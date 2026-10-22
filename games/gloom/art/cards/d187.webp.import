@@ -3,20 +3,19 @@
 importer="texture"
 type="CompressedTexture2D"
 uid="uid://bx53yyiqs6h1a"
-path.s3tc="res://.godot/imported/d187.webp-752146e6849552f12044846551af44be.s3tc.ctex"
+path="res://.godot/imported/d187.webp-752146e6849552f12044846551af44be.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
-"vram_texture": true
+"vram_texture": false
 }
 
 [deps]
 
 source_file="res://games/gloom/art/cards/d187.webp"
-dest_files=["res://.godot/imported/d187.webp-752146e6849552f12044846551af44be.s3tc.ctex"]
+dest_files=["res://.godot/imported/d187.webp-752146e6849552f12044846551af44be.ctex"]
 
 [params]
 
-compress/mode=2
+compress/mode=1
 compress/high_quality=false
 compress/lossy_quality=0.7
 compress/uastc_level=0
