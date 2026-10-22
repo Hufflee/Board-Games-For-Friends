@@ -1,0 +1,4 @@
+Текстуры с Poly Haven (https://polyhaven.com), лицензия CC0:
+- dark_wooden_planks (пол)
+- dark_wood (бортик стола)
+- brown_leather (кожаная окантовка)

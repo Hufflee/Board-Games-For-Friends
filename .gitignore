@@ -1,0 +1,10 @@
+# Godot 4+ specific ignores
+.godot/
+/android/
+build/
+
+# правила-PDF и служебное
+*.pdf
+tools/_fuzz/
+tools/_shot/
+*.tmp
