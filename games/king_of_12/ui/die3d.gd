@@ -59,7 +59,18 @@ var _plan_steps := 0
 var _plan_k := 0
 
 
-func _init() -> void:
+## sides — 12 («Дюжина короля») или 6 (обычный кубик с точками, напр. «Большая бродилка»).
+var sides := 12
+const PIPS6 := {
+	1: [Vector2.ZERO], 2: [Vector2(-1, -1), Vector2(1, 1)], 3: [Vector2(-1, -1), Vector2.ZERO, Vector2(1, 1)],
+	4: [Vector2(-1, -1), Vector2(1, -1), Vector2(-1, 1), Vector2(1, 1)],
+	5: [Vector2(-1, -1), Vector2(1, -1), Vector2.ZERO, Vector2(-1, 1), Vector2(1, 1)],
+	6: [Vector2(-1, -1), Vector2(1, -1), Vector2(-1, 0), Vector2(1, 0), Vector2(-1, 1), Vector2(1, 1)],
+}
+
+
+func _init(side_count: int = 12) -> void:
+	sides = side_count
 	custom_minimum_size = Vector2(SIZE, SIZE)
 	size = Vector2(SIZE, SIZE)
 	pivot_offset = size / 2.0
@@ -109,7 +120,11 @@ func _init() -> void:
 	_body = Node3D.new()
 	_body.scale = Vector3.ONE * 0.55
 	vp.add_child(_body)
-	_build_die(_body)
+	if sides == 6:
+		_body.scale = Vector3.ONE * 0.95  # куб меньше додекаэдра того же масштаба — подгоняем под размер кубика
+		_build_d6(_body)
+	else:
+		_build_die(_body)
 	_q = Quaternion(Vector3(1, 1, 0).normalized(), 0.6)
 
 	_overlay = Control.new()
@@ -193,6 +208,78 @@ static func _build_die(body: Node3D) -> void:
 		body.add_child(lbl)
 
 
+## Кубик со скруглёнными рёбрами и углами (как настоящий), цвета слоновой кости, точки — тёмные лунки.
+const D6_HALF := 0.86  # половина ребра
+const D6_ROUND := 0.24  # радиус скругления рёбер
+const D6_GRID := 10  # разбиение грани — чем больше, тем глаже скругление
+
+
+static func _rounded(p: Vector3) -> Array:
+	var inner := p.clamp(Vector3.ONE * -(D6_HALF - D6_ROUND), Vector3.ONE * (D6_HALF - D6_ROUND))
+	var d := p - inner
+	var n := d.normalized() if d.length() > 0.0001 else p.normalized()
+	return [inner + n * D6_ROUND, n]
+
+
+static func _build_d6(body: Node3D) -> void:
+	var faces := K12DieGeometry.faces_d6()
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	for f in faces:
+		var n: Vector3 = faces[f]["normal"]
+		var u: Vector3 = faces[f]["up"]
+		var r := u.cross(n)
+		var grid := []
+		for j in D6_GRID + 1:
+			var row := []
+			for i in D6_GRID + 1:
+				var a := -1.0 + 2.0 * i / D6_GRID
+				var b := -1.0 + 2.0 * j / D6_GRID
+				row.append(_rounded((n + r * a + u * b) * D6_HALF))
+			grid.append(row)
+		for j in D6_GRID:
+			for i in D6_GRID:
+				var q00: Array = grid[j][i]
+				var q10: Array = grid[j][i + 1]
+				var q01: Array = grid[j + 1][i]
+				var q11: Array = grid[j + 1][i + 1]
+				for q in [q00, q11, q10, q00, q01, q11]:  # обход против часовой, если смотреть снаружи
+					st.set_normal(q[1])
+					st.add_vertex(q[0])
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = Color(0.95, 0.93, 0.88)
+	mat.roughness = 0.4
+	mat.clearcoat_enabled = true
+	mat.clearcoat = 0.4
+	mat.cull_mode = BaseMaterial3D.CULL_DISABLED  # непрозрачен с любой стороны — задние точки не просвечивают
+	var mesh := MeshInstance3D.new()
+	mesh.mesh = st.commit()
+	mesh.material_override = mat
+	body.add_child(mesh)
+	var pip_mat := StandardMaterial3D.new()
+	pip_mat.albedo_color = Color(0.1, 0.08, 0.07)
+	pip_mat.roughness = 0.5
+	var pip_mesh := SphereMesh.new()
+	pip_mesh.radius = 0.2
+	pip_mesh.height = 0.4
+	for f in faces:
+		var n: Vector3 = faces[f]["normal"]
+		var u: Vector3 = faces[f]["up"]
+		var r := u.cross(n)
+		for pp in PIPS6[f]:
+			var pip := MeshInstance3D.new()
+			pip.mesh = pip_mesh
+			pip.material_override = pip_mat
+			# сплюснутая тёмная капля чуть утоплена в грань — выглядит как лунка
+			var pos: Vector3 = n * (D6_HALF - 0.035) + r * (pp as Vector2).x * 0.44 + u * (pp as Vector2).y * 0.44
+			pip.transform = Transform3D(Basis(r, n * 0.3, u), pos)
+			body.add_child(pip)
+
+
+func _orient(f: int) -> Quaternion:
+	return K12DieGeometry.orientation_d6(f) if sides == 6 else K12DieGeometry.orientation(f)
+
+
 # --- API ---------------------------------------------------------------------
 
 ## Кубик ещё не брошен: медленно крутится на своём месте.
@@ -206,7 +293,7 @@ func wait_for_roll() -> void:
 
 ## Показать грань (сразу или плавным поворотом).
 func show_face(f: int, animate: bool = true) -> void:
-	if f < 1 or f > 12:
+	if f < 1 or f > sides:
 		return
 	if state in ["dragging", "flying", "settling", "returning"]:
 		if state == "dragging" or (state == "flying" and _target == 0):
@@ -219,12 +306,12 @@ func show_face(f: int, animate: bool = true) -> void:
 	_w = Vector3.ZERO
 	if animate and is_inside_tree():
 		_from_q = _q
-		_to_q = K12DieGeometry.orientation(f)
+		_to_q = _orient(f)
 		_t = 0.0
 		state = "turning"
 		Sfx.play("die_shake", -10, 0.06, 0.15)
 	else:
-		_q = K12DieGeometry.orientation(f)
+		_q = _orient(f)
 		state = "idle"
 		_apply()
 
@@ -260,7 +347,7 @@ func set_result(f: int) -> void:
 	while not _flight_done(sim) and n < 3000:
 		_flight_step(sim, false)
 		n += 1
-	var corr := K12DieGeometry.orientation(f) * (sim["q"] as Quaternion).inverse()
+	var corr := _orient(f) * (sim["q"] as Quaternion).inverse()
 	if corr.w < 0.0:
 		corr = -corr
 	_corr = corr
@@ -340,7 +427,7 @@ func _process(delta: float) -> void:
 						state = "settling"
 						_t = 0.0
 						_from_q = _display_q()
-						_to_q = K12DieGeometry.orientation(_target)
+						_to_q = _orient(_target)
 					else:
 						# результат ещё не пришёл — кубик медленно докручивается на месте
 						_fs["w"] = (_fs["w"] as Vector3).lerp(Vector3(0.3, 0.9, 0.4), 0.02)

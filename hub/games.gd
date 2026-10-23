@@ -42,9 +42,9 @@ const LIST := [
 	{
 		"id": "hues_and_cues",
 		"title": "Hues and Cues",
-		"players": "3–8 игроков",
+		"players": "2–8 игроков",
 		"time": "30 минут",
-		"description": "Опишите цвет одним словом, а потом двумя — друзья ставят фишки на поле из 480 оттенков. Чем ближе к загаданному, тем больше очков.",
+		"description": "Опишите цвет одним словом, а потом двумя — друзья ставят фишки на поле из 480 оттенков. Чем ближе к загаданному, тем больше очков. Вдвоём — кооператив на общий счёт.",
 		"scene": "res://games/hues_and_cues/ui/main.tscn",
 		"cover_hues": true,
 	},
@@ -100,7 +100,7 @@ const LIST := [
 	{
 		"id": "gloom",
 		"title": "Gloom",
-		"players": "2–5 игроков",
+		"players": "2–4 игрока (5 — с дополнениями)",
 		"time": "60 минут",
 		"description": "Мрачная викторианская карточная игра: прозрачные карты несчастий складываются прямо на персонажей. Сведите свою семью в могилу самой несчастной — а чужим подарите счастливую жизнь.",
 		"scene": "res://games/gloom/ui/main.tscn",
@@ -109,17 +109,6 @@ const LIST := [
 		"variant_label": "Gloom",
 		"settings": {"gl_sets": "base"},
 		"thickness": 0.07,  # толщина коробки (важнее пропорций торца)
-	},
-	{
-		"id": "alola_athlete",
-		"title": "Алольский атлет",
-		"players": "2–6 игроков",
-		"time": "30–45 минут",
-		"description": "Гонка покемонов по четырём островам Алолы (по правилам Magical Athlete): соберите команду из четырёх бегунов — у каждого своё безумное умение. Кубик, стрелки, обмороки и подлянки соперникам.",
-		"scene": "res://games/alola_athlete/ui/main.tscn",
-		"color": Color("8a3fd1"),
-		"thickness": 0.06,
-		"shelf": false,  # пока скрыта из выбора игр (доделывается)
 	},
 	{
 		"id": "gloomier",
@@ -131,10 +120,19 @@ const LIST := [
 		"scene": "res://games/gloom/ui/main.tscn",
 		"color": Color("4b2560"),
 		"thickness": 0.07,
-		"shelf": false,
 		"variants": ["gloom", "gloomier"],
 		"variant_label": "Gloomier",
 		"settings": {"gl_sets": "gm"},
+	},
+	{
+		"id": "brodilka",
+		"title": "Большая бродилка",
+		"players": "2–8 игроков",
+		"time": "30–40 минут",
+		"description": "Нескучная ходилка для всей семьи: бросайте кубики, открывайте сундуки, закупайтесь в Лавке Джо и пакостите соседям картами «Тадам». Первым доберись до финиш-сейфа!",
+		"scene": "res://games/brodilka/ui/main.tscn",
+		"color": Color("1f6fb8"),
+		"thickness": 0.07,
 	},
 ]
 

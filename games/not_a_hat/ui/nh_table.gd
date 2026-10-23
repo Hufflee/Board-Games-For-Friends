@@ -19,6 +19,7 @@ var _last_turn := -1
 var _celebrated := false
 var _filter := ""
 var _picker: GridContainer
+var _top: TopBar
 
 
 func _ready() -> void:
@@ -44,18 +45,15 @@ func _ready() -> void:
 	_bubble.visible = false
 	_layer.add_child(_bubble)
 
-	var top := NHStyle.hbox(8)
-	top.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	top.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	top.offset_top = 12
-	top.offset_right = -14
-	add_child(top)
+	# общая верхняя полоса (TopBar): название, ход/фаза, часы, чат, кнопки игры
+	_top = TopBar.make(self, "Это не шляпа!", func(t, z): return NHStyle.button(t, z), null, Color.WHITE, NHStyle.font("bold"))
+	_top.z_index = 20  # стол поднимает свои слои (панель z=10) — полоса и чат поверх
 	var rules := NHStyle.button("Правила", NHStyle.CAP)
 	rules.pressed.connect(func(): app.show_rules())
-	top.add_child(rules)
+	_top.actions.add_child(rules)
 	var settings := NHStyle.button("Настройки", NHStyle.CAP)
 	settings.pressed.connect(func(): app.show_settings())
-	top.add_child(settings)
+	_top.actions.add_child(settings)
 	var leave: Button
 	if Net.is_party() and Net.is_host():
 		leave = NHStyle.button("Завершить партию", NHStyle.CAP)
@@ -66,19 +64,15 @@ func _ready() -> void:
 	else:
 		leave = NHStyle.button("Выйти", NHStyle.CAP)
 		LeaveGuard.wire(leave, "Выйти из партии?", "Игра закончится, вы вернётесь в меню.", func(): app.back_to_menu())
-	top.add_child(leave)
-	var logo := NHStyle.title("ЭТО НЕ ШЛЯПА!", 26)
-	logo.position = Vector2(16, 10)
-	add_child(logo)
+	leave.theme_type_variation = "QuietButton"
+	_top.actions.add_child(leave)
+	NHStyle.restyle_chat(_top.chat)
+	_top.chat.z_index = 21
 
 	_panel = NHStyle.panel(14)
 	_panel.z_index = 10
 	add_child(_panel)
 
-	add_child(TurnClock.top_center(14))
-	var chat := K12ChatPanel.new()
-	NHStyle.restyle_chat(chat)
-	add_child(chat)
 	ChatBubbles.attach(self, func(t: String) -> Control:
 		var b := NHStyle.label(t, NHStyle.CAP, NHStyle.INK, HORIZONTAL_ALIGNMENT_CENTER, true)
 		b.add_theme_stylebox_override("normal", NHStyle.box(NHStyle.PAPER, 14, NHStyle.INK, 3, 0.25))
@@ -122,7 +116,7 @@ func _send(kind: String, arg: Dictionary = {}) -> void:
 # --- Раскладка ----------------------------------------------------------------------
 
 func _center() -> Vector2:
-	return Vector2(size.x * 0.5 - 60, size.y * 0.40)
+	return Vector2(size.x * 0.5 - 60, TopBar.HEIGHT + (size.y - TopBar.HEIGHT) * 0.40)
 
 
 ## Место игрока s на эллипсе: вы — внизу, по часовой стрелке дальше.
@@ -130,7 +124,7 @@ func _seat_pos(s: int) -> Vector2:
 	var n: int = maxi(1, (_v.get("players", []) as Array).size())
 	var k := posmod(s - _me, n)
 	var a := PI / 2.0 - TAU * k / n  # против часовой: «вправо» (+1) от вас — справа на экране
-	var r := Vector2(minf(size.x * 0.36, 560), minf(size.y * 0.28, 240))
+	var r := Vector2(minf(size.x * 0.36, 560), minf((size.y - TopBar.HEIGHT) * 0.28, 240))
 	return _center() + Vector2(cos(a) * r.x, sin(a) * r.y)
 
 
@@ -155,6 +149,7 @@ func _on_state(v: Dictionary) -> void:
 	_v = v
 	_me = v["you"]
 	_build_seats()
+	_top.info.text = _info_text()
 	_shop.set_card(int(v["shop_top"]), 1)
 	_shop.tooltip_text = "Магазин подарков: верхний подарок виден всем"
 	_shop_label.text = "Магазин · %d" % int(v["shop_left"])
@@ -165,6 +160,19 @@ func _on_state(v: Dictionary) -> void:
 		_build_panel()
 	_layout.call_deferred()
 	_sounds(prev)
+
+
+func _info_text() -> String:
+	match String(_v["phase"]):
+		"give":
+			return "Ход: %s дарит подарок" % _name(int(_v["giver"]))
+		"respond":
+			return "Ход: %s решает" % _name(int(_v["receiver"]))
+		"reveal":
+			return "Вскрываем подарок"
+		"game_over":
+			return "Игра окончена"
+	return "Ход: %s" % _name(int(_v["giver"]))
 
 
 func _sounds(prev: Dictionary) -> void:

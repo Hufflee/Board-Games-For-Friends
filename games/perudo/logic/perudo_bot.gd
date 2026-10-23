@@ -43,5 +43,4 @@ static func act(r: PerudoRules, seat: int) -> bool:
 			best_q = q
 	if best_face < 0:
 		return r.challenge(seat)
-	var maputo := r.can_maputo(seat) and r.rng.randf() < 0.7
-	return r.place_bid(seat, best_q, best_face, maputo)
+	return r.place_bid(seat, best_q, best_face)

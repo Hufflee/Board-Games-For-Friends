@@ -28,7 +28,7 @@ var _panel: PanelContainer
 var _qty := 1
 var _face := 2
 var _maputo := false
-var _round_label: Label
+var _top: TopBar
 var _next_btn_row: HBoxContainer
 var _auto_label: Label
 var _auto_deadline := 0
@@ -38,6 +38,7 @@ var _queued := {}
 var _revealed_round := -1
 var _reveal_tween: Tween
 var _shaken_seen: Array = []
+var _roll_label: Label  # «Трясите стаканы!» → «Отпускайте!» через секунду тряски
 var _celebrated := false
 var _scattering_me := false  # свои кости ещё летят по столу — ряд показываем после
 var _bubbles := {}
@@ -58,15 +59,8 @@ func _ready() -> void:
 		add_child(l)
 		set(nm, l)
 
-	_round_label = K12UI.label("", K12UI.CAP, K12UI.CREAM)
-	_round_label.position = Vector2(12, 8)
-	_ui.add_child(_round_label)
-	var buttons := K12UI.hbox(8)
-	buttons.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	buttons.offset_left = -420
-	buttons.offset_right = -10
-	buttons.offset_top = 6
-	buttons.alignment = BoxContainer.ALIGNMENT_END
+	_top = TopBar.make(self, "Перудо", func(t, z): return K12UI.button(t, z), null, K12UI.CREAM, K12UI.font("bold"))
+	var buttons := _top.actions
 	var log_btn := K12UI.button("Журнал", K12UI.CAP)
 	log_btn.tooltip_text = "Кто что ставил и нажимал"
 	log_btn.pressed.connect(func():
@@ -90,12 +84,15 @@ func _ready() -> void:
 		leave = K12UI.button("Выйти", K12UI.CAP)
 		LeaveGuard.wire(leave, "Выйти из партии?", "Игра закончится, вы вернётесь в меню.", func(): app.back_to_menu())
 	buttons.add_child(leave)
-	_ui.add_child(buttons)
 
 	# текущая ставка и история
 	_bid_box = K12UI.panel(Color(0.06, 0.12, 0.09, 0.9), 8, "small")
 	_ui.add_child(_bid_box)
-	_history = K12UI.label("", K12UI.CAP, K12UI.MUTED, HORIZONTAL_ALIGNMENT_CENTER)
+	# история ставок лежит прямо на пергаменте стола — тёмные «чернила» со светлой обводкой
+	_history = K12UI.label("", K12UI.CAP, Color("3a2410"), HORIZONTAL_ALIGNMENT_CENTER)
+	_history.add_theme_font_override("font", K12UI.font("bold"))
+	_history.add_theme_color_override("font_outline_color", Color(0.96, 0.9, 0.76, 0.85))
+	_history.add_theme_constant_override("outline_size", 4)
 	_history.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_ui.add_child(_history)
 	_banner = K12UI.label("", K12UI.BODY, K12UI.CREAM, HORIZONTAL_ALIGNMENT_CENTER)
@@ -110,17 +107,13 @@ func _ready() -> void:
 	_panel = K12UI.panel(Color(0.08, 0.055, 0.035, 0.94), 8, "ornate")
 	_ui.add_child(_panel)
 
-	var chat := K12ChatPanel.new()
-	chat.corner_margin = Vector2(10, 10)
-	_ui.add_child(chat)
-
 	# журнал действий — по кнопке «Журнал», справа сверху под кнопками
 	_log_panel = K12UI.panel(Color(0.07, 0.05, 0.035, 0.94), 10, "small")
 	_log_panel.visible = false
 	_log_panel.set_anchors_preset(Control.PRESET_TOP_RIGHT)
 	_log_panel.offset_left = -330
 	_log_panel.offset_right = -10
-	_log_panel.offset_top = 48
+	_log_panel.offset_top = 48 + 4
 	_log_panel.offset_bottom = 300
 	_log_text = RichTextLabel.new()
 	_log_text.bbcode_enabled = true
@@ -133,7 +126,6 @@ func _ready() -> void:
 	_ui.add_child(_log_panel)
 
 	resized.connect(_layout)
-	add_child(TurnClock.top_right())  # в центре сверху — место игрока  # часы хода (настройка комнаты «Время на ход»)
 	Net.state_changed.connect(_on_state)
 	Net.chat_received.connect(_on_chat_bubble)
 	if not Net.view.is_empty():
@@ -150,8 +142,12 @@ func _tc() -> Vector2:
 	return Vector2(_cx(), K12Tavern.TABLE_Y)
 
 
+## Угол места за столом: по порядку рассадки (order), «я» — всегда внизу.
 func _angle(seat: int) -> float:
-	return deg_to_rad(90.0 + ((seat - _me + _n) % _n) * 360.0 / _n)
+	var order: Array = _v.get("order", [])
+	var p := order.find(seat) if order.size() == _n else seat
+	var me := order.find(_me) if order.size() == _n else _me
+	return deg_to_rad(90.0 + ((p - me + _n) % _n) * 360.0 / _n)
 
 
 func _cup_pos(seat: int) -> Vector2:
@@ -171,7 +167,7 @@ func _plate_rect(seat: int) -> Rect2:
 	var c := _tc() + Vector2(cos(a) * K12Tavern.TABLE_RADII.x, sin(a) * K12Tavern.TABLE_RADII.y)
 	var r := Rect2(c - sz / 2.0, sz)
 	r.position.x = clampf(r.position.x, 8, size.x - sz.x - 8)
-	r.position.y = clampf(r.position.y, 4, size.y - sz.y - 170)
+	r.position.y = clampf(r.position.y, TopBar.HEIGHT + 4, size.y - sz.y - 170)
 	return r
 
 
@@ -197,7 +193,7 @@ func _layout() -> void:
 	_panel.position = Vector2(_cx() - _panel.size.x / 2.0, size.y - _panel.size.y - 8)
 	var reactions := _ui.get_node_or_null("Reactions") as Control
 	if reactions:
-		reactions.position = Vector2(10, 34)  # под строкой раунда — не мешает панели ставки
+		reactions.position = Vector2(10, TopBar.HEIGHT + 4)  # под полосой — не мешает панели ставки
 
 
 # --- Состояние -------------------------------------------------------------------
@@ -269,6 +265,7 @@ func _build() -> void:
 		cup.color = _seat_color(s)
 		_table_layer.add_child(cup)
 		if s == _me:
+			cup.grabbed.connect(func(): Net.send_action("shaking", {"on": true}))
 			cup.shaken.connect(func():
 				_shaken_seen[_me] = true
 				_scatter_mine()
@@ -303,6 +300,8 @@ func _update_cups() -> void:
 			else:
 				_scatter_mine()  # стакан встряхнулся автоматически
 		_shaken_seen[s] = shaken
+		if s != _me:
+			cup.rattle(phase == "roll" and not shaken and bool(_v.get("shaking", [])[s] if s < _v.get("shaking", []).size() else false))
 		cup.shakeable = phase == "roll" and s == _me and not shaken and _v["counts"][s] > 0
 	# свои кости — после того как потряс стакан
 	K12UI.clear(_my_dice)
@@ -319,7 +318,9 @@ func _update_cups() -> void:
 
 func _update_plates() -> void:
 	var phase: String = _v["phase"]
-	_round_label.text = "Раунд %d · костей на столе: %d" % [_v["round_no"], _v["total"]] + ("  ·  МАПУТО" if _v["maputo"] else "")
+	_top.info.text = "Раунд %d · Костей на столе: %d" % [_v["round_no"], _v["total"]] + ("  ·  ПАЛИФИКО" if _v["maputo"] else "")
+	if _v["phase"] == "seating":
+		_top.info.text = "Рассадка · игроков: %d" % _n
 	for s in _n:
 		var p: PanelContainer = _plates[s]
 		K12UI.clear(p)
@@ -365,7 +366,9 @@ func _update_center() -> void:
 	_bid_box.add_child(col)
 	if bid.is_empty():
 		var t := "Трясите стаканы!" if phase == "roll" else "%s начинает раунд" % _v["players"][_v["turn"]]["name"]
-		col.add_child(K12UI.label(t, K12UI.BODY, K12UI.CREAM, HORIZONTAL_ALIGNMENT_CENTER))
+		var tl := K12UI.label(t, K12UI.BODY, K12UI.CREAM, HORIZONTAL_ALIGNMENT_CENTER)
+		col.add_child(tl)
+		_roll_label = tl if phase == "roll" else null
 	else:
 		col.add_child(K12UI.label("Ставка: " + _v["players"][bid["seat"]]["name"], K12UI.CAP, K12UI.MUTED, HORIZONTAL_ALIGNMENT_CENTER))
 		var row := K12UI.hbox(10)
@@ -376,7 +379,7 @@ func _update_center() -> void:
 		row.add_child(PerudoDie.new(bid["face"], 48, _seat_color(int(bid.get("seat", _me)))))
 		col.add_child(row)
 	if _v["maputo"]:
-		col.add_child(K12UI.label("Мапуто: единицы не джокеры, номинал не меняется", K12UI.CAP, K12UI.RED, HORIZONTAL_ALIGNMENT_CENTER))
+		col.add_child(K12UI.label("Палифико: единицы не джокеры, номинал не меняется", K12UI.CAP, K12UI.RED, HORIZONTAL_ALIGNMENT_CENTER))
 	var bids: Array = _v["bids"]
 	var parts := []
 	for i in range(maxi(0, bids.size() - 6), bids.size() - 1):
@@ -407,6 +410,24 @@ func _update_panel() -> void:
 		return
 	var col := K12UI.vbox(8)
 	_panel.add_child(col)
+	if phase == "seating":
+		col.add_child(K12UI.label("Рассадка за столом: по кругу — и порядок ходов", K12UI.BODY, K12UI.CREAM, HORIZONTAL_ALIGNMENT_CENTER))
+		if Net.is_host():
+			var row := K12UI.hbox(10)
+			row.alignment = BoxContainer.ALIGNMENT_CENTER
+			var mix := K12UI.button("Перемешать игроков", K12UI.BODY)
+			mix.pressed.connect(func():
+				Sfx.play("card_shove", -4)
+				Net.send_action("seat_shuffle"))
+			row.add_child(mix)
+			var go := K12UI.button("Начать игру", K12UI.BODY, 200)
+			go.theme_type_variation = "SelectedButton"
+			go.pressed.connect(func(): Net.send_action("seat_begin"))
+			row.add_child(go)
+			col.add_child(row)
+		else:
+			col.add_child(K12UI.label("Хост рассаживает игроков…", K12UI.CAP, K12UI.MUTED, HORIZONTAL_ALIGNMENT_CENTER))
+		return
 	if phase != "bid":
 		col.add_child(K12UI.label("Встряхните стакан: зажмите его мышью, потрясите и отпустите." if phase == "roll" and not _v["shaken"][_me] and _v["counts"][_me] > 0 else "Ждём остальных…", K12UI.BODY, K12UI.CREAM, HORIZONTAL_ALIGNMENT_CENTER))
 		return
@@ -489,7 +510,7 @@ func _update_panel() -> void:
 		act.add_child(calza)
 	if _v["can_maputo"]:
 		var mp := CheckBox.new()
-		mp.text = "Объявить Мапуто"
+		mp.text = "Объявить Палифико"
 		mp.button_pressed = _maputo
 		mp.toggled.connect(func(on): _maputo = on)
 		act.add_child(mp)
@@ -635,6 +656,10 @@ func _update_panel_reveal_done() -> void:
 
 
 func _process(_d: float) -> void:
+	if is_instance_valid(_roll_label) and _me < _cups.size():
+		var cup: PerudoCup = _cups[_me]
+		var ready := cup.is_holding() and Time.get_ticks_msec() - cup.hold_ms >= 1000
+		_roll_label.text = "Отпускайте!" if ready else "Трясите стаканы!"
 	if is_instance_valid(_auto_label):
 		_auto_label.text = "авто через %d с" % maxi(0, ceili((_auto_deadline - Time.get_ticks_msec()) / 1000.0))
 
@@ -760,8 +785,8 @@ func _scatter(seat: int, values: Array, targets: Array, side: float, on_done: Ca
 		t.tween_property(d, "position", p, fly).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 		t.tween_property(d, "rotation", randf_range(-1.0, 1.0) * TAU * 1.5, fly).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 		if not hidden:
-			var flicker_seed := randi() % 6
-			t.tween_method(func(k: float): d.value = 1 + (int(k * 23.0) + flicker_seed) % 6, 0.0, 1.0, fly)
+			# грани мелькают и в конце полёта останавливаются ровно на выпавшей — без подмены после
+			t.tween_method(func(k: float): d.value = 1 + (final_value - 1 + int((1.0 - k) * 23.0)) % 6, 0.0, 1.0, fly)
 		t.chain().tween_callback(func(): Sfx.play("die_hit", -12 if seat == _me else -18, 0.15, 0.04))
 		t.chain().tween_interval(0.35 + i * 0.06)
 		t.chain().tween_property(d, "position", targets[i], 0.45).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_IN_OUT)

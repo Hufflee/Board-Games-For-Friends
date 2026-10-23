@@ -4,10 +4,15 @@ extends Control
 ## он ударяет о стол (сигнал shaken). Чужие стаканы трясутся анимацией.
 
 signal shaken
+signal grabbed  # взял стакан — начал трясти (другие игроки видят тряску)
 
 var shakeable := false:
 	set(v):
 		shakeable = v
+		if not v and _holding:
+			# раунд начался, пока стакан держали, — тряска обрывается, стакан встаёт на место
+			_holding = false
+			_slam()
 		mouse_default_cursor_shape = Control.CURSOR_DRAG if v else Control.CURSOR_ARROW
 		queue_redraw()
 var lifted := false
@@ -25,6 +30,11 @@ static func seat_color(seat: int) -> Color:
 	return SEAT_COLORS[posmod(seat, SEAT_COLORS.size())]
 
 var _holding := false
+var hold_ms := 0  # когда взяли стакан (для подсказки «Отпускайте!»)
+
+
+func is_holding() -> bool:
+	return _holding
 var _grab := Vector2.ZERO
 var _home := Vector2.ZERO
 var _energy := 0.0
@@ -84,6 +94,8 @@ func _gui_input(event: InputEvent) -> void:
 		_home = position
 		_grab = get_global_mouse_position() - global_position
 		Sfx.play("die_grab")
+		hold_ms = Time.get_ticks_msec()
+		grabbed.emit()
 		accept_event()
 
 
@@ -125,6 +137,31 @@ func wobble() -> void:
 		t.tween_property(self, "rotation", 0.25 if i % 2 == 0 else -0.25, 0.06)
 	t.tween_property(self, "rotation", 0.0, 0.06)
 	t.tween_callback(func(): Sfx.play("die_throw", -10, 0.08, 0.05))
+
+
+## Чужой стакан, который сейчас трясут: качается и подпрыгивает, пока on.
+var _rattle: Tween
+var _rattle_y := 0.0
+
+
+func rattle(on: bool) -> void:
+	if on == (_rattle != null and _rattle.is_valid()):
+		return
+	if _rattle:
+		_rattle.kill()
+		_rattle = null
+		position.y = _rattle_y  # встаёт ровно на место
+	if not on:
+		rotation = 0.0
+		return
+	_rattle_y = position.y
+	var base_y := _rattle_y
+	_rattle = create_tween().set_loops()
+	_rattle.tween_property(self, "rotation", 0.28, 0.07)
+	_rattle.parallel().tween_property(self, "position:y", base_y - 8, 0.07)
+	_rattle.tween_property(self, "rotation", -0.28, 0.09)
+	_rattle.parallel().tween_property(self, "position:y", base_y, 0.09)
+	_rattle.tween_callback(func(): Sfx.play("die_shake", -16, 0.12, 0.25))
 
 
 ## Поднять стакан (вскрытие) или опустить.

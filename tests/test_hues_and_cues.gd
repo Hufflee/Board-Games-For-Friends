@@ -11,6 +11,7 @@ func _init() -> void:
 	test_round_flow()
 	test_pass_and_three_players()
 	test_game_end_and_tiebreak()
+	test_coop()
 	print("Оттенки и подсказки — проверок: %d, ошибок: %d" % [checks, failures])
 	quit(1 if failures > 0 else 0)
 
@@ -122,3 +123,27 @@ func test_game_end_and_tiebreak() -> void:
 	r.phase = "reveal"
 	r.advance()
 	check(r.phase == "game_over" and r.winners == [0], "лидер вырвался — победа")
+
+
+## Кооператив вдвоём: ведущие чередуются, очки угадывающего — общий счёт, итог по COOP_GOAL.
+func test_coop() -> void:
+	var r := HCRules.new()
+	r.new_game([{"name": "А"}, {"name": "Б"}], 0, false, 7, true)
+	check(r.coop and r.total_rounds == HCRules.COOP_ROUNDS, "кооператив: 10 раундов")
+	var givers := []
+	for k in r.total_rounds:
+		var g := r.giver
+		givers.append(g)
+		var tgt: int = r.card[0]
+		r.pick_color(g, tgt)
+		r.give_cue(g, "слово%s" % char(1072 + k))
+		check(r.order == [1 - g], "кооператив: угадывает второй")
+		r.place(1 - g, tgt)  # точно: 3 очка
+		r.give_cue(g, "еще слово%s" % char(1072 + k))
+		r.skip()  # вторую фишку не ставим
+		check(r.phase == "reveal", "кооператив: подсчёт раунда %d" % k)
+		check(r.scores[0] == r.scores[1] and r.scores[0] == 3 * (k + 1), "кооператив: общий счёт %d" % r.scores[0])
+		r.advance()
+	check(givers.count(0) == 5 and givers.count(1) == 5, "кооператив: ведущие чередуются")
+	check(r.phase == "game_over" and r.winners.size() == 2, "кооператив: 30 очков — цель взята, победа общая")
+	check(not r.can_add_player(), "кооператив: новых игроков не подсаживаем")

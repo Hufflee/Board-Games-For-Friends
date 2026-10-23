@@ -6,6 +6,7 @@ extends RefCounted
 const PHI := 1.6180339887
 
 static var _data: Dictionary = {}
+static var _d6: Dictionary = {}
 
 
 ## {face: {normal, up, verts: PackedVector3Array (по кругу), center}}
@@ -18,6 +19,28 @@ static func faces() -> Dictionary:
 ## Поворот кубика, при котором грань face смотрит на камеру (+Z), а число стоит ровно (+Y).
 static func orientation(face: int) -> Quaternion:
 	var f: Dictionary = faces()[face]
+	var n: Vector3 = f["normal"]
+	var u: Vector3 = f["up"]
+	return Quaternion(Basis(u.cross(n), u, n).transposed())
+
+
+## Шестигранник (куб): противоположные грани в сумме дают 7. Тот же формат, что faces().
+static func faces_d6() -> Dictionary:
+	if _d6.is_empty():
+		var h := 0.86
+		for spec in [[1, Vector3(0, 0, 1), Vector3.UP], [6, Vector3(0, 0, -1), Vector3.UP], [2, Vector3.UP, Vector3(0, 0, -1)],
+				[5, Vector3.DOWN, Vector3(0, 0, 1)], [3, Vector3.RIGHT, Vector3.UP], [4, Vector3.LEFT, Vector3.UP]]:
+			var n: Vector3 = spec[1]
+			var u: Vector3 = spec[2]
+			var r := u.cross(n)
+			var c := n * h
+			_d6[spec[0]] = {"normal": n, "up": u, "center": c,
+				"verts": PackedVector3Array([c + (-r - u) * h, c + (r - u) * h, c + (r + u) * h, c + (-r + u) * h])}
+	return _d6
+
+
+static func orientation_d6(face: int) -> Quaternion:
+	var f: Dictionary = faces_d6()[face]
 	var n: Vector3 = f["normal"]
 	var u: Vector3 = f["up"]
 	return Quaternion(Basis(u.cross(n), u, n).transposed())

@@ -598,6 +598,11 @@ func add_player(p: Dictionary) -> bool:
 	if not can_add_player():
 		return false
 	var q := p.duplicate()
-	q["team"] = _smaller_team()
+	q["team"] = int(p["team"]) if int(p.get("team", -1)) in [0, 1] else _smaller_team()
 	players.append(q)
 	return true
+
+
+## Командная игра: в какие команды зритель может войти сам (прогресс общий — он не начинает с нуля).
+func teams_for_join() -> Array:
+	return [0, 1] if can_add_player() else []

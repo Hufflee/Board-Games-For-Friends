@@ -48,6 +48,7 @@ var _celebrated := false
 var _hints_shown := {}
 var _hint_panel: PanelContainer
 var _chat: K12ChatPanel
+var _top: TopBar
 var _bubbles := {}  # место -> Label
 var _autoplay := OS.get_cmdline_user_args().has("--autoplay")  # отладка: играть за себя случайно
 var _autoplay_done := ""
@@ -64,28 +65,17 @@ func _ready() -> void:
 		add_child(layer)
 		set(layer_name, layer)
 
-	_round_label = K12UI.label("", K12UI.CAP, K12UI.CREAM)
-	_round_label.add_theme_color_override("font_outline_color", Color.BLACK)
-	_round_label.add_theme_constant_override("outline_size", 4)
-	_round_label.position = Vector2(12, 8)
-	_ui_layer.add_child(_round_label)
-	var buttons := K12UI.hbox(8)
-	buttons.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	buttons.offset_left = -190
-	buttons.offset_right = -10
-	buttons.offset_top = 6
-	buttons.alignment = BoxContainer.ALIGNMENT_END
+	_top = TopBar.make(self, "Дюжина короля", func(t, z): return K12UI.button(t, z), null, K12UI.CREAM, K12UI.font("bold"))
+	_round_label = _top.info
 	var rules_btn := K12UI.button("Правила", K12UI.CAP)
 	rules_btn.pressed.connect(func(): app.show_rules())
-	buttons.add_child(rules_btn)
-	buttons.offset_left = -330
+	_top.actions.add_child(rules_btn)
 	var hist_btn := K12UI.button("История", K12UI.CAP)
 	hist_btn.pressed.connect(_show_history)
-	buttons.add_child(hist_btn)
-	buttons.offset_left = -440
+	_top.actions.add_child(hist_btn)
 	var set_btn := K12UI.button("Настройки", K12UI.CAP)
 	set_btn.pressed.connect(func(): app.show_settings())
-	buttons.add_child(set_btn)
+	_top.actions.add_child(set_btn)
 	var leave_btn: Button
 	if Net.is_party() and Net.is_host():
 		leave_btn = K12UI.button("Завершить партию", K12UI.CAP)
@@ -97,8 +87,8 @@ func _ready() -> void:
 	else:
 		leave_btn = K12UI.button("Выйти", K12UI.CAP)
 		LeaveGuard.wire(leave_btn, "Выйти из партии?", "Игра закончится, вы вернётесь в меню.", func(): app.back_to_menu())
-	buttons.add_child(leave_btn)
-	_ui_layer.add_child(buttons)
+	leave_btn.theme_type_variation = "QuietButton"
+	_top.actions.add_child(leave_btn)
 
 	_banner = K12UI.label("", K12UI.BODY, K12UI.CREAM, HORIZONTAL_ALIGNMENT_CENTER)
 	_banner.add_theme_color_override("font_outline_color", Color(0, 0, 0, 0.85))
@@ -112,13 +102,10 @@ func _ready() -> void:
 	_center_panel.visible = false
 	_ui_layer.add_child(_center_panel)
 
-	_chat = K12ChatPanel.new()
-	_chat.corner_margin = Vector2(10, 136)
-	_ui_layer.add_child(_chat)
+	_chat = _top.chat
 	Net.chat_received.connect(_on_chat_bubble)
 
 	resized.connect(_relayout_all)
-	add_child(TurnClock.top_right())  # в центре сверху — место игрока  # часы хода (настройка комнаты «Время на ход»)
 	Net.state_changed.connect(_on_state)
 	if not Net.view.is_empty():
 		_on_state.call_deferred(Net.view)
@@ -164,7 +151,7 @@ func _plate_rect(seat: int) -> Rect2:
 	var c := _on_oval(seat, 1.0, K12Tavern.TABLE_RADII)
 	var r := Rect2(c - sz / 2.0, sz)
 	r.position.x = clampf(r.position.x, 8, size.x - sz.x - 8)
-	r.position.y = clampf(r.position.y, 4, size.y - sz.y - 150)
+	r.position.y = clampf(r.position.y, TopBar.HEIGHT + 4, size.y - sz.y - 150)
 	return r
 
 

@@ -294,7 +294,11 @@ static func logo_strip(cells: Array, s: int = 22) -> HBoxContainer:
 	return row
 
 
+## Цвет фишки = цвет игрока (кружок у ника, его можно сменить); без партии — запасная палитра.
 static func piece_color(seat: int) -> Color:
+	var pl: Array = Net.view.get("players", []) if Net.view.get("game", "") in ["", "hues_and_cues"] else []
+	if seat >= 0 and seat < pl.size() and pl[seat].has("color"):
+		return Net.color_of(int(pl[seat]["color"]))
 	return Color(HCData.PIECE_COLORS[seat % HCData.PIECE_COLORS.size()])
 
 

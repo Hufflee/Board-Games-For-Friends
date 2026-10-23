@@ -14,7 +14,9 @@ static func make(make_button: Callable, size: int) -> ThemeToggle:
 		if proto.has_theme_stylebox_override(st):
 			t.add_theme_stylebox_override(st, proto.get_theme_stylebox(st))
 	t.theme_type_variation = proto.theme_type_variation
-	t.custom_minimum_size = Vector2(maxf(proto.get_combined_minimum_size().y, 34), 0)
+	var side := maxf(proto.get_combined_minimum_size().y, 34)
+	t.custom_minimum_size = Vector2(side, side)
+	t.size_flags_horizontal = Control.SIZE_SHRINK_END  # квадратная коробочка со значком — не растягивается в столбике кнопок
 	proto.free()
 	return t
 

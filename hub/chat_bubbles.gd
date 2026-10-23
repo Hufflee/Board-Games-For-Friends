@@ -47,7 +47,12 @@ func _next() -> void:
 		var f := old.create_tween()
 		f.tween_property(old, "modulate:a", 0.0, 0.12)
 		f.tween_callback(old.queue_free)
-		await f.finished
+		# ждём таймером, а не концом анимации: окошко могло само догаснуть и удалиться —
+		# тогда его анимация не закончится никогда и окошки перестанут появляться
+		await get_tree().create_timer(0.12).timeout
+		if not is_inside_tree():
+			_busy = false
+			return
 	var b: Control = make_bubble.call(_queue.pop_front())
 	b.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(b)
@@ -61,7 +66,8 @@ func _next() -> void:
 	_busy = false
 	if not _queue.is_empty():
 		await get_tree().create_timer(0.7).timeout  # каждое окошко видно хотя бы мгновение
-		_next()
+		if is_inside_tree():
+			_next()
 		return
 	t.tween_interval(3.2)
 	t.tween_property(b, "modulate:a", 0.0, 0.4)

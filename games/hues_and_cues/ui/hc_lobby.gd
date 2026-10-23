@@ -62,7 +62,7 @@ func _rebuild() -> void:
 		_body.add_child(HCStyle.label("Тест на одном компьютере: передавайте мышь по кругу — программа сама подставит, чей ход.", HCStyle.CAP, HCStyle.SAGE))
 
 	# игроки
-	_body.add_child(HCStyle.caption("Игроки · от 3 до %d" % Net.MAX_PLAYERS))
+	_body.add_child(HCStyle.caption("Игроки · от 2 до %d · вдвоём — кооператив: %d раундов, цель %d очков" % [Net.MAX_PLAYERS, HCRules.COOP_ROUNDS, HCRules.COOP_GOAL]))
 	var members: Array = data["members"]
 	var grid := GridContainer.new()
 	grid.columns = 2
@@ -71,7 +71,6 @@ func _rebuild() -> void:
 	for i in members.size():
 		var row := HCStyle.hbox(10)
 		row.custom_minimum_size.x = 300
-		row.add_child(HCStyle.dot(HCStyle.piece_color(i), 18))
 		var m: Dictionary = members[i]
 		row.add_child(PlayerTag.make(m, members, 16, HCStyle.INK, "  · хост" if m["kind"] == "host" else ""))
 		grid.add_child(row)

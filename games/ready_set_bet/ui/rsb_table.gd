@@ -12,7 +12,7 @@ var _me := 0
 var _as := 0  # на одном компьютере — за кого ставим
 var _track: RSBTrack
 var _board: RSBBoard
-var _race_label: Label
+var _top: TopBar
 var _status_label: Label
 var _ticker: Label
 var _ticker_lines: Array = []
@@ -30,6 +30,8 @@ var _host_key := ""
 var _zoom: Control  # увеличенная VIP-карта из своей ложи
 
 var _drag := {}  # {tok, sprite, moved, start}
+var _ghosts := {}  # peer -> {spr, seen}: фишка, которую соперник сейчас тащит (полупрозрачная тень)
+var _ghost_sent := 0  # когда последний раз отправляли свою позицию (не чаще 20 раз в секунду)
 var _selected_tok := -1
 var _popup: Control
 var _pending := {}  # spot -> спрайт летящего жетона (ждём подтверждения хоста)
@@ -43,11 +45,7 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(RSBStyle.Backdrop.new())
 
-	_race_label = RSBStyle.label("", RSBStyle.BODY, RSBStyle.RED, HORIZONTAL_ALIGNMENT_LEFT, "title")
-	_race_label.add_theme_color_override("font_outline_color", RSBStyle.CREAM)
-	_race_label.add_theme_constant_override("outline_size", 4)
-	add_child(_race_label)
-	_status_label = RSBStyle.label("", RSBStyle.CAP, RSBStyle.INK, HORIZONTAL_ALIGNMENT_RIGHT, "bold")
+	_status_label = RSBStyle.label("", RSBStyle.CAP, RSBStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "bold")
 	add_child(_status_label)
 
 	_track = RSBTrack.new()
@@ -81,9 +79,7 @@ func _ready() -> void:
 	pv.add_child(_players_box)
 	add_child(plist)
 
-	var buttons := RSBStyle.hbox(6)
-	buttons.name = "Buttons"
-	buttons.alignment = BoxContainer.ALIGNMENT_END
+	var buttons := RSBStyle.hbox(6)  # кнопки игры — в верхней полосе (TopBar)
 	var rules := RSBStyle.button("Правила", RSBStyle.CAP)
 	rules.pressed.connect(func(): app.show_rules())
 	buttons.add_child(rules)
@@ -102,7 +98,6 @@ func _ready() -> void:
 		leave = RSBStyle.button("Выйти", RSBStyle.CAP)
 		LeaveGuard.wire(leave, "Выйти из партии?", "Игра закончится, вы вернётесь в меню.", func(): app.back_to_menu())
 	buttons.add_child(leave)
-	add_child(buttons)
 
 	_board = RSBBoard.new()
 	_board.spot_clicked.connect(_on_spot_clicked)
@@ -138,9 +133,6 @@ func _ready() -> void:
 	chat_holder.name = "ChatHolder"
 	chat_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(chat_holder)
-	var chat := K12ChatPanel.new()
-	RSBStyle.restyle_chat(chat)
-	chat_holder.add_child(chat)
 	ChatBubbles.attach(self, func(t: String) -> Control:
 		var b := RSBStyle.label(t, RSBStyle.CAP, RSBStyle.INK, HORIZONTAL_ALIGNMENT_CENTER, "bold")
 		b.add_theme_stylebox_override("normal", RSBStyle.box(RSBStyle.CREAM, 6, RSBStyle.RED, 2))
@@ -148,10 +140,31 @@ func _ready() -> void:
 		b.custom_minimum_size.x = 240
 		return b, Vector2(-1860, 860))  # над пустой частью списка игроков
 
+	# фон полосы — фон игры (прозрачный); содержимое чуть ниже красных полос, нарисованных у верхнего края фона
+	var bar_sb := StyleBoxFlat.new()
+	bar_sb.bg_color = Color(0, 0, 0, 0.0)
+	bar_sb.border_color = Color(RSBStyle.INK, 0.18)
+	bar_sb.content_margin_left = 16
+	bar_sb.content_margin_right = 12
+	bar_sb.content_margin_top = 13
+	bar_sb.content_margin_bottom = 2
+	_top = TopBar.make(self, "Ready Set Bet", func(t, z): return RSBStyle.button(t, z), bar_sb, RSBStyle.INK, RSBStyle.font("bold"))
+	# монетка — в панели фишек, в самой правой ячейке
+	_top.coin_at = func() -> Vector2:
+		var tr := get_node_or_null("Tray") as Control
+		if tr == null:
+			return Vector2(-9999, -9999)
+		var r := tr.get_global_rect()
+		return Vector2(r.end.x - 44.0, r.get_center().y)
+	for c in buttons.get_children():
+		buttons.remove_child(c)
+		_top.actions.add_child(c)
+	RSBStyle.restyle_chat(_top.chat)
+
 	resized.connect(_layout)
 	_layout()
-	add_child(TurnClock.top_center())  # часы хода (настройка комнаты «Время на ход»)
 	Net.state_changed.connect(_on_state)
+	Net.ghost_received.connect(_on_ghost)
 	if not Net.view.is_empty():
 		_on_state(Net.view)
 
@@ -160,30 +173,26 @@ func _layout() -> void:
 	var w := size.x
 	var h := size.y
 	var left_w := 520.0
-	_race_label.position = Vector2(16, 14)
-	_race_label.size = Vector2(240, 30)
-	_status_label.position = Vector2(250, 20)
-	_status_label.size = Vector2(left_w - 250 + 10, 24)
-	_track.position = Vector2(18, 54)
+	var t0 := float(TopBar.HEIGHT)
+	_status_label.position = Vector2(18, t0 + 8)
+	_status_label.size = Vector2(left_w - 8, 24)
+	_track.position = Vector2(18, t0 + 38)
 	_track.size = Vector2(left_w - 8, 282)
 	_countdown.position = _track.position
 	_countdown.size = _track.size
 	_countdown.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	var tick := get_node("Ticker") as Control
-	tick.position = Vector2(14, 344)
+	tick.position = Vector2(14, t0 + 332)
 	tick.size = Vector2(left_w, 50)
 	var pl := get_node("Players") as Control
-	pl.position = Vector2(14, 402)
-	pl.size = Vector2(left_w, h - 402 - 16)
+	pl.position = Vector2(14, t0 + 390)
+	pl.size = Vector2(left_w, h - pl.position.y - 16)
 	var chat_holder := get_node("ChatHolder") as Control
 	chat_holder.position = pl.position
 	chat_holder.size = pl.size + Vector2(0, 2)
 	var bx := left_w + 30.0
-	var buttons := get_node("Buttons") as Control
-	buttons.position = Vector2(bx, 10)
-	buttons.size = Vector2(w - bx - 14, 34)
-	_board.position = Vector2(bx, 50)
-	_board.size = Vector2(w - bx - 14, h - 50 - 100)
+	_board.position = Vector2(bx, t0 + 8)
+	_board.size = Vector2(w - bx - 14, h - t0 - 8 - 100)
 	var tray := get_node("Tray") as Control
 	tray.position = Vector2(bx, h - 92)
 	tray.size = Vector2(w - bx - 14, 80)
@@ -221,7 +230,7 @@ func _on_state(v: Dictionary) -> void:
 			if not v["vip_hand"][s].is_empty():
 				_as = s
 				break
-	_race_label.text = "Забег %d из %d" % [v["race_no"], RSBData.RACES]
+	_top.info.text = "Забег %d из %d" % [v["race_no"], RSBData.RACES]
 	_track.set_state(v, prev_phase == "race" or phase == "race")
 	_board.set_view(v)
 	_update_status(phase)
@@ -466,6 +475,7 @@ func _input(event: InputEvent) -> void:
 		var spr: Control = _drag["sprite"]
 		spr.position = event.position - spr.size / 2
 		spr.rotation = clampf(event.relative.x * 0.02, -0.3, 0.3)
+		_send_ghost(event.position, false)
 		if event.position.distance_to(_drag["start"]) > 6.0:
 			_drag["moved"] = true
 		var local: Vector2 = _board.get_global_transform().affine_inverse() * event.position
@@ -478,6 +488,7 @@ func _input(event: InputEvent) -> void:
 		var tok: int = _drag["tok"]
 		var spr: Control = _drag["sprite"]
 		var moved: bool = _drag["moved"]
+		_send_ghost(event.position, true)
 		_drag = {}
 		_board.highlight = {}
 		_board.queue_redraw()
@@ -500,10 +511,60 @@ func _input(event: InputEvent) -> void:
 func _cancel_drag() -> void:
 	if _drag.is_empty():
 		return
+	_send_ghost(Vector2.ZERO, true)
 	(_drag["sprite"] as Control).queue_free()
 	_drag = {}
 	_board.highlight = {}
 	_board.queue_redraw()
+
+
+## Своя фишка в руке — соперникам её тень: позиция в долях поля (у всех разный размер окна).
+func _send_ghost(at: Vector2, done: bool) -> void:
+	if _drag.is_empty() or _hotseat():
+		return
+	var now := Time.get_ticks_msec()
+	if not done and now - _ghost_sent < 50:
+		return
+	_ghost_sent = now
+	var local: Vector2 = _board.get_global_transform().affine_inverse() * at
+	var t: Dictionary = _v["tokens"][_seat()][_drag["tok"]]
+	Net.send_ghost({"g": "rsb", "seat": _seat(), "v": t["v"], "bonus": t["bonus"], "x": local.x / maxf(_board.size.x, 1.0), "y": local.y / maxf(_board.size.y, 1.0), "end": done})
+
+
+func _on_ghost(peer: int, d: Dictionary) -> void:
+	if str(d.get("g", "")) != "rsb" or _v.is_empty() or int(d.get("seat", -1)) == _seat():
+		return
+	var g: Dictionary = _ghosts.get(peer, {})
+	if bool(d.get("end", false)):
+		_drop_ghost(peer)
+		return
+	var at := _board.global_position + Vector2(float(d["x"]) * _board.size.x, float(d["y"]) * _board.size.y)
+	if g.is_empty() or not is_instance_valid(g["spr"]):
+		var spr := ChipSprite.new(RSBStyle.token_tex(int(d["seat"]), int(d["v"]), str(d["bonus"])))
+		spr.modulate.a = 0.5
+		spr.position = at - spr.size / 2
+		_layer.add_child(spr)
+		g = {"spr": spr}
+		_ghosts[peer] = g
+	var s: ChipSprite = g["spr"]
+	g["seen"] = Time.get_ticks_msec()
+	var tw := s.create_tween()
+	tw.tween_property(s, "position", at - s.size / 2, 0.06)
+
+
+func _drop_ghost(peer: int) -> void:
+	var g: Dictionary = _ghosts.get(peer, {})
+	_ghosts.erase(peer)
+	if not g.is_empty() and is_instance_valid(g["spr"]):
+		var s: Control = g["spr"]
+		s.create_tween().tween_property(s, "modulate:a", 0.0, 0.2).finished.connect(s.queue_free)
+
+
+func _expire_ghosts() -> void:
+	# тень, о которой давно ничего не слышно (сообщение «отпустил» потерялось), гасим сама
+	for peer in _ghosts.keys():
+		if Time.get_ticks_msec() - int(_ghosts[peer].get("seen", 0)) > 1500:
+			_drop_ghost(peer)
 
 
 func _fly_back(spr: Control, tok: int) -> void:
@@ -872,6 +933,8 @@ func _game_over_panel() -> void:
 
 
 func _process(_delta: float) -> void:
+	if not _ghosts.is_empty():
+		_expire_ghosts()
 	if _auto_label != null and is_instance_valid(_auto_label):
 		var left := maxi(0, (_auto_deadline - Time.get_ticks_msec()) / 1000)
 		var waiting: Array = _v.get("waiting", [])

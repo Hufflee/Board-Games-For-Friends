@@ -9,17 +9,30 @@ const STATES := {0: "не в сети", 1: "в сети", 2: "занят", 3: "�
 var _list: VBoxContainer
 var _status: Label
 var _invited := {}
+var _browse := false  # окно «Пати друзей»: не приглашать, а войти к другу
 
 
 ## Окно «Пригласить друзей». Открывается поверх любого экрана.
-static func open_panel() -> void:
+## on_layer — слой окна (из меню паузы — выше её затемнения).
+static func open_panel(on_layer: int = 50) -> void:
 	var tree := Engine.get_main_loop() as SceneTree
 	for n in tree.root.get_children():
 		if n is SteamInvite and n.has_meta("panel"):
 			return
 	var layer := SteamInvite.new()
 	layer.set_meta("panel", true)
-	layer.layer = 50
+	layer.layer = on_layer
+	tree.root.add_child(layer)
+	layer._build_panel()
+
+
+## Окно «Пати друзей»: друзья, которые сейчас в пати этой игры, — кнопка «Войти».
+static func open_browser(on_layer: int = 50) -> void:
+	var tree := Engine.get_main_loop() as SceneTree
+	var layer := SteamInvite.new()
+	layer.set_meta("panel", true)
+	layer._browse = true
+	layer.layer = on_layer
 	tree.root.add_child(layer)
 	layer._build_panel()
 
@@ -70,8 +83,8 @@ func _build_panel() -> void:
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 10)
 	p.add_child(col)
-	col.add_child(_label("Пригласить друзей из Steam", 22))
-	col.add_child(_label("Друг получит приглашение в Steam и прямо в игре, если она запущена.", 13, Color(1, 1, 1, 0.6)))
+	col.add_child(_label("Browse lobbies" if _browse else "Пригласить друзей из Steam", 22))
+	col.add_child(_label("Друзья из Steam, которые сейчас собрались в этой игре." if _browse else "Друг получит приглашение в Steam и прямо в игре, если она запущена.", 13, Color(1, 1, 1, 0.6)))
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(0, 340)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -84,7 +97,7 @@ func _build_panel() -> void:
 	col.add_child(_status)
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 8)
-	if Net.steam_ok and Net.steam.isOverlayEnabled():
+	if not _browse and Net.steam_ok and Net.steam.isOverlayEnabled():
 		var ov := Button.new()
 		ov.text = "Оверлей Steam"
 		ov.pressed.connect(func(): Net.steam.activateGameOverlayInviteDialog(Net.lobby_id))
@@ -104,6 +117,9 @@ func _build_panel() -> void:
 func _fill() -> void:
 	for c in _list.get_children():
 		c.queue_free()
+	if _browse:
+		_fill_parties()
+		return
 	if not Net.steam_ok or Net.lobby_id == 0:
 		_list.add_child(_label("Приглашать через Steam можно из пати, созданной через Steam.", 15, Color(1, 1, 1, 0.8)))
 		return
@@ -141,6 +157,39 @@ func _fill() -> void:
 				_status.text = "Приглашение отправлено: %s" % f["name"]
 			else:
 				_status.text = "Steam не принял приглашение — попробуйте ещё раз.")
+		row.add_child(b)
+		_list.add_child(row)
+
+
+func _fill_parties() -> void:
+	if not Net.steam_ok:
+		_list.add_child(_label("Steam недоступен — запустите Steam и перезапустите игру.", 15, Color(1, 1, 1, 0.8)))
+		return
+	var parties := Net.steam_friend_parties()
+	if parties.is_empty():
+		var l := _label("Сейчас никто из друзей не собрал пати. Создайте свою и пригласите их — или нажмите «Обновить» чуть позже.", 15, Color(1, 1, 1, 0.8))
+		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_list.add_child(l)
+		return
+	for f in parties:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		var av := TextureRect.new()
+		av.custom_minimum_size = Vector2(32, 32)
+		av.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		av.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		av.texture = Net.avatar(int(f["id"]))
+		row.add_child(av)
+		var nm := _label("Пати: %s" % f["name"], 16)
+		nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(nm)
+		var b := Button.new()
+		b.text = "Войти"
+		var lobby: int = f["lobby"]
+		b.pressed.connect(func():
+			_status.text = "Входим в пати %s…" % f["name"]
+			Net.join_steam(lobby)
+			queue_free())
 		row.add_child(b)
 		_list.add_child(row)
 

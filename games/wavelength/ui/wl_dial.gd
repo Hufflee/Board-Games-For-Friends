@@ -61,7 +61,9 @@ func _draw() -> void:
 			_wedge(c, r - 4, target - band[0], target + band[0], BAND_COLORS[band[1]])
 		var font := HCStyle.font("bold")
 		for band in [[8.0, 2], [4.0, 3], [0.0, 4], [-4.0, 3], [-8.0, 2]]:
-			var a := angle_of(clampf(target + band[0], 0, 100))
+			if target + band[0] < 1.0 or target + band[0] > 99.0:
+				continue  # полоса ушла за край шкалы — её цифру не рисуем (иначе цифры налезают друг на друга)
+			var a := angle_of(target + band[0])
 			var p := c + Vector2(cos(a), sin(a)) * (r - 40)
 			draw_string(font, p + Vector2(-6, 8), str(band[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1, 1, 1, 0.95))
 	# деления

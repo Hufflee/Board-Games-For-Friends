@@ -1,13 +1,29 @@
 class_name LeaveGuard
-## Опасная кнопка выхода из партии: приглушённый стиль (вариация темы «QuietButton»), отступ от
-## соседних кнопок и подтверждение — безопасное «Остаться» выделено, «Выйти» — второстепенное.
-## Оформление окна — из темы игры («ConfirmPanel», «SelectedButton», «QuietButton»).
+## Опасная кнопка выхода из партии / пати: приглушённый стиль (вариация темы «QuietButton»), отступ от
+## соседних кнопок и подтверждение удержанием — кнопку надо зажать, она заполняется слева направо,
+## и выход срабатывает, только когда заполнится (HoldFill). Отпустил раньше — заливка стекает обратно.
+## ask() — окно подтверждения для других важных действий (стать зрителем, сбросить руку…):
+## оформление из темы игры («ConfirmPanel», «SelectedButton», «QuietButton»).
+
+const HOLD_TIME := 1.0  # сколько держать кнопку выхода, с
 
 
-static func wire(btn: Button, question: String, detail: String, on_yes: Callable) -> void:
+static func wire(btn: Button, question: String, _detail: String, on_yes: Callable) -> void:
 	btn.theme_type_variation = "QuietButton"
 	btn.ready.connect(func(): _add_gap.call_deferred(btn), CONNECT_ONE_SHOT)
-	btn.pressed.connect(func(): ask(btn, question, detail, btn.text, on_yes))
+	hold(btn, on_yes, question)
+
+
+## Подтверждение удержанием: зажать кнопку на HOLD_TIME — сработает on_yes.
+static func hold(btn: Button, on_yes: Callable, question: String = "") -> void:
+	var tip := "Удерживайте кнопку, чтобы подтвердить"
+	btn.tooltip_text = (question + "\n" + tip) if question != "" else tip
+	var fill := HoldFill.new()
+	fill.on_done = on_yes
+	btn.add_child(fill)
+	btn.button_down.connect(fill.start)
+	btn.button_up.connect(fill.stop)
+	btn.mouse_exited.connect(fill.stop)
 
 
 ## Отступ перед опасной кнопкой (после того как родитель достроен — иначе add_child во время сборки падает).

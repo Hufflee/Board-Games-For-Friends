@@ -8,6 +8,7 @@ extends RefCounted
 
 const WIN := 10
 const COOP_CARDS := 7
+const COOP_GOAL := 16  # цель кооператива по шкале оригинала: «Вы победили!» (≈2,3 очка за карточку)
 const BANDS := [[2.0, 4], [6.0, 3], [10.0, 2]]  # полуширина полосы → очки
 const COOP_RESULTS := [
 	[0, "Эта штука вообще работает?"], [4, "Попробуйте выключить и включить"], [7, "Разберитесь уже с механизмом!"],
@@ -220,6 +221,14 @@ func goal(t: int) -> int:
 	return WIN - 1 if t == 1 and not coop else WIN
 
 
+## Следующая ступень шкалы кооператива: [очки, название] или [] если выше некуда.
+static func coop_next(score: int) -> Array:
+	for row in COOP_RESULTS:
+		if score < row[0]:
+			return row
+	return []
+
+
 static func coop_rating(score: int) -> String:
 	var text: String = COOP_RESULTS[0][1]
 	for row in COOP_RESULTS:
@@ -283,6 +292,19 @@ func add_player(p: Dictionary) -> bool:
 	if not can_add_player():
 		return false
 	var q := p.duplicate()
-	q["team"] = 0 if coop else _smaller_team()
+	q["team"] = 0 if coop else (int(p["team"]) if int(p.get("team", -1)) in [0, 1] else _smaller_team())
 	players.append(q)
 	return true
+
+
+## Зритель смотрит глазами рядового игрока — не телепата (тот видит тайну).
+func spectator_seat() -> int:
+	for s in players.size():
+		if s != psychic:
+			return s
+	return 0
+
+
+## Командная игра: в какие команды зритель может войти сам (прогресс общий — он не начинает с нуля).
+func teams_for_join() -> Array:
+	return [0] if coop else [0, 1] if can_add_player() else []

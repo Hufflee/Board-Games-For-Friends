@@ -1,0 +1,7 @@
+doubloon_front.png, doubloon_back.png — монетка-антистресс для «Перудо»; нарисованы процедурно скриптом
+(карта высот → освещение, патина, царапины), без чужого арта.
+holo_front.png, holo_back.png — монетка «Длины волны» (голографическая), тоже процедурно, без чужого арта.
+gloom_front.png (коса), gloom_back.png (привидение) — монетка Gloom, процедурно, без чужого арта.
+doubloon_front/back.png — теперь плоский мультяшный (череп / скрещённые кости), процедурно; прежний потёртый дублон — doubloon_old_*.png.
+wave_* (синяя, мозг / волны) — «Длина волны»; hues_* (синий-фиолетовый-голубой, клякса / волны) — Hues and Cues; holo_* — первый вариант. Всё процедурно.
+<game>[_dark]_front/back.png и <game>[_dark]_secret_front/back.png (king_of_12, dangerous_words, ready_set_bet, word_slam, wavelength, tip_top, tip_top_18, not_a_hat) — сгенерированы локально в ComfyUI (SD 1.5 DreamShaper 8 + IP-Adapter по монетам Перудо/Бродилки/Gloom, img2img по заготовкам, нарисованным кодом); _dark — для тёмной темы, _secret — секретный облик. Чужого арта нет (кроме стиля-референса монеты бродилки).

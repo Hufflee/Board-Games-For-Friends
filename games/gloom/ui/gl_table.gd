@@ -13,6 +13,9 @@ var _hand_layer: Control
 var _hand := {}  # карта -> K12TableCard
 var _order: Array = []  # порядок карт в руке (локальный, можно переставлять)
 var _stacks := {}  # персонаж -> GLStack
+var _card_scale := 1.0  # стол не влезает по высоте (5 игроков, гости и истории) — карты на столе мельче
+var _scale_for := -1  # для какого числа соперников подобран масштаб
+var _centre_low := false  # гости и истории — внизу рядом со своей семьёй (соперники заняли два ряда)
 var _panel: PanelContainer
 var _panel_key := ""
 var _log: RichTextLabel
@@ -30,6 +33,7 @@ var _drag := -1
 var _celebrated := false
 var _last_stack_sig := ""
 var _hover_char := -1
+var _top: TopBar
 
 
 func _ready() -> void:
@@ -99,37 +103,28 @@ func _ready() -> void:
 	_preview.visible = false
 	add_child(_preview)
 
-	var top := GLStyle.hbox(8)
-	top.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	top.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	top.offset_top = 8
-	top.offset_right = -12
-	add_child(top)
-	var rules := GLStyle.button("Правила", GLStyle.CAP)
+	# верхняя полоса: название, ход, часы, чат и кнопки игры
+	_top = TopBar.make(self, "Gloom", func(t, z): return GLStyle.button(t, z), null, GLStyle.BONE, GLStyle.font("bold"))
+	_top.z_index = 40  # над столом и рукой (20), под крупным просмотром (60)
+	_top.chat.z_index = 40
+	GLStyle.restyle_chat(_top.chat)
+	var rules := GLStyle.button("Правила", 14)
 	rules.pressed.connect(func(): app.show_rules())
-	top.add_child(rules)
-	var settings := GLStyle.button("Настройки", GLStyle.CAP)
+	_top.actions.add_child(rules)
+	var settings := GLStyle.button("Настройки", 14)
 	settings.pressed.connect(func(): app.show_settings())
-	top.add_child(settings)
+	_top.actions.add_child(settings)
 	var leave: Button
 	if Net.is_party() and Net.is_host():
-		leave = GLStyle.button("Завершить партию", GLStyle.CAP)
+		leave = GLStyle.button("Завершить партию", 14)
 		LeaveGuard.wire(leave, "Завершить партию для всех?", "Все вернутся в лобби игры, пати сохранится.", Net.end_game)
 	elif Net.is_party():
-		leave = GLStyle.button("Покинуть пати", GLStyle.CAP)
+		leave = GLStyle.button("Покинуть пати", 14)
 		LeaveGuard.wire(leave, "Покинуть пати?", "Вы выйдете из игры и из пати.", func(): app.leave_party())
 	else:
-		leave = GLStyle.button("Выйти", GLStyle.CAP)
+		leave = GLStyle.button("Выйти", 14)
 		LeaveGuard.wire(leave, "Выйти из партии?", "Игра закончится, вы вернётесь в меню.", func(): app.back_to_menu())
-	top.add_child(leave)
-	var logo := GLStyle.title("GLOOM", 26)
-	logo.position = Vector2(16, 6)
-	add_child(logo)
-
-	add_child(TurnClock.top_center(10))
-	var chat := K12ChatPanel.new()
-	GLStyle.restyle_chat(chat)
-	add_child(chat)
+	_top.actions.add_child(leave)
 	ChatBubbles.attach(self, func(t: String) -> Control:
 		var b := GLStyle.label(t, GLStyle.CAP, GLStyle.INK, HORIZONTAL_ALIGNMENT_CENTER)
 		b.add_theme_stylebox_override("normal", GLStyle.box(GLStyle.BONE, 6, GLStyle.INK, 2, 0.35))
@@ -202,6 +197,7 @@ func _on_state(v: Dictionary) -> void:
 	if v["phase"] != "prompt" or int(pr.get("seat", -1)) != _me:
 		_marked.clear()
 	_marked = _marked.filter(func(c): return _my_hand().has(c))
+	_update_info()
 	_build_board()
 	_sync_hand()
 	_update_piles()
@@ -209,6 +205,16 @@ func _on_state(v: Dictionary) -> void:
 	_build_panel()
 	_layout.call_deferred()
 	_sounds(prev)
+
+
+func _update_info() -> void:
+	if _v.is_empty():
+		return
+	var ph: String = _v.get("phase", "")
+	if ph == "game_over":
+		_top.info.text = "Конец партии"
+	else:
+		_top.info.text = "Ход: %s" % _name(_actor())
 
 
 func _sounds(prev: Dictionary) -> void:
@@ -264,10 +270,13 @@ func _build_board() -> void:
 	GLStyle.clear(_board)
 	_stacks.clear()
 	var opps := _opponents()
-	var small := 76.0 if opps.size() <= 2 else 58.0
+	if _scale_for != opps.size():
+		_scale_for = opps.size()
+		_card_scale = 1.0
+	var small := (76.0 if opps.size() <= 2 else 58.0) * _card_scale
 	for s in opps:
 		_board.add_child(_family_box(s, small, false))
-	_board.add_child(_family_box(_me, 100.0, true))
+	_board.add_child(_family_box(_me, 100.0 * maxf(_card_scale, 0.8), true))
 	var centre := _centre_box(small)
 	if centre:
 		_board.add_child(centre)
@@ -442,6 +451,10 @@ func _layout_hand() -> void:
 
 
 func _hand_left() -> float:
+	if _centre_low:
+		for b in _board.get_children():
+			if int(b.get_meta("seat", -2)) == -1:
+				return b.position.x + b.size.x + 16.0
 	var my := _my_box()
 	return (my.position.x + my.size.x + 16.0) if my else size.x * 0.5
 
@@ -463,12 +476,25 @@ func _layout() -> void:
 	for b in _board.get_children():
 		(b as Control).reset_size()
 		boxes[int(b.get_meta("seat", -1))] = b
-	# соперники: по два в ряд сверху
-	var per_row := 2 if opps.size() > 2 else maxi(1, opps.size())
-	var y := 44.0
-	var i := 0
-	while i < opps.size():
-		var row := opps.slice(i, i + per_row)
+	# соперники сверху: в ряд столько, сколько влезает по ширине (обычно 2–3)
+	var y := TopBar.HEIGHT + 8.0
+	var rows: Array = []
+	var cur: Array = []
+	var cur_w := 0.0
+	for s in opps:
+		var bw: float = (boxes[s] as Control).size.x
+		if not cur.is_empty() and cur_w + 14.0 + bw > size.x - 32.0:
+			rows.append(cur)
+			cur = []
+			cur_w = 0.0
+		cur_w += (14.0 if not cur.is_empty() else 0.0) + bw
+		cur.append(s)
+	if not cur.is_empty():
+		rows.append(cur)
+	# поровну по рядам: 4 соперника — 2 + 2, а не 3 + 1
+	if rows.size() == 2 and opps.size() == 4:
+		rows = [opps.slice(0, 2), opps.slice(2, 4)]
+	for row: Array in rows:
 		var tw := 0.0
 		var th := 0.0
 		for s in row:
@@ -481,17 +507,27 @@ func _layout() -> void:
 			b.position = Vector2(x, y)
 			x += b.size.x + gap
 		y += th + 8
-		i += per_row
 	var centre: Control = boxes.get(-1)
-	if centre:
+	var my: Control = boxes.get(_me)
+	# соперники в два ряда — гостям и историям сверху места нет: кладём их внизу, справа от своей семьи
+	_centre_low = centre != null and my != null and rows.size() >= 2
+	if centre and not _centre_low:
 		centre.position = Vector2((size.x - centre.size.x) * 0.5, y)
 		y += centre.size.y + 8
 	var top_end := y
-	var my: Control = boxes.get(_me)
 	if my:
 		my.position = Vector2(16, size.y - my.size.y - 12)
+		if _centre_low:
+			centre.position = Vector2(my.position.x + my.size.x + 14, size.y - centre.size.y - 12)
 	var mid_top := top_end + 6
 	var mid_bottom := (my.position.y if my else size.y - 200) - 8
+	# середине нужно место под панель хода — иначе всё мельче и раскладываем заново
+	_panel.reset_size()
+	if mid_bottom - mid_top < _panel.size.y + 24.0 and _card_scale > 0.62:
+		_card_scale -= 0.1
+		_build_board()
+		_layout.call_deferred()
+		return
 	# колода и сброс — слева посередине
 	var ch := clampf(mid_bottom - mid_top - 24, 70, 150)
 	var cw := ch * GLStyle.CARD.x / GLStyle.CARD.y
@@ -514,7 +550,7 @@ func _layout() -> void:
 	var px1 := _log_panel.position.x - 10
 	var py := mid_top + maxf(0, (mid_bottom - mid_top - _panel.size.y) * 0.5)
 	py = minf(py, mid_bottom - _panel.size.y)  # не залезать на свою семью
-	_panel.position = Vector2(px0 + maxf(0, (px1 - px0 - _panel.size.x) * 0.5), maxf(40, py))
+	_panel.position = Vector2(px0 + maxf(0, (px1 - px0 - _panel.size.x) * 0.5), maxf(TopBar.HEIGHT + 8.0, py))
 	_layout_hand()
 
 
@@ -595,6 +631,7 @@ func _refresh_targets() -> void:
 # --- Ввод ---------------------------------------------------------------------------------
 
 func _on_hand_click(card: int) -> void:
+	_drag = -1  # нажатие без перетаскивания: drag_started был, dropped не будет — иначе пропадает крупный просмотр
 	var pr: Dictionary = _v.get("prompt", {})
 	if _v["phase"] == "prompt" and int(pr.get("seat", -1)) == _actor() and pr.get("kind", "") in ["discard", "give", "refresh"]:
 		if _marked.has(card):
@@ -694,6 +731,8 @@ func _on_char_picked(c: int) -> void:
 		_send("gl_play", {"card": _sel, "target": c, "extra": {"pick": int(_ev["pick"])}})
 		_sel = -1
 		_ev = {}
+	elif _cd(_sel)["t"] == "E":
+		_ev["t"] = c  # событие (красная карта) — цель выбрана, срабатывает по кнопке «Применить»
 	else:
 		_send("gl_play", {"card": _sel, "target": c})
 		_sel = -1
@@ -897,8 +936,20 @@ func _build_turn(col: VBoxContainer, who: String) -> void:
 						_sel = -1)
 					mr.add_child(mb)
 				col.add_child(mr)
+			var simple: bool = e.has("t") and not (e.has("t2") or e.has("with") or e.has("pick") or e.has("go"))
+			if simple:
+				var tgt := int(_ev.get("t", -1))
+				var ap := GLStyle.primary("Применить «%s»%s" % [cd["name"], (" → " + str(_v["chars"][tgt]["name"])) if tgt >= 0 else ""], GLStyle.BODY)
+				ap.disabled = tgt < 0
+				ap.tooltip_text = "Сначала выберите персонажа" if tgt < 0 else ""
+				ap.pressed.connect(func():
+					_send("gl_play", {"card": s2, "target": tgt})
+					_sel = -1
+					_ev = {})
+				ap.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+				col.add_child(ap)
 			if e.get("go", false):
-				var go := GLStyle.primary("Сыграть «%s»" % cd["name"], GLStyle.BODY)
+				var go := GLStyle.primary("Применить «%s»" % cd["name"], GLStyle.BODY)
 				go.pressed.connect(func():
 					_send("gl_play", {"card": s2, "target": -1})
 					_sel = -1)

@@ -8,6 +8,8 @@ var _v := {}
 var _me := 0
 var _board: HCBoard
 var _round_label: Label
+var _top: TopBar
+var _top_dark := false
 var _hover_label: Label
 var _cues_row: HBoxContainer
 var _players_box: VBoxContainer
@@ -35,42 +37,38 @@ func _ready() -> void:
 	var top := HCStyle.hbox(14)
 	top.name = "Top"
 	add_child(top)
-	var left := HCStyle.vbox(0)
-	left.custom_minimum_size.x = 200
-	left.add_child(HCStyle.caption("Hues and Cues"))
-	# раунд и часы хода — в одну строку, чтобы часы не наезжали на подписи столбцов поля
-	var rrow := HCStyle.hbox(10)
-	_round_label = HCStyle.label("", HCStyle.BODY, HCStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "bold")
-	rrow.add_child(_round_label)
-	var clock := TurnClock.new()  # часы хода (настройка комнаты «Время на ход»)
-	clock.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	rrow.add_child(clock)
-	left.add_child(rrow)
-	top.add_child(left)
 	_cues_row = HCStyle.hbox(10)
 	_cues_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	_cues_row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(_cues_row)
-	var buttons := HCStyle.hbox(6)
-	var rules := HCStyle.button("Правила", HCStyle.CAP)
+	# общая верхняя полоса: название, раунд, часы, чат и кнопки
+	_top = TopBar.make(self, "Hues and Cues", func(t, z): return HCStyle.button(t, z), null, HCStyle.INK, HCStyle.font("bold"))
+	# монетка — по центру под правой панелью игроков
+	_top.coin_at = func() -> Vector2:
+		var r := _side.get_global_rect()
+		return Vector2(r.get_center().x, r.end.y + 38.0)
+	_top.info.add_theme_font_override("font", HCStyle.font("bold"))
+	_round_label = _top.info
+	var rules := HCStyle.button("Правила", 14)
 	rules.pressed.connect(func(): app.show_rules())
-	buttons.add_child(rules)
-	var settings := HCStyle.button("Настройки", HCStyle.CAP)
+	_top.actions.add_child(rules)
+	var settings := HCStyle.button("Настройки", 14)
 	settings.pressed.connect(func(): app.show_settings())
-	buttons.add_child(settings)
-	buttons.add_child(ThemeToggle.make(func(t, z): return HCStyle.button(t, z), HCStyle.CAP))  # солнце / луна — тема
+	_top.actions.add_child(settings)
+	_top.actions.add_child(ThemeToggle.make(func(t, z): return HCStyle.button(t, z), 14))  # солнце / луна — тема
 	var leave: Button
 	if Net.is_party() and Net.is_host():
-		leave = HCStyle.button("Завершить партию", HCStyle.CAP)
+		leave = HCStyle.button("Завершить партию", 14)
 		LeaveGuard.wire(leave, "Завершить партию для всех?", "Все вернутся в лобби игры, пати сохранится.", Net.end_game)
 	elif Net.is_party():
-		leave = HCStyle.button("Покинуть пати", HCStyle.CAP)
+		leave = HCStyle.button("Покинуть пати", 14)
 		LeaveGuard.wire(leave, "Покинуть пати?", "Вы выйдете из партии и из пати.", func(): app.leave_party())
 	else:
-		leave = HCStyle.button("Выйти", HCStyle.CAP)
+		leave = HCStyle.button("Выйти", 14)
 		LeaveGuard.wire(leave, "Выйти из партии?", "Игра закончится, вы вернётесь в меню.", func(): app.back_to_menu())
-	buttons.add_child(leave)
-	top.add_child(buttons)
+	_top.actions.add_child(leave)
+	HCStyle.restyle_chat(_top.chat)
+	_tint_top()
 
 	_side = HCStyle.panel(16)
 	var sv := HCStyle.vbox(8)
@@ -94,9 +92,6 @@ func _ready() -> void:
 	_hover_label = HCStyle.label("", HCStyle.CAP, HCStyle.MUTED, HORIZONTAL_ALIGNMENT_RIGHT, "bold")
 	add_child(_hover_label)
 
-	var chat := K12ChatPanel.new()
-	HCStyle.restyle_chat(chat)
-	add_child(chat)
 	ChatBubbles.attach(self, func(t: String) -> Control:
 		var b := HCStyle.label(t, HCStyle.CAP, HCStyle.INK, HORIZONTAL_ALIGNMENT_CENTER)
 		b.add_theme_stylebox_override("normal", HCStyle.box(HCStyle.SURFACE, 14, HCStyle.LINE, 1, HCStyle.SHADOW, 10))
@@ -111,17 +106,23 @@ func _ready() -> void:
 		_on_state(Net.view)
 
 
+func _tint_top() -> void:  # цвета полосы следуют за темой (INK меняется)
+	_top_dark = HCStyle.dark
+	_top.title.add_theme_color_override("font_color", Color(HCStyle.INK, 0.55))
+	_top.info.add_theme_color_override("font_color", HCStyle.INK)
+
+
 func _layout() -> void:
 	var w := size.x
 	var h := size.y
 	var side_w := 270.0
 	var top := get_node("Top") as Control
-	top.position = Vector2(20, 12)
+	top.position = Vector2(20, TopBar.HEIGHT + 4)
 	top.size = Vector2(w - 40, 46)
-	_board.position = Vector2(12, 66)
-	_board.size = Vector2(w - side_w - 44, h - 66 - 124)
-	_side.position = Vector2(w - side_w - 20, 70)
-	_side.size = Vector2(side_w, h - 70 - 76)
+	_board.position = Vector2(12, 106)
+	_board.size = Vector2(w - side_w - 44, h - 106 - 124)
+	_side.position = Vector2(w - side_w - 20, 110)
+	_side.size = Vector2(side_w, h - 110 - 76)
 	_action.position = Vector2(24, h - 116)
 	_action.size = Vector2(w - side_w - 72, 100)
 	_hover_label.position = Vector2(w - side_w - 140, h - 140)
@@ -160,6 +161,10 @@ func _on_state(v: Dictionary) -> void:
 	if v["pieces"].size() > prev_pieces:
 		Sfx.play("chip", -4, 0.08)
 	_round_label.text = ("Переигровка · раунд %d" % v["round_no"]) if v["tiebreak"] else "Раунд %d из %d" % [v["round_no"], v["total_rounds"]]
+	if v.get("coop", false):
+		_round_label.text += " · кооператив: общий счёт %d из %d" % [int(v["scores"][0]), int(v["coop_goal"])]
+	if _top_dark != HCStyle.dark:
+		_tint_top()
 	_update_board(phase)
 	_update_cues()
 	_update_players()
@@ -249,9 +254,6 @@ func _update_players() -> void:
 		sb.content_margin_right = 8
 		row.add_theme_stylebox_override("panel", sb)
 		var h := HCStyle.hbox(8)
-		var d := HCStyle.dot(HCStyle.piece_color(s), 16)
-		d.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-		h.add_child(d)
 		var nv := HCStyle.vbox(-2)
 		nv.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var nm := PlayerTag.make_seat(_v["players"], s, _me, 15, HCStyle.INK, " (вы)" if s == _me and not _hotseat() else "")
@@ -450,10 +452,16 @@ func _game_over_panel(row: HBoxContainer) -> void:
 	var col := HCStyle.vbox(2)
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var text := ("Победа: %s" % names[0]) if names.size() == 1 else "Общая победа: %s" % ", ".join(names)
+	var sub := "%d очков" % _v["scores"][winners[0]] if not winners.is_empty() else ""
+	if _v.get("coop", false):
+		var team := int(_v["scores"][0])
+		var goal := int(_v["coop_goal"])
+		text = "Цель взята — вы видите цвета одинаково!" if team >= goal else "Не хватило %d очк. до цели" % (goal - team)
+		sub = "Общий счёт: %d из %d" % [team, goal]
 	col.add_child(HCStyle.label(text, HCStyle.BODY, HCStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "title"))
-	col.add_child(HCStyle.label("%d очков" % _v["scores"][winners[0]] if not winners.is_empty() else "", HCStyle.CAP, HCStyle.MUTED))
+	col.add_child(HCStyle.label(sub, HCStyle.CAP, HCStyle.MUTED))
 	row.add_child(col)
-	if not _celebrated:
+	if not _celebrated and not winners.is_empty():
 		_celebrated = true
 		Sfx.victory()
 	if Net.is_host():

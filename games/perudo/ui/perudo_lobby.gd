@@ -1,5 +1,5 @@
 extends Control
-## Лобби «Перудо»: игроки, боты, число костей, Мапуто, старт, чат.
+## Лобби «Перудо»: игроки, боты, число костей, Палифико, старт, чат.
 
 var app: Node
 
@@ -93,12 +93,12 @@ func _rebuild() -> void:
 			drow.add_child(b)
 		ov.add_child(drow)
 		var mp := CheckBox.new()
-		mp.text = "Раунд Мапуто (игрок с последней костью может его объявить)"
+		mp.text = "Раунд Палифико (автоматически, когда у игрока остаётся последняя кость)"
 		mp.button_pressed = maputo_on
 		mp.toggled.connect(func(on): Net.set_setting("perudo_maputo", on))
 		ov.add_child(mp)
 	else:
-		ov.add_child(K12UI.label("Костей на старте: %d · Мапуто: %s" % [dice_n, "да" if maputo_on else "нет"], K12UI.BODY))
+		ov.add_child(K12UI.label("Костей на старте: %d · Палифико: %s" % [dice_n, "да" if maputo_on else "нет"], K12UI.BODY))
 
 	if data.get("in_game", false) and not data.get("seated", []).has(multiplayer.get_unique_id()):
 		_body.add_child(K12UI.label("Сейчас идёт партия — вы сядете за стол в следующей.", K12UI.BODY, K12UI.GOLD))

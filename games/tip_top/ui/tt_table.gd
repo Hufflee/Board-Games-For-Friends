@@ -8,7 +8,7 @@ var app: Node
 var _v := {}
 var _me := 0
 var _as := 0  # на одном компьютере — за кого действуем
-var _round_label: Label
+var _top: TopBar
 var _tokens: Control
 var _players_box: VBoxContainer
 var _theme_panel: PanelContainer
@@ -36,20 +36,16 @@ var _round := -1
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(TTStyle.Rays.new())
-	add_child(TurnClock.top_center())
 
-	_round_label = TTStyle.label("", TTStyle.BODY, TTStyle.WHITE, HORIZONTAL_ALIGNMENT_LEFT, "bold")
-	_round_label.add_theme_color_override("font_outline_color", TTStyle.INK)
-	_round_label.add_theme_constant_override("outline_size", 6)
-	_round_label.position = Vector2(18, 12)
-	add_child(_round_label)
-
-	var buttons := TTStyle.hbox(6)
-	buttons.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
-	buttons.offset_left = -440
-	buttons.offset_right = -14
-	buttons.offset_top = 8
-	buttons.alignment = BoxContainer.ALIGNMENT_END
+	_top = TopBar.make(self, "Тип Топ 18+" if TTStyle.adult else "Тип Топ", func(t, z): return TTStyle.button(t, z), null, TTStyle.WHITE, TTStyle.font("bold"))
+	# монетка — под панелью игроков, у левого края (панель растёт с числом игроков — гнездо едет за ней)
+	_top.coin_at = func() -> Vector2:
+		var panel := _players_box.get_parent() as Control if _players_box else null
+		if panel == null:
+			return Vector2(-9999, -9999)
+		var r := panel.get_global_rect()
+		return Vector2(r.position.x + 30.0, r.end.y + 38.0)
+	var buttons := _top.actions
 	var rules := TTStyle.button("Правила", TTStyle.CAP)
 	rules.pressed.connect(func(): app.show_rules())
 	buttons.add_child(rules)
@@ -67,7 +63,6 @@ func _ready() -> void:
 		leave = TTStyle.button("Выйти", TTStyle.CAP)
 		LeaveGuard.wire(leave, "Выйти из партии?", "Игра закончится, вы вернётесь в меню.", func(): app.back_to_menu())
 	buttons.add_child(leave)
-	add_child(buttons)
 
 	# планшет
 	var board := TTStyle.bubble(10)
@@ -104,8 +99,6 @@ func _ready() -> void:
 	_overlay = Control.new()
 	_overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_overlay)
-	var chat := K12ChatPanel.new()
-	add_child(chat)
 	# реплики и сообщения чата — всплывающим окошком
 	ChatBubbles.attach(self, func(t: String) -> Control:
 		var b := TTStyle.label(t, TTStyle.CAP, TTStyle.INK, HORIZONTAL_ALIGNMENT_CENTER, "bold")
@@ -124,17 +117,17 @@ func _ready() -> void:
 func _layout() -> void:
 	var w := size.x
 	var h := size.y
-	(get_node("Board") as Control).position = Vector2(14, 48)
+	(get_node("Board") as Control).position = Vector2(14, 56)
 	(get_node("Board") as Control).size = Vector2(278, 0)
-	(get_node("Players") as Control).position = Vector2(14, 236)
+	(get_node("Players") as Control).position = Vector2(14, 244)
 	(get_node("Players") as Control).size = Vector2(278, 0)
-	_theme_panel.position = Vector2(308, 48)
+	_theme_panel.position = Vector2(308, 56)
 	_theme_panel.size = Vector2(w - 308 - 300, 0)
 	_track.position = Vector2(308, h - 178)
 	_track.size = Vector2(w - 308 - 300, 150)
 	_cards_layer.position = Vector2.ZERO
 	_cards_layer.size = size
-	_right.position = Vector2(w - 284, 48)
+	_right.position = Vector2(w - 284, 56)
 	_right.size = Vector2(270, 0)
 	_overlay.size = size
 	_layout_cards()
@@ -214,7 +207,7 @@ func _on_state(v: Dictionary) -> void:
 		_start_reveal()
 	elif int(v["poops"]) > prev_poops and not _revealing:
 		Sfx.play("card_shove", 0)
-	_round_label.text = "РАУНД %d ИЗ %d · капитан: %s%s" % [v["round_no"], v["rounds"], _name(v["captain"]), " · ЭКСПЕРТ" if v["expert"] else ""]
+	_top.info.text = "Раунд %d из %d" % [v["round_no"], v["rounds"]]
 	_tokens.queue_redraw()
 	_update_players()
 	var tkey := "%s/%d/%d" % [phase, v["round_no"], v["theme"]]

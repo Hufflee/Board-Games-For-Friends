@@ -6,6 +6,7 @@ const TEAM_COLORS := [Color("5f7fbf"), Color("d9895a")]
 
 var app: Node
 
+var _top: TopBar
 var _v := {}
 var _me := 0
 var _dial: WLDial
@@ -33,7 +34,7 @@ func _ready() -> void:
 	col.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	col.offset_left = 16
 	col.offset_right = -16
-	col.offset_top = 8
+	col.offset_top = TopBar.HEIGHT + 16  # панели команд не прилипают к полосе
 	col.offset_bottom = -8
 	add_child(col)
 
@@ -41,7 +42,7 @@ func _ready() -> void:
 	_teams_box = HCStyle.hbox(12)
 	_teams_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	top.add_child(_teams_box)
-	var buttons := HCStyle.vbox(6)
+	var buttons := HCStyle.hbox(6)  # кнопки игры — в верхней полосе (TopBar)
 	var rules := HCStyle.button("Правила", HCStyle.CAP)
 	rules.pressed.connect(func(): app.show_rules())
 	buttons.add_child(rules)
@@ -60,7 +61,6 @@ func _ready() -> void:
 		leave = HCStyle.button("Выйти", HCStyle.CAP)
 		LeaveGuard.wire(leave, "Выйти из партии?", "Игра закончится, вы вернётесь в меню.", func(): app.back_to_menu())
 	buttons.add_child(leave)
-	top.add_child(buttons)
 	col.add_child(top)
 
 	_clue_label = HCStyle.label("", HCStyle.BODY, HCStyle.INK, HORIZONTAL_ALIGNMENT_CENTER, "title")
@@ -91,9 +91,12 @@ func _ready() -> void:
 	_banner.add_theme_constant_override("outline_size", 10)
 	_fx.add_child(_banner)
 
-	var chat := K12ChatPanel.new()
-	HCStyle.restyle_chat(chat)
-	add_child(chat)
+	_top = TopBar.make(self, "Длина волны", func(t, z): return HCStyle.button(t, z), null, HCStyle.INK, HCStyle.font("bold"))
+	_top.coin_center = true  # монетка — по центру сверху
+	for c in buttons.get_children():
+		buttons.remove_child(c)
+		_top.actions.add_child(c)
+	HCStyle.restyle_chat(_top.chat)
 	ChatBubbles.attach(self, func(t: String) -> Control:
 		var b := HCStyle.label(t, HCStyle.CAP, HCStyle.INK, HORIZONTAL_ALIGNMENT_CENTER)
 		b.add_theme_stylebox_override("normal", HCStyle.box(HCStyle.SURFACE, 14, HCStyle.LINE, 1, HCStyle.SHADOW, 10))
@@ -101,7 +104,6 @@ func _ready() -> void:
 		b.custom_minimum_size.x = 240
 		return b, Vector2(-270, 180))
 
-	add_child(TurnClock.top_center())  # часы хода (настройка комнаты «Время на ход»)
 	Net.state_changed.connect(_on_state)
 	if not Net.view.is_empty():
 		_on_state.call_deferred(Net.view)
@@ -116,6 +118,7 @@ func _on_state(v: Dictionary) -> void:
 	if int(v["turn_no"]) != prev_turn:
 		_peek = false
 	var phase: String = v["phase"]
+	_update_info()
 	_update_teams()
 	_update_clue()
 	_update_card()
@@ -124,6 +127,19 @@ func _on_state(v: Dictionary) -> void:
 		_update_panel()
 	elif phase == "reveal":
 		_update_panel()  # обновить, кто ещё смотрит итог
+
+
+func _update_info() -> void:
+	var ph: String = _v.get("phase", "")
+	if ph == "game_over":
+		_top.info.text = "Игра окончена"
+		return
+	var who := ""
+	if _v.has("psychic") and not _v.get("coop", false):
+		who = TEAM_NAMES[int(_v.get("active_team", 0))]
+	var names := {"card": "выбор карточки", "clue": "подсказка", "guess": "угадывание", "reveal": "итог"}
+	var p: String = names.get(ph, ph)
+	_top.info.text = ("%s: %s" % [who.get_slice(" ", 0), p]) if who != "" else p.capitalize()
 
 
 # --- Роли ---------------------------------------------------------------------------
@@ -180,7 +196,13 @@ func _update_teams() -> void:
 		if not _v["coop"]:
 			v.add_child(_track(int(_v["scores"][t]), int(_v.get("goals", [10, 10])[t]), TEAM_COLORS[t]))
 		else:
-			v.add_child(HCStyle.label("Карточек осталось: %d" % _v["cards_left"], HCStyle.CAP, HCStyle.MUTED))
+			var sc := int(_v["scores"][0])
+			v.add_child(_track(sc, WLRules.COOP_GOAL, HCStyle.SAGE))
+			var nx := WLRules.coop_next(sc)
+			var info := "Цель — %d очков («Вы победили!») · карточек осталось: %d" % [WLRules.COOP_GOAL, _v["cards_left"]]
+			if not nx.is_empty() and sc >= WLRules.COOP_GOAL:
+				info = "Цель взята! До «%s» — ещё %d · карточек: %d" % [nx[1], int(nx[0]) - sc, _v["cards_left"]]
+			v.add_child(HCStyle.label(info, HCStyle.CAP, HCStyle.MUTED))
 		var ml := HFlowContainer.new()
 		for s in _v["players"].size():
 			if _team_of(s) == t or _v["coop"]:
@@ -425,7 +447,8 @@ func _result_text() -> String:
 
 func _final_text() -> String:
 	if _v["coop"]:
-		return "Игра окончена!"
+		var sc := int(_v["scores"][0])
+		return "Победа! Вы на одной волне!" if sc >= WLRules.COOP_GOAL else "Не хватило %d очк. до цели" % (WLRules.COOP_GOAL - sc)
 	return "Победа: «%s»!" % TEAM_NAMES[int(_v["winner"])]
 
 
@@ -469,5 +492,3 @@ func _process(delta: float) -> void:
 		_flush_dial()
 	if is_instance_valid(_auto_label):
 		_auto_label.text = "авто через %d с" % maxi(0, ceili((_auto_deadline - Time.get_ticks_msec()) / 1000.0))
-
-

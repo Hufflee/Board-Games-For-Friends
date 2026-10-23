@@ -333,6 +333,19 @@ func add_player(p: Dictionary) -> bool:
 		q["team"] = 0
 		scores.append(0)
 	else:
-		q["team"] = _smaller_team()
+		q["team"] = int(p["team"]) if int(p.get("team", -1)) in [0, 1] else _smaller_team()
 	players.append(q)
 	return true
+
+
+## Зритель смотрит глазами рядового игрока — не рассказчика (тот видит тайну).
+func spectator_seat() -> int:
+	for s in players.size():
+		if not storytellers.has(s):
+			return s
+	return 0
+
+
+## Командная игра: в какие команды зритель может войти сам (прогресс общий — он не начинает с нуля).
+func teams_for_join() -> Array:
+	return ([] if mode == "solo" else [0, 1]) if can_add_player() else []

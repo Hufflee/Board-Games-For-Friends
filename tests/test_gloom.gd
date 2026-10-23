@@ -193,6 +193,50 @@ func test_plays() -> void:
 	r.finish_react()
 	check(r.chars[c]["dead"] and r.phase == "play", "персонаж умер")
 	check(total_cards(r) == DECK, "карты не теряются")
+	test_responses()
+
+
+## Ответы в чужой ход: «Второй шанс» отменяет смерть, «Напустить туману» — событие.
+func test_responses() -> void:
+	var r := make(2, 7)
+	var s := r.current
+	var o := 1 - s
+	var c: int = mine(r, o)[0]
+	var bees := find_card(func(d): return d["name"] == "Покусан пчёлами")
+	var bears := find_card(func(d): return d["name"] == "Съеден медведями")
+	_put_in_hand(r, s, bees)
+	r.play(s, bees, c)
+	r.end_turn(s)
+	r.end_turn(r.current)  # снова ход s
+	check(r.current == s, "ответы: снова ход первого игрока")
+	var sc := GLData.SECOND_CHANCE
+	_put_in_hand(r, o, sc)
+	_put_in_hand(r, s, bears)
+	check(r.play(s, bears, c) and r.phase == "react", "ответы: смерть открыла окно")
+	check(o in r.get_view(o)["react"]["can"], "ответы: у владельца «Второго шанса» есть кнопка")
+	check(not (o in r.get_view(s)["react"].get("can", [])), "ответы: чужая рука не подсвечивается")
+	check(r.respond(o, true), "ответы: «Второй шанс» сыгран в чужой ход")
+	check(not r.chars[c]["dead"] and r.phase == "play" and not r.hands[o].has(sc), "ответы: смерть отменена, карта ушла в сброс")
+	var fog := GLData.CANCEL_EVENT
+	_put_in_hand(r, o, fog)
+	var ev := -1
+	var tg := -1
+	for i in GLData.CARDS.size():
+		if GLData.CARDS[i]["t"] != "E" or GLData.CARDS[i]["set"] != "base" or r._fx0(i) in ["second_chance", "cancel_event"] or i == fog:
+			continue
+		_put_in_hand(r, s, i)
+		var e: Dictionary = r.legal().get(i, {})
+		if e.get("t", []) is Array and not (e.get("t", []) as Array).is_empty() and e.size() == 1:
+			ev = i
+			tg = int(e["t"][0])
+			break
+		r.hands[s].erase(i)
+		r.deck.append(i)
+	check(ev >= 0, "ответы: нашлось событие с одной целью")
+	if ev >= 0 and r.play(s, ev, tg):
+		check(r.phase == "react" and o in r.get_view(o)["react"]["can"], "ответы: событие открыло окно для «Напустить туману»")
+		check(r.respond(o, true) and r.discard.has(ev) and r.discard.has(fog), "ответы: событие отменено")
+
 
 
 func _put_in_hand(r: GLRules, s: int, card: int) -> void:

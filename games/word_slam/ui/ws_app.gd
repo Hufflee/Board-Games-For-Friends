@@ -115,6 +115,7 @@ const RULES_TEXT := """[b]Цель.[/b] Две команды одновреме
 func show_rules() -> void:
 	var layer := Control.new()
 	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	layer.z_index = 100  # выше панелей стола (у них поднятый z_index)
 	add_child(layer)
 	var dim := ColorRect.new()
 	dim.color = Color(0.15, 0.13, 0.1, 0.35)
@@ -147,7 +148,9 @@ func show_rules() -> void:
 
 
 func show_settings() -> void:
-	add_child(SettingsScreen.new())
+	var st := SettingsScreen.new()
+	st.z_index = 100  # выше панелей стола
+	add_child(st)
 
 
 func back_to_hub() -> void:

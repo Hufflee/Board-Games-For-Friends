@@ -15,6 +15,7 @@ var color := Color("f3ead2"):  # слоновая кость — нейтрал�
 	set(v):
 		color = v
 		queue_redraw()
+var star_one := true  # единица — звезда (джокер Перудо); в других играх — обычная точка
 var dim := false:
 	set(v):
 		dim = v
@@ -65,7 +66,7 @@ func _draw() -> void:
 	var pip := Color("7a1414") if ivory else (Color("1b1b1b") if color.get_luminance() > 0.62 else Color.WHITE)
 	if dim:
 		pip = pip.darkened(0.5)
-	if value == 1:
+	if value == 1 and star_one:
 		_star(Vector2(s, s) * 0.5, s * 0.3, (Color("d4a017") if ivory else pip) if not dim else Color("6d5a25"))
 		return
 	for p in PIPS.get(value, []):

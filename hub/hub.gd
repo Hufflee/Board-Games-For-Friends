@@ -56,7 +56,7 @@ func _rebuild() -> void:
 	var head := HubStyle.vbox(0)
 	head.position = Vector2(26, 16)
 	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	head.add_child(HubStyle.neon_label("PARTY WORLD", 34, HubStyle.PINK))
+	head.add_child(HubStyle.neon_label("Board GAMES for FRIENDS", 34, HubStyle.PINK))
 	_ui.add_child(head)
 	# пати слева
 	var in_party := Net.is_party() and not Net.lobby_view.is_empty()
@@ -75,10 +75,13 @@ func _rebuild() -> void:
 	var top := HubStyle.hbox(8)
 	top.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
 	top.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	top.offset_left = -300
+	top.offset_left = -440
 	top.offset_right = -20
 	top.offset_top = 18
 	top.alignment = BoxContainer.ALIGNMENT_END
+	var news := HubStyle.button("Что нового?", 15)
+	news.pressed.connect(func(): add_child(load("res://hub/whats_new.gd").new()))
+	top.add_child(news)
 	var settings := HubStyle.button("Настройки", 15)
 	settings.pressed.connect(func(): add_child(SettingsScreen.new()))
 	top.add_child(settings)
@@ -86,6 +89,15 @@ func _rebuild() -> void:
 	quit.pressed.connect(func(): get_tree().quit())
 	top.add_child(quit)
 	_ui.add_child(top)
+	# версия игры — мелко в правом нижнем углу
+	var ver := HubStyle.label("Версия " + str(ProjectSettings.get_setting("application/config/version", "?")), 12, HubStyle.MUTED, HORIZONTAL_ALIGNMENT_RIGHT)
+	ver.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
+	ver.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	ver.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	ver.offset_right = -16
+	ver.offset_bottom = -12
+	ver.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ui.add_child(ver)
 	_status = HubStyle.label("", 14, HubStyle.YELLOW)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.custom_minimum_size.x = 280
@@ -170,7 +182,7 @@ func _show_card(g: Dictionary, animate: bool = true) -> void:
 			row.add_child(sug)
 	else:
 		var play := HubStyle.primary("Играть", 20, 160)
-		play.pressed.connect(func(): _open_scene(g))
+		play.pressed.connect(func(): _open_scene(g, true))
 		row.add_child(play)
 	var back := HubStyle.button("Назад", 15)
 	back.pressed.connect(func(): _room.release())
@@ -210,6 +222,11 @@ func _party_create_panel() -> Control:
 	join.pressed.connect(func(): Net.join_steam(int(_code.text.strip_edges())))
 	join_row.add_child(join)
 	v.add_child(join_row)
+	var browse := HubStyle.button("Browse lobbies", 14)
+	browse.disabled = not Net.steam_ok
+	browse.tooltip_text = "Друзья из Steam, которые сейчас собрались в этой игре"
+	browse.pressed.connect(func(): SteamInvite.open_browser())
+	v.add_child(browse)
 	if not Net.last_join.is_empty():
 		var back := HubStyle.button("Вернуться в пати", 14)
 		back.pressed.connect(Net.rejoin)
@@ -255,10 +272,9 @@ func _party_panel() -> Control:
 		invite.pressed.connect(Net.invite_friends)
 		v.add_child(invite)
 	var leave := HubStyle.button("Распустить пати" if Net.is_host() else "Покинуть пати", 14)
-	leave.pressed.connect(func():
-		LeaveGuard.ask(leave, "Распустить пати?" if Net.is_host() else "Покинуть пати?", "Все участники вернутся в главное меню." if Net.is_host() else "Вы выйдете из пати друзей.", leave.text, func():
-			Net.leave()
-			_rebuild()))
+	LeaveGuard.hold(leave, func():
+		Net.leave()
+		_rebuild(), "Распустить пати: все вернутся в главное меню." if Net.is_host() else "Покинуть пати друзей.")
 	v.add_child(leave)
 	return p
 
@@ -304,13 +320,16 @@ func _on_party_game(game_id: String) -> void:
 func _open_by_id(game_id: String) -> void:
 	for g in HubGames.LIST:
 		if g["id"] == game_id:
-			_open_scene(g)
+			_open_scene(g, true)  # ведущий запустил игру для всей пати
 
 
-func _open_scene(g: Dictionary) -> void:
+func _open_scene(g: Dictionary, wipe: bool = false) -> void:
 	if _leaving:
 		return
 	HubGames.apply_settings(g)
 	_leaving = true
 	Sfx.play("game_start", -4)
-	get_tree().change_scene_to_file.call_deferred(g["scene"])
+	if wipe:
+		LumaWipe.change_scene(g["scene"])  # выбрали коробку и нажали «Играть» — проявляем игру пятнами
+	else:
+		get_tree().change_scene_to_file.call_deferred(g["scene"])

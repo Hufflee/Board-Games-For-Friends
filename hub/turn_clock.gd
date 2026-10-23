@@ -8,16 +8,27 @@ const OPTIONS := [0, 30, 60, 90, 120]
 const PHASES := ["roll", "select", "sorcerer", "oracle", "pick_under", "bid", "card", "clue", "guess", "side", "pick", "cue1", "cue2", "guess1", "guess2", "vip", "theme", "answer", "order", "give", "respond"]
 
 var _label: Label
+var _sb: StyleBoxFlat
+## Фон часов — по запасу времени: спокойный зелёный, ≤ 20 с — янтарный, ≤ 10 с — красный.
+const BG_OK := Color(0.16, 0.42, 0.3, 0.85)
+const BG_WARN := Color(0.62, 0.42, 0.08, 0.9)
+const BG_HURRY := Color(0.7, 0.16, 0.14, 0.92)
+const BG_PAUSE := Color(0.25, 0.25, 0.3, 0.8)
 var _deadline := 0
 var _total := 0
 var _last := -1
 var _paused := false
+## Срок хода считаем один раз на каждое состояние: стол пересобрали (смена темы) с тем же Net.view —
+## часы продолжают с того же места, а не с «turn_left» на момент рассылки.
+static var _seen_view: Dictionary = {}
+static var _seen_deadline := 0
 
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(0, 0, 0, 0.45)
+	_sb = sb
+	sb.bg_color = BG_OK
 	sb.set_corner_radius_all(10)
 	sb.content_margin_left = 10
 	sb.content_margin_right = 10
@@ -40,7 +51,10 @@ func _on_state(v: Dictionary) -> void:
 	visible = on
 	_paused = bool(v.get("game_paused", false))
 	if on:
-		_deadline = Time.get_ticks_msec() + int(v.get("turn_left", 0)) * 1000
+		if not is_same(v, _seen_view):
+			_seen_view = v
+			_seen_deadline = Time.get_ticks_msec() + int(v.get("turn_left", 0)) * 1000
+		_deadline = _seen_deadline
 
 
 func _process(_delta: float) -> void:
@@ -49,13 +63,17 @@ func _process(_delta: float) -> void:
 	if _paused:
 		_label.text = "⏸ пауза"
 		_label.add_theme_color_override("font_color", Color.WHITE)
+		_sb.bg_color = BG_PAUSE
 		return
 	var left := maxi(0, int(ceil((_deadline - Time.get_ticks_msec()) / 1000.0)))
 	_label.text = "⏱ %d с" % left
 	if left != _last:
 		_last = left
 		Sfx.countdown(left)
-	_label.add_theme_color_override("font_color", Color("ff8a7a") if left <= 10 else Color.WHITE)
+	_label.add_theme_color_override("font_color", Color.WHITE)
+	var bg := BG_HURRY if left <= 10 else (BG_WARN if left <= 20 else BG_OK)
+	if _sb.bg_color != bg:
+		_sb.bg_color = bg
 
 
 ## Часы в центре сверху родителя.

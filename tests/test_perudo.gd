@@ -10,6 +10,7 @@ func _init() -> void:
 	test_ones_rules()
 	test_challenge()
 	test_maputo()
+	test_seating()
 	test_calza()
 	test_lower_face_more_dice()
 	test_bot_games()
@@ -30,6 +31,7 @@ func make(n: int = 3) -> PerudoRules:
 		players.append({"name": "И%d" % i})
 	var r := PerudoRules.new()
 	r.new_game(players, 5, true, 42)
+	r.begin()
 	for s in n:
 		r.shake(s)
 	r.turn = 0
@@ -88,17 +90,31 @@ func test_challenge() -> void:
 
 func test_maputo() -> void:
 	var r := make()
-	r.counts[0] = 1
+	r.counts[0] = 2
+	r.dice = [[3, 4], [2, 2, 4, 5, 6], [2, 3, 5, 5, 6]]
+	r.place_bid(0, 4, 6)
+	r.challenge(1)  # шестёрок с джокерами 2 < 4 — кость теряет игрок 0, у него остаётся одна
+	check(r.counts[0] == 1 and r.pal_next == 0, "последняя кость — следующий раунд Палифико")
+	r.advance()
+	check(r.maputo and r.turn == 0, "Палифико наступил сам, начинает игрок с одной костью")
+	for k in 3:
+		r.shake(k)
 	r.dice[0] = [3]
-	check(r.can_maputo(0), "игрок с одной костью может объявить Мапуто")
-	check(r.place_bid(0, 1, 3, true) and r.maputo, "Мапуто объявлено")
-	check(not r.can_bid(2, 4), "в Мапуто номинал не меняется")
-	check(r.can_bid(2, 3), "в Мапуто только больше костей того же номинала")
+	check(r.place_bid(0, 1, 3), "ставка в Палифико")
+	check(not r.can_bid(2, 4), "в Палифико номинал не меняется")
+	check(r.can_bid(2, 3), "в Палифико только больше костей того же номинала")
 	r.dice = [[3], [1, 1, 3, 5, 6], [2, 2, 2, 2, 2]]
 	r.place_bid(1, 2, 3)
 	r.challenge(2)
-	check(r.reveal["count"] == 2 and not r.reveal["wild"], "в Мапуто единицы — не джокеры")
+	check(r.reveal["count"] == 2 and not r.reveal["wild"], "в Палифико единицы — не джокеры")
 	check(r.reveal["loser"] == 2, "ставка сыграла — проиграл сказавший «не верю»")
+	r.advance()
+	check(not r.maputo, "следующий раунд — обычный")
+	var r2 := make()
+	r2.place_bid(0, 3, 4)
+	check(not r2.can_bid(4, 5), "повысил номинал — количество не растёт")
+	check(r2.can_bid(3, 5), "повысить номинал при том же количестве можно")
+	check(r2.can_bid(4, 2), "больше костей с номиналом ниже — можно")
 
 
 func test_calza() -> void:
@@ -153,6 +169,7 @@ func test_bot_games() -> void:
 			players.append({"name": "Б%d" % i, "bot": true})
 		var r := PerudoRules.new()
 		r.new_game(players, 5, true, g + 1)
+		r.begin()
 		var steps := 0
 		while r.phase != "game_over" and steps < 5000:
 			steps += 1
@@ -169,3 +186,19 @@ func test_bot_games() -> void:
 		if r.phase == "game_over" and r.winner >= 0 and r.total_dice() == r.counts[r.winner]:
 			finished += 1
 	check(finished == 400, "партии ботов доиграны: %d/400" % finished)
+
+
+## Рассадка: до первого раунда хост перемешивает игроков, ходы идут по новому порядку.
+func test_seating() -> void:
+	var players := []
+	for i in 4:
+		players.append({"name": "И%d" % i})
+	var r := PerudoRules.new()
+	r.new_game(players, 5, true, 9)
+	check(r.phase == "seating" and r.dice[0].is_empty(), "партия начинается с рассадки, кости не брошены")
+	check(r.shuffle_order() and r.order != [0, 1, 2, 3] and r.order.size() == 4, "игроков перемешали")
+	var ord := r.order.duplicate()
+	check(r.begin() and r.phase == "roll", "после рассадки — первый раунд")
+	check(not r.shuffle_order(), "после начала перемешивать нельзя")
+	var k := ord.find(r.starter)
+	check(r._next_alive(r.starter) == ord[(k + 1) % 4], "ход переходит по новому порядку")

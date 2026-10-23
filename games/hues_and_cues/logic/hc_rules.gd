@@ -7,6 +7,10 @@ extends RefCounted
 ##       → guess2 (против часовой) → reveal → … → game_over
 
 const MAX_TIEBREAK_ROUNDS := 8
+## Кооператив вдвоём: ведущий и угадывающий меняются, очки обеих фишек — в общий счёт.
+## 10 раундов, максимум 6 очков за раунд; цель 30 — в среднем по 3 за раунд (рамка вокруг цвета).
+const COOP_ROUNDS := 10
+const COOP_GOAL := 30
 
 var players: Array = []  # [{name, ...}]
 var scores: Array = []
@@ -17,6 +21,7 @@ var total_rounds := 0  # основных раундов (каждый веду�
 var tiebreak := false
 var tiebreak_givers: Array = []  # в переигровке ведут те, кто не претендует на победу
 var tiebreak_rounds := 0
+var coop := false  # вдвоём — кооператив (COOP_GOAL)
 var free_pick := false  # вариант для новичков: ведущий выбирает любую клетку
 var card: Array = []  # 4 клетки карты
 var target := -1
@@ -36,7 +41,7 @@ static var _re: RegEx
 
 
 ## laps — сколько раз каждый будет ведущим (0 — по правилам: 3–6 игроков дважды, 7+ — один раз).
-func new_game(player_list: Array, laps: int = 0, free: bool = false, seed_value: int = 0) -> void:
+func new_game(player_list: Array, laps: int = 0, free: bool = false, seed_value: int = 0, coop_mode: bool = false) -> void:
 	players = player_list.duplicate(true)
 	if seed_value != 0:
 		rng.seed = seed_value
@@ -48,7 +53,8 @@ func new_game(player_list: Array, laps: int = 0, free: bool = false, seed_value:
 	scores = []
 	scores.resize(players.size())
 	scores.fill(0)
-	total_rounds = players.size() * laps
+	coop = coop_mode
+	total_rounds = COOP_ROUNDS if coop else players.size() * laps
 	first_giver = rng.randi_range(0, players.size() - 1)
 	round_no = 0
 	tiebreak = false
@@ -220,9 +226,18 @@ func _score() -> void:
 			in_frame += 1
 		details.append({"seat": p["seat"], "cell": p["cell"], "pts": pts})
 	var per_piece := 2 if players.size() == 3 else 1
+	if coop:
+		per_piece = 0  # в кооперативе всё идёт в общий счёт
 	gained[giver] += in_frame * per_piece
-	for s in players.size():
-		scores[s] += gained[s]
+	if coop:
+		var team := 0
+		for g in gained:
+			team += int(g)
+		for s in players.size():
+			scores[s] += team  # у всех один общий счёт
+	else:
+		for s in players.size():
+			scores[s] += gained[s]
 	history.append({"giver": giver, "target": target, "cues": cues.duplicate()})
 	result = {"target": target, "gained": gained, "giver_points": in_frame * per_piece, "details": details, "passed": passed}
 	phase = "reveal"
@@ -233,6 +248,10 @@ func advance() -> void:
 		return
 	if not tiebreak and round_no < total_rounds:
 		_start_round()
+		return
+	if coop:
+		winners = range(players.size()) if int(scores[0]) >= COOP_GOAL else []
+		phase = "game_over"
 		return
 	var best: int = scores.max()
 	var leaders := []
@@ -279,6 +298,8 @@ func get_view(seat: int, show_all: bool = false) -> Dictionary:
 		"result": result.duplicate(true),
 		"winners": winners.duplicate(),
 		"hotseat": show_all,
+		"coop": coop,
+		"coop_goal": COOP_GOAL,
 	}
 
 
@@ -286,7 +307,7 @@ func get_view(seat: int, show_all: bool = false) -> Dictionary:
 
 ## Между раундами: новичок с нуля очков; партия удлиняется на его круги ведущего.
 func can_add_player() -> bool:
-	return phase == "reveal" and not tiebreak and players.size() < 10
+	return phase == "reveal" and not tiebreak and not coop and players.size() < 10
 
 
 func add_player(p: Dictionary) -> bool:
@@ -297,3 +318,11 @@ func add_player(p: Dictionary) -> bool:
 	scores.append(0)
 	total_rounds += laps
 	return true
+
+
+## Зритель смотрит глазами рядового игрока — не ведущего (тот видит тайну).
+func spectator_seat() -> int:
+	for s in players.size():
+		if s != giver:
+			return s
+	return 0

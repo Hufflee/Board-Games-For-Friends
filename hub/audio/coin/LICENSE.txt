@@ -1,0 +1,4 @@
+Звуки монетки-антистресса (hub/fidget.gd):
+coins_1..5.ogg — «Coins sounds», jalastram (Jesús Lastra), CC-BY 3.0: https://opengameart.org/content/coins-sounds
+drop_1..2.wav — «Coin Sounds», Hansjörg Malthaner (http://opengameart.org/users/varkalandar), CC-BY 3.0: https://opengameart.org/content/coin-sounds-0
+bounce.wav — синтезирован (тон + щелчок), свой.

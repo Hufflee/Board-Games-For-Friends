@@ -1,0 +1,5 @@
+Музыка (OpenGameArt.org, CC0):
+«Happy Adventure (Loop)» — TinyWorlds, https://opengameart.org/content/happy-adventure-loop
+«Flowerbed Fields [Loop]» — Zane Little Music, https://opengameart.org/content/flowerbed-fields-loop
+
+Звуки шагов step_1..3.wav — синтезированы для проекта (свои).

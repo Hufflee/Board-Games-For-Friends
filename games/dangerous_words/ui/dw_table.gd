@@ -9,7 +9,7 @@ var _me := 0
 var _act := 0  # тест на одном компьютере: за какую команду действуем
 
 var _dungeon: Control
-var _round_label: Label
+var _top: TopBar
 var _teams: Array = []  # две панели команд
 var _center: PanelContainer
 var _center_key := ""
@@ -30,13 +30,10 @@ func _ready() -> void:
 	add_child(DWNight.new())
 	_dungeon = Control.new()
 	_dungeon.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
-	_dungeon.offset_bottom = 168
+	_dungeon.offset_top = TopBar.HEIGHT
+	_dungeon.offset_bottom = TopBar.HEIGHT + 168
 	_dungeon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_dungeon)
-	_round_label = DWStyle.label("", DWStyle.BODY, DWStyle.MUTED, HORIZONTAL_ALIGNMENT_LEFT, true)
-	_round_label.position = Vector2(14, 8)
-	add_child(_round_label)
-
 	for t in 2:
 		var p := DWStyle.panel(DWStyle.TEAM_COLORS[t])
 		p.custom_minimum_size = Vector2(250, 0)
@@ -45,18 +42,15 @@ func _ready() -> void:
 	_center = DWStyle.panel(DWStyle.PUMPKIN)
 	add_child(_center)
 
-	var buttons := DWStyle.hbox(6)
-	buttons.set_anchors_preset(Control.PRESET_TOP_RIGHT)
-	buttons.offset_left = -420
-	buttons.offset_right = -10
-	buttons.offset_top = 6
-	buttons.alignment = BoxContainer.ALIGNMENT_END
+	_top = TopBar.make(self, "Опасные слова", func(t, z): return DWStyle.button(t, z), null, DWStyle.TEXT, DWStyle.font("bold"))
+	_top.coin_center = true  # монетка — по центру сверху
+	_top.z_index = 60  # выше панелей стола
 	var rules := DWStyle.button("Правила", DWStyle.CAP)
 	rules.pressed.connect(func(): app.show_rules())
-	buttons.add_child(rules)
+	_top.actions.add_child(rules)
 	var settings := DWStyle.button("Настройки", DWStyle.CAP)
 	settings.pressed.connect(func(): app.show_settings())
-	buttons.add_child(settings)
+	_top.actions.add_child(settings)
 	var leave: Button
 	if Net.is_party() and Net.is_host():
 		leave = DWStyle.button("Завершить партию", DWStyle.CAP)
@@ -67,11 +61,7 @@ func _ready() -> void:
 	else:
 		leave = DWStyle.button("Выйти", DWStyle.CAP)
 		LeaveGuard.wire(leave, "Выйти из партии?", "Игра закончится, вы вернётесь в меню.", func(): app.back_to_menu())
-	buttons.add_child(leave)
-	add_child(buttons)
-
-	var chat := K12ChatPanel.new()
-	add_child(chat)
+	_top.actions.add_child(leave)
 
 	resized.connect(_layout)
 	Net.chat_received.connect(_on_chat_bubble)
@@ -82,11 +72,11 @@ func _ready() -> void:
 
 func _layout() -> void:
 	var w := size.x
-	_teams[0].position = Vector2(12, 176)
+	_teams[0].position = Vector2(12, TopBar.HEIGHT + 176)
 	_teams[0].size = Vector2(250, 0)
-	_teams[1].position = Vector2(w - 262, 176)
+	_teams[1].position = Vector2(w - 262, TopBar.HEIGHT + 176)
 	_teams[1].size = Vector2(250, 0)
-	_center.position = Vector2(276, 176)
+	_center.position = Vector2(276, TopBar.HEIGHT + 176)
 	_center.size = Vector2(w - 552, 0)
 	_center.custom_minimum_size = Vector2(w - 552, 0)
 
@@ -159,7 +149,7 @@ func _phase_sound(prev: String) -> void:
 
 func _draw_dungeon() -> void:
 	DWStyle.clear(_dungeon)
-	_round_label.text = "Раунд %d из %d" % [_v["round_no"], DWRules.MAX_ROUNDS]
+	_top.info.text = "Раунд %d из %d" % [_v["round_no"], DWRules.MAX_ROUNDS]
 	var rooms: Array = _v["rooms"]
 	var tile := 132.0
 	var gap := 10.0
@@ -388,7 +378,7 @@ func _build_traps(col: VBoxContainer) -> void:
 		add.add_child(b)
 		col.add_child(add)
 	var scroll := ScrollContainer.new()
-	scroll.custom_minimum_size.y = 190
+	scroll.custom_minimum_size.y = 130
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	_cand_box = DWStyle.vbox(3)

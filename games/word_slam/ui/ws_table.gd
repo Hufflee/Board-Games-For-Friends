@@ -17,7 +17,7 @@ var app: Node
 var _v := {}
 var _me := 0
 var _as := 0  # на одном компьютере — за кого смотрим
-var _round_label: Label
+var _top_bar: TopBar
 var _score_row: HBoxContainer
 var _timer_label: Label
 var _timer_bar: ProgressBar
@@ -60,12 +60,6 @@ func _ready() -> void:
 	var top := HCStyle.hbox(14)
 	top.name = "Top"
 	add_child(top)
-	var tl := HCStyle.vbox(0)
-	tl.custom_minimum_size.x = 170
-	tl.add_child(HCStyle.caption("Word Slam"))
-	_round_label = HCStyle.label("", HCStyle.BODY, HCStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "bold")
-	tl.add_child(_round_label)
-	top.add_child(tl)
 	_score_row = HCStyle.hbox(8)
 	top.add_child(_score_row)
 	var tbox := HCStyle.vbox(2)
@@ -83,13 +77,14 @@ func _ready() -> void:
 	_timer_bar.visible = false
 	tbox.add_child(_timer_bar)
 	top.add_child(tbox)
+	_top_bar = TopBar.make(self, "Word Slam", func(t, z): return HCStyle.button(t, z), null, HCStyle.INK, HCStyle.font("bold"))
 	var rules := HCStyle.button("Правила", HCStyle.CAP)
 	rules.pressed.connect(func(): app.show_rules())
-	top.add_child(rules)
+	_top_bar.actions.add_child(rules)
 	var settings := HCStyle.button("Настройки", HCStyle.CAP)
 	settings.pressed.connect(func(): app.show_settings())
-	top.add_child(settings)
-	top.add_child(ThemeToggle.make(func(t, z): return HCStyle.button(t, z), HCStyle.CAP))  # солнце / луна — тема
+	_top_bar.actions.add_child(settings)
+	_top_bar.actions.add_child(ThemeToggle.make(func(t, z): return HCStyle.button(t, z), HCStyle.CAP))  # солнце / луна — тема
 	var leave: Button
 	if Net.is_party() and Net.is_host():
 		leave = HCStyle.button("Завершить партию", HCStyle.CAP)
@@ -100,7 +95,9 @@ func _ready() -> void:
 	else:
 		leave = HCStyle.button("Выйти", HCStyle.CAP)
 		LeaveGuard.wire(leave, "Выйти из партии?", "Игра закончится, вы вернётесь в меню.", func(): app.back_to_menu())
-	top.add_child(leave)
+	leave.theme_type_variation = "QuietButton"
+	_top_bar.actions.add_child(leave)
+	HCStyle.restyle_chat(_top_bar.chat)
 
 	_word_panel = HCStyle.panel(12)
 	add_child(_word_panel)
@@ -138,9 +135,6 @@ func _ready() -> void:
 	_fall_layer = Control.new()
 	_fall_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_fall_layer)
-	var chat := K12ChatPanel.new()
-	HCStyle.restyle_chat(chat)
-	add_child(chat)
 	ChatBubbles.attach(self, func(t: String) -> Control:
 		var b := HCStyle.label(t, HCStyle.CAP, HCStyle.INK, HORIZONTAL_ALIGNMENT_CENTER)
 		b.add_theme_stylebox_override("normal", HCStyle.box(HCStyle.SURFACE, 14, HCStyle.LINE, 1, HCStyle.SHADOW, 10))
@@ -161,19 +155,19 @@ func _layout() -> void:
 	var side_w := 280.0
 	var main_w := w - side_w - 48.0
 	var top := get_node("Top") as Control
-	top.position = Vector2(18, 10)
-	top.size = Vector2(w - 36, 48)
-	_word_panel.position = Vector2(16, 68)
+	top.position = Vector2(18, TopBar.HEIGHT + 6)
+	top.size = Vector2(w - 36, 40)
+	_word_panel.position = Vector2(16, TopBar.HEIGHT + 56)
 	_word_panel.size = Vector2(main_w, 84)
-	_shelves.position = Vector2(16, 162)
+	_shelves.position = Vector2(16, TopBar.HEIGHT + 150)
 	_shelves.size = Vector2(main_w, 236)
 	for i in 2:
 		(_shelf_titles[i] as Control).position = Vector2(i * (main_w * 0.5) + 14, 6)
-	_bottom.position = Vector2(16, 408)
-	_bottom.size = Vector2(main_w, h - 408 - 16)
+	_bottom.position = Vector2(16, TopBar.HEIGHT + 396)
+	_bottom.size = Vector2(main_w, h - TopBar.HEIGHT - 396 - 16)
 	var side := get_node("Side") as Control
-	side.position = Vector2(w - side_w - 16, 68)
-	side.size = Vector2(side_w, h - 68 - 70)
+	side.position = Vector2(w - side_w - 16, TopBar.HEIGHT + 56)
+	side.size = Vector2(side_w, h - TopBar.HEIGHT - 56 - 70)
 	_overlay.size = size
 	_fall_layer.size = size
 	_layout_cards(false)
@@ -239,7 +233,7 @@ func _on_state(v: Dictionary) -> void:
 		Sfx.play("chips_big", -4)  # «ВОРД!» — «СЛЭМ!»
 	if v["guesses"].size() > prev_guesses:
 		Sfx.play("hover", -4, 0.1, 0.02)
-	_round_label.text = ("Доп. карта" if v["tiebreak"] else "Карта %d из %d" % [v["round_no"], v["total_cards"]])
+	_top_bar.info.text = ("Доп. карта" if v["tiebreak"] else "Карта %d из %d" % [v["round_no"], v["total_cards"]])
 	_update_scores()
 	_update_side()
 	_update_feed()

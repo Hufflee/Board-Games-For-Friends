@@ -9,7 +9,13 @@ const STATS := "user://stats.cfg"
 var muted := false
 var music_volume := 0.45
 var sfx_volume := 0.8
-var fullscreen := false
+var fullscreen := false  # старая настройка — теперь window_mode
+## Экран: windowed — окно, borderless — полный экран в окне (без рамки, быстро переключается alt+tab),
+## exclusive — эксклюзивный полный экран.
+var window_mode := "windowed"
+var resolution := "1280x720"  # размер окна в оконном режиме
+const RESOLUTIONS := ["1280x720", "1600x900", "1920x1080", "2560x1440"]
+var _applied_res := ""  # какой размер окна уже ставили — чтобы не сбрасывать окно, растянутое мышью
 var ui_scale := 1.0
 var tutorial_seen := false
 var graphics := 2  # качество графики: 0 — низкое, 1 — среднее, 2 — высокое
@@ -17,6 +23,9 @@ var show_fps := false
 var vsync := true
 var fps_limit := 60  # 0 — без ограничения
 var theme_mode := "light"  # оформление светлых игр: light / dark / system
+var perudo_coin_secret := false  # старая настройка — теперь coin_secrets["perudo"]
+var coin_secrets := {}  # игра → включён ли секретный облик монетки (5 орлов подряд — переключает)
+var chat_volume := 0.85  # голоса реплик и сообщений чата (поверх «Звуков игры»)
 
 const FPS_LIMITS := [60, 120, 144, 0]
 
@@ -49,6 +58,11 @@ func _ready() -> void:
 		vsync = cfg.get_value("video", "vsync", vsync)
 		fps_limit = cfg.get_value("video", "fps_limit", fps_limit)
 		theme_mode = cfg.get_value("video", "theme_mode", theme_mode)
+		window_mode = cfg.get_value("video", "window_mode", "borderless" if fullscreen else "windowed")
+		resolution = cfg.get_value("video", "resolution", resolution)
+		chat_volume = cfg.get_value("audio", "chat", chat_volume)
+		perudo_coin_secret = cfg.get_value("game", "perudo_coin_secret", perudo_coin_secret)
+		coin_secrets = cfg.get_value("game", "coin_secrets", {"perudo": true} if perudo_coin_secret else {})
 	# громкость — сразу, до того как меню включит музыку; окно и графика — после старта сцены
 	_apply_audio()
 	apply.call_deferred()
@@ -60,15 +74,18 @@ func _apply_audio() -> void:
 	AudioServer.set_bus_volume_db(AudioServer.get_bus_index("SFX"), linear_to_db(maxf(sfx_volume, 0.0001)))
 
 
+## Окно и графику трогаем, только если они правда поменялись: лишняя смена режима окна
+## или вертикальной синхронизации в полноэкранном режиме у некоторых видеокарт сворачивает игру.
 func apply() -> void:
 	_apply_audio()
 	if not DisplayServer.get_name().begins_with("headless"):
-		var want := DisplayServer.WINDOW_MODE_FULLSCREEN if fullscreen else DisplayServer.WINDOW_MODE_WINDOWED
-		if DisplayServer.window_get_mode() != want:
-			DisplayServer.window_set_mode(want)
-	get_tree().root.content_scale_factor = ui_scale
+		_apply_window()
+	if get_tree().root.content_scale_factor != ui_scale:
+		get_tree().root.content_scale_factor = ui_scale
 	# графика: вертикальная синхронизация, потолок кадров (видеокарта не греется зря), масштаб 3D-сцены со сглаживанием FSR
-	DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_ENABLED if vsync else DisplayServer.VSYNC_DISABLED)
+	var vs := DisplayServer.VSYNC_ENABLED if vsync else DisplayServer.VSYNC_DISABLED
+	if DisplayServer.window_get_vsync_mode() != vs:
+		DisplayServer.window_set_vsync_mode(vs)
 	Engine.max_fps = fps_limit
 	var root := get_tree().root
 	var sc: float = SCALE_3D[clampi(graphics, 0, 2)]
@@ -80,6 +97,27 @@ func apply() -> void:
 	root.screen_space_aa = Viewport.SCREEN_SPACE_AA_FXAA if q == 0 else Viewport.SCREEN_SPACE_AA_DISABLED
 	_sync_fps()
 	changed.emit()
+
+
+func _apply_window() -> void:
+	var mode := DisplayServer.window_get_mode()
+	if mode == DisplayServer.WINDOW_MODE_MINIMIZED:
+		return
+	var want: int = {"borderless": DisplayServer.WINDOW_MODE_FULLSCREEN, "exclusive": DisplayServer.WINDOW_MODE_EXCLUSIVE_FULLSCREEN}.get(window_mode, DisplayServer.WINDOW_MODE_WINDOWED)
+	fullscreen = window_mode != "windowed"
+	var windowed := want == DisplayServer.WINDOW_MODE_WINDOWED
+	if mode != want and not (windowed and mode == DisplayServer.WINDOW_MODE_MAXIMIZED):
+		DisplayServer.window_set_mode(want)
+		if windowed:
+			_applied_res = ""  # вышли из полного экрана — вернуть выбранный размер окна
+	if windowed and resolution != _applied_res and DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_WINDOWED:
+		_applied_res = resolution
+		var p := resolution.split("x")
+		var scr := DisplayServer.window_get_current_screen()
+		var area := DisplayServer.screen_get_usable_rect(scr)
+		var sz := Vector2i(int(p[0]), int(p[1])).min(area.size - Vector2i(16, 48))
+		DisplayServer.window_set_size(sz)
+		DisplayServer.window_set_position(area.position + (area.size - sz) / 2)
 
 
 ## Счётчик кадров в углу экрана (настройка «Показывать FPS»).
@@ -113,6 +151,8 @@ func save() -> void:
 	cfg.set_value("audio", "muted", muted)
 	cfg.set_value("audio", "music", music_volume)
 	cfg.set_value("audio", "sfx", sfx_volume)
+	cfg.set_value("audio", "chat", chat_volume)
+	cfg.set_value("game", "coin_secrets", coin_secrets)
 	cfg.set_value("video", "fullscreen", fullscreen)
 	cfg.set_value("video", "ui_scale", ui_scale)
 	cfg.set_value("game", "tutorial_seen", tutorial_seen)
@@ -121,6 +161,8 @@ func save() -> void:
 	cfg.set_value("video", "vsync", vsync)
 	cfg.set_value("video", "fps_limit", fps_limit)
 	cfg.set_value("video", "theme_mode", theme_mode)
+	cfg.set_value("video", "window_mode", window_mode)
+	cfg.set_value("video", "resolution", resolution)
 	cfg.save(SETTINGS)
 
 

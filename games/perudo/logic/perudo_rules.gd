@@ -9,12 +9,15 @@ const FACES := 6
 var players: Array = []  # [{name, bot, steam_id}]
 var dice: Array = []  # по местам: Array[int] значений костей
 var counts: Array[int] = []  # сколько костей у игрока
+var order: Array[int] = []  # порядок за столом по часовой (по нему и ходят)
 var shaken: Array[bool] = []  # потряс ли стакан в этом раунде
+var shaking: Array[bool] = []  # трясёт прямо сейчас (держит стакан) — другие видят, как стакан ходит ходуном
 var phase := "setup"
 var turn := -1  # чей ход в фазе bid
 var bid := {}  # текущая ставка {q, face, seat}
 var bids: Array = []  # ставки раунда
-var maputo := false
+var maputo := false  # идёт раунд Палифико
+var pal_next := -1  # у кого только что осталась одна кость — следующий раунд Палифико
 var maputo_enabled := true
 var dice_at_start := 5
 var round_no := 0
@@ -32,6 +35,11 @@ func player_count() -> int:
 
 func player_name(seat: int) -> String:
 	return players[seat]["name"]
+
+
+## Выбыл (костей не осталось) — наблюдает; сеть не ждёт от него «Дальше» (Net._seat_out).
+func is_out(seat: int) -> bool:
+	return not alive(seat)
 
 
 func alive(seat: int) -> bool:
@@ -59,20 +67,53 @@ func new_game(player_list: Array, start_dice: int = 5, maputo_on: bool = true, s
 	for s in n:
 		dice.append([])
 	shaken.resize(n)
+	shaking.resize(n)
 	maputo_enabled = maputo_on
 	history = []
 	log = []
 	round_no = 0
+	pal_next = -1
 	winner = -1
 	starter = rng.randi_range(0, n - 1)
+	order = []
+	for k in n:
+		order.append(k)
+	phase = "seating"  # сначала рассадка: хост может перемешать игроков, потом begin()
+
+
+## Рассадка: перемешать порядок за столом (только до первого раунда).
+func shuffle_order() -> bool:
+	if phase != "seating":
+		return false
+	var before := order.duplicate()
+	while order == before and order.size() > 1:
+		for i in range(order.size() - 1, 0, -1):
+			var j := rng.randi_range(0, i)
+			var t := order[i]
+			order[i] = order[j]
+			order[j] = t
+	_log(-1, "Игроков пересадили: " + ", ".join(order.map(func(s): return player_name(s))))
+	return true
+
+
+## Рассадка закончена — первый раунд.
+func begin() -> bool:
+	if phase != "seating":
+		return false
 	start_round()
+	return true
 
 
 func start_round() -> void:
 	round_no += 1
 	bid = {}
 	bids = []
-	maputo = false
+	# Палифико наступает само: в раунде после того, как у игрока осталась последняя кость
+	# (снова — если он вернул кость «Калзаком» и опять опустился до одной)
+	maputo = pal_next >= 0 and alive(pal_next)
+	if maputo:
+		_log(pal_next, "Палифико! У игрока последняя кость: единицы не джокеры, номинал не меняется")
+	pal_next = -1
 	reveal = {}
 	for s in player_count():
 		dice[s] = []
@@ -80,6 +121,7 @@ func start_round() -> void:
 			dice[s].append(rng.randi_range(1, FACES))
 		dice[s].sort()
 		shaken[s] = not alive(s)
+		shaking[s] = false
 	if not alive(starter):
 		starter = _next_alive(starter)
 	turn = starter
@@ -91,15 +133,24 @@ func shake(seat: int) -> bool:
 	if phase != "roll" or shaken[seat]:
 		return false
 	shaken[seat] = true
+	shaking[seat] = false
 	_log(seat, "трясёт стакан")
 	if not shaken.has(false):
 		phase = "bid"
 	return true
 
 
-## Может ли начинающий раунд объявить Мапуто.
-func can_maputo(seat: int) -> bool:
-	return maputo_enabled and phase == "bid" and bid.is_empty() and seat == turn and counts[seat] == 1 and _alive_count() > 2
+## Игрок взял стакан и трясёт (on) или отпустил — только до броска, только для анимации у остальных.
+func set_shaking(seat: int, on: bool) -> bool:
+	if phase != "roll" or seat < 0 or seat >= shaking.size() or shaken[seat] or shaking[seat] == on:
+		return false
+	shaking[seat] = on
+	return true
+
+
+## Палифико больше не объявляют — он наступает сам (pal_next). Оставлено для совместимости.
+func can_maputo(_seat: int) -> bool:
+	return false
 
 
 ## Допустима ли ставка q костей номинала face сейчас.
@@ -135,7 +186,10 @@ static func check_bid(bid: Dictionary, bids: Array, maputo: bool, total: int, q:
 		if last.is_empty():
 			return true
 		return q > last["q"] or (q == last["q"] and face > last["face"])
-	return q > pq or (q == pq and face > pf)
+	# повышаешь номинал — количество то же; больше костей — номинал не выше прежнего
+	if face > pf:
+		return q == pq
+	return q > pq
 
 
 ## Наименьшее допустимое количество для номинала (или -1, если номинал сейчас недоступен).
@@ -149,13 +203,9 @@ func min_quantity(face: int) -> int:
 func place_bid(seat: int, q: int, face: int, declare_maputo: bool = false) -> bool:
 	if seat != turn or not can_bid(q, face):
 		return false
-	if declare_maputo:
-		if not can_maputo(seat):
-			return false
-		maputo = true
 	bid = {"q": q, "face": face, "seat": seat}
 	bids.append(bid.duplicate())
-	_log(seat, "ставка: %d × %s%s" % [q, "★" if face == 1 else str(face), " (мапуто!)" if declare_maputo else ""])
+	_log(seat, "ставка: %d × %s%s" % [q, "★" if face == 1 else str(face), ""])
 	turn = _next_alive(seat)
 	return true
 
@@ -216,6 +266,8 @@ func _reveal_bid(seat: int, is_calza: bool) -> bool:
 	_log(-1, res)
 	if loser >= 0:
 		counts[loser] -= 1
+		if counts[loser] == 1 and maputo_enabled and _alive_count() > 2:
+			pal_next = loser  # осталась последняя кость — следующий раунд (его он и начинает) — Палифико
 	if gained >= 0:
 		counts[gained] += 1
 	reveal["eliminated"] = loser >= 0 and counts[loser] == 0
@@ -247,8 +299,9 @@ func advance() -> void:
 
 func _next_alive(seat: int) -> int:
 	var n := player_count()
+	var k := order.find(seat)
 	for i in range(1, n + 1):
-		var s := (seat + i) % n
+		var s: int = order[(k + i) % n] if k >= 0 else (seat + i) % n
 		if alive(s):
 			return s
 	return seat
@@ -272,10 +325,12 @@ func get_view(seat: int) -> Dictionary:
 			shown.append([])
 	return {
 		"you": seat,
+		"order": order.duplicate(),
 		"players": players.duplicate(true),
 		"counts": counts.duplicate(),
 		"dice": shown,
 		"shaken": shaken.duplicate(),
+		"shaking": shaking.duplicate(),
 		"phase": phase,
 		"turn": turn,
 		"bid": bid.duplicate(),

@@ -25,6 +25,7 @@ const SOUNDS := {
 	# «Перудо» (пиратский стол): полные пути — свои файлы игры
 	"pirate_laugh": ["res://games/perudo/audio/laugh_1.mp3", "res://games/perudo/audio/laugh_2.mp3", "res://games/perudo/audio/laugh_3.mp3", "res://games/perudo/audio/laugh_4.mp3", "res://games/perudo/audio/laugh_6.mp3"],
 	"arr": ["res://games/perudo/audio/arr.wav"],
+	"pawn_step": ["res://games/brodilka/audio/step_1.wav", "res://games/brodilka/audio/step_2.wav", "res://games/brodilka/audio/step_3.wav"],  # бродилка: персонаж стучит по полю (синтез)
 	"hover": ["rollover2"],  # rollover1 убран — неприятный щелчок
 }
 const POOL := 12
@@ -160,6 +161,7 @@ var _victory_tween: Tween
 
 
 var _victory_gid := ""  # партия, для которой тема уже звучала
+const VICTORY_DB := -20.0  # тише музыки игры: тема громко сведена
 
 
 func victory() -> void:
@@ -169,29 +171,33 @@ func victory() -> void:
 		return
 	_victory_gid = gid
 	stop_victory()
-	var p := _free_player()
-	p.bus = "Music"
-	p.stream = load(DIR + VICTORY)
-	p.volume_db = -12.0
-	p.pitch_scale = 1.0
-	p.play()
-	_victory = p
+	if _victory == null:
+		_victory = AudioStreamPlayer.new()  # свой плеер: его всегда можно остановить при выходе
+		_victory.bus = "Music"
+		add_child(_victory)
+	_victory.stream = load(DIR + VICTORY)
+	_victory.volume_db = VICTORY_DB
+	_victory.play()
 	_victory_tween = create_tween()
-	_victory_tween.tween_property(_music, "volume_db", -24.0, 0.5)
+	_victory_tween.tween_property(_music, "volume_db", -26.0, 0.5)
 	_victory_tween.tween_interval(6.0)
-	_victory_tween.tween_property(_music, "volume_db", MUSIC_DB, 2.0)
-	_victory_tween.tween_callback(func(): p.bus = "SFX")
+	_victory_tween.tween_property(_victory, "volume_db", -40.0, 2.5)  # тема затихает…
+	_victory_tween.parallel().tween_property(_music, "volume_db", _cur_music_db(), 2.5)  # …и возвращается музыка игры
+	_victory_tween.tween_callback(_victory.stop)
 
 
 func stop_victory() -> void:
 	if _victory_tween and _victory_tween.is_valid():
 		_victory_tween.kill()
-	if is_instance_valid(_victory) and _victory.playing and _victory.bus == "Music":
+	if is_instance_valid(_victory):
 		_victory.stop()
-		_victory.bus = "SFX"
-	_victory = null
 	if _music:
-		_music.volume_db = -8.0
+		_music.volume_db = _cur_music_db()
+
+
+## Громкость текущего трека (с поправкой TRACK_GAIN).
+func _cur_music_db() -> float:
+	return _track_db(_music.stream.resource_path) if _music and _music.stream else MUSIC_DB
 
 ## Проиграть звук. vol_db — относительная громкость, min_gap — не чаще, чем раз в N секунд.
 ## «Бессвязная речь» к реплике (как в Animal Crossing): интонация — по смыслу реплики
@@ -203,16 +209,53 @@ const BABBLE_STYLE := {
 }
 
 
-func babble(text: String, voice: String) -> void:
+## Голоса персонажей (ElevenLabs): voices/<голос>_<стиль>.wav. Выдаёт хост — Net._voice_of.
+const VOICES := ["buddy", "duchess", "fireplace", "giant", "grandpa", "sailor", "schemer", "scholar", "soldier", "villain"]
+var _voice_players := {}  # голос → плеер, который его сейчас проигрывает (новая реплика обрывает прежнюю)
+const VOICE_DIR := "res://games/king_of_12/audio/voices/"
+
+
+## Обычное сообщение чата — тоже голосом автора: «!» — восклицание, «?» — недоумение, иначе случайная реплика.
+const CHAT_EXCLAIM := ["wow", "hope"]
+const CHAT_PUZZLED := ["think", "oops"]
+const CHAT_ANY := ["any", "think", "sly", "wow", "hope", "oops", "hey", "bluff"]
+
+
+func chat_voice(text: String, voice: String) -> void:
+	var t := text.strip_edges()
+	var style: String = (CHAT_PUZZLED if t.ends_with("?") else (CHAT_EXCLAIM if t.ends_with("!") else CHAT_ANY)).pick_random()
+	babble("", voice, style, -3.0)
+
+
+func babble(text: String, voice: String, style: String = "", extra_db: float = 0.0) -> void:
 	if muted:
 		return
-	var file := "res://games/king_of_12/audio/babble_%s_%d.wav" % [BABBLE_STYLE.get(text, "any"), randi_range(1, 3)]
+	if style == "":
+		style = BABBLE_STYLE.get(text, "any")
+	if VOICES.has(voice):
+		var vf := "%s%s_%s.wav" % [VOICE_DIR, voice, style]
+		if not ResourceLoader.exists(vf):
+			vf = "%s%s_any.wav" % [VOICE_DIR, voice]
+		if not _cache.has(vf):
+			_cache[vf] = load(vf)
+		var prev: AudioStreamPlayer = _voice_players.get(voice)
+		if is_instance_valid(prev) and prev.playing:
+			prev.stop()  # тот же игрок сказал новую реплику — прежняя обрывается
+		var vp := _free_player()
+		_voice_players[voice] = vp
+		vp.bus = "SFX"
+		vp.stream = _cache[vf]
+		vp.volume_db = -4.0 + extra_db + linear_to_db(maxf(volume * Prefs.chat_volume, 0.0001))  # ползунок «Чат» в настройках
+		vp.pitch_scale = randf_range(0.98, 1.02)
+		vp.play()
+		return
+	var file := "res://games/king_of_12/audio/babble_%s_%d.wav" % [style if ResourceLoader.exists("res://games/king_of_12/audio/babble_%s_1.wav" % style) else "any", randi_range(1, 3)]
 	if not _cache.has(file):
 		_cache[file] = load(file)
 	var player := _free_player()
 	player.bus = "SFX"
 	player.stream = _cache[file]
-	player.volume_db = -4.9 + linear_to_db(volume)  # на 10% тише первой версии (-4 дБ)
+	player.volume_db = -4.9 + linear_to_db(maxf(volume * Prefs.chat_volume, 0.0001))  # на 10% тише первой версии (-4 дБ)
 	var base := 0.85 + float(absi(hash(voice)) % 100) / 100.0 * 0.4  # 0.85…1.25 — свой голос
 	player.pitch_scale = base * randf_range(0.95, 1.05)
 	player.play()
