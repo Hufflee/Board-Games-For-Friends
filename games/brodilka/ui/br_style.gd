@@ -1,5 +1,7 @@
 class_name BRStyle
 extends RefCounted
+
+const ACCENT_FX := preload("res://hub/ui_accent_fx.gd")
 ## Стиль «Большой бродилки»: деревянная настолка — рамки из досок, пергаментные окна и карты,
 ## мультяшные фишки (как на поле в art/src). Дизайн-система: 2 цвета — дерево (панели, рамки)
 ## и пергамент (окна, карты, текст на дереве); зелёный — главная кнопка и «мой ход», красный — опасность.
@@ -187,6 +189,7 @@ static func button(text: String, size: int = BODY, min_w: int = 0) -> Button:
 static func primary(text: String, size: int = BODY, min_w: int = 0) -> Button:
 	var b := button(text, size, min_w)
 	b.theme_type_variation = "SelectedButton"
+	ACCENT_FX.sheen(b)
 	return b
 
 

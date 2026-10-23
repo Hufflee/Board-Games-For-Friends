@@ -1,5 +1,7 @@
 class_name RSBStyle
 extends RefCounted
+
+const ACCENT_FX := preload("res://hub/ui_accent_fx.gd")
 ## Стиль «Ready Set Bet»: американский ипподром 80-х — бумага старой афиши, зелёное сукно,
 ## красные заголовки плитой-антиквой, кремовые таблички, золото. Арт — из правил (только для личной игры).
 
@@ -252,6 +254,7 @@ static func primary(text: String, size: int = BODY, min_w: int = 0) -> Button:
 		b.add_theme_color_override(c, CREAM)
 	b.add_theme_color_override("font_disabled_color", Color(CREAM, 0.7))
 	b.add_theme_font_override("font", font("title"))
+	ACCENT_FX.sheen(b)
 	return b
 
 

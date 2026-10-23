@@ -79,26 +79,34 @@ def make(card: dict, tpl: Image.Image) -> Image.Image:
     ox, oy = (art.width - pw) // 2, (art.height - ph) // 2
     art = art.crop((ox, oy, ox + pw, oy + ph))
     im.paste(art, PIC[:2], rounded_mask((pw, ph), 22))
-    # плашка с названием: старая надпись закрашивается цветом плашки
+    # поле текста: чистый пергамент (до плашки — плашка лежит поверх и не обрезается)
+    bw, bh = BOX[2] - BOX[0], BOX[3] - BOX[1]
+    im.paste(parchment((bw, bh), hash(card["id"]) & 0xFFFF), BOX[:2], rounded_mask((bw, bh), 18))
+    # плашка с названием (поверх поля текста): старая надпись закрашивается цветом плашки
     plw, plh = PLATE[2] - PLATE[0], PLATE[3] - PLATE[1]
     plate = tpl.crop(PLATE)
     ImageDraw.Draw(plate).rounded_rectangle((3, 3, plw - 4, plh - 4), 10, fill=(233, 214, 167))
     im.paste(plate, PLATE[:2], rounded_mask((plw, plh), 12))
     d = ImageDraw.Draw(im)
-    size = 34
-    while size > 20 and d.textlength(card["name"].lower(), font=font(size, 500)) > plw - 24:
+    size = 38  # выше плашка не вмещает (низ букв обрезался бы)
+    while size > 24 and d.textlength(card["name"].lower(), font=font(size, 500)) > plw - 24:
         size -= 1
     f = font(size, 500)
     d.text(((PLATE[0] + PLATE[2]) / 2, (PLATE[1] + PLATE[3]) / 2 + 1), card["name"].lower(), font=f, fill=INK, anchor="mm")
-    # поле текста: чистый пергамент и текст по центру
-    bw, bh = BOX[2] - BOX[0], BOX[3] - BOX[1]
-    im.paste(parchment((bw, bh), hash(card["id"]) & 0xFFFF), BOX[:2], rounded_mask((bw, bh), 18))
-    size = 40
+    size = 68  # крупно: на столе карты мелкие, текст должен читаться и в окне Лавки
     while True:
         f = font(size, 400)
-        lines = wrap(d, card["text"], f, bw - 90)
-        line_h = size * 1.28
-        if len(lines) * line_h <= bh - 120 or size <= 26:
+        lines = wrap(d, card["text"], f, bw - 80)
+        # строки выравниваем по длине: сужаем ширину, пока число строк не меняется (без «висящего» слова)
+        width = bw - 80
+        while len(lines) > 1 and width > (bw - 80) * 0.5:
+            narrower = wrap(d, card["text"], f, width - 8)
+            if len(narrower) != len(lines):
+                break
+            width -= 8
+            lines = narrower
+        line_h = size * 1.22
+        if len(lines) * line_h <= bh - 80 or size <= 36:
             break
         size -= 2
     cy = (BOX[1] + BOX[3]) / 2 - (len(lines) - 1) * line_h / 2

@@ -7,6 +7,8 @@ extends RefCounted
 ##       → guess2 (против часовой) → reveal → … → game_over
 
 const MAX_TIEBREAK_ROUNDS := 8
+const PREPARE_SECONDS := 6.0
+const SPIN_SPEED_MULTIPLIER := 1.5
 ## Кооператив вдвоём: ведущий и угадывающий меняются, очки обеих фишек — в общий счёт.
 ## 10 раундов, максимум 6 очков за раунд; цель 30 — в среднем по 3 за раунд (рамка вокруг цвета).
 const COOP_ROUNDS := 10
@@ -23,6 +25,14 @@ var tiebreak_givers: Array = []  # в переигровке ведут те, к
 var tiebreak_rounds := 0
 var coop := false  # вдвоём — кооператив (COOP_GOAL)
 var free_pick := false  # вариант для новичков: ведущий выбирает любую клетку
+var distorted := false  # отдельный режим с перемешиванием и фильтром
+var color_order: Array = []  # позиция на поле -> исходный оттенок
+var round_filter := -1  # 0 — синий, 1 — зелёный, 2 — красный, 3 — ч/б
+var spin_start := 0.0
+var spin_turns := 0.0
+var _orbit_phase := 0.0
+static var _rings: Array = []
+var board_seed := 0
 var card: Array = []  # 4 клетки карты
 var target := -1
 var cues: Array = []  # подсказки текущего раунда
@@ -41,7 +51,7 @@ static var _re: RegEx
 
 
 ## laps — сколько раз каждый будет ведущим (0 — по правилам: 3–6 игроков дважды, 7+ — один раз).
-func new_game(player_list: Array, laps: int = 0, free: bool = false, seed_value: int = 0, coop_mode: bool = false) -> void:
+func new_game(player_list: Array, laps: int = 0, free: bool = false, seed_value: int = 0, coop_mode: bool = false, distorted_mode: bool = false) -> void:
 	players = player_list.duplicate(true)
 	if seed_value != 0:
 		rng.seed = seed_value
@@ -50,6 +60,8 @@ func new_game(player_list: Array, laps: int = 0, free: bool = false, seed_value:
 	if laps <= 0:
 		laps = 2 if players.size() <= 6 else 1
 	free_pick = free
+	distorted = distorted_mode
+	_orbit_phase = 0.0
 	scores = []
 	scores.resize(players.size())
 	scores.fill(0)
@@ -73,6 +85,17 @@ func _start_round() -> void:
 		tiebreak_rounds += 1
 	else:
 		giver = (first_giver + round_no - 1) % players.size()
+	color_order = range(HCData.COLS * HCData.ROWS)
+	if distorted:
+		spin_start = _orbit_phase
+		spin_turns = (1.0 if rng.randi_range(0, 1) == 0 else -1.0) * (rng.randi_range(4, 6) + rng.randf_range(0.2, 0.8)) * SPIN_SPEED_MULTIPLIER
+		_orbit_phase += spin_turns
+		color_order = orbit_order(_orbit_phase)
+		round_filter = rng.randi_range(0, 3)
+		board_seed = rng.randi_range(1, 2147483647)
+	else:
+		round_filter = -1
+		board_seed = 0
 	card = HCData.draw_card(rng)
 	target = -1
 	cues = []
@@ -81,7 +104,51 @@ func _start_round() -> void:
 	order_i = 0
 	passed = false
 	result = {}
+	phase = "prepare" if distorted else "pick"
+
+
+## Вложенные прямоугольные кольца по часовой стрелке. Общая фаза сохраняет цветовые группы
+## между соседними кольцами; исходная сетка остаётся целой, оттенки не теряются и не дублируются.
+static func orbit_rings() -> Array:
+	if _rings.is_empty():
+		for inset in HCData.ROWS / 2:
+			var ring := []
+			var right := HCData.COLS - inset - 1
+			var bottom := HCData.ROWS - inset - 1
+			for x in range(inset, right + 1):
+				ring.append(inset * HCData.COLS + x)
+			for y in range(inset + 1, bottom + 1):
+				ring.append(y * HCData.COLS + right)
+			for x in range(right - 1, inset - 1, -1):
+				ring.append(bottom * HCData.COLS + x)
+			for y in range(bottom - 1, inset, -1):
+				ring.append(y * HCData.COLS + inset)
+			_rings.append(ring)
+	return _rings
+
+
+static func orbit_order(turns: float) -> Array:
+	var out := range(HCData.COLS * HCData.ROWS)
+	for ring in orbit_rings():
+		var count: int = ring.size()
+		var shift := roundi(fposmod(turns, 1.0) * count)
+		for i in count:
+			out[ring[(i + shift) % count]] = ring[i]
+	return out
+
+
+## Плавный разгон с нулевой скоростью на концах, максимум скорости — посередине.
+static func spin_progress(time_fraction: float) -> float:
+	var t := clampf(time_fraction, 0.0, 1.0)
+	return t - sin(TAU * t) / TAU
+
+
+## Хост открывает выбор цвета после вступления, действия игроков до этого не принимаются.
+func finish_prepare() -> bool:
+	if phase != "prepare":
+		return false
 	phase = "pick"
+	return true
 
 
 func pick_color(seat: int, cell: int) -> bool:
@@ -199,7 +266,7 @@ func _next_guesser() -> void:
 
 ## Ведущий вылетел до подсказки — раунд без очков.
 func skip_round() -> void:
-	history.append({"giver": giver, "target": target, "cues": cues.duplicate()})
+	history.append({"giver": giver, "target": target, "cues": cues.duplicate(), "color": color_order[target] if target >= 0 else -1})
 	var gained := []
 	gained.resize(players.size())
 	gained.fill(0)
@@ -208,9 +275,26 @@ func skip_round() -> void:
 
 
 ## Очки за фишку: 3 — точно, 2 — в рамке 3×3, 1 — вплотную к рамке.
-static func points_for(target_cell: int, cell: int) -> int:
+static func points_for(target_cell: int, cell: int, distorted_mode: bool = false) -> int:
+	if distorted_mode:
+		for pts in [3, 2, 1]:
+			if score_rect(target_cell, pts, true).has_point(Vector2i(cell % HCData.COLS, cell / HCData.COLS)):
+				return pts
+		return 0
 	var d := HCData.dist(target_cell, cell)
 	return [3, 2, 1][d] if d <= 2 else 0
+
+
+## Центр 2×2 содержит цель и соседние клетки справа/снизу; у края сдвигается внутрь поля.
+## Кольца шириной две клетки: 6×6 и 10×10, за краем поля обрезаются.
+static func score_rect(target_cell: int, points: int, distorted_mode: bool = false) -> Rect2i:
+	var pos := Vector2i(target_cell % HCData.COLS, target_cell / HCData.COLS)
+	if distorted_mode:
+		pos = pos.clamp(Vector2i.ZERO, Vector2i(HCData.COLS - 2, HCData.ROWS - 2))
+		var padding := (3 - points) * 2
+		return Rect2i(pos - Vector2i.ONE * padding, Vector2i.ONE * (2 + padding * 2))
+	var padding := 3 - points
+	return Rect2i(pos - Vector2i.ONE * padding, Vector2i.ONE * (1 + padding * 2))
 
 
 func _score() -> void:
@@ -220,9 +304,9 @@ func _score() -> void:
 	var in_frame := 0
 	var details := []
 	for p in pieces:
-		var pts := points_for(target, p["cell"])
+		var pts := points_for(target, p["cell"], distorted)
 		gained[p["seat"]] += pts
-		if HCData.dist(target, p["cell"]) <= 1:
+		if pts >= 2:
 			in_frame += 1
 		details.append({"seat": p["seat"], "cell": p["cell"], "pts": pts})
 	var per_piece := 2 if players.size() == 3 else 1
@@ -238,7 +322,7 @@ func _score() -> void:
 	else:
 		for s in players.size():
 			scores[s] += gained[s]
-	history.append({"giver": giver, "target": target, "cues": cues.duplicate()})
+	history.append({"giver": giver, "target": target, "cues": cues.duplicate(), "color": color_order[target] if target >= 0 else -1})
 	result = {"target": target, "gained": gained, "giver_points": in_frame * per_piece, "details": details, "passed": passed}
 	phase = "reveal"
 
@@ -285,6 +369,12 @@ func get_view(seat: int, show_all: bool = false) -> Dictionary:
 		"total_rounds": total_rounds,
 		"tiebreak": tiebreak,
 		"free_pick": free_pick,
+		"distorted": distorted,
+		"color_order": color_order.duplicate(),
+		"round_filter": round_filter,
+		"spin_start": spin_start,
+		"spin_turns": spin_turns,
+		"board_seed": board_seed,
 		"card": card.duplicate() if secret else [],
 		"target": target if secret or phase in ["reveal", "game_over"] else -1,
 		"cues": cues.duplicate(),

@@ -61,7 +61,7 @@ func show_menu(message: String = "") -> void:
 	col.add_child(parade)
 	col.add_child(RoomPanel.make(GAME_ID, func(t, z): return DWStyle.button(t, z), func(t, z): return DWStyle.label(t, z, DWStyle.MUTED, HORIZONTAL_ALIGNMENT_CENTER)))
 	col.add_child(DWStyle.label("Объясняйте голосом — зайдите в голосовой чат (Discord и т. п.).", DWStyle.CAP, DWStyle.MUTED, HORIZONTAL_ALIGNMENT_CENTER))
-	var test := DWStyle.button("Попробовать на одном компьютере", DWStyle.BODY)
+	var test := DWStyle.primary("Попробовать на одном компьютере", DWStyle.BODY)
 	test.theme_type_variation = "SelectedButton"  # главное действие меню — тыквой
 	test.tooltip_text = "Тестовый режим: все видят всё, действуете за обе команды"
 	test.pressed.connect(func():

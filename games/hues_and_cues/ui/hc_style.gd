@@ -1,5 +1,7 @@
 class_name HCStyle
 extends RefCounted
+
+const ACCENT_FX := preload("res://hub/ui_accent_fx.gd")
 ## Современный спокойный стиль «Оттенков и подсказок»: светлый тёплый фон, мягкие тени, крупные скругления,
 ## приглушённые графит / шалфей / пыльно-синий. Всё яркое — только на самом поле.
 
@@ -257,6 +259,7 @@ static func primary(text: String, size: int = BODY, min_w: int = 0) -> Button:
 		b.add_theme_color_override(c, ON_ACCENT)
 	b.add_theme_color_override("font_disabled_color", Color(ON_ACCENT, 0.8))
 	b.add_theme_font_override("font", font("bold"))
+	ACCENT_FX.sheen(b)
 	return b
 
 
@@ -265,6 +268,7 @@ static func panel(padding: int = 18) -> PanelContainer:
 	var sb := box(SURFACE, 20, Color(LINE, 0.7), 1, SHADOW, 18)
 	sb.set_content_margin_all(padding)
 	p.add_theme_stylebox_override("panel", sb)
+	ACCENT_FX.border(p, DUSK)
 	return p
 
 

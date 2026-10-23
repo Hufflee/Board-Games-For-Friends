@@ -8,7 +8,9 @@ extends CanvasLayer
 
 var _root: Control
 var _button: Button
-const FidgetScript := preload("res://hub/fidget.gd")  # по пути: слой грузится до регистрации классов
+var _button_icon: Control
+const FidgetScript := preload("res://hub/fidget.gd")
+const PlayPauseScript := preload("res://hub/play_pause_icon.gd")  # иконка «‖ ↔ ▶» с морфом  # по пути: слой грузится до регистрации классов
 var _fidget: Control  # антистресс — во всех играх
 var _spec_button: Button  # «Стать зрителем» — у любого игрока за столом
 var _spec_banner: Label  # у зрителя: «Вы зритель…»
@@ -42,14 +44,16 @@ func _ready() -> void:
 	_panel.visible = false
 	_root.add_child(_panel)
 	_button = Button.new()
-	_button.text = "⏸ Пауза"
+	_button.text = "Пауза"
 	_button.tooltip_text = "Поставить игру на паузу (только хост). Здесь же можно посадить за стол новых друзей из пати."
 	_button.add_theme_font_size_override("font_size", 13)
 	_button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_button.focus_mode = Control.FOCUS_NONE
+	var bic = PlayPauseScript.attach(_button, Net.paused)
+	_button_icon = bic
 	_button.pressed.connect(func():
 		Sfx.play("click", -6)
-		Net.set_paused(true))
+		bic.morph(true, func(): Net.set_paused(true)))
 	_button.visible = false
 	_root.add_child(_button)
 	_spec_button = Button.new()
@@ -75,6 +79,8 @@ func _ready() -> void:
 	_offer.theme_type_variation = "ConfirmPanel"
 	_offer.visible = false
 	_root.add_child(_offer)
+	# После смены темы сцена уже готова: восстанавливаем монетку до следующего кадра, без ожидания опроса.
+	get_tree().scene_changed.connect(_refresh)
 	Net.state_changed.connect(func(_v): _refresh())
 	Net.pause_changed.connect(_refresh)
 	Net.lobby_changed.connect(_refresh)
@@ -116,7 +122,8 @@ func _refresh() -> void:
 	_spec_banner.visible = spectator and not on
 	_update_offer(spectator and not on)
 	_spec_button.visible = playing and not on and not spectator and Net.can_spectate() and not has_bar
-	_button.text = "⏸ Пауза" + (" · ждут: %d" % waiting.size() if not waiting.is_empty() else "")
+	_button_icon.sync_state(on)
+	_button.text = ("Продолжить" if on else "Пауза") + (" · ждут: %d" % waiting.size() if not waiting.is_empty() else "")
 	_dim.visible = on
 	_panel.visible = on
 	var key := "%s|%s|%s|%s|%s" % [on, Net.is_host(), waiting, Net.free_seats(), _status]
@@ -212,9 +219,10 @@ func _build(waiting: Array) -> void:
 		return
 	var go := _btn("Продолжить игру", true)
 	go.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	var gic = PlayPauseScript.attach(go, true)
 	go.pressed.connect(func():
 		_status = ""
-		Net.set_paused(false))
+		gic.morph(false, func(): Net.set_paused(false)))  # «▶» перетекает в «‖» — игра пошла
 	col.add_child(go)
 	col.add_child(HSeparator.new())
 	col.add_child(_label("Новые игроки", 18))

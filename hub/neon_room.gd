@@ -19,18 +19,26 @@ const BOARD := 0.03
 const ROWS := 4
 const PER_CELL := 4  # коробок в ячейке — впритык к задней стенке; ширина шкафа считается по самой широкой ячейке
 const SHELF_SCALE := 0.95  # шкаф вместе с коробками крупнее (масштаб от пола у стены)
-const BOXED_ROWS := 3  # ячеек с коробками (в последней — остаток + «Перудо»), ниже — «Coming soon»
+const BOXED_ROWS := 3  # ячеек с коробками (в последней — ещё «Перудо»), ниже — «Coming soon»
+## Какие коробки на какой полке (сверху вниз, слева направо).
+const SHELF_LAYOUT := [
+	["wavelength", "hues_and_cues", "dangerous_words", "king_of_12", "not_a_hat"],
+	["ready_set_bet", "tip_top", "tip_top_18", "gloom", "gloomier"],
+	["word_slam", "brodilka"],
+]
 const SHELF_X := 0.25
 const PERUDO_SPACE := 0.17  # место под набор «Перудо» во второй ячейке
 
 var camera: Camera3D
 var boxes: Array = []  # GameBox
 var focused: GameBox
+var panels: GamePanels  # «окошки игр» (стеклянный куб на шкафу)
+var shelf_top_right := Vector3.ZERO  # место на крышке шкафа у правого края (куб-кнопка окошек игр)
 var _hover: GameBox
 var _cam_home := Transform3D.IDENTITY
 var _t := 0.0
 var _lava: Array = []  # капли лавовой лампы
-var _blink: Label3D
+var _blink: Label  # «PRESS START» на экране телевизора (мигает)
 var _sign: Label3D
 var _row_x := 0.0
 var _lava_base := 1.33
@@ -55,6 +63,9 @@ func _ready() -> void:
 	camera.look_at(Vector3(SHELF_X, 0.84, BACK + 0.2))
 	_cam_home = camera.transform
 	camera.current = true
+	panels = GamePanels.new()
+	add_child(panels)
+	panels.setup(camera, boxes.map(func(b): return b.game), shelf_top_right)
 	# «презентационный» свет от камеры: слабый всегда, ярче — когда коробка в руках
 	_present = SpotLight3D.new()
 	_present.light_color = Color("fff3fb")
@@ -694,6 +705,36 @@ static func _wheel_mesh() -> ArrayMesh:
 	return st.commit()
 
 ## Тумба с открытыми полками (видеомагнитофон, приставка, кассеты), ЭЛТ-телевизор и лавовая лампа.
+## Картинка экрана телевизора: «НАСТОЛКИ» и мигающее «PRESS START» пиксельным шрифтом на прозрачном фоне
+## (фон кинескопа рисует шейдер). Размер — в пропорциях стекла 0.51 × 0.38.
+func _tv_picture() -> SubViewport:
+	var vp := SubViewport.new()
+	vp.size = Vector2i(510, 380)
+	vp.transparent_bg = true
+	vp.disable_3d = true
+	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child(vp)
+	var title := Label.new()
+	title.text = "НАСТОЛКИ"
+	title.add_theme_font_override("font", HubStyle.font("pixel"))
+	title.add_theme_font_size_override("font_size", 38)
+	title.add_theme_color_override("font_color", Color(1.0, 0.92, 0.45))
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	title.size = Vector2(510, 60)
+	title.position = Vector2(0, 124)
+	vp.add_child(title)
+	_blink = Label.new()
+	_blink.text = "PRESS START"
+	_blink.add_theme_font_override("font", HubStyle.font("pixel"))
+	_blink.add_theme_font_size_override("font_size", 24)
+	_blink.add_theme_color_override("font_color", Color(0.55, 1.0, 1.0))
+	_blink.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_blink.size = Vector2(510, 40)
+	_blink.position = Vector2(0, 244)
+	vp.add_child(_blink)
+	return vp
+
+
 func _tv_corner(tv_x: float) -> void:
 	var z := BACK + 0.28
 	var dark := Color("1d1630")
@@ -721,21 +762,22 @@ func _tv_corner(tv_x: float) -> void:
 	_soft(Vector3(0.52, 0.39, 0.02), Vector3(tv_x - 0.03, tv_y + 0.01, tvz + 0.225), "plastic", Color("17131f"), self, Vector3.ZERO, 0.03)
 	var screen := MeshInstance3D.new()
 	var q := QuadMesh.new()
-	q.size = Vector2(0.46, 0.34)
+	q.size = Vector2(0.51, 0.38)  # стекло — почти на всю тёмную пластину проёма (0.52 × 0.39), без тёмной полосы вокруг картинки
 	q.subdivide_width = 16
 	q.subdivide_depth = 12
 	screen.mesh = q
 	var sm := ShaderMaterial.new()
 	sm.shader = preload("res://hub/crt_screen.gdshader")
+	# что показывает экран — рисуется в отдельную картинку, а шейдер кинескопа её изгибает,
+	# раздвигает по каналам и прочерчивает строками (надписи — часть картинки, а не поверх стекла)
+	sm.set_shader_parameter("screen_tex", _tv_picture().get_texture())
+	sm.set_shader_parameter("aspect", q.size.x / q.size.y)
 	screen.material_override = sm
 	screen.position = Vector3(tv_x - 0.03, tv_y + 0.01, tvz + 0.236)
 	add_child(screen)
 	for k in 3:
 		var btn := _cyl(0.008, 0.008, 0.01, Vector3(tv_x + 0.262, tv_y - 0.05 - k * 0.04, tvz + 0.225), _mat(Color("8a8498"), 0.3))
 		btn.rotation_degrees.x = 90
-	var title := _glow_label("НАСТОЛКИ", Vector3(tv_x - 0.03, tv_y + 0.06, tvz + 0.252), 36, HubStyle.YELLOW, "pixel", 0.0012)
-	title.modulate = Color(1.8, 1.6, 0.6)
-	_blink = _glow_label("PRESS START", Vector3(tv_x - 0.03, tv_y - 0.05, tvz + 0.252), 24, HubStyle.CYAN, "pixel", 0.0011)
 	# лавовая лампа на телевизоре
 	var lamp := Vector3(tv_x + 0.18, tv_y + 0.27, tvz)
 	var metal := _mat(Color("8a8aa0"), 0.25)
@@ -777,8 +819,7 @@ func _shelf() -> void:
 	var wood := Color("2a1d42")
 	var rows := ROWS
 	var palette := [Color("e0a83a"), Color("b8402e"), Color("3a7bd5"), Color("6b3fa0"), Color("2ea86b"), Color("d4392b"), Color("e86f3c")]
-	# 1) коробки (размеры — по обложкам): по PER_CELL в ячейке, в BOXED_ROWS-й — остаток + «Перудо»
-	var boxed: Array = HubGames.LIST.filter(func(g): return g["id"] != "perudo" and g.get("shelf", true))
+	# 1) коробки (размеры — по обложкам): по полкам — SHELF_LAYOUT, в последней ячейке ещё «Перудо»
 	var cups: Array = HubGames.LIST.filter(func(g): return g["id"] == "perudo")
 	var make := func(g: Dictionary, i: int) -> GameBox:
 		var b := GameBox.new()
@@ -788,14 +829,15 @@ func _shelf() -> void:
 		var b := GameBox.new()
 		b.setup({"id": "soon", "title": "Coming soon"}, Vector3(0.06, 0.3, 0.28), Color.WHITE)
 		return b
-	# раскладка: по PER_CELL коробок в ячейке, в последней с коробками — остаток (+ «Перудо» справа)
+	# раскладка — явно по полкам (SHELF_LAYOUT), в последней ячейке справа ещё «Перудо»
 	var cells: Array = []
+	var n := 0
 	for r in BOXED_ROWS:
-		cells.append([])
-	var last := mini(2, boxed.size())  # в последней ячейке — 2 коробки (рядом «Перудо»)
-	for i in boxed.size():
-		var r := mini(i / PER_CELL, BOXED_ROWS - 2) if i < boxed.size() - last else BOXED_ROWS - 1
-		cells[r].append(make.call(boxed[i], i))
+		var row: Array = []
+		for id in SHELF_LAYOUT[r]:
+			row.append(make.call(HubGames.by_id(id), n))
+			n += 1
+		cells.append(row)
 	for r in BOXED_ROWS - 1:
 		while cells[r].size() < PER_CELL:
 			cells[r].append(soon_box.call())
@@ -813,6 +855,8 @@ func _shelf() -> void:
 	var w := inner.x + 2.0 * BOARD
 	var z := BACK + inner.z / 2.0 + 0.01
 	var base_y := 0.06
+	# крышка шкафа у правого края — там стоит стеклянный куб (кнопка окошек игр)
+	shelf_top_right = _shelf_root.transform * Vector3(SHELF_X + w / 2.0 - 0.07, base_y + total_h + BOARD * 0.5, z + 0.02)
 	_soft(Vector3(w - 0.02, base_y, inner.z - 0.02), Vector3(SHELF_X, base_y / 2.0, z - 0.01), "wood_dark", wood.darkened(0.25), _shelf_root)  # цоколь
 	_soft(Vector3(BOARD, total_h, inner.z), Vector3(SHELF_X - w / 2.0 + BOARD / 2.0, base_y + total_h / 2.0, z), "wood_dark", wood, _shelf_root)
 	_soft(Vector3(BOARD, total_h, inner.z), Vector3(SHELF_X + w / 2.0 - BOARD / 2.0, base_y + total_h / 2.0, z), "wood_dark", wood, _shelf_root)
@@ -879,7 +923,7 @@ func _shelf() -> void:
 func _box_at(screen_pos: Vector2) -> GameBox:
 	var from := camera.project_ray_origin(screen_pos)
 	var to := from + camera.project_ray_normal(screen_pos) * 20.0
-	var q := PhysicsRayQueryParameters3D.create(from, to)
+	var q := PhysicsRayQueryParameters3D.create(from, to, 1)  # только коробки (окошки игр — на своём слое)
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
 	if hit.is_empty():
 		return null
@@ -888,6 +932,8 @@ func _box_at(screen_pos: Vector2) -> GameBox:
 
 
 func _unhandled_input(event: InputEvent) -> void:
+	if panels and panels.is_open:
+		return  # открыты окошки игр — шкаф не реагирует
 	if event is InputEventMouseMotion:
 		if focused:
 			return

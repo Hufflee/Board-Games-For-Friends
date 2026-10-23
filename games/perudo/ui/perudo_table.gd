@@ -420,7 +420,7 @@ func _update_panel() -> void:
 				Sfx.play("card_shove", -4)
 				Net.send_action("seat_shuffle"))
 			row.add_child(mix)
-			var go := K12UI.button("Начать игру", K12UI.BODY, 200)
+			var go := K12UI.primary("Начать игру", K12UI.BODY, 200)
 			go.theme_type_variation = "SelectedButton"
 			go.pressed.connect(func(): Net.send_action("seat_begin"))
 			row.add_child(go)
@@ -487,14 +487,14 @@ func _update_panel() -> void:
 	col.add_child(row)
 	var act := K12UI.hbox(10)
 	act.alignment = BoxContainer.ALIGNMENT_CENTER
-	var place := K12UI.button("Поставить: %d %s" % [_qty, NAMES_GEN[_face]], K12UI.BODY)
+	var place := K12UI.primary("Поставить: %d %s" % [_qty, NAMES_GEN[_face]], K12UI.BODY)
 	place.disabled = not _valid(_qty, _face)
 	place.pressed.connect(func():
 		Sfx.play("chip")
 		Net.send_action("bid", {"q": _qty, "face": _face, "maputo": _maputo and _v["can_maputo"]}))
 	act.add_child(place)
 	if not _v["bid"].is_empty():
-		var dudo := K12UI.button("Дудо!", K12UI.BODY)
+		var dudo := K12UI.primary("Дудо!", K12UI.BODY)
 		dudo.tooltip_text = "Не верю: на столе меньше, чем в ставке"
 		dudo.add_theme_color_override("font_color", K12UI.RED)
 		dudo.pressed.connect(func():
@@ -645,7 +645,7 @@ func _update_panel_reveal_done() -> void:
 	var row := K12UI.hbox(10)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	var me_waiting: bool = _v.get("waiting", []).has(_v["players"][_me]["name"])
-	var btn := K12UI.button("Далее" if me_waiting else "Ждём остальных…", K12UI.BODY, 200)
+	var btn := K12UI.primary("Далее" if me_waiting else "Ждём остальных…", K12UI.BODY, 200)
 	btn.disabled = not me_waiting
 	btn.pressed.connect(func(): Net.send_action("next"))
 	row.add_child(btn)
@@ -715,7 +715,7 @@ func _update_overlay() -> void:
 	var row := K12UI.hbox(12)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	if Net.is_host():
-		var again := K12UI.button("Новая партия", K12UI.BODY, 190)
+		var again := K12UI.primary("Новая партия", K12UI.BODY, 190)
 		again.pressed.connect(Net.end_game)
 		row.add_child(again)
 		var back := K12UI.button("К выбору игры" if Net.is_party() else "В меню", K12UI.BODY, 190)

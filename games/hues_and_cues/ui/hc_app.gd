@@ -7,10 +7,16 @@ const LobbyScreen := preload("res://games/hues_and_cues/ui/hc_lobby.gd")
 const SettingsScreen := preload("res://games/king_of_12/ui/settings_screen.gd")
 const LOGO_CELLS := [8, 64, 129, 233, 318, 413, 446, 207, 290]
 
+const SKIP_INTRO_META := &"hc_skip_intro_once"  # передача флага через полную перезагрузку темы
+var _intro_pending := true
 var screen: Control
 
 
 func _ready() -> void:
+	var root := get_tree().root
+	_intro_pending = not bool(root.get_meta(SKIP_INTRO_META, false))
+	if root.has_meta(SKIP_INTRO_META):
+		root.remove_meta(SKIP_INTRO_META)
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	HCStyle.sync_prefs()  # светлая / тёмная тема (Настройки)
 	get_tree().root.theme = HCStyle.theme()
@@ -18,7 +24,7 @@ func _ready() -> void:
 	Sfx.start_music()
 	Sfx.set_playlist(HCStyle.MUSIC)
 	Net.lobby_changed.connect(_on_lobby_changed)
-	Net.game_started.connect(show_table)
+	Net.game_started.connect(_on_game_started)
 	Net.game_ended.connect(show_lobby)
 	Net.session_closed.connect(_on_closed)
 	Net.party_game_changed.connect(_on_party_game)
@@ -92,8 +98,15 @@ func show_lobby() -> void:
 	_set_screen(l)
 
 
+func _on_game_started() -> void:
+	_intro_pending = true
+	show_table()
+
+
 func show_table() -> void:
 	var t := TableScreen.new()
+	t.play_intro = _intro_pending
+	_intro_pending = false
 	t.app = self
 	_set_screen(t)
 
@@ -113,6 +126,8 @@ const RULES_TEXT := """[b]Цель.[/b] Ведущий описывает цве
 [b]Подсчёт.[/b] Вокруг загаданного цвета кладётся рамка 3×3.
 • Точно в цвет — 3 очка; фишка в рамке — 2; вплотную к рамке (и по диагонали) — 1.
 • Ведущий — 1 очко за каждую фишку в рамке (втроём — 2 очка).
+
+[b]Crazy colors.[/b] Отдельный режим в лобби. Каждый раунд цвета переходят между неподвижными клетками по вложенным кольцам, по часовой или против часовой стрелки. Движение разгоняется, затем тормозит; цветовые группы сохраняются. В течение 6 секунд плавно появляется один из четырёх фильтров: синий, зелёный, красный или чёрно-белый. Ведущий тоже видит вступление с фильтром; после остановки у него фильтр плавно исчезает. Центр 2×2 даёт 3 очка, кольцо до 6×6 — 2, до 10×10 — 1. Центр включает загаданную клетку и соседей справа/снизу; у края сдвигается внутрь. Ведущий получает очки за фишки в области 6×6.
 
 [b]Конец игры.[/b] При 3–6 игроках каждый ведёт дважды, при 7–8 — один раз. Больше очков — победа. При ничьей играют ещё раунды: ведут те, кто не претендует на победу, пока один из лидеров не вырвется вперёд."""
 
@@ -200,4 +215,5 @@ func _on_closed(reason: String) -> void:
 ## Сменили тему в настройках — пересобрать экран в новой палитре (партия продолжается: стол строится из Net.view).
 func _on_prefs() -> void:
 	if HCStyle.sync_prefs():
+		# новая тема — вступление (окрашивание поля) проигрывается заново
 		get_tree().reload_current_scene.call_deferred()

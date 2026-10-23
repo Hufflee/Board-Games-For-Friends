@@ -1,9 +1,9 @@
 class_name HoldFill
 extends Control
 ## Заливка кнопки «зажми и держи» (LeaveGuard.hold): пока кнопку держат, слева направо растёт заливка
-## в форме самой кнопки (маска — её же стиль, скругления совпадают), с мягким бликом на переднем краю.
+## в форме самой кнопки (маска — её же стиль, скругления совпадают), цветом обводки нажатой кнопки.
 ## Заполнилась — короткая вспышка и действие. Отпустили раньше — заливка быстро стекает, а под кнопкой
-## на секунду всплывает подсказка «Удерживайте кнопку» (кнопка не меняет размер). Цвет — «опасный» цвет наведения из темы игры.
+## на секунду всплывает подсказка «Удерживайте кнопку» (кнопка не меняет размер). Цвет берётся из рамки самой кнопки; удержание без звука.
 
 const DRAIN := 3.5  # во сколько раз стекает быстрее, чем набирается
 
@@ -13,12 +13,23 @@ var _holding := false
 var _done := false
 var _flash := 0.0  # вспышка после срабатывания 1 → 0
 var _hint: Label
+var _text_clip: Control
+var _fill_text: Label
 
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	set_process(false)
+	# Надпись поверх заливки обрезается той же шириной: остальной текст рисует сама кнопка.
+	_text_clip = Control.new()
+	_text_clip.clip_contents = true
+	_text_clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_text_clip)
+	_fill_text = Label.new()
+	_fill_text.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fill_text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_text_clip.add_child(_fill_text)
 
 
 func _btn() -> Button:
@@ -30,7 +41,6 @@ func start() -> void:
 		return
 	_holding = true
 	set_process(true)
-	Sfx.play("hover", -10, 0.05, 0.05)
 
 
 func stop() -> void:
@@ -82,7 +92,6 @@ func _process(delta: float) -> void:
 			_done = true
 			_holding = false
 			_flash = 1.0
-			Sfx.play("click", -4)
 			# действие — после кадра со вспышкой, чтобы заливку было видно целиком
 			(func():
 				if on_done.is_valid():
@@ -102,27 +111,35 @@ func _process(delta: float) -> void:
 func _draw() -> void:
 	var b := _btn()
 	if b == null or (progress <= 0.0 and _flash <= 0.0):
+		if is_instance_valid(_text_clip):
+			_text_clip.visible = false
 		return
+	var sb := b.get_theme_stylebox("pressed" if _holding or _done else ("hover" if b.is_hovered() else "normal"))
 	var col := b.get_theme_color("font_hover_color")
+	if sb is StyleBoxFlat:
+		col = (sb as StyleBoxFlat).border_color
+	elif sb is StyleBoxTexture:
+		col = (sb as StyleBoxTexture).modulate_color
 	# плавный ход: в начале чуть медленнее, к концу — увереннее (сглаженная кривая, без отскока)
 	var k := progress * progress * (3.0 - 2.0 * progress)
 	var w := size.x * (1.0 if _flash > 0.0 else k)
-	var sb := b.get_theme_stylebox("normal")
 	var rad := 6.0
 	if sb is StyleBoxFlat:
 		rad = float((sb as StyleBoxFlat).corner_radius_top_left)
 	var shape := StyleBoxFlat.new()
 	shape.set_corner_radius_all(int(rad))
-	shape.bg_color = Color(col, 0.32 + 0.25 * _flash)
+	shape.bg_color = Color(col, col.a * 0.65)
 	shape.anti_aliasing = true
 	# заливка: прямоугольник формы кнопки, обрезанный по ширине (draw_style_box в узкую рамку сохраняет скругления)
 	var r := Rect2(Vector2.ZERO, Vector2(maxf(w, rad * 2.0), size.y))
 	if w < rad * 2.0:
 		shape.bg_color.a *= w / (rad * 2.0)
 	draw_style_box(shape, r)
-	# блик на переднем краю заливки
-	if _flash <= 0.0 and progress > 0.02 and progress < 1.0:
-		var x := r.end.x
-		for i in 6:
-			var a := 0.16 * (1.0 - i / 6.0)
-			draw_rect(Rect2(x - 2.0 - i * 2.0, 2.0, 2.0, size.y - 4.0), Color(1, 1, 1, a))
+	_text_clip.visible = true
+	_text_clip.size = Vector2(w, size.y)
+	_fill_text.size = size
+	_fill_text.text = b.text
+	_fill_text.horizontal_alignment = b.alignment
+	_fill_text.add_theme_font_override("font", b.get_theme_font("font"))
+	_fill_text.add_theme_font_size_override("font_size", b.get_theme_font_size("font_size"))
+	_fill_text.add_theme_color_override("font_color", Color("16131d") if col.get_luminance() > 0.4 else Color("fff7fc"))

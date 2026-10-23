@@ -1,147 +1,211 @@
 class_name LumaWipe
 extends CanvasLayer
-## Переход «luma wipe» (matte wipe): снимок старого экрана лежит поверх новой сцены, на нём проступает
-## мягкая облачная маска, и в самых тёмных её местах прорезаются маленькие пятна — сквозь них видна новая сцена.
-## Пятна плавно растут, сливаются, и старый экран исчезает целиком; сам он при этом всё сильнее размывается.
-## Пока новая сцена грузится в фоне (load_threaded_request), снимок плавно размывается и на нём проступает
-## облачная тень маски; как загрузилась — смена сцены и сами пятна.
-## Запуск: LumaWipe.change_scene(path) вместо change_scene_to_file (сейчас — только старт игры из хаба).
+## Случайный переход из хаба: шесть эффектов, фоновая загрузка и защита от повторного запуска.
+## Запуск: change_scene(path, {"box": коробка, "camera": камера, "game": описание игры}).
 
-const DURATION := 1.9  # пятна: от первых точек до полного перехода, с
-const PREP := 0.45  # минимум на размытие до пятен, с (если сцена загрузится раньше)
-const SHADER := """
-shader_type canvas_item;
-render_mode unshaded;
-
-uniform sampler2D old_screen : filter_linear_mipmap;
-uniform float progress = 0.0;  // пятна: 0 — старый экран целиком, 1 — новая сцена
-uniform float soft = 0.0;  // размытие и тень маски на старом экране, 0…1
-uniform float aspect = 1.7778;
-uniform float seed = 0.0;
-
-// хеш без синуса (Dave Hoskins) — без полос и сетки
-float hash(vec2 p) {
-	vec3 p3 = fract(vec3(p.xyx) * 0.1031 + seed);
-	p3 += dot(p3, p3.yzx + 33.33);
-	return fract((p3.x + p3.y) * p3.z);
-}
-
-// градиентный шум: мягкие округлые пятна, без «кубиков» value noise
-float gnoise(vec2 p) {
-	vec2 i = floor(p);
-	vec2 f = fract(p);
-	vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
-	float a = hash(i) * 6.2832;
-	float b = hash(i + vec2(1.0, 0.0)) * 6.2832;
-	float c = hash(i + vec2(0.0, 1.0)) * 6.2832;
-	float d = hash(i + vec2(1.0, 1.0)) * 6.2832;
-	float va = dot(vec2(cos(a), sin(a)), f);
-	float vb = dot(vec2(cos(b), sin(b)), f - vec2(1.0, 0.0));
-	float vc = dot(vec2(cos(c), sin(c)), f - vec2(0.0, 1.0));
-	float vd = dot(vec2(cos(d), sin(d)), f - vec2(1.0, 1.0));
-	return mix(mix(va, vb, u.x), mix(vc, vd, u.x), u.y) * 0.5 + 0.5;
-}
-
-// облачная маска: октавы с поворотом — края пятен рваные, но не по сетке
-float fbm(vec2 p) {
-	mat2 rot = mat2(vec2(1.6, 1.2), vec2(-1.2, 1.6));
-	float v = 0.0;
-	float a = 0.6;
-	for (int k = 0; k < 4; k++) {
-		v += a * gnoise(p);
-		p = rot * p + vec2(5.2, 1.3);
-		a *= 0.45;
-	}
-	return v / 1.05;
-}
-
-void fragment() {
-	vec2 uv = UV;
-	vec2 q = vec2(uv.x * aspect, uv.y) * 2.2;
-	// маска чуть «дышит» — пятна растут не по линейке, а живо
-	float m = fbm(q + vec2(progress * 0.35, -progress * 0.2));
-	m = clamp((m - 0.28) / 0.5, 0.0, 1.0);
-	// порог идёт от самых тёмных точек маски к самым светлым
-	float t = progress * 1.14 - 0.08;  // при 0 дыр нет совсем
-	float edge = 0.05 + 0.6 * fwidth(m);  // мягкий край, сглаженный по пикселю
-	float keep = smoothstep(t - edge, t + edge, m);  // 1 — старый экран, 0 — дыра в новую сцену
-	// старый экран всё сильнее размыт (мип-уровни снимка)
-	float blur = soft * 4.5;
-	vec3 col = textureLod(old_screen, uv, blur).rgb;
-	// облачная маска проступает на старом экране лёгкой тенью
-	float veil = soft * (1.0 - m) * 0.35;
-	col = mix(col, col * 0.55, veil);
-	// тонкая светлая кайма по краю пятен — край читается, но не кричит
-	float rim = (1.0 - abs(keep * 2.0 - 1.0)) * smoothstep(0.0, 0.15, progress) * (1.0 - smoothstep(0.85, 1.0, progress));
-	col += vec3(0.9, 0.85, 1.0) * rim * 0.18;
-	COLOR = vec4(col, keep);
-}
-"""
+const TRANSITION_SHADER := preload("res://hub/scene_transition.gdshader")
+const EFFECTS := ["luma_wipe", "gradient_wipe", "blur_dissolve", "cross_zoom", "smoke_dissolve", "ink_bleed"]
+# Номера веток шейдера сохраняются независимо от списка доступных переходов.
+const SHADER_EFFECTS := [0, 1, 3, 5, 6, 8]
+const DURATIONS := [1.9, 1.35, 1.5, 1.35, 1.9, 1.7]
+const PREP := 0.16
+static var _bag: Array[int] = []
+static var _last_effect := -1
+static var _active: LumaWipe
 
 var _rect: TextureRect
 var _path := ""
-var _prep := 0.0  # сколько уже размываем, с
-var _soft := 0.0
-var _t := -1.0  # время пятен, с; -1 — сцена ещё не сменилась
+var _effect := 0
+var _elapsed := 0.0
+var _t := 0.0
+var _switching := false
+var _scene_ready := false
+var _capture_ready := true
+var _origin: WeakRef
+var _box_viewport: SubViewport
 
 
-## Снять текущий кадр, загрузить сцену в фоне, сменить её и проявить сквозь пятна.
-static func change_scene(path: String) -> void:
+## Перемешанная колода: каждый эффект встречается за цикл, на стыке циклов нет повтора.
+static func next_effect() -> int:
+	if _bag.is_empty():
+		for i in EFFECTS.size():
+			_bag.append(i)
+		_bag.shuffle()
+		if _bag[-1] == _last_effect:
+			var swap := _bag[0]
+			_bag[0] = _bag[-1]
+			_bag[-1] = swap
+	_last_effect = _bag.pop_back()
+	return _last_effect
+
+
+## Возвращает false, если переход не запущен. Повторный вызов не создаёт второй слой.
+static func change_scene(path: String, context: Dictionary = {}) -> bool:
 	var tree := Engine.get_main_loop() as SceneTree
-	var img := tree.root.get_viewport().get_texture().get_image()
-	img.generate_mipmaps()
-	var w := LumaWipe.new()
-	w.layer = 120
-	w._path = path
-	tree.root.add_child(w)
-	w._setup(ImageTexture.create_from_image(img), tree.root.get_visible_rect().size)
-	ResourceLoader.load_threaded_request(path)
+	if tree == null or is_instance_valid(_active):
+		return false
+	if not ResourceLoader.exists(path, "PackedScene"):
+		push_error("Переход: сцена не найдена — " + path)
+		return false
+	# В headless нет кадра для эффекта; сохраняем возможность служебного запуска.
+	if DisplayServer.get_name() == "headless":
+		return tree.change_scene_to_file(path) == OK
+	var image := tree.root.get_texture().get_image()
+	if image == null or image.is_empty():
+		return tree.change_scene_to_file(path) == OK
+	var error := ResourceLoader.load_threaded_request(path, "PackedScene")
+	if error != OK:
+		push_error("Переход: не удалось начать загрузку — " + path)
+		return false
+	image.generate_mipmaps()
+	var transition := LumaWipe.new()
+	transition.layer = 120
+	transition.process_mode = Node.PROCESS_MODE_ALWAYS
+	transition._path = path
+	transition._effect = next_effect()
+	if tree.current_scene:
+		transition._origin = weakref(tree.current_scene)
+	_active = transition
+	tree.root.add_child(transition)
+	transition.add_to_group("scene_transition")
+	transition._setup(ImageTexture.create_from_image(image), tree.root.get_visible_rect().size, context)
+	return true
 
 
-func _setup(tex: Texture2D, vs: Vector2) -> void:
+func _setup(texture: Texture2D, viewport_size: Vector2, context: Dictionary = {}) -> void:
 	_rect = TextureRect.new()
-	_rect.texture = tex
+	_rect.texture = texture
 	_rect.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_rect.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_rect.stretch_mode = TextureRect.STRETCH_SCALE
-	_rect.mouse_filter = Control.MOUSE_FILTER_STOP  # пока идёт переход, клики не уходят в сцены
-	var mat := ShaderMaterial.new()
-	var sh := Shader.new()
-	sh.code = SHADER
-	mat.shader = sh
-	mat.set_shader_parameter("old_screen", tex)
-	mat.set_shader_parameter("aspect", vs.x / maxf(vs.y, 1.0))
-	mat.set_shader_parameter("seed", randf())
-	_rect.material = mat
+	_rect.mouse_filter = Control.MOUSE_FILTER_STOP
+	var material := ShaderMaterial.new()
+	material.shader = TRANSITION_SHADER
+	material.set_shader_parameter("old_screen", texture)
+	material.set_shader_parameter("effect", SHADER_EFFECTS[_effect])
+	material.set_shader_parameter("aspect", viewport_size.x / maxf(viewport_size.y, 1.0))
+	material.set_shader_parameter("seed", randf())
+	var box := context.get("box") as Node3D
+	var camera := context.get("camera") as Camera3D
+	if is_instance_valid(box) and is_instance_valid(camera):
+		var center := camera.unproject_position(box.global_position) / viewport_size
+		material.set_shader_parameter("focus", center.clamp(Vector2(0.2, 0.2), Vector2(0.8, 0.8)))
+	_rect.material = material
 	add_child(_rect)
+	if _effect == EFFECTS.find("morph_cut"):
+		_capture_ready = false
+		_capture_box.call_deferred(context, Vector2i(viewport_size))
+
+
+## Изолированный прозрачный кадр настоящей коробки: без комнаты и без панелей хаба.
+func _capture_box(context: Dictionary, viewport_size: Vector2i) -> void:
+	_box_viewport = SubViewport.new()
+	_box_viewport.size = viewport_size
+	_box_viewport.transparent_bg = true
+	_box_viewport.own_world_3d = true
+	_box_viewport.msaa_3d = Viewport.MSAA_4X
+	_box_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+	add_child(_box_viewport)
+	var environment := WorldEnvironment.new()
+	environment.environment = Environment.new()
+	environment.environment.background_mode = Environment.BG_CLEAR_COLOR
+	environment.environment.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+	environment.environment.ambient_light_color = Color.WHITE
+	environment.environment.ambient_light_energy = 0.65
+	_box_viewport.add_child(environment)
+	var source := context.get("box") as Node3D
+	var source_camera := context.get("camera") as Camera3D
+	var camera: Camera3D
+	if is_instance_valid(source) and is_instance_valid(source_camera):
+		var original_environment := source.get_world_3d().environment
+		if original_environment:
+			environment.environment = original_environment.duplicate() as Environment
+			environment.environment.background_mode = Environment.BG_CLEAR_COLOR
+		var copy := source.duplicate(0) as Node3D
+		# Геометрия уже построена. Повторный _ready GameBox создал бы её второй раз.
+		copy.set_script(null)
+		copy.transform = source.global_transform
+		_box_viewport.add_child(copy)
+		camera = source_camera.duplicate(0) as Camera3D
+		camera.transform = source_camera.global_transform
+	else:
+		# У участника пати коробка может ещё стоять в шкафу: показываем выбранную игру.
+		var box := GameBox.new()
+		box.setup(context.get("game", {}), Vector3(0.075, 0.30, 0.30), Color("6b3fa0"))
+		box.rotation.y = -PI / 2.0
+		_box_viewport.add_child(box)
+		camera = Camera3D.new()
+		camera.position = Vector3(0, 0, 0.7)
+		camera.fov = 52.0
+	_box_viewport.add_child(camera)
+	camera.current = true
+	if not is_instance_valid(source):
+		var light := DirectionalLight3D.new()
+		light.rotation_degrees = Vector3(-25, -30, 0)
+		light.light_energy = 0.8
+		_box_viewport.add_child(light)
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	if not is_instance_valid(_box_viewport):
+		return
+	var image := _box_viewport.get_texture().get_image()
+	if image != null and not image.is_empty():
+		image.generate_mipmaps()
+		var material := _rect.material as ShaderMaterial
+		material.set_shader_parameter("box_screen", ImageTexture.create_from_image(image))
+		material.set_shader_parameter("has_box", true)
+	_box_viewport.queue_free()
+	_box_viewport = null
+	_capture_ready = true
+
+
+func _input(_event: InputEvent) -> void:
+	get_viewport().set_input_as_handled()
 
 
 func _process(delta: float) -> void:
-	var mat := _rect.material as ShaderMaterial
-	# размытие нарастает всё время перехода (быстро в начале, мягко к концу)
-	_prep += delta
-	_soft = minf(1.0, _soft + delta / 1.2)
-	mat.set_shader_parameter("soft", 1.0 - pow(1.0 - _soft, 2.0))
-	if _t < 0.0:
-		if _path == "":
+	_elapsed += delta
+	if not _scene_ready:
+		if _switching or _elapsed < PREP or not _capture_ready:
 			return
-		var st := ResourceLoader.load_threaded_get_status(_path)
-		if st == ResourceLoader.THREAD_LOAD_IN_PROGRESS or _prep < PREP:
+		var status := ResourceLoader.load_threaded_get_status(_path)
+		if status == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
 			return
-		var path := _path
-		_path = ""
-		if st == ResourceLoader.THREAD_LOAD_LOADED:
-			get_tree().change_scene_to_packed(ResourceLoader.load_threaded_get(path))
-		else:
-			get_tree().change_scene_to_file(path)  # фоновая загрузка не вышла — по-простому
-		# новая сцена строится кадр-другой — пятна начинаем, когда она уже на экране
-		await get_tree().process_frame
-		await get_tree().process_frame
-		_t = 0.0
+		if status != ResourceLoader.THREAD_LOAD_LOADED:
+			_abort("Не удалось загрузить игру. Попробуйте ещё раз.")
+			return
+		_switching = true
+		_switch_scene.call_deferred()
 		return
 	_t += delta
-	var k := clampf(_t / DURATION, 0.0, 1.0)
-	# мягкий старт и плавное дотягивание (синусоида), без рывков
-	mat.set_shader_parameter("progress", 0.5 - 0.5 * cos(k * PI))
-	if k >= 1.0:
+	var progress := clampf(_t / float(DURATIONS[_effect]), 0.0, 1.0)
+	(_rect.material as ShaderMaterial).set_shader_parameter("progress", 0.5 - 0.5 * cos(progress * PI))
+	if progress >= 1.0:
 		queue_free()
+
+
+func _switch_scene() -> void:
+	var scene := ResourceLoader.load_threaded_get(_path) as PackedScene
+	if scene == null or get_tree().change_scene_to_packed(scene) != OK:
+		_abort("Не удалось открыть игру. Попробуйте ещё раз.")
+		return
+	# Старый кадр непрозрачен, пока новая сцена строится и рисует первые кадры.
+	await get_tree().process_frame
+	await get_tree().process_frame
+	await RenderingServer.frame_post_draw
+	_scene_ready = true
+	_t = 0.0
+
+
+func _abort(message: String) -> void:
+	push_error("Переход: " + message)
+	if _origin:
+		var origin: Object = _origin.get_ref()
+		if is_instance_valid(origin) and origin.has_method("_on_transition_failed"):
+			origin._on_transition_failed(message)
+	queue_free()
+
+
+func _exit_tree() -> void:
+	if _active == self:
+		_active = null

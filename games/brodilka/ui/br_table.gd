@@ -11,6 +11,7 @@ const SIDE_W := 300.0
 const PAD := 12.0
 const STEP_TIME := 0.3  # шаг персонажа по клетке — не спеша, чтобы успеть сосчитать клетки
 const AFTER_DIE := 0.35  # пауза между остановкой кубика и первым шагом
+const CARD_FIRST := 1800  # мс: вытянутую карту сначала читают, потом персонаж идёт по её эффекту
 const AFTER_STEP := 0.8  # пауза после последнего шага: видно, на какую клетку встал, — потом её эффект
 ## Печатные места на поле (пиксели art/board.webp, 3402×3600): колоды и три ячейки Тадам.
 const DECK_RECTS := [Rect2(341, 48, 472, 651), Rect2(848, 48, 472, 651), Rect2(1352, 48, 467, 651)]
@@ -53,6 +54,9 @@ var _shown: Array[int] = []  # клетка, где фишка нарисова�
 var _slots: Array = []  # TextureRect ячеек Тадам
 var _deck_labels: Array = []
 var _traps: Control
+var _step_hl: Control  # подсветка клеток, куда можно пойти после броска (щёлкнуть, чтобы идти)
+var _step_cells: Array = []
+const STEP_HL := Color(0.35, 0.85, 0.3, 0.4)  # зелёный, прозрачность 60 %
 
 var _side: VBoxContainer
 var _top: TopBar
@@ -72,8 +76,9 @@ var _dice3d: Array = []  # два TossDie (2D-кубики с физикой м�
 var _thrown_mine := false  # свой бросок улетел, ждём результат с хоста
 
 var _bar_key := ""
-var _roll_key := ""
+var _roll_no := -1  # какой бросок уже показан (номер из правил); -1 — ещё ни одного состояния
 var _card_key := ""
+var _walk_after := 0  # мс: раньше этого персонажи не идут (показывается вытянутая карта)
 var _celebrated := false
 
 
@@ -137,6 +142,16 @@ func _ready() -> void:
 	_traps = Control.new()
 	_traps.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_map.add_child(_traps)
+	_step_hl = Control.new()
+	_step_hl.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_step_hl.draw.connect(func():
+
+		for c in _step_cells:
+			var at := _cell_px(int(c))
+			_step_hl.draw_circle(at, 82.0, STEP_HL)
+			_step_hl.draw_arc(at, 82.0, 0.0, TAU, 56, Color(STEP_HL, 0.9), 7.0, true))
+	_map.add_child(_step_hl)
+	_step_hl.size = _tex_size  # на всё поле: слой нулевого размера движок мог не выводить
 	var frame := Panel.new()
 	frame.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	frame.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -304,7 +319,7 @@ func _place_bar() -> void:
 		var ds := _dialog.get_combined_minimum_size()
 		_dialog.size = ds
 		_dialog.position = _board.position + (_board.size - ds) * 0.5
-		if _dialog.get_meta("kind", "") == "trap":
+		if _dialog.get_meta("kind", "") in ["trap", "die"]:
 			_dialog.position.y = _board.position.y + 56.0  # выбор клетки на поле — окно сверху, поле открыто
 
 
@@ -391,10 +406,35 @@ func _check_label() -> void:
 	_label_view.visible = true
 
 
+## Какая из подсвеченных клеток хода под точкой поля (индекс в prompt.data.cells), -1 — никакая.
+func _step_at(at: Vector2) -> int:
+	if _step_cells.is_empty() or _dice_rolling():
+		return -1
+	var mpd := (at - _map.position) / _zoom
+	var best := -1
+	var dist := 110.0
+	for k in _step_cells.size():
+		var dd := _cell_px(int(_step_cells[k])).distance_to(mpd)
+		if dd < dist:
+			dist = dd
+			best = k
+	return best
+
+
 ## Клик по полю: если просят тянуть карту — клик по нужной колоде тянет её.
 func _click_board(at: Vector2) -> void:
 	var p: Dictionary = _v.get("prompt", {})
 	if p.is_empty() or int(p["seat"]) != _actor():
+		return
+	if str(p.get("kind", "")) == "die":
+		# бросок: щёлкнули по одной из подсвеченных клеток — персонаж идёт туда
+		var best_d := _step_at(at)
+		if best_d >= 0:
+			_step_cells = []
+			_step_hl.queue_redraw()
+			_board.mouse_default_cursor_shape = Control.CURSOR_ARROW
+			_dialog.visible = false
+			_send("br_answer", {"i": best_d})
 		return
 	if str(p.get("kind", "")) == "trap":
 		# монета-ловушка: ближайшая к щелчку свободная клетка
@@ -451,6 +491,12 @@ func _zoom_at(at: Vector2, k: float) -> void:
 ## Стрелки / WASD двигают поле.
 func _process(delta: float) -> void:
 	_check_label()
+	if _step_hl:
+		var show := not _dice_rolling()
+		if show != _step_hl.visible:
+			_step_hl.visible = show
+			if show:
+				_step_hl.queue_redraw()  # скрытый слой не перерисовывается — клетки могли смениться, пока кубик катился
 	if get_viewport().gui_get_focus_owner() is LineEdit:
 		return  # пишут в чат
 	var d := Vector2(Input.get_axis("ui_left", "ui_right"), Input.get_axis("ui_up", "ui_down"))
@@ -481,6 +527,8 @@ func _on_board_input(e: InputEvent) -> void:
 			_board.mouse_default_cursor_shape = Control.CURSOR_DRAG if mb.pressed else Control.CURSOR_ARROW
 	elif e is InputEventMouseMotion and not _dragging:
 		_hover_label((e as InputEventMouseMotion).position)
+		# над клеткой, куда можно пойти, — курсор «рука» (можно щёлкнуть)
+		_board.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if _step_at((e as InputEventMouseMotion).position) >= 0 else Control.CURSOR_ARROW
 	elif e is InputEventMouseMotion and _dragging:
 		var mm := e as InputEventMouseMotion
 		if _cam_tween:
@@ -526,6 +574,10 @@ func _on_state(v: Dictionary) -> void:
 		return
 	var first := _v.is_empty()
 	_v = v
+	# новая карта «Хорошо/Плохо» или «Тадам» — сначала показываем её, потом персонаж идёт по её эффекту
+	if not first and _card_id() != _card_key and _card_key != "":
+		_show_card()
+		_walk_after = Time.get_ticks_msec() + CARD_FIRST
 	_sync_pawns(first)
 	_show_roll()
 	# хост уже посчитал эффект клетки, но показываем его, когда персонаж дошёл: пока идут — ждём
@@ -608,9 +660,13 @@ func _walk(s: int, from: int, to: int) -> void:
 	pw.walking = true
 	# сначала кубик долетает и показывает число, потом короткая пауза — и только тогда персонаж идёт
 	if _dice_rolling():
-		while _dice_rolling():
+		var waited := 0.0
+		while _dice_rolling() and waited < 4.0:  # страховка: не ждём кубик вечно
+			waited += get_process_delta_time()
 			await get_tree().process_frame
 		await get_tree().create_timer(AFTER_DIE).timeout
+	while Time.get_ticks_msec() < _walk_after:  # сначала читают вытянутую карту
+		await get_tree().process_frame
 	if not is_instance_valid(pw):
 		return
 	var t := create_tween()
@@ -828,12 +884,14 @@ func _on_die_thrown(i: int, vel: Vector2) -> void:
 func _show_roll() -> void:
 	_update_dice()
 	var roll: Array = _v.get("last_roll", [])
-	var key := "%d/%s" % [_v["log"].size(), str(roll)]
-	if roll.is_empty() or key == _roll_key:
+	# новый бросок — только новый номер из правил (а не любое обновление: иначе кубик бросался заново
+	# и «менял» значение, а первый бросок партии не получал результата и катился без конца)
+	var no := int(_v.get("roll_no", 0))
+	if no == _roll_no:
 		return
-	var fresh := _roll_key != ""
-	_roll_key = key
-	if not fresh:
+	var first := _roll_no < 0  # открыли стол посреди партии — старый бросок не показываем
+	_roll_no = no
+	if roll.is_empty():
 		return
 	for i in mini(roll.size(), 2):
 		var d: TossDie = _dice3d[i]
@@ -841,22 +899,29 @@ func _show_roll() -> void:
 		var face := int(roll[i])
 		if d.state == "flying":
 			d.set_result(face)  # свой бросок — кубик остановится на выпавшем
+		elif first:
+			continue
 		else:
 			var vel := (d.area.get_center() - d.home).normalized().rotated(randf_range(-0.7, 0.7)) * randf_range(800.0, 1300.0)
 			d.throw(vel, face)
 	_thrown_mine = false
 
 
+## Ключ последней вытянутой карты (по её номеру) — «none», если карт ещё не тянули.
+func _card_id() -> String:
+	var c: Dictionary = _v.get("last_card", {})
+	return "none" if c.is_empty() else "%d/%s/%d" % [int(c.get("no", 0)), c["deck"], int(c["id"])]
+
+
 func _show_card() -> void:
 	var c: Dictionary = _v.get("last_card", {})
-	if c.is_empty():
-		return
-	var key := "%d/%s/%d" % [_v["log"].size(), c["deck"], int(c["id"])]
+	# крупно — только новая карта (по её номеру); при входе в партию прежнюю не показываем
+	var key := _card_id()
 	if key == _card_key:
 		return
 	var fresh := _card_key != ""
 	_card_key = key
-	if not fresh:
+	if not fresh or c.is_empty():
 		return
 	var path := BRData.gb_image(int(c["id"])) if c["deck"] == "gb" else BRData.tadam_image(int(c["id"]))
 	var tr := TextureRect.new()
@@ -888,6 +953,7 @@ func _show_card() -> void:
 	tr.gui_input.connect(func(e: InputEvent):
 		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
 			t.kill()
+			_walk_after = 0  # убрали карту — персонаж идёт сразу
 			var f := tr.create_tween()
 			f.tween_property(tr, "modulate:a", 0.0, 0.2)
 			f.tween_callback(tr.queue_free))
@@ -998,6 +1064,14 @@ func _use_card(idx: int, id: String) -> void:
 
 func _update_dialog() -> void:
 	var p: Dictionary = _v.get("prompt", {})
+	var cells: Array = []
+	if not p.is_empty() and str(p.get("kind", "")) == "die" and int(p["seat"]) == _actor():
+		cells = p.get("data", {}).get("cells", [])
+	if cells != _step_cells:
+		_step_cells = cells
+		_step_hl.queue_redraw()
+		if cells.is_empty() and not _dragging:
+			_board.mouse_default_cursor_shape = Control.CURSOR_ARROW
 	if p.is_empty() or int(p["seat"]) != _actor() or _v["phase"] == "game_over":
 		if _dialog.get_meta("local", false):
 			return
@@ -1018,6 +1092,8 @@ func _open_dialog(text: String, options: Array, on_pick: Callable, local: bool, 
 	if kind == "draw":
 		text += "
 (кнопкой ниже или щелчком по колоде на поле)"
+	if kind == "die":
+		options = []  # клетку выбирают щелчком по подсвеченной клетке поля
 	if kind == "trap":
 		options = [options[0]]  # клетку выбирают щелчком по полю, кнопка — «куда-нибудь перед соперником»
 	var t := BRStyle.label(text, BRStyle.BODY, BRStyle.INK, HORIZONTAL_ALIGNMENT_CENTER, "bold")

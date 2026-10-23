@@ -1,5 +1,7 @@
 class_name HubStyle
 extends RefCounted
+
+const ACCENT_FX := preload("res://hub/ui_accent_fx.gd")
 ## Неоновое ретро: базовый стиль главного меню и общего интерфейса.
 ## Тёмно-фиолетовые полупрозрачные панели, неоновые рамки (розовый / бирюзовый) со свечением,
 ## шрифты: заголовки — Russo One, текст — Exo 2, пиксельные акценты — Press Start 2P (OFL, с кириллицей).
@@ -175,6 +177,7 @@ static func primary(text: String, size: int = 18, min_w: int = 0) -> Button:
 	b.add_theme_font_override("font", font("title"))
 	b.add_theme_color_override("font_color", Color.WHITE)
 	b.add_theme_color_override("font_hover_color", Color.WHITE)
+	ACCENT_FX.sheen(b)
 	return b
 
 

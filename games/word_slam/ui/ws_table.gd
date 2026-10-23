@@ -835,13 +835,15 @@ func _update_bottom() -> void:
 				b.add_theme_stylebox_override("hover", hsb)
 				b.add_theme_stylebox_override("pressed", hsb)
 				var dsb := sb.duplicate() as StyleBoxFlat
-				dsb.bg_color = Color(WSCardFace.COLORS[cat], 0.35)
+				dsb.bg_color = Color(WSCardFace.COLORS[cat], 0.55 if HCStyle.dark else 0.35)  # на тёмном фоне бледная пастель сливалась
 				dsb.border_color = Color(0, 0, 0, 0)  # неактивное слово — без рамки (в тёмной теме рамка светилась)
 				b.add_theme_stylebox_override("disabled", dsb)
 				b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-				b.add_theme_color_override("font_color", HCStyle.INK)
-				b.add_theme_color_override("font_hover_color", HCStyle.INK)
-				b.add_theme_color_override("font_disabled_color", Color(HCStyle.INK, 0.3))
+				# текст — тёмный, как на самих карточках, в любой теме (светлый на пастели в тёмной теме не читался)
+				b.add_theme_color_override("font_color", HCStyle.INK_ART)
+				b.add_theme_color_override("font_hover_color", HCStyle.INK_ART)
+				b.add_theme_color_override("font_pressed_color", HCStyle.INK_ART)
+				b.add_theme_color_override("font_disabled_color", Color(HCStyle.INK_ART, 0.6 if HCStyle.dark else 0.35))
 				b.mouse_default_cursor_shape = Control.CURSOR_DRAG
 				b.button_down.connect(func(): _grab_from_deck(id))
 				flow.add_child(b)

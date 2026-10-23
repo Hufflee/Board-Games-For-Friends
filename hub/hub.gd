@@ -33,6 +33,8 @@ func _ready() -> void:
 	add_child(_room)
 	_room.box_selected.connect(_on_box_selected)
 	_room.box_released.connect(_on_box_released)
+	_room.panels.game_selected.connect(_on_box_selected)
+	_room.panels.game_released.connect(_on_box_released)
 	_ui = Control.new()
 	_ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -83,7 +85,10 @@ func _rebuild() -> void:
 	news.pressed.connect(func(): add_child(load("res://hub/whats_new.gd").new()))
 	top.add_child(news)
 	var settings := HubStyle.button("Настройки", 15)
-	settings.pressed.connect(func(): add_child(SettingsScreen.new()))
+	settings.pressed.connect(func():
+		var screen := SettingsScreen.new()
+		screen.neon_style = true
+		add_child(screen))
 	top.add_child(settings)
 	var quit := HubStyle.button("Выход", 15)
 	quit.pressed.connect(func(): get_tree().quit())
@@ -185,7 +190,9 @@ func _show_card(g: Dictionary, animate: bool = true) -> void:
 		play.pressed.connect(func(): _open_scene(g, true))
 		row.add_child(play)
 	var back := HubStyle.button("Назад", 15)
-	back.pressed.connect(func(): _room.release())
+	back.pressed.connect(func():
+		_room.release()
+		_room.panels.deselect())
 	row.add_child(back)
 	v.add_child(row)
 	v.add_child(HubStyle.label("← → или колесо мыши — соседняя игра", 12, HubStyle.MUTED))
@@ -330,6 +337,19 @@ func _open_scene(g: Dictionary, wipe: bool = false) -> void:
 	_leaving = true
 	Sfx.play("game_start", -4)
 	if wipe:
-		LumaWipe.change_scene(g["scene"])  # выбрали коробку и нажали «Играть» — проявляем игру пятнами
+		var context := {"game": g}
+		if is_instance_valid(_room):
+			context["camera"] = _room.camera
+			if is_instance_valid(_room.focused) and _room.focused.game.get("id") == g.get("id"):
+				context["box"] = _room.focused
+		if not LumaWipe.change_scene(g["scene"], context):
+			_on_transition_failed("Не удалось запустить переход. Попробуйте ещё раз.")
 	else:
 		get_tree().change_scene_to_file.call_deferred(g["scene"])
+
+
+## Ошибка загрузки не должна оставлять кнопку запуска заблокированной.
+func _on_transition_failed(message: String) -> void:
+	_leaving = false
+	_set_status(message)
+

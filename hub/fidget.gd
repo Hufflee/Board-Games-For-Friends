@@ -31,8 +31,18 @@ var _rot0 := 0.0
 var _dir0 := 0.0
 var _rot_samples: Array = []  # [время, угол] — скорость вращения при отпускании
 const COINS := "res://hub/art/coins/"
+const COIN_VARIANTS := COINS + "variants/codex_2026-10-23/"
 ## Монеты-картинки: [орёл, решка]. Остальные стили рисуются кодом.
 const TEXTURES := {
+	# Согласованные новые монеты: на каждом листе орёл слева, решка справа.
+	"brodilka": ["res://games/brodilka/art/cards/coin_crown.png", "res://games/brodilka/art/cards/coin_10.png"],
+	"gloom": [COINS + "gloom_front.png", COINS + "gloom_back.png"],
+	"hues_and_cues": [COIN_VARIANTS + "hues_light_concept.png", COIN_VARIANTS + "hues_light_concept.png"],
+	"hues_and_cues_dark": [COIN_VARIANTS + "hues_dark_concept.png", COIN_VARIANTS + "hues_dark_concept.png"],
+	"hues_and_cues_secret": [COIN_VARIANTS + "hues_light_secret_concept.png", COIN_VARIANTS + "hues_light_secret_concept.png"],
+	"hues_and_cues_dark_secret": [COIN_VARIANTS + "hues_dark_secret_concept.png", COIN_VARIANTS + "hues_dark_secret_concept.png"],
+	"brodilka_secret": [COIN_VARIANTS + "brodilka_secret_concept.png", COIN_VARIANTS + "brodilka_secret_concept.png"],
+	"gloom_secret": [COIN_VARIANTS + "gloom_secret_awakened_stylized_v4.png", COIN_VARIANTS + "gloom_secret_awakened_stylized_v4.png"],
 	"doubloon": ["res://hub/art/coins/doubloon_front.png", "res://hub/art/coins/doubloon_back.png"],
 	"doubloon_gold": ["res://hub/art/coins/doubloon_old_front.png", "res://hub/art/coins/doubloon_old_back.png"],  # секрет «Перудо»
 	"gold": ["res://games/brodilka/art/cards/coin_crown.png", "res://games/brodilka/art/cards/coin_10.png"],
@@ -65,10 +75,20 @@ const TEXTURES := {
 	"not_a_hat": [COINS + "not_a_hat_front.png", COINS + "not_a_hat_back.png"],
 	"not_a_hat_secret": [COINS + "not_a_hat_secret_front.png", COINS + "not_a_hat_secret_back.png"],
 }
-## Игры со своей монетой (кроме Перудо/Бродилки/Gloom/Hues) и есть ли у неё вариант для тёмной темы.
+## Области сторон на листах. Круглая отрисовка отсекает фон за ободком.
+const COIN_REGIONS := {
+	"hues_and_cues": [Rect2(19, 125, 744, 737), Rect2(774, 124, 743, 741)],
+	"hues_and_cues_dark": [Rect2(44, 37, 807, 801), Rect2(922, 37, 808, 801)],
+	"hues_and_cues_secret": [Rect2(29, 28, 835, 823), Rect2(900, 28, 837, 823)],
+	"hues_and_cues_dark_secret": [Rect2(28, 26, 838, 828), Rect2(899, 25, 841, 829)],
+	"brodilka_secret": [Rect2(41, 32, 808, 809), Rect2(919, 32, 812, 807)],
+	"gloom_secret": [Rect2(26, 22, 827, 831), Rect2(915, 22, 833, 831)],
+}
+## Игры со своей монетой (кроме Перудо) и есть ли у неё вариант для тёмной темы.
 ## Порядок важен: tip_top_18 раньше tip_top.
 const GAME_COINS := [["tip_top_18", false], ["tip_top", false], ["king_of_12", false], ["dangerous_words", false],
-	["ready_set_bet", true], ["word_slam", true], ["wavelength", true], ["not_a_hat", false]]
+	["ready_set_bet", true], ["word_slam", true], ["wavelength", true], ["not_a_hat", false],
+	["hues_and_cues", true], ["brodilka", false], ["gloom", false]]
 static var _tex_cache := {}
 
 var _vel := Vector2.ZERO
@@ -87,6 +107,7 @@ var _style := "neon"
 
 
 func _ready() -> void:
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS
 	size = Vector2(R * 2 + 8, R * 2 + 8)
 	pivot_offset = size * 0.5
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -114,14 +135,21 @@ func _ready() -> void:
 	# та же игра (сцену перезагрузили при смене темы) — лежит там же, где лежала
 	var sc := get_tree().current_scene
 	var key := sc.scene_file_path if sc else ""
-	if key != _scene_key or _was_docked:
+	if key != _scene_key:
 		_scene_key = key
 		saved_pos = Vector2(-1, -1)
 	if saved_pos.x >= 0.0:
 		position = saved_pos
+		_in_dock = _was_docked
 	else:
 		modulate.a = 0.0  # пока гнездо не встало на место — не видна (иначе мелькает в углу)
 		_reset_pos.call_deferred()
+
+
+## Перезагрузка темы сохраняет видимую позицию, в том числе у монетки в гнезде.
+func _exit_tree() -> void:
+	saved_pos = position
+	_was_docked = _in_dock
 
 
 ## Ушли в хаб — следующая игра начнёт с монеткой в гнезде.
@@ -464,9 +492,9 @@ func _colors() -> Array:
 	match _style:
 		"doubloon", "doubloon_gold":
 			return [Color("d9a43a"), Color("8a5a14"), Color("f6dc8a")]
-		"gold":
+		"gold", "brodilka", "brodilka_secret":
 			return [Color("f2c03a"), Color("a8741c"), Color("fff1b0")]
-		"silver":
+		"silver", "gloom", "gloom_secret":
 			return [Color("4a4c52"), Color("2a2c30"), Color("9fd8b4")]  # Gloom: тёмный камень
 	return [Color("3fd6e8"), Color("1a5f8a"), Color("c8fbff")]
 
@@ -488,7 +516,10 @@ func _draw() -> void:
 		if tex:
 			# «Дюжина короля» — та же монета, что в бродилке, но потемнее (под таверну)
 			var tint := Color(0.72, 0.68, 0.6) if _style == "gold_dark" else Color.WHITE
-			draw_texture_rect(tex, Rect2(Vector2(-R, -R), Vector2(R, R) * 2.0), false, tint)
+			if COIN_REGIONS.has(_style):
+				_draw_coin_region(tex, COIN_REGIONS[_style][0 if heads else 1], tint)
+			else:
+				draw_texture_rect(tex, Rect2(Vector2(-R, -R), Vector2(R, R) * 2.0), false, tint)
 		draw_set_transform(Vector2.ZERO)
 		return
 	# ребро — видно, когда монета повёрнута
@@ -514,6 +545,17 @@ func _draw() -> void:
 	# блик
 	draw_circle(Vector2(-R * 0.35, -R * 0.4), R * 0.18, Color(cols[2], 0.55))
 	draw_set_transform(Vector2.ZERO)
+
+
+## Рисует одну сторону листа внутри круга: без фона и соседней монеты.
+func _draw_coin_region(tex: Texture2D, region: Rect2, tint: Color) -> void:
+	var points := PackedVector2Array()
+	var uv := PackedVector2Array()
+	for i in 96:
+		var direction := Vector2.from_angle(TAU * i / 96.0)
+		points.append(direction * R)
+		uv.append((region.position + (direction * 0.5 + Vector2.ONE * 0.5) * region.size) / tex.get_size())
+	draw_polygon(points, PackedColorArray([tint]), uv, tex)
 
 
 static func _tex(path: String) -> Texture2D:

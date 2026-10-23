@@ -1,5 +1,7 @@
 class_name K12UI
 extends RefCounted
+
+const ACCENT_FX := preload("res://hub/ui_accent_fx.gd")
 ## Общий стиль «таверны»: цвета, шрифты, тема Godot и фабрики элементов.
 ##
 ## Шрифты (OFL): Ruslan Display — заголовки в духе старорусской вязи, Alegreya Sans — текст.
@@ -321,6 +323,12 @@ static func button(text: String, size: int = 18, min_w: int = 0) -> Button:
 	b.mouse_entered.connect(func():
 		if not b.disabled:
 			Sfx.play("hover", -16, 0.05, 0.06))
+	return b
+
+## Главное действие: прежний стиль кнопки и периодический блик.
+static func primary(text: String, size: int = 18, min_w: int = 0) -> Button:
+	var b := button(text, size, min_w)
+	ACCENT_FX.sheen(b)
 	return b
 
 

@@ -1,5 +1,7 @@
 class_name TTStyle
 extends RefCounted
+
+const ACCENT_FX := preload("res://hub/ui_accent_fx.gd")
 ## Стиль «Тип Топ» — как у коробки и карт: фон с лучами (бирюзовый / чёрный у версии «Для взрослых»),
 ## белые «пузыри» с толстой обводкой, жирный округлый шрифт, шкала «какашка → единорог».
 
@@ -201,6 +203,7 @@ static func primary(text: String, size: int = BODY, min_w: int = 0) -> Button:
 	b.add_theme_font_override("font", font("title"))
 	for c in ["font_color", "font_hover_color", "font_pressed_color"]:
 		b.add_theme_color_override(c, INK if not adult else WHITE)
+	ACCENT_FX.sheen(b)
 	return b
 
 

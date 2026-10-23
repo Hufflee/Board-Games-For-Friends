@@ -153,3 +153,23 @@ func test_eight_rounds() -> void:
 		if r.phase == "round_result":
 			r.advance()
 	check(r.phase == "game_over" and r.monster_won, "8 раундов — победа монстра")
+
+	# порядок ловушек: больше голосов — выше; при равенстве — перетаскиванием, но только внутри своей группы
+	var m := make()
+	m.phase = "traps"
+	m.ready = [false, false]
+	m.cands[0] = []
+	for w in ["а", "б", "в", "г", "д"]:
+		m.cands[0].append({"w": w, "by": 0, "votes": [0]})
+	m.cands[0][0]["votes"] = [0, 1]  # «а» — 2 голоса
+	m.cands[0][1]["votes"] = [0, 1]  # «б» — 2 голоса
+	m.cands[0][4]["votes"] = []  # «д» — без голоса
+	var words := func() -> String:
+		return "".join(m.ranked(0).map(func(k): return m.cands[0][k]["w"]))
+	var idx := func(w: String) -> int:
+		return m.cands[0].map(func(c): return c["w"]).find(w)
+	check(words.call() == "абвгд", "больше голосов — выше")
+	check(m.move_cand(0, idx.call("а"), 1) == 1 and words.call() == "бавгд", "внутри группы с равными голосами — куда поставили")
+	check(m.move_cand(0, idx.call("а"), 4) == 1 and words.call() == "бавгд", "2 голоса не опускаются ниже слов с 1 голосом — последним в своей группе")
+	check(m.move_cand(0, idx.call("г"), 0) == 2 and words.call() == "багвд", "1 голос не поднимается выше слов с 2 голосами — первым в своей группе")
+	check(m.move_cand(0, idx.call("д"), 0) == 4 and words.call() == "багвд", "без голоса — всегда в самом низу")

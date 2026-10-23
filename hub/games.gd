@@ -38,6 +38,7 @@ const LIST := [
 		"description": "Жуткое подземелье: объясняйте слова голосом, обходя ловушки соперников, и одолейте монстра раньше другой команды!",
 		"scene": "res://games/dangerous_words/ui/main.tscn",
 		"cover_monsters": ["monster_vampire", "monster_mummy", "monster_troll"],
+		"thickness": 0.0805,  # на 15 % шире обычной (0.07)
 	},
 	{
 		"id": "hues_and_cues",

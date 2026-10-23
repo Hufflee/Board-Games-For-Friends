@@ -106,7 +106,7 @@ func _rebuild() -> void:
 	ov.add_child(TurnClock.settings_row(func(t, z): return K12UI.button(t, z), func(t, z): return K12UI.label(t, z)))
 	var start_row := K12UI.hbox(12)
 	if host:
-		var start := K12UI.button("Начать игру", K12UI.BODY, 260)
+		var start := K12UI.primary("Начать игру", K12UI.BODY, 260)
 		start.disabled = data["members"].size() < 2
 		if not start.disabled:
 			start.theme_type_variation = "SelectedButton"  # главное действие — золотом

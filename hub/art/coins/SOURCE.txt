@@ -5,3 +5,5 @@ gloom_front.png (коса), gloom_back.png (привидение) — монет
 doubloon_front/back.png — теперь плоский мультяшный (череп / скрещённые кости), процедурно; прежний потёртый дублон — doubloon_old_*.png.
 wave_* (синяя, мозг / волны) — «Длина волны»; hues_* (синий-фиолетовый-голубой, клякса / волны) — Hues and Cues; holo_* — первый вариант. Всё процедурно.
 <game>[_dark]_front/back.png и <game>[_dark]_secret_front/back.png (king_of_12, dangerous_words, ready_set_bet, word_slam, wavelength, tip_top, tip_top_18, not_a_hat) — сгенерированы локально в ComfyUI (SD 1.5 DreamShaper 8 + IP-Adapter по монетам Перудо/Бродилки/Gloom, img2img по заготовкам, нарисованным кодом); _dark — для тёмной темы, _secret — секретный облик. Чужого арта нет (кроме стиля-референса монеты бродилки).
+
+variants/codex_2026-10-23/: Hues and Cues (светлая/тёмная, обычная/секретная), секретные Бродилка и Gloom — встроенный image_gen по существующим монетам проекта. Подключены листы с двумя сторонами; области и круглая обрезка заданы в hub/fidget.gd. Gloom использует gloom_secret_awakened_stylized_v4.png. Промпты — coin_prompts.md рядом.

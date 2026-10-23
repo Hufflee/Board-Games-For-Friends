@@ -46,7 +46,7 @@ func _ready() -> void:
 	var st_label := K12UI.label(st, K12UI.CAP, K12UI.GREEN if Net.steam_ok else K12UI.MUTED)
 	st_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	sv.add_child(st_label)
-	var host_btn := K12UI.button("Создать игру и пригласить друзей")
+	var host_btn := K12UI.primary("Создать игру и пригласить друзей")
 	host_btn.disabled = not Net.steam_ok
 	host_btn.pressed.connect(Net.host_steam)
 	if Net.steam_ok:
@@ -68,7 +68,7 @@ func _ready() -> void:
 	test_box.add_child(tv)
 	col.add_child(test_box)
 	tv.add_child(K12UI.label("Без Steam", K12UI.BODY, K12UI.GOLD))
-	var bots_btn := K12UI.button("Играть с ботами")
+	var bots_btn := K12UI.primary("Играть с ботами")
 	bots_btn.pressed.connect(Net.host_offline)
 	if not Net.steam_ok:
 		bots_btn.theme_type_variation = "SelectedButton"

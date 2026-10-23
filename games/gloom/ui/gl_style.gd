@@ -1,5 +1,7 @@
 class_name GLStyle
 extends RefCounted
+
+const ACCENT_FX := preload("res://hub/ui_accent_fx.gd")
 ## Стиль Gloom: викторианская готика в духе Эдварда Гори — тёмные обои с узором, панели цвета
 ## старой кости с чёрно-серебряной каймой, кроваво-красный акцент. Шрифты — Old Standard (текст)
 ## и Cormorant SC (заголовки), оба OFL.
@@ -184,6 +186,7 @@ static func button(text: String, size: int = BODY, min_w: int = 0) -> Button:
 static func primary(text: String, size: int = BODY, min_w: int = 0) -> Button:
 	var b := button(text, size, min_w)
 	b.theme_type_variation = "SelectedButton"
+	ACCENT_FX.sheen(b)
 	return b
 
 

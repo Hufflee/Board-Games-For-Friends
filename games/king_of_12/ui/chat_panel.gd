@@ -85,6 +85,12 @@ func _ready() -> void:
 	_input.add_theme_font_size_override("font_size", 13)
 	_input.text_submitted.connect(_on_submit)
 	_input.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# курсор — тонкая черта цвета игры, мигает (0.375 с горит / 0.375 с нет); виден, только пока в поле есть текст
+	_input.caret_blink = true
+	_input.caret_blink_interval = 0.375  # на треть быстрее обычного
+	_input.add_theme_constant_override("caret_width", 2)
+	_input.text_changed.connect(func(_t): _sync_caret())
+	_sync_caret()
 	var in_row := K12UI.hbox(4)
 	in_row.add_child(_input)
 	in_row.add_child(_quick_btn)
@@ -104,6 +110,16 @@ func _on_submit(text: String) -> void:
 	Net.send_chat(text)
 	_input.clear()
 	_input.release_focus()
+	_sync_caret()  # отправили — курсор пропадает до первого нового символа
+
+
+## Пустое поле — курсора нет (прозрачный); есть хоть один символ — обычный цвет курсора из темы игры.
+func _sync_caret() -> void:
+	if _input.text.is_empty():
+		_input.add_theme_color_override("caret_color", Color(0, 0, 0, 0))
+	else:
+		_input.remove_theme_color_override("caret_color")
+		_input.caret_blink = true  # перезапуск мигания: после ввода курсор сразу виден
 
 
 func _on_chat(entry: Dictionary) -> void:

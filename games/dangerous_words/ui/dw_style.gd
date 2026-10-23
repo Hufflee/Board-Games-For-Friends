@@ -1,5 +1,7 @@
 class_name DWStyle
 extends RefCounted
+
+const ACCENT_FX := preload("res://hub/ui_accent_fx.gd")
 ## Жутковатый «хеллоуинский» стиль «Опасных слов» — своя тема, не общая «таверна».
 ## Ночь, туман, луна, летучие мыши, паутина.
 ## Дизайн-система (docs/styleboard_dangerous_words.png): 2 основных цвета — тыква (акцент, «Тыквы») и фиолет
@@ -182,6 +184,12 @@ static func button(text: String, size: int = BODY, min_w: int = 0) -> Button:
 	b.mouse_entered.connect(func():
 		if not b.disabled:
 			Sfx.play("hover", -16, 0.05, 0.06))
+	return b
+
+## Главное действие: прежний стиль кнопки и периодический блик.
+static func primary(text: String, size: int = BODY, min_w: int = 0) -> Button:
+	var b := button(text, size, min_w)
+	ACCENT_FX.sheen(b)
 	return b
 
 

@@ -61,7 +61,7 @@ func show_menu(message: String = "") -> void:
 	for i in faces.size():
 		dice_row.add_child(PerudoDie.new(faces[i], 44, PerudoCup.seat_color(i)))
 	col.add_child(dice_row)
-	var bots := K12UI.button("Играть с ботами", K12UI.BODY)
+	var bots := K12UI.primary("Играть с ботами", K12UI.BODY)
 	bots.pressed.connect(func():
 		Net.host_offline(GAME_ID)
 		Net.set_bots(3))

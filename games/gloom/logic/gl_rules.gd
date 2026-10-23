@@ -26,6 +26,7 @@ const FX_NO_TARGET := ["stormy", "root_of_evil", "extra_plays", "unlimited_plays
 ## События «цель + второй персонаж».
 const FX_TWO := ["swap_top_mods", "swap_all_mods_with_guest", "move_guest_between", "swap_living_chars_with_opponent"]
 const DRAFT_EACH := 4  # Gloomier: персонажей у каждого
+const DRAFT_CHOICES := 3  # случайных кандидатов на каждый выбор
 
 var players: Array = []
 var sets: Array = ["base"]
@@ -50,6 +51,7 @@ var prompts: Array = []  # очередь выборов: {seat, kind: discard|g
 var react := {}  # {play, kind: ud|event|card, eligible: [], passed: []}
 var trim_left: Array = []
 var draft_order: Array = []  # Gloomier: очередь выбора персонажей
+var draft_options: Array = []  # стабильное предложение до подтверждения выбора
 var ending := false  # игрок закончил ход — после выборов добор и переход хода
 var turn_no := 0
 var log: Array = []
@@ -110,8 +112,9 @@ func new_game(player_list: Array, seed_value: int = 0, card_sets: Array = ["base
 	_shuffle(deck)
 	discard = []
 	removed = []
-	for s in n:
-		_draw(s, HAND)
+	if not draft:
+		for s in n:
+			_draw(s, HAND)
 	current = rng.randi_range(0, n - 1)
 	log = []
 	finals = []
@@ -121,11 +124,13 @@ func new_game(player_list: Array, seed_value: int = 0, card_sets: Array = ["base
 	turn_no = 0
 	trim_left = []
 	draft_order = []
+	draft_options = []
 	if draft:
 		for r in DRAFT_EACH:
 			for k in n:
 				draft_order.append((current + k) % n)
 		phase = "draft"
+		_roll_draft_options()
 	elif n >= 4:
 		trim_left = [0, 1, 2, 3]
 		phase = "trim"
@@ -144,19 +149,31 @@ func draft_left() -> Array:
 
 
 func draft(seat: int, id: int) -> bool:
-	if phase != "draft" or draft_order.is_empty() or seat != int(draft_order[0]) or not id in draft_left():
+	if phase != "draft" or draft_order.is_empty() or seat != int(draft_order[0]) or not id in draft_options or not id in draft_left():
 		return false
 	chars.append(_new_char(id, "char", seat))
 	draft_order.pop_front()
+	draft_options.clear()
 	if draft_order.is_empty():
+		# Игровые карты приходят только после завершения набора всех семей.
+		for s in players.size():
+			_draw(s, HAND)
 		_start_play()
+	else:
+		_roll_draft_options()
 	return true
+
+
+## Невыбранные не удаляются из общей колоды и могут снова попасть в предложение.
+func _roll_draft_options() -> void:
+	var left := draft_left()
+	_shuffle(left)
+	draft_options = left.slice(0, mini(DRAFT_CHOICES, left.size()))
 
 
 func auto_draft() -> void:
 	if phase == "draft" and not draft_order.is_empty():
-		var left := draft_left()
-		draft(int(draft_order[0]), left[rng.randi_range(0, left.size() - 1)])
+		draft(int(draft_order[0]), draft_options[rng.randi_range(0, draft_options.size() - 1)])
 
 
 func _new_char(id: int, kind: String, own: int) -> Dictionary:
@@ -1702,6 +1719,7 @@ func get_view(seat: int, show_all: bool = false) -> Dictionary:
 		"trim_left": trim_left.duplicate(),
 		"draft_order": draft_order.duplicate(),
 		"draft_left": draft_left() if phase == "draft" else [],
+		"draft_options": draft_options.duplicate() if phase == "draft" and (show_all or seat == int(draft_order[0])) else [],
 		"turn_no": turn_no,
 		"log": log.duplicate(true),
 		"finals": finals.duplicate(),

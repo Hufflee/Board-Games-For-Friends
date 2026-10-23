@@ -220,7 +220,8 @@ func words_needed(t: int) -> int:
 	return n
 
 
-## Номера предложений по убыванию голосов (при равенстве — кто раньше предложил).
+## Номера предложений по убыванию голосов; при равенстве — как расставили игроки перетаскиванием
+## (move_cand переставляет сам список), новые — в конец своей группы.
 func ranked(t: int) -> Array:
 	var idx := range(cands[t].size())
 	idx.sort_custom(func(a, b):
@@ -228,6 +229,33 @@ func ranked(t: int) -> Array:
 		var vb: int = cands[t][b]["votes"].size()
 		return va > vb or (va == vb and a < b))
 	return idx
+
+
+## Переставить слово i на место to (в общем порядке ranked). Слово остаётся среди слов с тем же числом
+## голосов: ниже слов, у которых голосов меньше, не опускается (встаёт последним в своей группе), выше слов,
+## у которых больше, не поднимается (встаёт первым в своей группе). Возвращает итоговое место или -1.
+func move_cand(t: int, i: int, to: int) -> int:
+	if phase != "traps" or ready[t] or i < 0 or i >= cands[t].size():
+		return -1
+	var order := ranked(t)
+	order.erase(i)
+	var mine: int = cands[t][i]["votes"].size()
+	var more := 0  # слов с большим числом голосов — они выше
+	var same := 0  # с тем же числом — своя группа
+	for k in order:
+		var n: int = cands[t][k]["votes"].size()
+		if n > mine:
+			more += 1
+		elif n == mine:
+			same += 1
+	to = clampi(to, more, more + same)
+	order.insert(to, i)
+	# сам список переставляем в этом порядке (номер слова «ужаса» — следом)
+	var h: int = horror_cand[t]
+	cands[t] = order.map(func(k): return cands[t][k])
+	if h >= 0:
+		horror_cand[t] = order.find(h)
+	return to
 
 
 ## Ловушки из общего поля: лучшие по голосам слова по строкам.

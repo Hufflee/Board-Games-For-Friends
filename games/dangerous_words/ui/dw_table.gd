@@ -22,6 +22,13 @@ var _cand_edit: LineEdit
 var _cand_draft := ""
 var _cand_box: VBoxContainer
 var _cand_key := ""
+## Перетаскивание слов-ловушек: строки списка стоят вручную (не VBox), чтобы плавно расступаться.
+const ROW_GAP := 3.0
+const SLIDE := 0.18  # соседи расступаются, с
+var _cand_list: Control  # строки предложений
+var _cand_rows: Array = []  # [{row, i, voted}] в порядке списка
+var _drag_row := {}  # {row, i, from, dy, slot} — что тащим
+var _drag_at := Vector2.ZERO  # где курсор (для автопрокрутки списка у края)
 var _last_tick := -1
 
 
@@ -341,7 +348,7 @@ func _timer_row(col: VBoxContainer) -> void:
 
 
 ## Ловушки: видим слово соперника; команда предлагает слова в общее поле и голосует.
-## В ловушки попадают слова с наибольшим числом голосов. Голос — кружок цвета игрока.
+## В ловушки попадают слова с наибольшим числом голосов (при равенстве — какое выше в списке). Голос — кружок цвета игрока.
 func _build_traps(col: VBoxContainer) -> void:
 	var me := _team()
 	var victim := 1 - me
@@ -393,6 +400,7 @@ func _build_traps(col: VBoxContainer) -> void:
 	var done := DWStyle.button("Изменить" if ready or my_vote else "Готово — ловушки расставлены", DWStyle.BODY)
 	if not ready and not my_vote:
 		done.theme_type_variation = "SelectedButton"
+		DWStyle.ACCENT_FX.sheen(done)
 	done.tooltip_text = "Команда готова, когда нажмут все её игроки"
 	done.pressed.connect(func(): _send("dw_ready", {"on": not (ready or my_vote)}))
 	act.add_child(done)
@@ -427,7 +435,7 @@ func _refresh_cands() -> void:
 	var me := _team()
 	var list: Array = _v["cands"][me] if me >= 0 else []
 	var key := str(list) + str(_v["horror_cand"]) + str(_v["ready"])
-	if key == _cand_key:
+	if key == _cand_key or not _drag_row.is_empty():
 		return
 	_cand_key = key
 	DWStyle.clear(_cand_box)
@@ -435,7 +443,7 @@ func _refresh_cands() -> void:
 	var ready: bool = _v["ready"][me]
 	var horror_on: bool = _v["active_curses"][1 - me].has("horror")
 	var my_seat := _vote_seat()
-	# порядок как в итоговом списке: больше голосов — выше
+	# порядок как в итоговом списке: больше голосов — выше; при равенстве — как расставили перетаскиванием
 	var order := range(list.size())
 	order.sort_custom(func(a, b):
 		var va: int = list[a]["votes"].size()
@@ -443,37 +451,58 @@ func _refresh_cands() -> void:
 		return va > vb or (va == vb and a < b))
 	if list.is_empty():
 		_cand_box.add_child(_hint("Пока пусто — предложите первое слово!", DWStyle.MUTED, DWStyle.CAP))
+	elif not ready:
+		_cand_box.add_child(_hint("Слова с равным числом голосов можно перетащить мышью: выше — важнее", DWStyle.MUTED, DWStyle.CAP))
+	_cand_list = Control.new()
+	_cand_list.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_cand_list.mouse_filter = Control.MOUSE_FILTER_PASS
+	_cand_box.add_child(_cand_list)
+	_cand_list.resized.connect(func(): _layout_cands(-1, false))
+	_cand_rows = []
 	for rank in order.size():
 		var i: int = order[rank]
 		var c: Dictionary = list[i]
 		var chosen := rank < need
-		var row := DWStyle.hbox(8)
-		row.add_child(DWStyle.label("✔" if chosen else "·", DWStyle.BODY, DWStyle.SLIME if chosen else DWStyle.MUTED))
+		var row := PanelContainer.new()
+		row.add_theme_stylebox_override("panel", _row_style(false))
+		var line := DWStyle.hbox(8)
+		row.add_child(line)
+		if not ready:
+			# тащить можно за всю строку, кроме кнопок (голос, удалить, «ужас» — они ловят клик сами); «⋮⋮» — подсказка
+			line.add_child(DWStyle.label("⋮⋮", DWStyle.BODY, DWStyle.MUTED))
+			row.mouse_filter = Control.MOUSE_FILTER_STOP
+			row.mouse_default_cursor_shape = Control.CURSOR_DRAG
+			row.tooltip_text = "Потяните, чтобы поменять порядок"
+			var ri := rank
+			row.gui_input.connect(func(e: InputEvent):
+				if e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT and e.pressed:
+					_start_cand_drag(ri, e.global_position))
+		line.add_child(DWStyle.label("✔" if chosen else "·", DWStyle.BODY, DWStyle.SLIME if chosen else DWStyle.MUTED))
 		var w := DWStyle.label(str(c["w"]), DWStyle.BODY, DWStyle.TEXT if chosen else DWStyle.MUTED, HORIZONTAL_ALIGNMENT_LEFT, chosen)
 		w.custom_minimum_size.x = 170
-		row.add_child(w)
+		line.add_child(w)
 		var dots := DWStyle.hbox(2)
 		dots.custom_minimum_size.x = 120
-		for s in c["votes"]:
+		for sv in c["votes"]:
 			var d := TextureRect.new()
-			d.texture = PlayerTag.dot(Net.color_of(int(_v["players"][s].get("color", 0))), 18)
+			d.texture = PlayerTag.dot(Net.color_of(int(_v["players"][sv].get("color", 0))), 18)
 			d.stretch_mode = TextureRect.STRETCH_KEEP_CENTERED
 			d.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-			d.tooltip_text = _name(s)
+			d.tooltip_text = _name(sv)
 			d.mouse_filter = Control.MOUSE_FILTER_PASS
 			dots.add_child(d)
-		row.add_child(dots)
+		line.add_child(dots)
 		if not ready:
 			var mine: bool = c["votes"].has(my_seat)
 			var vb := DWStyle.button("− голос" if mine else "+ голос", DWStyle.CAP)
 			var ii: int = i
 			vb.pressed.connect(func(): _send("dw_vote", {"i": ii}))
-			row.add_child(vb)
+			line.add_child(vb)
 			if int(c["by"]) == my_seat:
 				var del := DWStyle.button("×", DWStyle.CAP)
 				del.tooltip_text = "Убрать своё предложение"
 				del.pressed.connect(func(): _send("dw_cand_del", {"i": ii}))
-				row.add_child(del)
+				line.add_child(del)
 		if horror_on:
 			var hb := CheckBox.new()
 			hb.text = "ужас"
@@ -484,8 +513,165 @@ func _refresh_cands() -> void:
 			hb.toggled.connect(func(on):
 				if on:
 					_send("dw_horror", {"i": hi}))
-			row.add_child(hb)
-		_cand_box.add_child(row)
+			line.add_child(hb)
+		_cand_list.add_child(row)
+		_cand_rows.append({"row": row, "i": i, "votes": (c["votes"] as Array).size()})
+	_layout_cands.call_deferred(-1, false)
+
+
+## Строка списка: обычная — едва заметная подложка; поднятая — светлее, с мягкой тенью снизу.
+func _row_style(lifted: bool) -> StyleBoxFlat:
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(DWStyle.PANEL_2, 0.98) if lifted else Color(1, 1, 1, 0.03)
+	sb.set_corner_radius_all(8)
+	sb.content_margin_left = 8
+	sb.content_margin_right = 8
+	sb.content_margin_top = 2
+	sb.content_margin_bottom = 2
+	if lifted:
+		sb.border_color = Color(DWStyle.SLIME, 0.35)
+		sb.set_border_width_all(1)
+		sb.shadow_color = Color(0, 0, 0, 0.45)
+		sb.shadow_size = 12
+		sb.shadow_offset = Vector2(0, 5)
+	return sb
+
+
+## Расставить строки: gap — номер места, где сейчас «дыра» под тащимую строку (-1 — без дыры).
+func _layout_cands(gap: int, animated: bool) -> void:
+	if _cand_list == null or not is_instance_valid(_cand_list):
+		return
+	var y := 0.0
+	var slot := 0
+	var dragged: Control = _drag_row.get("row") if not _drag_row.is_empty() else null
+	var gap_h: float = dragged.size.y + ROW_GAP if dragged else 0.0
+	var total := 0.0
+	for r in _cand_rows:
+		var row: Control = r["row"]
+		row.size = Vector2(_cand_list.size.x, row.get_combined_minimum_size().y)
+		total += row.size.y + ROW_GAP
+		if row == dragged:
+			continue
+		if slot == gap:
+			y += gap_h
+		var target := Vector2(0, y)
+		if animated:
+			row.create_tween().tween_property(row, "position", target, SLIDE).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		else:
+			row.position = target
+		y += row.size.y + ROW_GAP
+		slot += 1
+	_cand_list.custom_minimum_size.y = maxf(0.0, total - ROW_GAP)
+
+
+func _start_cand_drag(rank: int, at: Vector2) -> void:
+	if not _drag_row.is_empty() or rank >= _cand_rows.size():
+		return
+	var row: Control = _cand_rows[rank]["row"]
+	_drag_row = {"row": row, "i": _cand_rows[rank]["i"], "votes": _cand_rows[rank]["votes"], "from": rank, "slot": rank,
+		"dy": at.y - row.global_position.y}
+	row.z_index = 10
+	row.add_theme_stylebox_override("panel", _row_style(true))
+	row.pivot_offset = row.size * 0.5
+	row.create_tween().tween_property(row, "scale", Vector2(1.02, 1.02), 0.12).set_trans(Tween.TRANS_SINE)
+	_drag_at = at
+	Sfx.play("card_slide", -10)
+	_layout_cands(rank, false)
+
+
+## Тащим: строка едет за курсором, соседи расступаются там, куда она встанет.
+func _drag_cand_motion(at: Vector2) -> void:
+	var row: Control = _drag_row["row"]
+	var y: float = at.y - float(_drag_row["dy"]) - _cand_list.global_position.y
+	y = clampf(y, -row.size.y * 0.5, _cand_list.size.y - row.size.y * 0.5)
+	row.position = Vector2(0, y)
+	# место — сколько других строк (в раскладке без дыры) выше середины тащимой; не по анимации соседей — без дрожи
+	var mid := y + row.size.y * 0.5
+	var slot := 0
+	var acc := 0.0
+	for r in _cand_rows:
+		var other: Control = r["row"]
+		if other == row:
+			continue
+		if acc + other.size.y * 0.5 < mid:
+			slot += 1
+		acc += other.size.y + ROW_GAP
+	if slot != int(_drag_row["slot"]):
+		_drag_row["slot"] = slot
+		_layout_cands(slot, true)
+
+
+## Отпустили: слово остаётся среди слов с тем же числом голосов — ниже тех, у кого голосов меньше,
+## не опустится (встанет последним в своей группе), выше тех, у кого больше, не поднимется (встанет первым).
+## Строка садится на место, хост узнаёт порядок (DWRules.move_cand — то же правило).
+func _drop_cand() -> void:
+	var row: Control = _drag_row["row"]
+	var mine: int = _drag_row["votes"]
+	var more := 0
+	var same := 0
+	for r in _cand_rows:
+		if r["row"] == row:
+			continue
+		if int(r["votes"]) > mine:
+			more += 1
+		elif int(r["votes"]) == mine:
+			same += 1
+	var to: int = clampi(int(_drag_row["slot"]), more, more + same)
+	var i: int = _drag_row["i"]
+	var moved := to != int(_drag_row["from"])
+	# новый порядок строк — сразу у себя, чтобы всё плавно встало
+	var rec: Dictionary = _cand_rows[int(_drag_row["from"])]
+	_cand_rows.remove_at(int(_drag_row["from"]))
+	_cand_rows.insert(to, rec)
+	_drag_row = {}
+	_layout_cands(-1, true)
+	var y := 0.0
+	for r in _cand_rows:
+		if r["row"] == row:
+			break
+		y += (r["row"] as Control).size.y + ROW_GAP
+	var tw := row.create_tween().set_parallel()
+	tw.tween_property(row, "position", Vector2(0, y), 0.22).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	tw.tween_property(row, "scale", Vector2.ONE, 0.22).set_trans(Tween.TRANS_SINE)
+	tw.chain().tween_callback(func():
+		if is_instance_valid(row):
+			row.z_index = 0
+			row.add_theme_stylebox_override("panel", _row_style(false)))
+	Sfx.play("card_place", -8)
+	if moved:
+		_send("dw_move", {"i": i, "to": to})
+	_cand_key = ""  # пришёл новый порядок, пока тащили, — перестроим по нему
+
+
+## Строку подвели к верхнему или нижнему краю окна списка — список сам прокручивается.
+func _process(delta: float) -> void:
+	if _drag_row.is_empty() or _cand_list == null:
+		return
+	var scroll := _cand_list.get_parent().get_parent() as ScrollContainer
+	if scroll == null:
+		return
+	var r := scroll.get_global_rect()
+	var edge := 28.0
+	var v := 0.0
+	if _drag_at.y < r.position.y + edge:
+		v = -1.0 + (_drag_at.y - r.position.y) / edge
+	elif _drag_at.y > r.end.y - edge:
+		v = 1.0 - (r.end.y - _drag_at.y) / edge
+	if v != 0.0:
+		scroll.scroll_vertical += int(clampf(v, -1.5, 1.5) * 420.0 * delta)
+		_drag_cand_motion(_drag_at)
+
+
+func _input(e: InputEvent) -> void:
+	if _drag_row.is_empty():
+		return
+	if e is InputEventMouseMotion:
+		_drag_at = (e as InputEventMouseMotion).global_position
+		_drag_cand_motion(_drag_at)
+		get_viewport().set_input_as_handled()
+	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT and not e.pressed:
+		_drop_cand()
+		get_viewport().set_input_as_handled()
 
 
 ## За кого голосуем: я (в тесте на одном компьютере — первый игрок выбранной команды).
@@ -540,7 +726,7 @@ func _build_turn(col: VBoxContainer) -> void:
 		hidden.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		hidden.add_child(_big_word("• • • • • •", DWStyle.MUTED, DWStyle.H1))
 		col.add_child(hidden)
-		var go := DWStyle.button("Начать объяснение", DWStyle.BODY, 280)
+		var go := DWStyle.primary("Начать объяснение", DWStyle.BODY, 280)
 		go.theme_type_variation = "SelectedButton"
 		go.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		go.pressed.connect(func():
@@ -552,7 +738,7 @@ func _build_turn(col: VBoxContainer) -> void:
 		col.add_child(_hint("Ваше слово:", DWStyle.MUTED))
 		col.add_child(_big_word(_v["secret"][t], DWStyle.PUMPKIN, DWStyle.H1))
 		col.add_child(_hint("Объясняйте голосом. Нельзя однокоренные, примеры, имена собственные, «звучит как…».", DWStyle.MUTED, DWStyle.CAP))
-		var ok := DWStyle.button("Отгадали!", DWStyle.H1, 300)
+		var ok := DWStyle.primary("Отгадали!", DWStyle.H1, 300)
 		ok.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		ok.add_theme_color_override("font_color", DWStyle.SLIME)
 		ok.disabled = reading
@@ -658,7 +844,7 @@ func _build_game_over(col: VBoxContainer) -> void:
 	var row := DWStyle.hbox(12)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	if Net.is_host():
-		var again := DWStyle.button("Новая партия", DWStyle.BODY, 190)
+		var again := DWStyle.primary("Новая партия", DWStyle.BODY, 190)
 		again.pressed.connect(Net.end_game)
 		row.add_child(again)
 		var back := DWStyle.button("К выбору игры" if Net.is_party() else "В меню", DWStyle.BODY, 190)
@@ -675,7 +861,7 @@ func _next_button() -> Control:
 	var row := DWStyle.hbox(10)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	var me_waiting: bool = _v.get("waiting", []).has(_name(_me)) or _test()
-	var b := DWStyle.button("Дальше" if me_waiting else "Ждём остальных…", DWStyle.BODY, 200)
+	var b := DWStyle.primary("Дальше" if me_waiting else "Ждём остальных…", DWStyle.BODY, 200)
 	b.disabled = not me_waiting
 	b.pressed.connect(func(): Net.send_action("next"))
 	row.add_child(b)

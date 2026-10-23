@@ -23,6 +23,7 @@ var _left: VBoxContainer
 var _make_button: Callable
 var _chat_btn: Button
 var _pause_btn: Button
+var _pause_icon: PlayPauseIcon
 var _spec_btn: Button
 var _invite_btn: Button
 
@@ -99,7 +100,12 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 		LeaveGuard.ask(t._spec_btn, "Стать зрителем?", "За ваше место будет играть бот. Вы увидите стол как обычный игрок; вернуть за стол может хост через «Паузу».", "Смотреть", Net.become_spectator, "Остаться в игре"))
 	right.add_child(t._spec_btn)
 	t._pause_btn = t._btn("Пауза", "Поставить игру на паузу (только хост). Здесь же — посадить друзей за стол и пригласить новых.")
-	t._pause_btn.pressed.connect(func(): Net.set_paused(true))
+	var pic := PlayPauseIcon.attach(t._pause_btn, Net.paused)
+	t._pause_icon = pic
+	t._pause_btn.pressed.connect(func():
+		# «‖» перетекает в «▶» — и только потом пауза (иначе окно паузы закроет анимацию)
+		var to_play := not Net.paused
+		pic.morph(to_play, func(): Net.set_paused(to_play)))
 	right.add_child(t._pause_btn)
 	var sep := VSeparator.new()
 	sep.modulate = Color(text, 0.3)
@@ -183,6 +189,8 @@ func _process(_d: float) -> void:
 	var playing := Net.in_session() and not Net.view.is_empty()
 	var spectator := bool(Net.view.get("spectator", false))
 	_pause_btn.visible = playing and Net.is_host()
+	_pause_icon.sync_state(Net.paused)
+	_pause_btn.text = "Продолжить" if Net.paused else "Пауза"
 	_invite_btn.visible = Net.is_party()
 	_spec_btn.visible = playing and not spectator and Net.can_spectate()
 	var unread := chat.unread() if chat else 0

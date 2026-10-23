@@ -8,6 +8,8 @@ var checks := 0
 func _init() -> void:
 	test_data()
 	test_setup()
+	test_gloomier_deal()
+	test_gloomier_offers()
 	test_scores()
 	test_plays()
 	test_expansions()
@@ -355,3 +357,56 @@ func test_random_games() -> void:
 			check(r.winners.size() >= 1 and r.finals.size() == n, "партия %d: есть победитель" % g)
 	DECK = 88
 	check(ended == 100, "все случайные партии закончились (%d из 100)" % ended)
+
+
+## Игровые карты не раздаются, пока хотя бы одна семья ещё набирается.
+func test_gloomier_deal() -> void:
+	for n in range(2, 6):
+		var r := make(n, 310 + n, ["gm"])
+		var deck_size := r.deck.size()
+		while r.phase == "draft":
+			check(r.hands.all(func(h): return h.is_empty()), "Gloomier: до завершения выбора руки пусты")
+			check(r.deck.size() == deck_size, "Gloomier: до завершения выбора колода цела")
+			r.auto_draft()
+		check(r.phase == "play", "Gloomier: после набора семей начинается игра")
+		check(r.hands.all(func(h): return h.size() == GLRules.HAND), "Gloomier: каждому выдано по пять карт")
+		check(r.deck.size() == deck_size - n * GLRules.HAND, "Gloomier: карты выданы ровно один раз")
+		for seat in n:
+			check(mine(r, seat).size() == GLRules.DRAFT_EACH, "Gloomier: в семье четыре персонажа")
+
+
+## Предложение стабильно, проверяется хостом, невыбранные остаются доступны.
+func test_gloomier_offers() -> void:
+	var returned_later := false
+	for seed_value in range(1, 21):
+		var r := make(5, seed_value, ["gm"])
+		var returned := []
+		while r.phase == "draft":
+			var seat := int(r.draft_order[0])
+			var offered := r.draft_options.duplicate()
+			check(offered.size() == mini(3, r.draft_left().size()), "Gloomier: до трёх кандидатов, в конце остаток колоды")
+			var unique := {}
+			for id in offered:
+				unique[id] = true
+			check(offered.size() == unique.size(), "Gloomier: кандидаты не повторяются")
+			var rng_state := r.rng.state
+			check(r.get_view(seat)["draft_options"] == offered and r.get_view(seat)["draft_options"] == offered, "Gloomier: просмотр не меняет предложение")
+			check(r.rng.state == rng_state, "Gloomier: просмотр не расходует случайность")
+			check(r.get_view((seat + 1) % 5)["draft_options"].is_empty(), "Gloomier: чужое предложение скрыто")
+			check(r.get_view(0, true)["draft_options"] == offered, "Gloomier: предложение доступно для игры на одном экране")
+			check(not r.draft((seat + 1) % 5, offered[0]), "Gloomier: вне очереди выбрать нельзя")
+			var outside := r.draft_left().filter(func(id): return not id in offered)
+			if not outside.is_empty():
+				check(not r.draft(seat, outside[0]), "Gloomier: нельзя выбрать персонажа вне предложения")
+			check(r.draft_options == offered, "Gloomier: неверный выбор не меняет кандидатов")
+			for id in offered:
+				returned_later = returned_later or id in returned
+			var selected := int(offered[0])
+			var unpicked := offered.slice(1)
+			check(r.draft(seat, selected), "Gloomier: предложенный персонаж выбран")
+			check(not selected in r.draft_left(), "Gloomier: выбранный персонаж убран из колоды")
+			check(unpicked.all(func(id): return id in r.draft_left()), "Gloomier: невыбранные возвращаются в колоду")
+			returned.append_array(unpicked)
+		check(r.draft_options.is_empty(), "Gloomier: после набора предложение очищено")
+		check(r.chars.filter(func(ch): return ch["kind"] == "char").size() == 20, "Gloomier: пять семей без потери персонажей")
+	check(returned_later, "Gloomier: невыбранные действительно выпадают следующим игрокам")

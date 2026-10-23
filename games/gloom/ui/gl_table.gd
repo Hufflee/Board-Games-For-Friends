@@ -269,6 +269,8 @@ func _family_color(s: int) -> Color:
 func _build_board() -> void:
 	GLStyle.clear(_board)
 	_stacks.clear()
+	if _v.get("phase", "") == "draft":
+		return
 	var opps := _opponents()
 	if _scale_for != opps.size():
 		_scale_for = opps.size()
@@ -471,6 +473,17 @@ func _my_box() -> Control:
 func _layout() -> void:
 	if _v.is_empty():
 		return
+	var drafting: bool = _v.get("phase", "") == "draft"
+	_board.visible = not drafting
+	for pile in [_deck, _deck_label, _discard, _discard_bg, _discard_label]:
+		pile.visible = not drafting
+	_log_panel.visible = not drafting
+	if drafting:
+		_panel.reset_size()
+		_panel.position = Vector2((size.x - _panel.size.x) * 0.5, TopBar.HEIGHT + maxf(16.0, (size.y - TopBar.HEIGHT - _panel.size.y) * 0.5))
+		_layout_hand()
+		return
+	_discard_bg.visible = not _v["discard"].is_empty()
 	var opps := _opponents()
 	var boxes := {}
 	for b in _board.get_children():
@@ -541,13 +554,15 @@ func _layout() -> void:
 	_discard_bg.position = _discard.position
 	_discard_label.position = Vector2(30 + cw, mid_top + ch + 2)
 	_discard_label.size = Vector2(cw, 36)
+	# Во время набора семьи журнал пуст и не должен отнимать место у выбора персонажей.
+	_log_panel.visible = _v.get("phase", "") != "draft"
 	# журнал — справа посередине
 	_log_panel.size = Vector2(minf(330, size.x * 0.26), maxf(90, mid_bottom - mid_top))
 	_log_panel.position = Vector2(size.x - _log_panel.size.x - 16, mid_top)
 	# панель действия — между ними
 	_panel.reset_size()
 	var px0 := 40 + cw * 2
-	var px1 := _log_panel.position.x - 10
+	var px1 := _log_panel.position.x - 10 if _log_panel.visible else size.x - 16.0
 	var py := mid_top + maxf(0, (mid_bottom - mid_top - _panel.size.y) * 0.5)
 	py = minf(py, mid_bottom - _panel.size.y)  # не залезать на свою семью
 	_panel.position = Vector2(px0 + maxf(0, (px1 - px0 - _panel.size.x) * 0.5), maxf(TopBar.HEIGHT + 8.0, py))
@@ -878,17 +893,17 @@ func _build_draft(col: VBoxContainer, who: String) -> void:
 	if s != _actor():
 		col.add_child(_line("%s выбирает персонажа…" % _name(s), true))
 		return
-	col.add_child(_line(who + "Выберите персонажа в свою семью (всего по 4).", true))
-	var flow := HFlowContainer.new()
-	flow.custom_minimum_size.x = 640
-	flow.add_theme_constant_override("h_separation", 6)
-	flow.add_theme_constant_override("v_separation", 6)
-	for id in _v.get("draft_left", []):
+	var picked: int = _v["chars"].filter(func(ch): return ch["kind"] == "char" and int(ch["owner"]) == s).size()
+	col.add_child(_line(who + "Выберите персонажа · %d из 4" % (picked + 1), true))
+	col.add_child(_line("Остальные вернутся в колоду и могут выпасть другим игрокам.", false))
+	var flow := GLStyle.hbox(16)
+	flow.alignment = BoxContainer.ALIGNMENT_CENTER
+	for id in _v.get("draft_options", []):
 		var tr := TextureRect.new()
 		tr.texture = GLStyle.tex("ch%d" % int(id))
 		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		tr.custom_minimum_size = Vector2(56, 80)
+		tr.custom_minimum_size = Vector2(112, 161)
 		tr.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		tr.tooltip_text = GLData.char_name(int(id))
 		var cid := int(id)
@@ -897,8 +912,15 @@ func _build_draft(col: VBoxContainer, who: String) -> void:
 				_send("gl_draft", {"id": cid}))
 		tr.mouse_entered.connect(func(): _show_preview(tr, func(ci: CanvasItem, r: Rect2): ci.draw_texture_rect(GLStyle.tex("ch%d" % cid), r, false)))
 		tr.mouse_exited.connect(func(): _preview.visible = false)
-		flow.add_child(tr)
+		var option := GLStyle.vbox(4)
+		option.add_child(tr)
+		var name_label := GLStyle.label(GLData.char_name(cid), GLStyle.CAP, GLStyle.INK, HORIZONTAL_ALIGNMENT_CENTER)
+		name_label.custom_minimum_size.x = 112
+		name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		option.add_child(name_label)
+		flow.add_child(option)
 	col.add_child(flow)
+	col.add_child(_line("Игровые карты будут розданы, когда все соберут семьи.", false))
 
 
 func _build_turn(col: VBoxContainer, who: String) -> void:

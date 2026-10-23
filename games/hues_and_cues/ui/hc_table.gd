@@ -3,6 +3,7 @@ extends Control
 ## панель действия снизу (выбор цвета / подсказка / ход / итог раунда).
 
 var app: Node
+var play_intro := false  # только начало партии, не обновления состояния
 
 var _v := {}
 var _me := 0
@@ -23,6 +24,7 @@ var _auto_label: Label
 var _auto_deadline := 0
 var _revealed_round := -1
 var _celebrated := false
+var _distorted_round := -1
 
 
 func _ready() -> void:
@@ -30,6 +32,8 @@ func _ready() -> void:
 	add_child(HCBackdrop.new(true))
 
 	_board = HCBoard.new()
+	if play_intro and not Net.view.get("distorted", false):
+		_board.play_reveal()
 	_board.cell_clicked.connect(_on_cell)
 	_board.cell_hovered.connect(func(c): _hover_label.text = HCData.coord(c) if c >= 0 else "")
 	add_child(_board)
@@ -89,6 +93,13 @@ func _ready() -> void:
 
 	_action = HCStyle.panel(14)
 	add_child(_action)
+	if play_intro and not Net.view.get("distorted", false):
+		# панель хода (у ведущего — выбор из четырёх оттенков) — после вступления, вместе с затемнением поля
+		_action.visible = false
+		_board.reveal_finished.connect(func():
+			_action.visible = true
+			_action.modulate.a = 0.0
+			_action.create_tween().tween_property(_action, "modulate:a", 1.0, HCBoard.DIM_IN).set_trans(Tween.TRANS_SINE))
 	_hover_label = HCStyle.label("", HCStyle.CAP, HCStyle.MUTED, HORIZONTAL_ALIGNMENT_RIGHT, "bold")
 	add_child(_hover_label)
 
@@ -166,6 +177,8 @@ func _on_state(v: Dictionary) -> void:
 	if _top_dark != HCStyle.dark:
 		_tint_top()
 	_update_board(phase)
+	if v.get("distorted", false):
+		_round_label.text += " · Crazy colors"
 	_update_cues()
 	_update_players()
 	_update_history()
@@ -179,6 +192,15 @@ func _update_board(phase: String) -> void:
 	_board.set_pieces(_v["pieces"])
 	_board.card = _v["card"]
 	_board.free_pick = _v["free_pick"]
+	var altered: bool = _v.get("distorted", false)
+	_board.distorted = altered
+	if altered:
+		var giver_view: bool = (_hotseat() and phase in ["prepare", "pick", "cue1", "cue2"]) or (not _hotseat() and _me == int(_v["giver"]))
+		var filter_id := int(_v.get("round_filter", -1))
+		if _distorted_round != int(_v["round_no"]):
+			_distorted_round = int(_v["round_no"])
+			_board.play_distorted_round(_v["color_order"], filter_id, int(_v["board_seed"]), float(_v["spin_start"]), float(_v["spin_turns"]), giver_view)
+		_board.set_filter_view(filter_id, giver_view, phase != "prepare")
 	var seat_for_color: int = _v["guesser"] if _hotseat() and int(_v["guesser"]) >= 0 else _me
 	_board.my_color = HCStyle.piece_color(seat_for_color)
 	if phase == "pick" and _am_giver():
@@ -287,7 +309,7 @@ func _update_history() -> void:
 		var row := HCStyle.hbox(8)
 		var t: int = e["target"]
 		if t >= 0:
-			row.add_child(HCStyle.swatch(HCData.color(t), 20, 5))
+			row.add_child(HCStyle.swatch(HCData.color(int(e.get("color", t))), 20, 5))
 		var txt := HCStyle.label(" · ".join(e["cues"]) if not e["cues"].is_empty() else "—", HCStyle.CAP, HCStyle.INK)
 		txt.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		txt.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -308,6 +330,8 @@ func _update_action() -> void:
 	_action.add_child(row)
 	var giver: int = _v["giver"]
 	match _v["phase"]:
+		"prepare":
+			row.add_child(_wait_text("Цвета набирают скорость · дождитесь остановки…"))
 		"pick":
 			if _am_giver():
 				var col := HCStyle.vbox(2)
@@ -355,7 +379,7 @@ func _card_button(cell: int) -> Button:
 	var b := Button.new()
 	b.custom_minimum_size = Vector2(76, 70)
 	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	var col := HCData.color(cell)
+	var col := _board.base_color(cell)
 	b.add_theme_stylebox_override("normal", HCStyle.box(col, 12, Color.WHITE, 3, HCStyle.SHADOW, 8))
 	b.add_theme_stylebox_override("hover", HCStyle.box(col.lightened(0.06), 12, HCStyle.INK, 3, Color(0, 0, 0, 0.2), 12))
 	b.add_theme_stylebox_override("pressed", HCStyle.box(col, 12, HCStyle.INK, 3))
@@ -373,7 +397,7 @@ func _card_button(cell: int) -> Button:
 func _cue_form(row: HBoxContainer, second: bool) -> void:
 	var t: int = _v["target"]
 	if t >= 0:
-		var sw := HCStyle.swatch(HCData.color(t), 56, 12)
+		var sw := HCStyle.swatch(_board.base_color(t), 56, 12)
 		row.add_child(sw)
 	var col := HCStyle.vbox(4)
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -423,7 +447,7 @@ func _reveal_panel(row: HBoxContainer) -> void:
 	if r.get("skipped", false) or t < 0:
 		row.add_child(_wait_text("Ведущий вылетел — раунд пропущен"))
 	else:
-		row.add_child(HCStyle.swatch(HCData.color(t), 56, 12))
+		row.add_child(HCStyle.swatch(_board.base_color(t), 56, 12))
 		var col := HCStyle.vbox(2)
 		col.add_child(HCStyle.label("Загадан цвет %s" % HCData.coord(t), HCStyle.BODY, HCStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "bold"))
 		var parts := []
@@ -478,6 +502,8 @@ func _game_over_panel(row: HBoxContainer) -> void:
 
 
 func _on_cell(cell: int) -> void:
+	if _board._reveal_active:
+		return
 	match _v.get("phase", ""):
 		"pick":
 			Net.send_action("hc_pick", cell)
@@ -486,6 +512,8 @@ func _on_cell(cell: int) -> void:
 
 
 func _process(_delta: float) -> void:
+	if _v.get("distorted", false):
+		_action.visible = not _board._reveal_active or _v.get("phase", "") == "prepare"
 	if _auto_label != null and is_instance_valid(_auto_label):
 		var left := maxi(0, (_auto_deadline - Time.get_ticks_msec()) / 1000)
 		var waiting: Array = _v.get("waiting", [])

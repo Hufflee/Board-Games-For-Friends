@@ -893,7 +893,7 @@ func _next_row() -> HBoxContainer:
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	var waiting: Array = _v["waiting"]
 	var me_waiting := waiting.has(_v["players"][_me]["name"])
-	var btn := K12UI.button("Далее" if me_waiting else "Ждём остальных…", K12UI.CAP, 170)
+	var btn := K12UI.primary("Далее" if me_waiting else "Ждём остальных…", K12UI.CAP, 170)
 	btn.disabled = not me_waiting
 	btn.pressed.connect(func(): Net.send_action("next"))
 	row.add_child(btn)
@@ -989,7 +989,7 @@ func _update_overlay() -> void:
 		var row := K12UI.hbox(12)
 		row.alignment = BoxContainer.ALIGNMENT_CENTER
 		if Net.is_host():
-			var again := K12UI.button("Новая партия", K12UI.BODY, 200)
+			var again := K12UI.primary("Новая партия", K12UI.BODY, 200)
 			again.pressed.connect(Net.end_game)
 			row.add_child(again)
 			var back := K12UI.button("К выбору игры" if Net.is_party() else "В меню", K12UI.BODY, 200)

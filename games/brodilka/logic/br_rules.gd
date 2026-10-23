@@ -29,7 +29,9 @@ var phase := "setup"  # roll / prompt / free / game_over
 var turn := 0
 var prompt := {}  # {seat, kind, options:Array, text}
 var last_roll: Array[int] = []
-var last_card := {}  # {deck: gb/tadam/shop, id, side} — для анимации
+var roll_no := 0  # номер броска: стол бросает кубик только на новый номер (а не на каждое обновление)
+var last_card := {}  # {deck: gb/tadam/shop, id, side, no} — для анимации
+var card_no := 0  # номер вытянутой карты: стол показывает карту крупно только на новый номер
 var used: Array[String] = []  # активные карты Лавки, сыгранные в этом ходу
 var winner := -1
 var log: Array = []
@@ -158,6 +160,14 @@ func _push_back(seat: int, n: int) -> void:
 	_move(seat, -absi(n))
 
 
+## Чужая карта переносит игрока на клетку to: назад Якорь не пускает.
+func _pull_to(seat: int, to: int) -> void:
+	if to < pos[seat] and has_shop(seat, "anchor"):
+		_log(seat, "якорь: не сдвинуть назад")
+		return
+	_set_pos(seat, to)
+
+
 ## Ближайший телепорт впереди (клетка) или -1.
 static func tele_ahead(from: int) -> int:
 	for c in range(from + 1, BRBoard.finish()):
@@ -219,7 +229,7 @@ func _do_roll(boost: int) -> void:
 		if b == 1: b = 3
 	var bonus := 1 if has_shop(turn, "magic_die") else 0
 	if mode == "finish":
-		last_roll = [a]
+		_set_roll([a])
 		var v := a + boost + bonus
 		_log(turn, "бросает на финиш-сейфе: %d%s" % [a, (" +%d" % (boost + bonus)) if boost + bonus > 0 else ""])
 		if v >= 6:
@@ -228,9 +238,9 @@ func _do_roll(boost: int) -> void:
 			_end_turn()
 		return
 	if mode == "light" and not has_shop(turn, "fan"):
-		last_roll = [a]
+		_set_roll([a])
 	else:
-		last_roll = [a, b]
+		_set_roll([a, b])
 	_log(turn, "бросает: %s" % " и ".join(PackedStringArray(last_roll.map(func(x): return str(x)))))
 	for t in _tadam_when("roll"):
 		var fx: String = BRData.TADAM[t].fx
@@ -240,11 +250,14 @@ func _do_roll(boost: int) -> void:
 		elif fx == "double_extra" and last_roll.size() == 2 and a == b:
 			extra[turn] += 1
 			_log(turn, "Тадам: дубль — ходит ещё раз")
-	if mode == "grey" or (mode == "light" and has_shop(turn, "fan")):
-		_ask(turn, "die", ["%d" % (a + bonus), "%d" % (b + bonus)], "Выбери кубик" + (" (веер)" if mode == "light" else ""))
-		return
-	var steps := (a + b if mode == "black" else a) + bonus
-	_walk(steps)
+	# куда идти, игрок показывает сам — щелчком по клетке (на серой клетке и с веером — одну из двух)
+	var choices: Array = [a + bonus, b + bonus] if mode == "grey" or (mode == "light" and has_shop(turn, "fan")) else [(a + b if mode == "black" else a) + bonus]
+	if choices.size() == 2 and choices[0] == choices[1]:
+		choices = [choices[0]]
+	var cells := choices.map(func(n): return clampi(pos[turn] + int(n), 0, BRBoard.finish()))
+	_ask(turn, "die", choices.map(func(n): return str(n)),
+		("Выбери кубик: нажми на одну из клеток" + (" (веер)" if mode == "light" else "")) if choices.size() == 2 else "Нажми на клетку, куда пойдёт персонаж",
+		{cells = cells})
 
 
 ## Обычное движение в свой ход: идём, эффект клетки, пассивные карты.
@@ -333,6 +346,12 @@ func _run() -> void:
 		phase = "free" if _rolled else "roll"
 
 
+## Новый бросок кубика (в ход или от клетки/карты): запомнить грани и номер броска.
+func _set_roll(faces: Array) -> void:
+	last_roll.assign(faces)
+	roll_no += 1
+
+
 func _ask(seat: int, kind: String, options: Array, text: String, data: Dictionary = {}) -> void:
 	prompt = {seat = seat, kind = kind, options = options, text = text, data = data}
 	phase = "prompt"
@@ -417,7 +436,7 @@ func _cell_fx(s: int) -> void:
 		"chest_bad":
 			if has_shop(s, "lucky_coin"):
 				var lc := rng.randi_range(1, 6)
-				last_roll = [lc]
+				_set_roll([lc])
 				if lc >= 5:
 					_log(s, "счастливая монетка: %d — «Хорошо» вместо «Плохо»" % lc)
 					_draw_gb(s, true)
@@ -459,7 +478,7 @@ func _cell_fx(s: int) -> void:
 			_queue.push_front({k = "cell", seat = s})
 		"mine":
 			var d := rng.randi_range(1, 6)
-			last_roll = [d]
+			_set_roll([d])
 			if d == 1 and not has_shop(s, "helmet"):
 				skip[s] += 1
 				_log(s, "шахта: 1 — пропустит ход")
@@ -540,7 +559,8 @@ func _draw_gb(s: int, good: bool, drawn: bool = false) -> void:
 	if card < 0:
 		return
 	disc_gb.append(card)
-	last_card = {deck = "gb", id = card, side = "good" if good else "bad", seat = s}
+	card_no += 1
+	last_card = {deck = "gb", id = card, side = "good" if good else "bad", seat = s, no = card_no}
 	var side: Dictionary = BRData.GOODBAD[card].good if good else BRData.GOODBAD[card].bad
 	_log(s, "%s: %s" % ["Хорошо" if good else "Плохо", side.text])
 	if not good and has_shop(s, "shield"):
@@ -675,7 +695,8 @@ func _draw_tadam(s: int, drawn: bool = false) -> void:
 	if tadam[2] >= 0:
 		disc_tadam.append(tadam[2])
 	tadam = [card, tadam[0], tadam[1]]
-	last_card = {deck = "tadam", id = card, seat = s}
+	card_no += 1
+	last_card = {deck = "tadam", id = card, seat = s, no = card_no}
 	_log(s, "ТАДАМ: " + str(BRData.TADAM[card].text))
 
 
@@ -844,7 +865,7 @@ func use_card(seat: int, idx: int, target: int = -1) -> bool:
 		"hook":
 			_set_pos(seat, pos[target])
 		"harpoon":
-			_set_pos(target, pos[seat])
+			_pull_to(target, pos[seat])
 		"grenade":
 			_push_back(target, 6)
 		"sling":
@@ -904,12 +925,12 @@ func use_card(seat: int, idx: int, target: int = -1) -> bool:
 			_log(seat, "отлипает от жвачки и встаёт на финиш-сейф")
 		"dice_bag":
 			var dd := rng.randi_range(1, 6)
-			last_roll = [dd]
+			_set_roll([dd])
 			_gain(seat, dd)
 			_log(seat, "мешок кубиков: +%d" % dd)
 		"magnet_big":
 			for o in card_targets(seat, id, pos, stuck, shop, coins):
-				_set_pos(o, pos[seat])
+				_pull_to(o, pos[seat])
 	if prompt.is_empty():
 		phase = "resolve"
 	_queue.push_back({k = "free"})
@@ -999,7 +1020,7 @@ func _resolve(p: Dictionary, ch: int) -> void:
 				"target_double": extra[o] += 1
 				"target_push":
 					var dd := rng.randi_range(1, 6)
-					last_roll = [dd]
+					_set_roll([dd])
 					_move(o, dd)
 					_log(o, "сдвинут вперёд на %d" % dd)
 				"both_skip":
@@ -1103,7 +1124,7 @@ func get_view(seat: int) -> Dictionary:
 			skip = skip[s], stuck = stuck[s]})
 	return {
 		game = "brodilka", seat = seat, players = pl, turn = turn, phase = phase, winner = winner,
-		tadam = tadam.duplicate(), traps = traps.keys(), last_roll = last_roll.duplicate(), last_card = last_card.duplicate(),
+		tadam = tadam.duplicate(), traps = traps.keys(), last_roll = last_roll.duplicate(), roll_no = roll_no, last_card = last_card.duplicate(),
 		dice = dice_count(turn) if phase != "game_over" else "",
 		prompt = prompt.duplicate(true),  # тайн в игре нет — выбор видят все, отвечает prompt.seat
 		waiting = int(prompt.seat) if not prompt.is_empty() else -1,

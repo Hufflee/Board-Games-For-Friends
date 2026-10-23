@@ -47,7 +47,7 @@ var lobby_id := 0
 var members := {}  # peer_id -> {name}
 var join_order: Array[int] = []
 var bots := 0
-var settings := {"deck_mode": "first", "manual": [], "promo": "", "tournament": true, "reveal_speed": "normal", "perudo_dice": 5, "perudo_maputo": true, "wl_mode": "teams", "wl_local_teams": [], "dw_rooms": "3-7", "dw_monster": "random", "dw_hard": false, "dw_curses": true, "dw_time": 60, "hc_laps": 0, "hc_free": false, "rsb_speed": "normal", "ws_mode": "teams", "ws_cards": "standard", "ws_names": true, "ws_time": 60, "turn_time": 60, "tt_expert": false}
+var settings := {"deck_mode": "first", "manual": [], "promo": "", "tournament": true, "reveal_speed": "normal", "perudo_dice": 5, "perudo_maputo": true, "wl_mode": "teams", "wl_local_teams": [], "dw_rooms": "3-7", "dw_monster": "random", "dw_hard": false, "dw_curses": true, "dw_time": 60, "hc_laps": 0, "hc_free": false, "hc_mode": "classic", "rsb_speed": "normal", "ws_mode": "teams", "ws_cards": "standard", "ws_names": true, "ws_time": 60, "turn_time": 60, "tt_expert": false}
 var disconnected := {}  # место -> имя вылетевшего игрока (может вернуться)
 var chat_log: Array = []
 var last_join := {}  # куда подключались в последний раз — для «Вернуться в партию»
@@ -657,7 +657,7 @@ func start_game() -> String:
 		wavelength = null
 		dwords = null
 		hues = HCRules.new()
-		hues.new_game(players, int(settings.get("hc_laps", 0)), bool(settings.get("hc_free", false)), 0, players.size() == 2)
+		hues.new_game(players, int(settings.get("hc_laps", 0)), bool(settings.get("hc_free", false)), 0, players.size() == 2, str(settings.get("hc_mode", "classic")) == "distorted")
 		auto_advance_time = 40.0
 	elif party_game == "dangerous_words":
 		var err := _start_dw(players)
@@ -1513,7 +1513,7 @@ func _dw_action(peer: int, seat: int, kind: String, arg) -> bool:
 	match kind:
 		"dw_traps":
 			return d.set_traps(team, a.get("lines", []))
-		"dw_cand", "dw_cand_del", "dw_vote":
+		"dw_cand", "dw_cand_del", "dw_vote", "dw_move":
 			if int(d.players[seat]["team"]) != team:
 				var m: Array = d.team_members(team)
 				seat = m[0] if not m.is_empty() else seat  # тест на одном компьютере
@@ -1522,6 +1522,8 @@ func _dw_action(peer: int, seat: int, kind: String, arg) -> bool:
 					return d.add_cand(team, seat, str(a.get("word", "")))
 				"dw_cand_del":
 					return d.del_cand(team, seat, int(a.get("i", -1)))
+				"dw_move":
+					return d.move_cand(team, int(a.get("i", -1)), int(a.get("to", 0))) >= 0
 				_:
 					return d.vote(team, seat, int(a.get("i", -1)))
 		"dw_horror":
@@ -1658,6 +1660,14 @@ func _hc_process(delta: float) -> void:
 		_phase_time = 0.0
 		_stamp_turn = true  # новая фаза — часы хода у всех с нуля
 	_phase_time += delta
+	if hues.phase == "prepare":
+		if get_tree().get_first_node_in_group("scene_transition") != null:
+			_phase_time = 0.0
+			return
+		if _phase_time >= HCRules.PREPARE_SECONDS:
+			hues.finish_prepare()
+			_push_state()
+		return
 	# вылетевший игрок (за него «бот»): его догадку пропускаем, а за ведущего — пас или пропуск раунда
 	if _phase_time >= 1.5:
 		var h := hues

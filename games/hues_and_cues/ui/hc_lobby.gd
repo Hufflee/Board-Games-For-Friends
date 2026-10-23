@@ -89,6 +89,20 @@ func _rebuild() -> void:
 
 	# настройки
 	_body.add_child(HCStyle.caption("Настройки"))
+	var mode_row := HCStyle.hbox(8)
+	mode_row.add_child(HCStyle.label("Режим:", HCStyle.BODY))
+	for option in [["classic", "Классический"], ["distorted", "Crazy colors"]]:
+		var b := HCStyle.button(option[1], HCStyle.CAP)
+		UISel.pick(b, str(s.get("hc_mode", "classic")) == option[0])
+		b.disabled = not host
+		var mode_id: String = option[0]
+		b.pressed.connect(func(): Net.set_setting("hc_mode", mode_id))
+		mode_row.add_child(b)
+	_body.add_child(mode_row)
+	if str(s.get("hc_mode", "classic")) == "distorted":
+		var note := HCStyle.label("Каждый раунд: круговое движение цветов с разгоном и торможением, затем один из четырёх фильтров. Зоны очков: 2×2 / 6×6 / 10×10.", HCStyle.CAP, HCStyle.MUTED)
+		note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_body.add_child(note)
 	var laps := int(s.get("hc_laps", 0))
 	if host:
 		var r1 := HCStyle.hbox(8)

@@ -1,5 +1,7 @@
 class_name NHStyle
 extends RefCounted
+
+const ACCENT_FX := preload("res://hub/ui_accent_fx.gd")
 ## Стиль «Это не шляпа!»: ярко-розовый фон с белыми каракулями, белые карточки с чёрными
 ## рисунками от руки, рубашки — розовые со стрелкой. Шрифт — Balsamiq Sans (OFL).
 ## Дизайн-система: 2 цвета — розовый (фон, рубашки) и чёрные чернила; белый — карточки и панели;
@@ -170,6 +172,7 @@ static func button(text: String, size: int = BODY, min_w: int = 0) -> Button:
 static func primary(text: String, size: int = BODY, min_w: int = 0) -> Button:
 	var b := button(text, size, min_w)
 	b.theme_type_variation = "SelectedButton"
+	ACCENT_FX.sheen(b)
 	return b
 
 

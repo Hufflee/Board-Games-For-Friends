@@ -74,6 +74,7 @@ func _rebuild() -> void:
 		for team in 2:
 			var p := PanelContainer.new()
 			p.add_theme_stylebox_override("panel", HCStyle.box(Color(TEAM_COLORS[team], 0.08), 14, Color(TEAM_COLORS[team], 0.6), 1))
+			HCStyle.ACCENT_FX.border(p, HCStyle.DUSK)
 			p.custom_minimum_size = Vector2(300, 0)
 			var v := HCStyle.vbox(6)
 			p.add_child(v)

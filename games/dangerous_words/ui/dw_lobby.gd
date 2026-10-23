@@ -159,7 +159,7 @@ func _rebuild() -> void:
 
 	var start_row := DWStyle.hbox(12)
 	if host:
-		var start := DWStyle.button("Спуститься в подземелье!", DWStyle.BODY, 320)
+		var start := DWStyle.primary("Спуститься в подземелье!", DWStyle.BODY, 320)
 		start.theme_type_variation = "SelectedButton"  # главное действие — тыквенной заливкой
 		start.pressed.connect(func():
 			var err: String = Net.start_game()

@@ -4,6 +4,13 @@ extends Control
 
 signal cell_clicked(cell: int)
 signal cell_hovered(cell: int)
+signal reveal_finished  # вступление (окрашивание поля) закончилось — пора показывать выбор ведущего
+
+enum RevealPattern { DIAGONAL, RANDOM, RADIAL }
+const REVEAL_DURATION := 3.0
+const REVEAL_HOLD := 0.15
+const REVEAL_FADE := 0.60
+const REVEAL_SPREAD := REVEAL_DURATION - REVEAL_HOLD - REVEAL_FADE
 
 const LABEL := 20.0  # поля под буквы и номера
 
@@ -20,6 +27,17 @@ var frame_t := 0.0:  # 0…1 — рамка подсчёта выезжает
 		queue_redraw()
 var points := {}  # cell -> очки (при подсчёте)
 var my_color := Color.WHITE  # цвет фишки под курсором
+var distorted := false
+var color_order: Array = []
+var color_filter := -1
+var _display_order: Array = []
+var _spin_start := 0.0
+var _spin_turns := 0.0
+var _giver_view := false
+var _round_started := false
+var _filter_amount := 1.0
+const FILTER_FADE := 0.9
+var _distort_intro := false
 var labels := true  # буквы и номера по краям (на обложке — без них)
 
 var _pieces: Array = []
@@ -28,6 +46,126 @@ var _hover := -1
 var _pitch := 20.0
 var _origin := Vector2.ZERO
 var _cell_box: StyleBoxFlat
+var _reveal_active := false
+var _reveal_elapsed := 0.0
+var _reveal_pattern := RevealPattern.DIAGONAL
+var _reveal_delays := PackedFloat32Array()
+## Затемнение «не цвета карты» и кольца выбора у ведущего: во время вступления поле в полном цвете (0),
+## после — плавно затемняется (DIM_IN, до 1).
+const DIM_IN := 0.5
+var _dim := 1.0
+
+
+## Один запуск на начало партии. Свой RNG не влияет на правила и порядок карт.
+## pattern/seed_value нужны для воспроизводимого просмотра и проверок; обычно выбирается случайно.
+func play_reveal(pattern: int = -1, seed_value: int = 0) -> void:
+	var rng := RandomNumberGenerator.new()
+	if seed_value == 0:
+		rng.randomize()
+	else:
+		rng.seed = seed_value
+	_reveal_pattern = rng.randi_range(0, 2) if pattern < 0 else clampi(pattern, 0, 2)
+	var count := HCData.COLS * HCData.ROWS
+	_reveal_delays.resize(count)
+	var center := Vector2(HCData.COLS - 1, HCData.ROWS - 1) * 0.5
+	var min_radius := Vector2(0.5 if HCData.COLS % 2 == 0 else 0.0, 0.5 if HCData.ROWS % 2 == 0 else 0.0).length()
+	var max_radius := center.length()
+	if _reveal_pattern == RevealPattern.RANDOM:
+		var order := PackedInt32Array()
+		for cell in count:
+			order.append(cell)
+		# Fisher–Yates через локальный RNG: каждый квадрат имеет своё место в порядке.
+		for i in range(count - 1, 0, -1):
+			var j := rng.randi_range(0, i)
+			var temp := order[i]
+			order[i] = order[j]
+			order[j] = temp
+		for rank in count:
+			_reveal_delays[order[rank]] = REVEAL_HOLD + REVEAL_SPREAD * float(rank) / maxf(1.0, count - 1)
+	else:
+		for cell in count:
+			var col := cell % HCData.COLS
+			var row := cell / HCData.COLS
+			var weight := 0.0
+			if _reveal_pattern == RevealPattern.DIAGONAL:
+				weight = float(col + row) / maxf(1.0, HCData.COLS + HCData.ROWS - 2)
+			else:
+				weight = (Vector2(col, row).distance_to(center) - min_radius) / maxf(0.001, max_radius - min_radius)
+			_reveal_delays[cell] = REVEAL_HOLD + REVEAL_SPREAD * clampf(weight, 0.0, 1.0)
+	_distort_intro = false
+	_reveal_elapsed = 0.0
+	_reveal_active = true
+	_dim = 0.0
+	_hover = -1
+	mouse_default_cursor_shape = Control.CURSOR_ARROW
+	queue_redraw()
+
+
+func reveal_progress(cell: int) -> float:
+	if not _reveal_active:
+		return 1.0
+	if _distort_intro:
+		return HCRules.spin_progress(_reveal_elapsed / HCRules.PREPARE_SECONDS)
+	var progress := clampf((_reveal_elapsed - _reveal_delays[cell]) / REVEAL_FADE, 0.0, 1.0)
+	return progress * progress * (3.0 - 2.0 * progress)
+
+
+## Конечный цвет совпадает с прежней отрисовкой, включая затемнение вне цветов карты
+## (во время вступления затемнения нет — оно наплывает после, _dim).
+func _cell_color(cell: int) -> Color:
+	var color := base_color(cell)
+	if _distort_intro and _reveal_active and _display_order.size() == HCData.COLS * HCData.ROWS:
+		color = HCData.color(int(_display_order[cell]))
+	color = color.lerp(filtered_color(color, color_filter), _filter_amount)
+	if mode == "pick" and not free_pick and not card.has(cell):
+		var k := _dim * _dim * (3.0 - 2.0 * _dim)
+		color = color.lerp(Color("26272b"), 0.62 * k)
+	if _reveal_active and not _distort_intro:
+		var gray := Color("727780") if HCStyle.dark else Color("b9bbc0")
+		return gray.lerp(color, reveal_progress(cell))
+	return color
+
+
+## Исходный цвет позиции после перестановки; карточка ведущего всегда использует его без фильтра.
+func base_color(cell: int) -> Color:
+	return HCData.color(int(color_order[cell]) if color_order.size() == HCData.COLS * HCData.ROWS else cell)
+
+
+static func filtered_color(color: Color, channel: int) -> Color:
+	if channel < 0:
+		return color
+	if channel == 3:
+		var value := color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722
+		return Color(value, value, value, color.a)
+	var tint: Color = [Color("3b62ff"), Color("39ed64"), Color("ff404b")][clampi(channel, 0, 2)]
+	return color.lerp(tint, 0.567)
+
+
+## Клетки неподвижны: по кольцам «перепрыгивают» только оттенки, с разгоном и торможением.
+func play_distorted_round(order: Array, filter_id: int, _seed_value: int, start_turns: float = 0.0, turns: float = 0.0, giver_view: bool = false) -> void:
+	color_order = order.duplicate()
+	color_filter = filter_id
+	distorted = true
+	_distort_intro = true
+	_spin_start = start_turns
+	_spin_turns = turns
+	_giver_view = giver_view
+	_round_started = false
+	_display_order = HCRules.orbit_order(start_turns)
+	_filter_amount = 0.0
+	_reveal_elapsed = 0.0
+	_reveal_active = true
+	_dim = 0.0
+	_hover = -1
+	mouse_default_cursor_shape = Control.CURSOR_ARROW
+	queue_redraw()
+
+
+## Ведущий тоже видит фильтр во вступлении; после остановки он плавно исчезает.
+func set_filter_view(filter_id: int, giver_view: bool, round_started: bool = true) -> void:
+	color_filter = filter_id
+	_giver_view = giver_view
+	_round_started = round_started
 
 
 func _ready() -> void:
@@ -89,7 +227,7 @@ func occupied(cell: int) -> bool:
 
 
 func can_click(cell: int) -> bool:
-	if cell < 0:
+	if cell < 0 or _reveal_active:
 		return false
 	match mode:
 		"pick":
@@ -123,7 +261,30 @@ func _notification(what: int) -> void:
 		queue_redraw()
 
 
-func _process(_delta: float) -> void:
+func _process(delta: float) -> void:
+	var was_revealing := _reveal_active
+	if _reveal_active and is_visible_in_tree():
+		# Если партия открылась сразу из хаба, не проигрываем вступление под непрозрачным переходом.
+		if get_tree().get_first_node_in_group("scene_transition") == null:
+			var duration := HCRules.PREPARE_SECONDS if _distort_intro else REVEAL_DURATION
+			_reveal_elapsed = minf(duration, _reveal_elapsed + delta)
+			if _distort_intro:
+				var t := _reveal_elapsed / duration
+				_display_order = HCRules.orbit_order(_spin_start + _spin_turns * HCRules.spin_progress(t))
+				_filter_amount = smoothstep(0.08, 0.38, t)
+			if _reveal_elapsed >= duration:
+				_reveal_active = false
+				reveal_finished.emit()
+			queue_redraw()
+	elif _dim < 1.0:
+		# вступление закончилось — затемнение и кольца выбора плавно появляются
+		_dim = minf(1.0, _dim + delta / DIM_IN)
+		queue_redraw()
+	if _distort_intro and not was_revealing:
+		var amount := move_toward(_filter_amount, 0.0 if _giver_view and _round_started else 1.0, delta / FILTER_FADE)
+		if not is_equal_approx(amount, _filter_amount):
+			_filter_amount = amount
+			queue_redraw()
 	var now := Time.get_ticks_msec()
 	for k in _born:
 		if now - int(_born[k]) < 600:
@@ -154,19 +315,15 @@ func _draw() -> void:
 	# клетки
 	var radius := int(maxf(2.0, _pitch * 0.14))
 	_cell_box.set_corner_radius_all(radius)
-	var dim := mode == "pick" and not free_pick
 	for i in HCData.COLS * HCData.ROWS:
-		var col := HCData.color(i)
-		if dim and not card.has(i):
-			col = col.lerp(Color("26272b"), 0.62)
-		_cell_box.bg_color = col
+		_cell_box.bg_color = _cell_color(i)
 		draw_style_box(_cell_box, cell_rect(i))
 	var t := Time.get_ticks_msec() / 1000.0
 	# цвета карты (ведущий выбирает)
-	if mode == "pick" and not free_pick:
+	if mode == "pick" and not free_pick and _dim > 0.0:
 		var pulse := 0.5 + 0.5 * sin(t * 2.4)
 		for c in card:
-			_ring(cell_rect(c, 2.0 + pulse * 1.5), Color.WHITE, 2.0)
+			_ring(cell_rect(c, 2.0 + pulse * 1.5), Color(1, 1, 1, _dim), 2.0)
 	# загаданный цвет — тонкое кольцо (ведущему, пока не подсчёт)
 	if target >= 0 and frame_t <= 0.0:
 		_ring(cell_rect(target, 2.0), Color.WHITE, 2.5)
@@ -195,7 +352,7 @@ func _draw() -> void:
 	# клетка под курсором
 	if can_click(_hover):
 		var r := cell_rect(_hover, _pitch * 0.18)
-		var hb := HCStyle.box(HCData.color(_hover), radius + 2, Color.WHITE, 2, Color(0, 0, 0, 0.3), 8)
+		var hb := HCStyle.box(base_color(_hover).lerp(filtered_color(base_color(_hover), color_filter), _filter_amount), radius + 2, Color.WHITE, 2, Color(0, 0, 0, 0.3), 8)
 		draw_style_box(hb, r)
 		if mode == "place":
 			_piece(cell_center(_hover), _pitch * 0.32, Color(my_color, 0.75), 0)
@@ -203,6 +360,14 @@ func _draw() -> void:
 
 func _draw_frame() -> void:
 	var c := target
+	if distorted:
+		var bounds := Rect2(_origin, Vector2(HCData.COLS, HCData.ROWS) * _pitch)
+		for pts in [1, 2, 3]:
+			var cells := HCRules.score_rect(target, pts, true)
+			var rect := Rect2(_origin + Vector2(cells.position) * _pitch, Vector2(cells.size) * _pitch).intersection(bounds)
+			var alpha := frame_t * (0.45 if pts == 1 else (0.7 if pts == 2 else 1.0))
+			_ring(rect.grow(-1.0), Color(1, 1, 1, alpha), 3.0 if pts == 3 else 2.0)
+		return
 	var a := clampf(frame_t, 0.0, 1.0)
 	var grow := (1.0 - _ease_out(a)) * _pitch * 1.5
 	var tl := _origin + Vector2(c % HCData.COLS - 1, c / HCData.COLS - 1) * _pitch

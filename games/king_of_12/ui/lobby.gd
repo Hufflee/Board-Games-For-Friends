@@ -211,7 +211,7 @@ func _rebuild() -> void:
 	# --- Старт: всегда видно внизу, главная кнопка выделена золотом ---
 	var start_row := _footer
 	if host:
-		var start := K12UI.button("Начать игру", K12UI.BODY, 280)
+		var start := K12UI.primary("Начать игру", K12UI.BODY, 280)
 		start.disabled = data["members"].size() < 2
 		if not start.disabled:
 			start.theme_type_variation = "SelectedButton"
