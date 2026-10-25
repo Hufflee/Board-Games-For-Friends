@@ -184,7 +184,12 @@ func _show_card(g: Dictionary, animate: bool = true) -> void:
 		v.add_child(vrow)
 	var in_party := Net.is_party() and not Net.lobby_view.is_empty()
 	var row := HubStyle.hbox(8)
-	if in_party:
+	if HubGames.is_release_soon(g):
+		var soon := HubStyle.primary("Скоро", 20, 160)
+		soon.disabled = true
+		soon.tooltip_text = "Игра ещё готовится и появится в одном из следующих обновлений"
+		row.add_child(soon)
+	elif in_party:
 		if Net.is_host():
 			var go := HubStyle.primary("Играть всей пати", 18)
 			go.pressed.connect(func():
@@ -348,7 +353,7 @@ func _open_by_id(game_id: String) -> void:
 
 
 func _open_scene(g: Dictionary, wipe: bool = false) -> void:
-	if _leaving:
+	if _leaving or HubGames.is_release_soon(g):
 		return
 	HubGames.apply_settings(g)
 	_leaving = true

@@ -181,6 +181,11 @@ static func apply_settings(g: Dictionary) -> void:
 		Net.settings[k] = g["settings"][k]
 
 
+## Игры нет в этой сборке (папка исключена из экспорта): коробка на полке есть, вместо «Играть» — «Скоро».
+static func is_release_soon(g: Dictionary) -> bool:
+	return not ResourceLoader.exists(str(g.get("scene", "")))
+
+
 static func by_id(id: String) -> Dictionary:
 	for g in LIST:
 		if g["id"] == id:

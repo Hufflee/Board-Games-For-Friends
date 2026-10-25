@@ -10,7 +10,8 @@ func check(ok: bool, message: String) -> void:
 
 func click(button: Button) -> void:
 	await get_tree().process_frame
-	var point := button.get_global_rect().get_center()
+	# Окно может быть растянуто (content scale): переводим координаты холста в координаты окна.
+	var point := get_viewport().get_final_transform() * button.get_global_rect().get_center()
 	var motion := InputEventMouseMotion.new()
 	motion.position = point
 	Input.parse_input_event(motion)

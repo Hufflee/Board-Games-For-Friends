@@ -67,7 +67,7 @@ var wslam: WSRules = null  # «Ворд Слэм»
 var tiptop: TTRules = null  # «Тип Топ» (обе коробки)
 var nothat: NHRules = null  # «Это не шляпа!»
 var gloom: GLRules = null  # Gloom
-var fours: FSRules = null
+var fours = null  # FSRules; без типа — Айзека может не быть в сборке (тогда он «Скоро»)
 var fs_view_seat := 0
 var stillion: STRules = null  # «Стиллион»
 var _st_jev: STJev  # проверка незнакомых ответов нейросетью (только у хоста), своя на каждую партию
@@ -633,7 +633,7 @@ func start_game() -> String:
 		wslam = null
 		tiptop = null
 		fs_view_seat = 0
-		fours = FSRules.new()
+		fours = load("res://games/four_souls/logic/fs_rules.gd").new()
 		fours.new_game(players, bool(settings.get("fs_dlc", false)))
 		auto_advance_time = 0.0
 	elif party_game == "phantom_ink":
