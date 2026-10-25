@@ -48,6 +48,8 @@ const MUSIC_DB := -8.0
 const MIN_TRACK_SEC := 90.0  # короткие лупы крутим, пока не наберётся столько
 var _ambience: AudioStreamPlayer  # фоновый шум (море в «Перудо»), по кругу
 
+var _theme_before := ""
+var _theme_silent_until := 0
 var played := {}  # счётчик проигранных звуков (для отладки)
 var _players: Array[AudioStreamPlayer] = []
 var _cache := {}
@@ -55,6 +57,11 @@ var _last := {}
 
 
 func _ready() -> void:
+	_theme_before = Prefs.theme_mode
+	Prefs.changed.connect(func():
+		if _theme_before != Prefs.theme_mode:
+			_theme_before = Prefs.theme_mode
+			_theme_silent_until = Time.get_ticks_msec() + 1000)
 	for i in POOL:
 		var p := AudioStreamPlayer.new()
 		p.bus = "SFX"
@@ -262,6 +269,8 @@ func babble(text: String, voice: String, style: String = "", extra_db: float = 0
 
 
 func play(sound: String, vol_db: float = 0.0, pitch_var: float = 0.06, min_gap: float = 0.04) -> void:
+	if sound in ["shuffle", "game_start", "card_flip"] and Time.get_ticks_msec() < _theme_silent_until:
+		return
 	if muted or not SOUNDS.has(sound):
 		return
 	var now := Time.get_ticks_msec() / 1000.0

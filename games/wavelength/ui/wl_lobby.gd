@@ -11,7 +11,7 @@ var _error: Label
 
 
 func _ready() -> void:
-	add_child(HCBackdrop.new())
+	add_child(preload("res://games/wavelength/ui/wl_backdrop.gd").new())
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center.offset_right = -300  # справа — чат

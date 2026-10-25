@@ -745,7 +745,7 @@ func _grab_from_deck(id: String) -> void:
 	_shelves.add_child(c)
 	c.place(_shelves.get_local_mouse_position())
 	c.dragging = true
-	c.z_index = 100
+	c.z_index = 60
 	_cards[id] = c
 	_wire(c, id)
 	c.clicked.connect(func(_card):

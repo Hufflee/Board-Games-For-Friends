@@ -308,10 +308,14 @@ static func piece_color(seat: int) -> Color:
 
 ## Чат из общего кода — перекрашиваем под светлую тему.
 static func restyle_chat(chat: Control) -> void:
-	chat.ready.connect(func():
+	var apply := func():
 		chat.add_theme_stylebox_override("panel", box(SURFACE, 14, LINE, 1, SHADOW, 12))
 		for n in chat.find_children("*", "RichTextLabel", true, false):
-			(n as RichTextLabel).add_theme_color_override("default_color", INK))
+			(n as RichTextLabel).add_theme_color_override("default_color", INK)
+	if chat.is_node_ready():
+		apply.call()
+	else:
+		chat.ready.connect(apply)
 
 
 class Dot:

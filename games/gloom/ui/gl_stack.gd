@@ -7,7 +7,12 @@ signal picked(index: int)
 signal hovered(index: int, on: bool)
 
 var index := -1  # номер персонажа в партии
-var data := {}  # {id, owner, stack, dead, removed, worth, icon}
+var _images: Array[TextureRect] = []
+var data: Dictionary = {}:  # {id, owner, stack, dead, removed, worth, icon}
+	set(value):
+		data = value
+		if is_inside_tree():
+			_sync_images()
 var highlight := 0.0:  # подсветка цели (0…1)
 	set(v):
 		highlight = v
@@ -35,6 +40,8 @@ func _init(i: int, d: Dictionary, w: float) -> void:
 
 
 func _ready() -> void:
+	resized.connect(_sync_images)
+	_sync_images()
 	mouse_entered.connect(func(): hovered.emit(index, true))
 	mouse_exited.connect(func(): hovered.emit(index, false))
 
@@ -57,9 +64,6 @@ func _draw() -> void:
 	if highlight > 0.01 or selected:
 		var c := GLStyle.BLOOD_LIGHT if selected else Color(GLStyle.BONE, 0.85)
 		draw_style_box(GLStyle.box(Color(c, 0.25 + 0.5 * highlight), 8, c, 3, 0.0), r.grow(5))
-	draw_texture_rect(GLStyle.tex(str(data.get("img", "ch%d" % int(data["id"])))), r, false)
-	for card in data["stack"]:
-		draw_texture_rect(GLStyle.card_tex(int(card)), r, false)
 	if dim:
 		draw_rect(r, Color(0, 0, 0, 0.45))
 	# счёт — медальон у правого верхнего угла
@@ -86,3 +90,27 @@ func _draw() -> void:
 		draw_rect(band, Color(GLStyle.COAL, 0.88))
 		draw_line(band.position, band.position + Vector2(size.x, 0), GLStyle.BLOOD, 2.0)
 		draw_string(tf, Vector2((size.x - tw) * 0.5, r.end.y - tfs * 0.5), lab, HORIZONTAL_ALIGNMENT_LEFT, -1, tfs, GLStyle.BONE)
+
+
+## Маска только на изображениях: подписи, медальоны и рамки остаются самостоятельными.
+func _sync_images() -> void:
+	for image: TextureRect in _images:
+		remove_child(image)
+		image.queue_free()
+	_images.clear()
+	var textures: Array[Texture2D] = [GLStyle.tex(str(data.get("img", "ch%d" % int(data.get("id", 0)))))]
+	for card in data.get("stack", []):
+		textures.append(GLStyle.card_tex(int(card)))
+	for texture: Texture2D in textures:
+		var image := TextureRect.new()
+		image.texture = texture
+		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		image.stretch_mode = TextureRect.STRETCH_SCALE
+		image.size = size - Vector2(0, NAME_H)
+		image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		image.show_behind_parent = true
+		var corners := ShaderMaterial.new()
+		corners.shader = preload("res://hub/card_corners.gdshader")
+		image.material = corners
+		add_child(image)
+		_images.append(image)

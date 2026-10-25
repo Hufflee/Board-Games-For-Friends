@@ -14,6 +14,9 @@ var marked := false:  # выбрана для сброса / передачи
 
 func _init(c: int = -1) -> void:
 	card = c
+	var corners := ShaderMaterial.new()
+	corners.shader = preload("res://hub/card_corners.gdshader")
+	material = corners
 	size = SIZE
 	custom_minimum_size = SIZE
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -39,3 +42,5 @@ func _draw() -> void:
 		sb.set_border_width_all(4)
 		sb.set_corner_radius_all(6)
 		draw_style_box(sb, r)
+
+

@@ -5,7 +5,7 @@ extends Control
 ## Ничего не делает в игре — просто занять руки. Есть во всех играх (её создаёт PauseLayer).
 ## Вид — под игру (hub/art/coins, GAME_COINS): у части игр есть вариант для тёмной темы (_dark) и секретный (_secret).
 ## Смена темы — монетка сама подпрыгивает и в полёте, когда стоит ребром (картинки почти не видно), меняет облик.
-## Секрет: 5 орлов подряд — на пятом подбросе облик так же в полёте меняется на секретный (и обратно), запоминается в Prefs.coin_secrets.
+## Секрет: 5 орлов подряд — на пятом подбросе облик в полёте меняется на секретный (и обратно), запоминается в Prefs.coin_secrets.
 
 const R := 24.0  # радиус монеты
 const FRICTION := 1.6  # затухание скорости в секунду
@@ -20,6 +20,7 @@ const SECRET_STREAK := 5
 static var _heads := 0
 static var _last_style := ""  # облик до перезагрузки сцены (смена темы) — новая монетка начинает в нём и меняется в полёте
 var _pending := ""  # облик, в который монетка превратится в полёте, когда встанет ребром
+var _silent_toss := false
 var _pending_secret := false  # смена — из-за секрета (на приземлении — звук и «подпрыгивание»)
 ## Свои звуки монеты (hub/audio/coin, CC-BY — см. LICENSE.txt рядом): звон, падение; стук о край — bounce.wav (синтез).
 const SND := "res://hub/audio/coin/"
@@ -34,15 +35,21 @@ const COINS := "res://hub/art/coins/"
 const COIN_VARIANTS := COINS + "variants/codex_2026-10-23/"
 ## Монеты-картинки: [орёл, решка]. Остальные стили рисуются кодом.
 const TEXTURES := {
+	"phantom_ink": [COINS + "phantom_ink_regular.png", COINS + "phantom_ink_regular.png"],
+	"phantom_ink_secret": [COINS + "phantom_ink_secret.png", COINS + "phantom_ink_secret.png"],
+	"four_souls_secret": [COINS + "four_souls_secret.png", COINS + "four_souls_secret.png"],
+	"stillion_secret": [COINS + "stillion_secret.png", COINS + "stillion_secret.png"],
+	"four_souls": [COINS + "four_souls_handdrawn.png", COINS + "four_souls_handdrawn.png"],
+	"stillion": [COINS + "stillion_worn.png", COINS + "stillion_worn.png"],
 	# Согласованные новые монеты: на каждом листе орёл слева, решка справа.
 	"brodilka": ["res://games/brodilka/art/cards/coin_crown.png", "res://games/brodilka/art/cards/coin_10.png"],
 	"gloom": [COINS + "gloom_front.png", COINS + "gloom_back.png"],
-	"hues_and_cues": [COIN_VARIANTS + "hues_light_concept.png", COIN_VARIANTS + "hues_light_concept.png"],
-	"hues_and_cues_dark": [COIN_VARIANTS + "hues_dark_concept.png", COIN_VARIANTS + "hues_dark_concept.png"],
-	"hues_and_cues_secret": [COIN_VARIANTS + "hues_light_secret_concept.png", COIN_VARIANTS + "hues_light_secret_concept.png"],
-	"hues_and_cues_dark_secret": [COIN_VARIANTS + "hues_dark_secret_concept.png", COIN_VARIANTS + "hues_dark_secret_concept.png"],
+	"hues_and_cues": [COINS + "hues_regular_painted.png", COINS + "hues_regular_painted.png"],
+	"hues_and_cues_dark": [COINS + "hues_regular_painted.png", COINS + "hues_regular_painted.png"],
+	"hues_and_cues_secret": [COINS + "hues_secret_painted.png", COINS + "hues_secret_painted.png"],
+	"hues_and_cues_dark_secret": [COINS + "hues_secret_painted.png", COINS + "hues_secret_painted.png"],
 	"brodilka_secret": [COIN_VARIANTS + "brodilka_secret_concept.png", COIN_VARIANTS + "brodilka_secret_concept.png"],
-	"gloom_secret": [COIN_VARIANTS + "gloom_secret_awakened_stylized_v4.png", COIN_VARIANTS + "gloom_secret_awakened_stylized_v4.png"],
+	"gloom_secret": [COINS + "gloom_secret_painted.png", COINS + "gloom_secret_painted.png"],
 	"doubloon": ["res://hub/art/coins/doubloon_front.png", "res://hub/art/coins/doubloon_back.png"],
 	"doubloon_gold": ["res://hub/art/coins/doubloon_old_front.png", "res://hub/art/coins/doubloon_old_back.png"],  # секрет «Перудо»
 	"gold": ["res://games/brodilka/art/cards/coin_crown.png", "res://games/brodilka/art/cards/coin_10.png"],
@@ -77,16 +84,22 @@ const TEXTURES := {
 }
 ## Области сторон на листах. Круглая отрисовка отсекает фон за ободком.
 const COIN_REGIONS := {
-	"hues_and_cues": [Rect2(19, 125, 744, 737), Rect2(774, 124, 743, 741)],
-	"hues_and_cues_dark": [Rect2(44, 37, 807, 801), Rect2(922, 37, 808, 801)],
-	"hues_and_cues_secret": [Rect2(29, 28, 835, 823), Rect2(900, 28, 837, 823)],
-	"hues_and_cues_dark_secret": [Rect2(28, 26, 838, 828), Rect2(899, 25, 841, 829)],
+	"phantom_ink": [Rect2(0, 0, 887, 887), Rect2(886, 0, 887, 887)],
+	"phantom_ink_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"four_souls_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"stillion_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"four_souls": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"stillion": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"hues_and_cues": [Rect2(40, 30, 830, 830), Rect2(910, 30, 830, 830)],
+	"hues_and_cues_dark": [Rect2(40, 30, 830, 830), Rect2(910, 30, 830, 830)],
+	"hues_and_cues_secret": [Rect2(35, 25, 845, 845), Rect2(892, 25, 845, 845)],
+	"hues_and_cues_dark_secret": [Rect2(35, 25, 845, 845), Rect2(892, 25, 845, 845)],
 	"brodilka_secret": [Rect2(41, 32, 808, 809), Rect2(919, 32, 812, 807)],
-	"gloom_secret": [Rect2(26, 22, 827, 831), Rect2(915, 22, 833, 831)],
+	"gloom_secret": [Rect2(8, 0, 870, 870), Rect2(895, 0, 870, 870)],
 }
 ## Игры со своей монетой (кроме Перудо) и есть ли у неё вариант для тёмной темы.
 ## Порядок важен: tip_top_18 раньше tip_top.
-const GAME_COINS := [["tip_top_18", false], ["tip_top", false], ["king_of_12", false], ["dangerous_words", false],
+const GAME_COINS := [["phantom_ink", false], ["four_souls", false], ["stillion", false], ["tip_top_18", false], ["tip_top", false], ["king_of_12", false], ["dangerous_words", false],
 	["ready_set_bet", true], ["word_slam", true], ["wavelength", true], ["not_a_hat", false],
 	["hues_and_cues", true], ["brodilka", false], ["gloom", false]]
 static var _tex_cache := {}
@@ -219,7 +232,7 @@ func _refresh_style(animated: bool) -> void:
 	if animated and is_visible_in_tree() and not _holding:
 		_pending = want
 		_pending_secret = false
-		_toss()
+		_toss(true)
 		return
 	_set_style(want)
 
@@ -327,13 +340,15 @@ func _throw() -> void:
 
 
 ## Щелчок: подброс на месте — 0.9 с в воздухе, приземляется орлом или решкой.
-func _toss() -> void:
+func _toss(silent: bool = false) -> void:
 	if _toss_t >= 0.0:
 		return
+	_silent_toss = silent
 	_toss_t = 0.0
 	var half_turns := randi_range(6, 9)
 	_toss_target = round(_flip / PI) * PI + half_turns * PI
-	_play("coins_5.ogg", -8)
+	if not _silent_toss:
+		_play("coins_5.ogg", -8)
 	if _pending == "" and cos(_toss_target) >= 0.0 and _heads + 1 >= SECRET_STREAK and _has_secret():
 		var key := _game_key()
 		Prefs.coin_secrets[key] = not Prefs.coin_secrets.get(key, false)
@@ -397,7 +412,7 @@ func _process(delta: float) -> void:
 		var scr = par.get("screen")
 		if scr is Node and (scr as Node).get_parent() == par and (scr as Node).get_index() > get_index():
 			par.move_child(self, (scr as Node).get_index())
-		var z := 0 if get_index() < par.get_child_count() - 1 else 50
+		var z := 90 if bool(Net.view.get("game_paused", Net.paused)) else (0 if get_index() < par.get_child_count() - 1 else 50)
 		if z_index != z:
 			z_index = z
 	if not _holding and _toss_t < 0.0 and _vel.length_squared() > 1.0 and _try_dock():
@@ -432,11 +447,14 @@ func _process(delta: float) -> void:
 			_toss_t = -1.0
 			_lift = 0.0
 			_flip = _toss_target
-			_play("drop_%d.wav" % randi_range(1, 2), -8)
+			if not _silent_toss:
+				_play("drop_%d.wav" % randi_range(1, 2), -8)
 			if _pending != "":
 				_set_style(_pending)  # не успела встать ребром — меняем на приземлении
 				_pending = ""
-			_count_heads(cos(_flip) >= 0.0)
+			if not _silent_toss:
+				_count_heads(cos(_flip) >= 0.0)
+			_silent_toss = false
 		dirty = true
 	if not _holding and (_vel.length_squared() > 1.0 or absf(_spin) > 0.05 or _flip_speed > 0.05):
 		var vs := get_viewport_rect().size
@@ -490,6 +508,14 @@ func _count_heads(heads: bool) -> void:
 
 func _colors() -> Array:
 	match _style:
+		"four_souls", "four_souls_secret":
+			return [Color("74634c"), Color("28241f"), Color("b59a70")]
+		"phantom_ink", "phantom_ink_secret":
+			return [Color("92743f"), Color("18251e"), Color("c2a96f")]
+		"hues_and_cues", "hues_and_cues_dark", "hues_and_cues_secret", "hues_and_cues_dark_secret":
+			return [Color("b8a2bd"), Color("59405e"), Color("d5bdd3")]
+		"stillion", "stillion_secret":
+			return [Color("b89a54"), Color("462e26"), Color("d2b478")]
 		"doubloon", "doubloon_gold":
 			return [Color("d9a43a"), Color("8a5a14"), Color("f6dc8a")]
 		"gold", "brodilka", "brodilka_secret":
@@ -499,20 +525,28 @@ func _colors() -> Array:
 	return [Color("3fd6e8"), Color("1a5f8a"), Color("c8fbff")]
 
 
+## Тень лежит на столе: её оси и отступ не вращаются вместе с монетой.
+func _shadow_transform(center: Vector2, scale_up: float) -> Transform2D:
+	var angle := get_global_transform().get_rotation()
+	var offset := Vector2(0, 4 + _lift * 14).rotated(-angle)
+	return Transform2D(-angle, Vector2(scale_up, scale_up * 0.38), 0.0, center + offset)
+
+
 func _draw() -> void:
 	var c := size * 0.5
 	var cols := _colors()
 	var face_w := absf(cos(_flip))  # сжатие по ширине — монета повёрнута ребром
 	var heads := cos(_flip) >= 0.0
 	var scale_up := 1.0 + _lift * 0.35
-	# тень: при подбросе — дальше и бледнее
-	# тень сужается вместе с монетой, когда та встаёт ребром
-	draw_set_transform(c + Vector2(0, 4 + _lift * 14), 0.0, Vector2(maxf(face_w, 0.2) * scale_up, scale_up * 0.45))
-	draw_circle(Vector2.ZERO, R, Color(0, 0, 0, 0.3 - _lift * 0.18))
+	# Мягкая горизонтальная тень: прежняя вращалась и вставала вертикально на ребре.
+	draw_set_transform_matrix(_shadow_transform(c, scale_up))
+	for layer in 3:
+		draw_circle(Vector2.ZERO, R * (1.0 - layer * 0.12), Color(0, 0, 0, (0.10 - _lift * 0.06)))
 	draw_set_transform(c - Vector2(0, _lift * 10), 0.0, Vector2(maxf(face_w, 0.08) * scale_up, scale_up))
 	if TEXTURES.has(_style):
 		var tex := _tex(TEXTURES[_style][0 if heads else 1])
-		draw_circle(Vector2(0, 2.0), R, cols[1].darkened(0.4))  # ребро
+		var edge_radius := R * 0.94 if _style in ["phantom_ink", "phantom_ink_secret", "four_souls", "four_souls_secret", "stillion", "stillion_secret", "gloom_secret", "hues_and_cues", "hues_and_cues_dark", "hues_and_cues_secret", "hues_and_cues_dark_secret"] else R
+		draw_circle(Vector2(0, 2.0), edge_radius, cols[1].darkened(0.4))  # ребро
 		if tex:
 			# «Дюжина короля» — та же монета, что в бродилке, но потемнее (под таверну)
 			var tint := Color(0.72, 0.68, 0.6) if _style == "gold_dark" else Color.WHITE
@@ -549,6 +583,11 @@ func _draw() -> void:
 
 ## Рисует одну сторону листа внутри круга: без фона и соседней монеты.
 func _draw_coin_region(tex: Texture2D, region: Rect2, tint: Color) -> void:
+	# У Айзека и Стиллиона выступы выходят за круг ободка. Сохраняем
+	# исходную альфу и весь силуэт вместо круглой маски, срезавшей эти выступы.
+	if _style in ["phantom_ink", "phantom_ink_secret", "four_souls", "four_souls_secret", "stillion", "stillion_secret", "gloom_secret", "hues_and_cues", "hues_and_cues_dark", "hues_and_cues_secret", "hues_and_cues_dark_secret"]:
+		draw_texture_rect_region(tex, Rect2(Vector2(-R, -R), Vector2.ONE * R * 2.0), region, tint)
+		return
 	var points := PackedVector2Array()
 	var uv := PackedVector2Array()
 	for i in 96:

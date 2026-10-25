@@ -31,8 +31,10 @@ const MUSIC := [
 const PAWNS := [Color("3d8fd0"), Color("d23a2a"), Color("f0a028"), Color("6cc04a"), Color("e8c020"), Color("27407a"), Color("2fb8b0"), Color("c8285e")]
 ## Фишки-персонажи: art/cards/pawn_0..7.png (бородач, рыжая, пёс, близняшки, копейщик — из мода; енот, путешественница, лисица — ComfyUI).
 const PAWN_COUNT := 8
+const PawnOutline := preload("res://games/brodilka/ui/br_pawn_outline.gd")
 
 static var _fonts := {}
+static var _pawn_textures: Dictionary = {}
 static var _theme: Theme
 static var _theme_dark := false  # тема собрана для тёмного режима — сменили режим, собираем заново
 
@@ -224,7 +226,12 @@ static func shop_card_tex(path: String) -> Texture2D:
 
 
 static func pawn_tex(i: int) -> Texture2D:
-	return load(ART + "cards/pawn_%d.png" % (i % PAWN_COUNT))
+	var index := posmod(i, PAWN_COUNT)
+	if not _pawn_textures.has(index):
+		var source: Texture2D = load(ART + "cards/pawn_%d.png" % index)
+		# У новых трёх персонажей кромка уже нарисована; старым добавляем её под оригиналом.
+		_pawn_textures[index] = PawnOutline.make(source) if index < 5 else source
+	return _pawn_textures[index]
 
 
 ## Карта по id картинки (gb_0_1, tadam_3, shop_hook, *_back).

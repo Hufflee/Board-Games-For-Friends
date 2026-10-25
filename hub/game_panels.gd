@@ -11,6 +11,11 @@ extends Node3D
 
 signal game_selected(game: Dictionary)
 signal game_released
+signal editor_requested
+var input_locked := false
+var _editor_tile: Node3D
+var _editor_body: StaticBody3D
+var _editor_mat: ShaderMaterial
 
 const PANEL_H := 0.17  # высота стекла, м (ширина — по пропорциям постера)
 const CELL := Vector2(0.25, 0.17)  # шаг сетки (по самой широкой панели)
@@ -105,6 +110,11 @@ const SHADOW_OFF := Vector3(0.026, -0.04, -0.07)  # тень: правее, ни
 var camera: Camera3D
 var is_open := false
 var _items: Array = []  # [{game, root, mesh, mat, body, label, home: Transform3D, depth, seed}]
+const ORDER_FILE := "user://game_panels.cfg"
+var _panel_press := -1
+var _panel_hold := 0.0
+var _panel_drag := -1
+var _panel_point := Vector2.ZERO
 var _hover := -1
 var _selected := -1
 var _t := 0.0
@@ -139,7 +149,9 @@ func setup(cam: Camera3D, games: Array, launcher_at: Vector3) -> void:
 	for g in games:
 		if g.get("shelf", true):  # одна панель на игру: «Тип Топ» — одна (версии — переключателем в карточке)
 			_items.append(_make(g))
+	_load_order()
 	_make_launcher(launcher_at)
+	_make_editor_tile()
 	for it in _items:
 		(it["root"] as Node3D).visible = false
 	_veil.visible = false
@@ -147,6 +159,52 @@ func setup(cam: Camera3D, games: Array, launcher_at: Vector3) -> void:
 
 ## Кнопка — стеклянный куб на шкафу сверху справа: каждая грань — то же стекло, что у окошек
 ## (полупрозрачная заливка, светящаяся окантовка), сквозь него видны дальние грани. Медленно вращается.
+## Значок редактора — дочернее 3D-окошко верхней левой игры: общий поворот и параллакс.
+func _make_editor_tile() -> void:
+	if _items.is_empty():
+		return
+	var first: Node3D = _items[0].root
+	var panel_size: Vector2 = (_items[0].mesh.mesh as QuadMesh).size
+	_editor_tile = Node3D.new()
+	first.add_child(_editor_tile)
+	_editor_tile.position = Vector3(-panel_size.x * 0.5 - 0.047, panel_size.y * 0.5 - 0.0375, 0.004)
+	var glass := MeshInstance3D.new()
+	var quad := QuadMesh.new()
+	quad.size = Vector2(0.075, 0.075)
+	glass.mesh = quad
+	_editor_mat = ShaderMaterial.new()
+	_editor_mat.shader = _shader
+	_editor_mat.set_shader_parameter("has_poster", false)
+	_editor_mat.set_shader_parameter("panel_aspect", 1.0)
+	_editor_mat.set_shader_parameter("tint", Color("101b33"))
+	_editor_mat.set_shader_parameter("base_alpha", 0.7)
+	_editor_mat.set_shader_parameter("glow", 0.35)
+	glass.material_override = _editor_mat
+	glass.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_editor_tile.add_child(glass)
+	var icon := MeshInstance3D.new()
+	var face := QuadMesh.new()
+	face.size = Vector2(0.045, 0.045)
+	icon.mesh = face
+	icon.position.z = 0.002
+	var material := StandardMaterial3D.new()
+	material.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	material.albedo_texture = ShelfIcons.icon()
+	icon.material_override = material
+	icon.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	_editor_tile.add_child(icon)
+	_editor_body = StaticBody3D.new()
+	_editor_body.collision_layer = 0
+	_editor_body.collision_mask = 0
+	var collision := CollisionShape3D.new()
+	var shape := BoxShape3D.new()
+	shape.size = Vector3(0.075, 0.075, 0.012)
+	collision.shape = shape
+	_editor_body.add_child(collision)
+	_editor_tile.add_child(_editor_body)
+
+
 func _make_launcher(on_shelf: Vector3) -> void:
 	_launcher = Node3D.new()
 	add_child(_launcher)
@@ -224,6 +282,12 @@ void fragment() {
 func _launch_xf() -> Transform3D:
 	return Transform3D(camera.global_transform.basis, _launcher.global_position)
 
+func move_launcher(on_shelf: Vector3) -> void:
+	_launcher.global_position = on_shelf + Vector3(0, LAUNCH_SIZE * 0.5 + 0.004, 0)
+	_launch_halo.global_position = (
+		_launcher.global_position + (camera.global_position - _launcher.global_position).normalized() * -0.08
+	)
+
 
 func _make(g: Dictionary) -> Dictionary:
 	var root := Node3D.new()
@@ -293,6 +357,15 @@ func _make(g: Dictionary) -> Dictionary:
 	label.modulate = Color(HubStyle.CYAN.r * 1.4, HubStyle.CYAN.g * 1.4, HubStyle.CYAN.b * 1.4, 0.0)
 	label.position = Vector3(0, size.y * 0.5 + 0.022, 0.01)
 	label.shaded = false
+	# длинное название — не шире окошка (с запасом), переносится и растёт вверх; рисуется поверх соседних окошек
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	if label.text.length() > 16:
+		label.font_size = 30  # длинное название — мельче, в две строки
+	label.width = size.x * 2.6 / label.pixel_size
+	label.vertical_alignment = VERTICAL_ALIGNMENT_BOTTOM
+	label.no_depth_test = true
+	label.render_priority = 10
+	label.outline_render_priority = 9
 	root.add_child(label)
 	# тело для луча мыши — отдельный слой, чтобы не мешать выбору коробок
 	var body := StaticBody3D.new()
@@ -382,6 +455,7 @@ func open() -> void:
 
 
 func close() -> void:
+	_cancel_panel_drag()
 	if not is_open:
 		return
 	if _selected >= 0:
@@ -396,15 +470,28 @@ func close() -> void:
 		# улетают обратно в куб и гаснут уже внутри него
 		var d := 0.03 * (_items.size() - i)
 		var tw := create_tween().set_parallel()
-		tw.tween_method(func(v: float): it["fly"] = v, float(it.get("fly", 1.0)), 0.0, FLY_TIME * 0.8).set_delay(d).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN)
-		tw.tween_method(func(v: float): mat.set_shader_parameter("fade", v), cur, 0.0, 0.15).set_delay(d + FLY_TIME * 0.8 - 0.12).set_trans(Tween.TRANS_SINE)
+		(
+			tw
+			. tween_method(func(v: float): it["fly"] = v, float(it.get("fly", 1.0)), 0.0, FLY_TIME * 0.8)
+			. set_delay(d)
+			. set_trans(Tween.TRANS_CUBIC)
+			. set_ease(Tween.EASE_IN)
+		)
+		(
+			tw
+			. tween_method(func(v: float): mat.set_shader_parameter("fade", v), cur, 0.0, 0.15)
+			. set_delay(d + FLY_TIME * 0.8 - 0.12)
+			. set_trans(Tween.TRANS_SINE)
+		)
 		(it["body"] as StaticBody3D).collision_layer = 0
 		(it["label"] as Label3D).modulate.a = 0.0
-	get_tree().create_timer(FLY_TIME * 0.8 + 0.03 * _items.size() + 0.1).timeout.connect(func():
-		if not is_open:
-			_veil.visible = false
-			for it2 in _items:
-				(it2["root"] as Node3D).visible = false)
+	get_tree().create_timer(FLY_TIME * 0.8 + 0.03 * _items.size() + 0.1).timeout.connect(
+		func():
+			if not is_open:
+				_veil.visible = false
+				for it2 in _items:
+					(it2["root"] as Node3D).visible = false
+	)
 	Sfx.play("card_slide", -10)
 
 
@@ -449,7 +536,81 @@ func _launcher_at(screen: Vector2) -> bool:
 	return not hit.is_empty() and hit["collider"] == _launch_body
 
 
+## Порядок VR-окон личный и не связан с расстановкой коробок.
+func _load_order() -> void:
+	var file := ConfigFile.new()
+	if file.load(ORDER_FILE) != OK and file.load("res://hub/defaults/game_panels.cfg") != OK:
+		return  # своего порядка нет — берём стартовый из игры, нет и его — по умолчанию
+	var saved: Variant = file.get_value("panels", "order", [])
+	var order: Array = saved if saved is Array else []
+	var sorted: Array = []
+	for id in order:
+		for item: Dictionary in _items:
+			if item.game.id == id and not sorted.has(item):
+				sorted.append(item)
+	for item: Dictionary in _items:
+		if not sorted.has(item):
+			sorted.append(item)
+	_items = sorted
+
+
+func _cancel_panel_drag() -> void:
+	if _panel_drag >= 0:
+		_items[_panel_drag].body.collision_layer = (1 << (LAYER - 1)) if is_open else 0
+		_items[_panel_drag].mat.set_shader_parameter("rim", Color("2ef2ff"))
+	_panel_press = -1
+	_panel_drag = -1
+	_panel_hold = 0.0
+
+
+func _swap_panels(source: int, target: int) -> void:
+	var item: Dictionary = _items[source]
+	_items[source] = _items[target]
+	_items[target] = item
+	_editor_tile.reparent(_items[0].root, false)
+	var dimensions: Vector2 = (_items[0].mesh.mesh as QuadMesh).size
+	_editor_tile.position = Vector3(-dimensions.x * 0.5 - 0.047, dimensions.y * 0.5 - 0.0375, 0.004)
+	_layout()
+	var file := ConfigFile.new()
+	file.set_value("panels", "order", _items.map(func(entry): return str(entry.game.id)))
+	file.save(ORDER_FILE)
+	Sfx.play("card_place", -12)
+
+
 func _unhandled_input(e: InputEvent) -> void:
+	if input_locked:
+		return
+	if is_open and e is InputEventMouse:
+		_panel_point = e.position
+		if (
+			e is InputEventMouseButton
+			and e.button_index == MOUSE_BUTTON_LEFT
+			and not e.pressed
+			and _panel_press >= 0
+		):
+			var source := _panel_press
+			var was_drag := _panel_drag >= 0
+			var target := _panel_at(e.position)
+			_cancel_panel_drag()
+			if was_drag and target >= 0 and target != source:
+				_swap_panels(source, target)
+			elif not was_drag:
+				select(source)
+			get_viewport().set_input_as_handled()
+			return
+	if is_open and is_instance_valid(_editor_tile) and _editor_tile.visible and e is InputEventMouse:
+		var origin := camera.project_ray_origin(e.position)
+		var query := PhysicsRayQueryParameters3D.create(
+			origin, origin + camera.project_ray_normal(e.position) * 10.0, 1 << (LAYER - 1)
+		)
+		var hit := get_world_3d().direct_space_state.intersect_ray(query)
+		if not hit.is_empty() and hit.collider == _editor_body:
+			Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND)
+			if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+				close()
+				editor_requested.emit()
+			get_viewport().set_input_as_handled()
+			return
 	# квадратик-кнопка — и при закрытых окошках
 	if e is InputEventMouseMotion:
 		var over := _launcher_at(e.position)
@@ -461,7 +622,12 @@ func _unhandled_input(e: InputEvent) -> void:
 			Input.set_default_cursor_shape(Input.CURSOR_POINTING_HAND)
 			get_viewport().set_input_as_handled()
 			return
-	elif e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT and _launcher_at(e.position):
+	elif (
+		e is InputEventMouseButton
+		and e.pressed
+		and e.button_index == MOUSE_BUTTON_LEFT
+		and _launcher_at(e.position)
+	):
 		toggle()
 		get_viewport().set_input_as_handled()
 		return
@@ -479,7 +645,8 @@ func _unhandled_input(e: InputEvent) -> void:
 		if e.button_index == MOUSE_BUTTON_LEFT:
 			var h := _panel_at(e.position)
 			if h >= 0:
-				select(h)
+				_panel_press = h
+				_panel_hold = 0.0
 			elif _selected >= 0:
 				deselect()
 			else:
@@ -498,20 +665,41 @@ func _unhandled_input(e: InputEvent) -> void:
 		else:
 			close()
 		get_viewport().set_input_as_handled()
-	elif e is InputEventKey and e.pressed and _selected >= 0 and e.keycode in [KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN]:
+	elif (
+		e is InputEventKey
+		and e.pressed
+		and _selected >= 0
+		and e.keycode in [KEY_LEFT, KEY_RIGHT, KEY_UP, KEY_DOWN]
+	):
 		step(1 if e.keycode in [KEY_RIGHT, KEY_DOWN] else -1)
 		get_viewport().set_input_as_handled()
 
 
 func _process(delta: float) -> void:
+	if _panel_press >= 0 and _panel_drag < 0 and _selected < 0:
+		_panel_hold += delta
+		if _panel_hold >= 0.4:
+			_panel_drag = _panel_press
+			_items[_panel_drag].body.collision_layer = 0
+			_items[_panel_drag].mat.set_shader_parameter("rim", Color("61f5a0"))
+	if is_instance_valid(_editor_tile):
+		_editor_tile.visible = is_open and not input_locked and _selected < 0
+		_editor_body.collision_layer = (1 << (LAYER - 1)) if _editor_tile.visible else 0
+		_editor_mat.set_shader_parameter(
+			"fade", float((_items[0]["mat"] as ShaderMaterial).get_shader_parameter("fade"))
+		)
 	_t += delta
 	_open_t += delta
 	if _launch_mat:
 		var lg: float = _launch_mat.get_shader_parameter("glow")
 		var want := 1.0 if (is_open or _launch_hover) else 0.6 + 0.2 * sin(_t * 1.2)  # в покое — мягко «дышит» светом
 		_launch_mat.set_shader_parameter("glow", lerpf(lg, want, 1.0 - exp(-delta * 8.0)))
-		(_launch_halo.material_override as ShaderMaterial).set_shader_parameter("power", 0.3 + 0.45 * float(_launch_mat.get_shader_parameter("glow")))
-		_launcher.scale = _launcher.scale.lerp(Vector3.ONE * (1.12 if _launch_hover else 1.0), 1.0 - exp(-delta * 10.0))
+		(_launch_halo.material_override as ShaderMaterial).set_shader_parameter(
+			"power", 0.3 + 0.45 * float(_launch_mat.get_shader_parameter("glow"))
+		)
+		_launcher.scale = _launcher.scale.lerp(
+			Vector3.ONE * (1.12 if _launch_hover else 1.0), 1.0 - exp(-delta * 10.0)
+		)
 		# куб медленно поворачивается и чуть покачивается; при наведении — быстрее
 		_launcher.rotation.y += delta * (0.84 if _launch_hover else 0.27)
 		_launcher.rotation.x = sin(_t * 0.42) * 0.08
@@ -533,6 +721,14 @@ func _process(delta: float) -> void:
 		var glow := 0.0
 		if not root.visible:
 			continue
+		if i == _panel_drag:
+			var origin := camera.project_ray_origin(_panel_point)
+			var plane := Plane(_anchor.basis.z, _anchor.origin)
+			var at: Variant = plane.intersects_ray(origin, camera.project_ray_normal(_panel_point))
+			if at != null:
+				root.global_position = at + _anchor.basis.z * 0.05
+			mat.set_shader_parameter("glow", 1.0)
+			continue
 		if _selected == i and is_open:
 			# ближе к игроку, по центру между панелью пати и карточкой игры; чуть повёрнута к карточке, слегка «дышит»
 			var pos := camera.global_position + fwd * 0.7 + right * 0.0 + up * 0.0
@@ -543,7 +739,9 @@ func _process(delta: float) -> void:
 			# слегка поворачивается за курсором (мягче, чем при наведении: отсчёт — от всего экрана)
 			var sp_sel := camera.unproject_position(root.global_position)
 			var dv_sel := (mp - sp_sel) / (vp.get_visible_rect().size.y * 0.4)
-			it["tilt"] = (it["tilt"] as Vector2).lerp(Vector2(clampf(dv_sel.x, -1, 1), clampf(dv_sel.y, -1, 1)), k)
+			it["tilt"] = (it["tilt"] as Vector2).lerp(
+				Vector2(clampf(dv_sel.x, -1, 1), clampf(dv_sel.y, -1, 1)), k
+			)
 			var tl_sel: Vector2 = it["tilt"]
 			target.basis = target.basis * Basis.from_euler(Vector3(tl_sel.y * 0.16, tl_sel.x * 0.2, 0))
 		else:
@@ -599,3 +797,5 @@ func _process(delta: float) -> void:
 		var la := 1.0 if is_open and i == _hover and _selected < 0 else 0.0  # у выбранной название — в карточке справа
 		label.modulate.a = lerpf(label.modulate.a, la, k)
 		label.outline_modulate.a = label.modulate.a * 0.85
+
+

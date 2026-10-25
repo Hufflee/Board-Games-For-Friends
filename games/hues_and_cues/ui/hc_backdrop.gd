@@ -21,10 +21,10 @@ func _ready() -> void:
 	if HCStyle.dark:
 		m.set_shader_parameter("strength", 0.08)
 	material = m
-	set_process(painted)
+	set_process(true)
 
 
-## Параллакс клякс за мышью (только painted): плавно догоняем положение курсора.
+## Параллакс клякс и мягких пятен за мышью: плавно догоняем положение курсора.
 var _par := Vector2.ZERO
 
 

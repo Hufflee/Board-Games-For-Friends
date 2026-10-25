@@ -103,10 +103,50 @@ static func tex(name: String) -> Texture2D:
 	return _tex[name]
 
 
-static func token_tex(seat: int, v: int, bonus: String) -> Texture2D:
-	if bonus != "":
-		return tex("bonus_%s_%d" % [bonus, v])
-	return tex("token_%s_%d" % [PLAYER_COLORS[seat % 8], v])
+## Чёткие фишки казино: цвет игрока, контрастный номинал, насечки и отдельные бонусные края.
+static func token_tex(seat: int, value: int, bonus: String) -> Texture2D:
+	var key := "chip:%d:%d:%s" % [seat % 8, value, bonus]
+	if _tex.has(key):
+		return _tex[key]
+	var tint: Color = (
+		PLAYER_TINT[seat % 8]
+		if bonus.is_empty()
+		else Color("24202c") if bonus == "black" else Color("eee7d1")
+	)
+	var rim := "#fbf3dd" if bonus != "white" else "#302722"
+	var number := "#211b19" if tint.get_luminance() > 0.38 else "#fbf3dd"
+	var marks := ""
+	for i in 8:
+		marks += '<path d="M32 5v6" transform="rotate(%d 32 32)"/>' % (i * 45)
+	var digits := ["abcedf", "bc", "abged", "abgcd", "fgbc", "afgcd", "afgecd", "abc", "abcdefg", "abfgcd"]
+	var segments := {
+		"a": "M25 20h14",
+		"b": "M40 21v10",
+		"c": "M40 34v10",
+		"d": "M25 45h14",
+		"e": "M24 34v10",
+		"f": "M24 21v10",
+		"g": "M25 32h14"
+	}
+	var numeral := ""
+	for segment: String in str(digits[clampi(value, 0, 9)]):
+		numeral += '<path d="%s"/>' % segments[segment]
+	var svg := '<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 64 64">'
+	svg += (
+		'<circle cx="32" cy="33" r="29" fill="#15191a"/><circle cx="32" cy="31" r="28" fill="#%s"/>'
+		% tint.to_html(false)
+	)
+	svg += '<g fill="none" stroke="%s" stroke-width="4">%s</g>' % [rim, marks]
+	svg += '<circle cx="32" cy="31" r="20" fill="none" stroke="%s" stroke-width="1.5"/>' % rim
+	svg += (
+		'<g fill="none" stroke="%s" stroke-width="3.2" stroke-linecap="round">%s</g></svg>'
+		% [number, numeral]
+	)
+	var image := Image.new()
+	image.load_svg_from_string(svg)
+	var texture := ImageTexture.create_from_image(image)
+	_tex[key] = texture
+	return texture
 
 
 static func box(color: Color, radius: int = 8, border: Color = Color.TRANSPARENT, border_w: int = 0, shadow: Color = Color.TRANSPARENT, shadow_size: int = 6) -> StyleBoxFlat:

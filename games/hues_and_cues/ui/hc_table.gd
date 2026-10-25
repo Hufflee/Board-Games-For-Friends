@@ -71,6 +71,7 @@ func _ready() -> void:
 		leave = HCStyle.button("Выйти", 14)
 		LeaveGuard.wire(leave, "Выйти из партии?", "Игра закончится, вы вернётесь в меню.", func(): app.back_to_menu())
 	_top.actions.add_child(leave)
+	_top.chat.z_index = 80  # поверх бокового меню и панели хода
 	HCStyle.restyle_chat(_top.chat)
 	_tint_top()
 
@@ -167,9 +168,9 @@ func _on_state(v: Dictionary) -> void:
 	_me = v["you"]
 	_auto_deadline = Time.get_ticks_msec() + int(v.get("auto_in", 0)) * 1000
 	var phase: String = v["phase"]
-	if phase != prev_phase and phase == "pick":
+	if not _v.is_empty() and prev_phase != "" and phase != prev_phase and phase == "pick":
 		Sfx.play("card_flip", -6)
-	if v["pieces"].size() > prev_pieces:
+	if prev_phase != "" and v["pieces"].size() > prev_pieces:
 		Sfx.play("chip", -4, 0.08)
 	_round_label.text = ("Переигровка · раунд %d" % v["round_no"]) if v["tiebreak"] else "Раунд %d из %d" % [v["round_no"], v["total_rounds"]]
 	if v.get("coop", false):

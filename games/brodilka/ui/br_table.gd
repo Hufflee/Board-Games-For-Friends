@@ -44,7 +44,7 @@ var _manual_until := 0  # мс: до этого времени камера не
 var _ui_waits := false  # пришло новое состояние, но персонаж ещё идёт — эффект клетки покажем, когда дойдёт
 var _tex_scale := 1.0  # во сколько раз картинка поля плотнее его координат (апскейл ×2 — 2.0)
 const BOARD_W := 3534.0  # ширина поля в координатах (пиксели исходной board.webp)
-const LABEL_DELAY := 2000  # мс: подсказка по надписи на поле — только если держать курсор 2 с
+const LABEL_DELAY := 1200  # мс: подсказка по надписи на глобальной карте через 1,2 с наведения
 var _label_wait := -1  # над какой надписью курсор (ждём LABEL_DELAY)
 var _label_since := 0
 var _cam_tween: Tween
@@ -73,6 +73,7 @@ var _label_view: TextureRect  # надпись с поля — крупно в �
 var _label_i := -1
 var _dice_box: HBoxContainer
 var _dice3d: Array = []  # два TossDie (2D-кубики с физикой монетки; 3D K12Die3D(6) пока не используем)
+var _teleport_no := -1
 var _thrown_mine := false  # свой бросок улетел, ждём результат с хоста
 
 var _bar_key := ""
@@ -610,6 +611,9 @@ func _anyone_walking() -> bool:
 
 
 func _sync_pawns(first: bool) -> void:
+	var tp: Dictionary = _v.get("teleport", {})
+	var new_tp: bool = not first and int(tp.get("no", -1)) > _teleport_no
+	_teleport_no = int(tp.get("no", -1))
 	var pl: Array = _v["players"]
 	while _pawns.size() < pl.size():
 		var i := _pawns.size()
@@ -631,7 +635,7 @@ func _sync_pawns(first: bool) -> void:
 			_pawns[s].position = _pawn_spot(s, to)
 			continue
 		if to != _shown[s]:
-			_walk(s, _shown[s], to)
+			_walk(s, _shown[s], to, int(tp["entry"]) if new_tp and int(tp["seat"]) == s else -1)
 			_shown[s] = to
 			moved = s
 	# раздвигаем фишки на одной клетке
@@ -655,7 +659,8 @@ func _pawn_spot(s: int, cell: int) -> Vector2:
 	return _cell_px(cell) + Vector2(off - Pawn.W * 0.5, -Pawn.H + 30)
 
 
-func _walk(s: int, from: int, to: int) -> void:
+func _walk(s: int, from: int, final_cell: int, portal_entry: int = -1) -> void:
+	var to := portal_entry if portal_entry >= 0 else final_cell
 	var pw: Pawn = _pawns[s]
 	pw.walking = true
 	# сначала кубик долетает и показывает число, потом короткая пауза — и только тогда персонаж идёт
@@ -675,7 +680,7 @@ func _walk(s: int, from: int, to: int) -> void:
 			var p := _cell_px(c) + Vector2(-Pawn.W * 0.5, -Pawn.H + 30)
 			t.tween_property(pw, "position", p + Vector2(0, -36), STEP_TIME * 0.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
 			t.tween_property(pw, "position", p, STEP_TIME * 0.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
-			t.tween_callback(func(): Sfx.play("pawn_step", -10, 0.12, 0.05))  # приземлился на клетку — «тук»
+			t.tween_callback(func(): Sfx.play("pawn_step", -16, 0.12, 0.025))  # приземлился на клетку — «тук»
 	else:
 		# назад, телепорт, смерч — прыжок по дуге
 		var a := pw.position
@@ -683,9 +688,15 @@ func _walk(s: int, from: int, to: int) -> void:
 		var lift := minf(300.0, a.distance_to(b) * 0.4) + 60.0
 		t.tween_method(func(k: float):
 			pw.position = a.lerp(b, k) + Vector2(0, -sin(k * PI) * lift), 0.0, 1.0, 0.55).set_trans(Tween.TRANS_SINE)
+	if portal_entry >= 0:
+		var entry_pos := _pawn_spot(s, portal_entry)
+		var exit_pos := _pawn_spot(s, final_cell)
+		t.tween_interval(0.3)
+		t.tween_property(pw, "position", (entry_pos + exit_pos) * 0.5 + Vector2(0, -160), 0.3).set_trans(Tween.TRANS_SINE)
+		t.tween_property(pw, "position", exit_pos, 0.3).set_trans(Tween.TRANS_SINE)
 	t.tween_callback(func():
 		pw.walking = false
-		pw.position = _pawn_spot(s, to)
+		pw.position = _pawn_spot(s, final_cell)
 		Sfx.play("card_place", -8)
 		# дошёл последний — короткая пауза, чтобы увидеть, куда наступил, и срабатывает клетка
 		if _ui_waits and not _anyone_walking():
@@ -838,10 +849,12 @@ func _ensure_dice() -> void:
 
 
 func _dice_count() -> int:
-	return 1 if str(_v.get("dice", "light")) in ["light", "finish"] else 2
+	return 1 if _v.get("prompt", {}).get("kind", "") == "card_die" else (1 if str(_v.get("dice", "light")) in ["light", "finish"] else 2)
 
 
 func _my_roll() -> bool:
+	if _v.get("prompt", {}).get("kind", "") == "card_die":
+		return int(_v["prompt"]["seat"]) == _actor() and not bool(_v.get("spectator", false))
 	return _v.get("phase", "") == "roll" and int(_v["turn"]) == _actor() and _v.get("prompt", {}).is_empty() and not bool(_v.get("spectator", false))
 
 
@@ -998,7 +1011,7 @@ func _update_bar() -> void:
 	_bar_box.add_child(head)
 	var row := BRStyle.hbox(8)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	if phase == "roll" and mine:
+	if _my_roll():
 		var mode := str(_v.get("dice", ""))
 		row.add_child(BRStyle.label("Схвати кубик%s мышью и брось ↑" % ("и" if mode in ["grey", "black"] else ""), BRStyle.BODY, BRStyle.GREEN_DARK, HORIZONTAL_ALIGNMENT_CENTER, "bold"))
 	elif phase == "free" and mine:
@@ -1075,6 +1088,9 @@ func _update_dialog() -> void:
 	if p.is_empty() or int(p["seat"]) != _actor() or _v["phase"] == "game_over":
 		if _dialog.get_meta("local", false):
 			return
+		_dialog.visible = false
+		return
+	if p.get("kind", "") == "card_die":
 		_dialog.visible = false
 		return
 	_open_dialog(str(p["text"]), p["options"], func(k: int): _send("br_answer", {"i": k}), false, str(p.get("kind", "")), p.get("data", {}))

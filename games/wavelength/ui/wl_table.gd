@@ -29,7 +29,8 @@ var _celebrated := false
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	add_child(HCBackdrop.new())
+	var backdrop := preload("res://games/wavelength/ui/wl_backdrop.gd").new()
+	add_child(backdrop)
 	var col := HCStyle.vbox(6)
 	col.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	col.offset_left = 16
@@ -72,6 +73,7 @@ func _ready() -> void:
 	_dial.dial_moved.connect(_on_dial_moved)
 	_dial.drag_finished.connect(_flush_dial)
 	col.add_child(_dial)
+	backdrop.dial = _dial
 
 	_card_row = HCStyle.hbox(12)
 	_card_row.alignment = BoxContainer.ALIGNMENT_CENTER

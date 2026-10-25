@@ -149,6 +149,11 @@ func show_rules() -> void:
 
 func show_settings() -> void:
 	var st := SettingsScreen.new()
+	# окно настроек — в оформлении окна правил этой игры
+	st.make_panel = func(): return HCStyle.panel(28)
+	st.make_title = func(t: String): return HCStyle.label(t, HCStyle.H1, HCStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "title")
+	st.make_primary = func(t: String): return HCStyle.primary(t, HCStyle.BODY, 160)
+	st.ink = HCStyle.INK
 	st.z_index = 100  # выше панелей стола
 	add_child(st)
 

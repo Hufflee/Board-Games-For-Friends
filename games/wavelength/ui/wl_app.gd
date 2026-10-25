@@ -41,7 +41,7 @@ func _set_screen(s: Control) -> void:
 
 func show_menu(message: String = "") -> void:
 	var m := Control.new()
-	m.add_child(HCBackdrop.new())
+	m.add_child(preload("res://games/wavelength/ui/wl_backdrop.gd").new())
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	m.add_child(center)
@@ -122,6 +122,7 @@ const RULES_TEXT := """[b]Цель.[/b] Две команды — «Левое»
 
 func show_rules() -> void:
 	var layer := Control.new()
+	layer.z_index = 100  # правила доступны поверх окна паузы
 	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(layer)
 	var dim := ColorRect.new()
@@ -155,7 +156,13 @@ func show_rules() -> void:
 
 
 func show_settings() -> void:
-	add_child(SettingsScreen.new())
+	var st := SettingsScreen.new()
+	# окно настроек — в оформлении окна правил этой игры
+	st.make_panel = func(): return HCStyle.panel(28)
+	st.make_title = func(t: String): return HCStyle.label(t, HCStyle.H1, HCStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "title")
+	st.make_primary = func(t: String): return HCStyle.primary(t, HCStyle.BODY, 160)
+	st.ink = HCStyle.INK
+	add_child(st)
 
 
 func back_to_hub() -> void:

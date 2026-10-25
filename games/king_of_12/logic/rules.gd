@@ -44,6 +44,7 @@ var winner := -1
 var rng := RandomNumberGenerator.new()
 
 var _throw_seq := 0
+var stats_rolls: Array = []
 var _played: Array[String] = []
 var _stages: Array = []
 var _stage_i := 0
@@ -76,6 +77,7 @@ func active_seats() -> Array:
 
 
 func new_game(player_list: Array, deck_cards: Array, seed_value: int = 0, tournament_mode: bool = false) -> void:
+	stats_rolls.clear()
 	players = player_list.duplicate(true)
 	deck.assign(deck_cards)
 	if seed_value != 0:
@@ -158,6 +160,7 @@ func roll_die(seat: int, vx: float = 0.0, vy: float = 0.0) -> bool:
 	if phase != "roll" or rolled[seat] or not active[seat]:
 		return false
 	faces[seat] = rng.randi_range(1, K12Dice.FACES)
+	stats_rolls.append({"seat":seat,"faces":[faces[seat]]})
 	values[seat] = faces[seat]
 	rolled[seat] = true
 	_throw_seq += 1
@@ -219,6 +222,7 @@ func roll_oracle(seat: int, vx: float = 0.0, vy: float = 0.0) -> bool:
 	if phase != "oracle" or pending.get("seat", -1) != seat:
 		return false
 	faces[seat] = rng.randi_range(1, K12Dice.FACES)
+	stats_rolls.append({"seat":seat,"faces":[faces[seat]]})
 	values[seat] = faces[seat]
 	_throw_seq += 1
 	throws[seat] = {"id": _throw_seq, "vx": vx, "vy": vy}

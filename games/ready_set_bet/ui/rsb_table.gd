@@ -995,14 +995,21 @@ class TokenChip:
 			grabbed.emit(event.global_position)
 			accept_event()
 
+	## Контейнер может вытянуть слот по высоте; сам жетон всегда остаётся круглым.
+	func token_rect() -> Rect2:
+		var diameter := maxf(0.0, minf(size.x, size.y) - 4.0)
+		var extent := Vector2.ONE * diameter
+		return Rect2((size - extent) * 0.5, extent)
+
 	func _draw() -> void:
-		var r := Rect2(Vector2(2, 2), size - Vector2(4, 4))
+		var r := token_rect()
+		var radius := r.size.x * 0.5
 		if used:
-			draw_circle(size / 2, size.x * 0.46, Color(0, 0, 0, 0.12))
+			draw_circle(r.get_center(), radius, Color(0, 0, 0, 0.12))
 			draw_texture_rect(texture, r, false, Color(1, 1, 1, 0.25))
 			return
 		if selected:
-			draw_circle(size / 2, size.x * 0.52, RSBStyle.GOLD)
-		draw_circle(size / 2 + Vector2(1.5, 2.5), size.x * 0.46, Color(0, 0, 0, 0.3))
+			draw_circle(r.get_center(), radius + 3.0, RSBStyle.GOLD)
+		draw_circle(r.get_center() + Vector2(1.5, 2.5), radius, Color(0, 0, 0, 0.3))
 		var lift := Vector2(0, -3) if _hover or selected else Vector2.ZERO
 		draw_texture_rect(texture, Rect2(r.position + lift, r.size), false)

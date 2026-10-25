@@ -32,7 +32,7 @@ const REVEAL_SLACK := 20.0  # Оракул наступает во время в
 const AUTO_PICK := 60.0  # победитель раунда долго не выбирает карту под кубик
 ## Цвета игроков: каждому случайный, клик по своему нику — сменить. По цвету видно, кто что сделал.
 const PLAYER_COLORS := ["e6194b", "3cb44b", "f2c318", "4363d8", "f58231", "911eb4", "2ec4d6", "f032e6", "8fcf2b", "f59ac0", "2a9d8f", "9a6324", "34408f", "6fd6a8"]
-const LOCAL_GAMES := ["wavelength", "dangerous_words", "hues_and_cues", "ready_set_bet", "word_slam", "tip_top", "tip_top_18", "not_a_hat", "gloom", "brodilka"]  # офлайн — местные игроки, а не боты
+const LOCAL_GAMES := ["wavelength", "dangerous_words", "hues_and_cues", "ready_set_bet", "word_slam", "tip_top", "tip_top_18", "not_a_hat", "gloom", "brodilka", "phantom_ink", "four_souls", "stillion"]  # офлайн — местные игроки, а не боты
 const BOT_NAMES := ["Бот Аркадий", "Бот Варвара", "Бот Геннадий", "Бот Дарья", "Бот Евсей", "Бот Жанна", "Бот Захар"]
 
 var auto_advance_time := 45.0  # через сколько секунд итог закрывается сам
@@ -47,7 +47,7 @@ var lobby_id := 0
 var members := {}  # peer_id -> {name}
 var join_order: Array[int] = []
 var bots := 0
-var settings := {"deck_mode": "first", "manual": [], "promo": "", "tournament": true, "reveal_speed": "normal", "perudo_dice": 5, "perudo_maputo": true, "wl_mode": "teams", "wl_local_teams": [], "dw_rooms": "3-7", "dw_monster": "random", "dw_hard": false, "dw_curses": true, "dw_time": 60, "hc_laps": 0, "hc_free": false, "hc_mode": "classic", "rsb_speed": "normal", "ws_mode": "teams", "ws_cards": "standard", "ws_names": true, "ws_time": 60, "turn_time": 60, "tt_expert": false}
+var settings := {"deck_mode": "first", "manual": [], "promo": "", "tournament": true, "reveal_speed": "normal", "perudo_dice": 5, "perudo_maputo": true, "wl_mode": "teams", "wl_local_teams": [], "dw_rooms": "3-7", "dw_monster": "random", "dw_hard": false, "dw_curses": true, "dw_time": 60, "hc_laps": 0, "hc_free": false, "hc_mode": "classic", "rsb_speed": "normal", "ws_mode": "teams", "ws_cards": "standard", "ws_names": true, "ws_time": 60, "turn_time": 60, "tt_expert": false, "pi_roles": [], "fs_dlc": false, "st_bots": false, "st_lives": 3, "st_meter": 20, "st_casual": false}
 var disconnected := {}  # место -> имя вылетевшего игрока (может вернуться)
 var chat_log: Array = []
 var last_join := {}  # куда подключались в последний раз — для «Вернуться в партию»
@@ -67,6 +67,18 @@ var wslam: WSRules = null  # «Ворд Слэм»
 var tiptop: TTRules = null  # «Тип Топ» (обе коробки)
 var nothat: NHRules = null  # «Это не шляпа!»
 var gloom: GLRules = null  # Gloom
+var fours: FSRules = null
+var fs_view_seat := 0
+var stillion: STRules = null  # «Стиллион»
+var _st_jev: STJev  # проверка незнакомых ответов нейросетью (только у хоста), своя на каждую партию
+var _st_jev_for: STRules  # партия, к которой привязан _st_jev: вердикты старой партии не трогают новую
+var _st_checking := -1  # номер ответа, отправленного в jev
+var _st_verdict: Array = []  # вердикт, пришедший на паузе: [партия, no, ok, rarity] — применим после паузы
+var _st_deck: Array = []  # колода вопросов на всю сессию лобби: не повторяются, пока хост не выйдет к выбору игры
+var player_stats := PlayerStatsStore.new()
+var _match_metrics := MatchMetrics.new()
+var phantom: PIRules = null
+var pi_view_seat := 0  # личный экран в локальной партии
 var brod: BRRules = null  # «Большая бродилка»
 var _rsb_roll_wait := 0.0
 var rsb_go := false  # ведущий нажал «Начать гонку» — идёт отсчёт
@@ -121,6 +133,7 @@ func _init_steam() -> void:
 		return
 	my_name = steam.getPersonaName()
 	my_steam_id = steam.getSteamID()
+	player_stats = PlayerStatsStore.new("user://player_statistics_%d_v1.json"%my_steam_id)
 	steam.lobby_created.connect(_on_lobby_created)
 	steam.lobby_joined.connect(_on_lobby_joined)
 	steam.join_requested.connect(_on_join_requested)
@@ -265,6 +278,10 @@ func _on_lobby_invite(inviter: int, lobby: int, _game: int) -> void:
 
 
 func leave() -> void:
+	fours = null
+	phantom = null
+	stillion = null
+	_st_deck.clear()
 	if steam_ok and lobby_id != 0:
 		steam.leaveLobby(lobby_id)
 	lobby_id = 0
@@ -288,6 +305,10 @@ func leave() -> void:
 
 
 func _reset_host() -> void:
+	fours = null
+	phantom = null
+	stillion = null
+	_st_deck.clear()
 	members = {1: {"name": my_name, "steam_id": my_steam_id, "color": randi() % PLAYER_COLORS.size()}}
 	disconnected.clear()
 	join_order = [1]
@@ -393,9 +414,10 @@ func _on_peer_disconnected(id: int) -> void:
 		if seat >= 0:
 			seat_peers[seat] = 0
 			disconnected[seat] = pname
-			_gp()[seat]["bot"] = true
-			_gp()[seat]["name"] = pname + " (бот)"
-			_system_chat("%s отключился — пока за него играет бот. Он может вернуться в партию." % pname)
+			if phantom == null and fours == null:
+				_gp()[seat]["bot"] = true
+				_gp()[seat]["name"] = pname + " (бот)"
+			_system_chat("%s отключился. Ждём его возвращения — место в этой игре нельзя заменить ботом." % pname if phantom != null or fours != null else "%s отключился — пока за него играет бот. Он может вернуться в партию." % pname)
 		_push_state()
 	else:
 		_broadcast_lobby()
@@ -551,7 +573,7 @@ func start_game() -> String:
 	if total < 2 or total > MAX_PLAYERS:
 		return "Нужно от 2 до %d игроков (можно добавить ботов)." % MAX_PLAYERS
 	var deck: Array[String] = []
-	if not party_game in ["perudo", "wavelength", "dangerous_words", "hues_and_cues", "ready_set_bet", "word_slam", "tip_top", "tip_top_18", "not_a_hat", "gloom", "brodilka"]:
+	if not party_game in ["perudo", "wavelength", "dangerous_words", "hues_and_cues", "ready_set_bet", "word_slam", "tip_top", "tip_top_18", "not_a_hat", "gloom", "brodilka", "phantom_ink", "four_souls", "stillion"]:
 		deck = build_deck()
 		if deck.is_empty():
 			return "Вручную нужно отметить ровно %d карт." % K12Cards.DECK_SIZE
@@ -567,10 +589,73 @@ func start_game() -> String:
 			players.append({"name": BOT_NAMES[i % BOT_NAMES.size()], "bot": true, "color": _local_color(i)})
 		seat_peers.append(0)
 	game_id = "%d-%d" % [Time.get_unix_time_from_system(), randi() % 100000]
+	# прошлая партия в этой пати могла быть другой игрой: сбрасываем ВСЕ правила, иначе _seat_view
+	# возьмёт первое непустое (например, hues раньше wavelength) и стол получит чужое состояние
+	rules = null
+	perudo = null
+	wavelength = null
+	dwords = null
+	hues = null
+	rsb = null
+	wslam = null
+	tiptop = null
 	nothat = null
 	gloom = null
 	brod = null
-	if party_game == "gloom":
+	phantom = null
+	stillion = null
+	fours = null
+	if party_game == "stillion":
+		rules = null
+		perudo = null
+		wavelength = null
+		dwords = null
+		hues = null
+		rsb = null
+		wslam = null
+		tiptop = null
+		stillion = STRules.new()
+		stillion.max_lives = clampi(int(settings.get("st_lives", STRules.MAX_LIVES)), 1, 9)
+		stillion.meter_max = clampi(int(settings.get("st_meter", STRules.METER_MAX)), 4, 60)
+		stillion.casual = bool(settings.get("st_casual", false))
+		stillion.deck = _st_deck  # та же колода (по ссылке) — вопросы прошлых партий не повторяются
+		stillion.new_game(players, bool(settings.get("st_bots", false)))
+		stillion.external_check = STJev.available()
+		_st_checking = -1
+		auto_advance_time = 0.0
+	elif party_game == "four_souls":
+		rules = null
+		perudo = null
+		wavelength = null
+		dwords = null
+		hues = null
+		rsb = null
+		wslam = null
+		tiptop = null
+		fs_view_seat = 0
+		fours = FSRules.new()
+		fours.new_game(players, bool(settings.get("fs_dlc", false)))
+		auto_advance_time = 0.0
+	elif party_game == "phantom_ink":
+		var pi_roles: Array = settings.get("pi_roles", [])
+		if pi_roles.size() != players.size():
+			pi_roles = PIData.default_roles(players.size())
+		var pi_error := PIData.validate(pi_roles, players.size())
+		if not pi_error.is_empty():
+			return pi_error
+		rules = null
+		perudo = null
+		wavelength = null
+		dwords = null
+		hues = null
+		rsb = null
+		wslam = null
+		tiptop = null
+		pi_view_seat = 0
+		phantom = PIRules.new()
+		phantom.new_game(players, pi_roles)
+		auto_advance_time = 0.0
+	elif party_game == "gloom":
 		var gl_max := 4 if str(settings.get("gl_sets", "base")) == "base" else 5  # базовая коробка — до 4, пятый — с дополнениями
 		if players.size() > gl_max:
 			seat_peers.clear()
@@ -717,10 +802,29 @@ func _rpc_action(kind: String, arg) -> void:
 
 
 func _handle_action(peer: int, kind: String, arg) -> void:
-	if not in_game or (rules == null and perudo == null and wavelength == null and dwords == null and hues == null and rsb == null and wslam == null and tiptop == null and nothat == null and gloom == null and brod == null):
+	if not in_game or (rules == null and perudo == null and wavelength == null and dwords == null and hues == null and rsb == null and wslam == null and tiptop == null and nothat == null and gloom == null and brod == null and phantom == null and fours == null and stillion == null):
 		return
 	var seat := seat_peers.find(peer)
 	if seat < 0 or paused:
+		return
+	if fours != null:
+		if mode == "offline" and peer == 1:
+			seat = fs_view_seat
+		if fours.action(seat, kind, arg):
+			_push_state()
+		return
+	if stillion != null:
+		var sa: Dictionary = arg if arg is Dictionary else {}
+		if mode == "offline" and sa.has("as"):
+			seat = clampi(int(sa["as"]), 0, stillion.players.size() - 1)  # на одном компьютере — за того, в кого целится пушка
+		if stillion.action(seat, kind, arg):
+			_push_state()
+		return
+	if phantom != null:
+		if mode == "offline" and peer == 1:
+			seat = pi_view_seat
+		if phantom.action(seat, kind, arg):
+			_push_state()
 		return
 	if gloom != null:
 		if _gl_action(peer, seat, kind, arg):
@@ -828,6 +932,15 @@ func _process(delta: float) -> void:
 		# состояние ушло клиентам ещё со старым временем фазы — переотправляем с полным временем хода
 		_stamp_turn = false
 		_push_state()
+	if fours != null:
+		return
+	if stillion != null:
+		_st_process(delta)
+		return
+	if phantom != null:
+		if phantom.tick(delta):
+			_push_state()
+		return
 	if gloom != null:
 		_gl_process(delta)
 		return
@@ -900,10 +1013,17 @@ func _process(delta: float) -> void:
 
 
 func _push_state() -> void:
-	if rules == null and perudo == null and wavelength == null and dwords == null and hues == null and rsb == null and wslam == null and tiptop == null and nothat == null and gloom == null and brod == null:
+	if rules == null and perudo == null and wavelength == null and dwords == null and hues == null and rsb == null and wslam == null and tiptop == null and nothat == null and gloom == null and brod == null and phantom == null and fours == null and stillion == null:
 		return
+	_match_metrics.observe(game_id,party_game,_game_obj(),seat_peers)
 	var phase: String
-	if gloom != null:
+	if fours != null:
+		phase = fours.phase
+	elif stillion != null:
+		phase = stillion.phase
+	elif phantom != null:
+		phase = phantom.phase
+	elif gloom != null:
 		phase = gloom.phase
 	elif brod != null:
 		phase = brod.phase
@@ -939,7 +1059,7 @@ func _push_state() -> void:
 	# зрители видят стол глазами рядового игрока (не ведущего), без права действовать
 	var specs := spectators()
 	if not specs.is_empty() and not seat_peers.is_empty():
-		var sv := _seat_view(_spectator_seat(), names, left, false)
+		var sv := _seat_view(-1 if phantom != null or fours != null else _spectator_seat(), names, left, false)
 		sv["spectator"] = true
 		# что зритель может занять сам: место бота (с его прогрессом) или команду (прогресс общий)
 		var bot_seats := []
@@ -963,7 +1083,13 @@ func _send_view(p: int, v: Dictionary) -> void:
 ## Состояние стола для места s (show_all — на одном компьютере видно всё).
 func _seat_view(s: int, names: Array, left: float, show_all: bool) -> Dictionary:
 	var v: Dictionary
-	if gloom != null:
+	if fours != null:
+		v = fours.get_view(fs_view_seat if show_all else s)
+	elif stillion != null:
+		v = stillion.get_view(s)
+	elif phantom != null:
+		v = phantom.get_view(pi_view_seat if show_all else s)
+	elif gloom != null:
 		v = gloom.get_view(s, show_all)
 	elif brod != null:
 		v = brod.get_view(s)
@@ -996,6 +1122,7 @@ func _seat_view(s: int, names: Array, left: float, show_all: bool) -> Dictionary
 	v["waiting"] = names
 	v["reveal_speed"] = settings.get("reveal_speed", "normal")
 	v["game_id"] = game_id
+	v["personal_stats"] = _match_metrics.snapshot(s)
 	v["game_paused"] = paused
 	v["tutorial"] = tutorial
 	v["auto_in"] = int(left)
@@ -1103,6 +1230,7 @@ func _apply_state(v: Dictionary) -> void:
 		pause_changed.emit.call_deferred()
 	_dbg("state phase=%s trick=%s" % [v.get("phase"), v.get("trick_no")])
 	view = v
+	if not bool(v.get("spectator",false)): player_stats.consume(v.get("personal_stats",{}))
 	state_changed.emit(v)
 
 
@@ -1141,6 +1269,12 @@ const PERUDO_TURN := 60.0  # долго думает — ход делает б�
 
 ## Игроки текущей партии (любой игры).
 func _gp() -> Array:
+	if stillion != null:
+		return stillion.players
+	if fours != null:
+		return fours.players
+	if phantom != null:
+		return phantom.players
 	if gloom != null:
 		return gloom.players
 	if brod != null:
@@ -1228,6 +1362,12 @@ func _perudo_process(delta: float) -> void:
 
 ## Время на ход из настроек комнаты (0 — без ограничения).
 func turn_limit() -> float:
+	if stillion != null:
+		return INF  # время задаёт фитиль пушки
+	if fours != null:
+		return INF
+	if phantom != null:
+		return INF  # буквы и обсуждение не ограничены таймером
 	var t := int(settings.get("turn_time", 60))
 	if t <= 0 or rsb != null:  # Ready Set Bet: ходов нет — всё идёт вместе с гонкой, своего таймера не нужно
 		return INF
@@ -1794,6 +1934,8 @@ func _rsb_process(delta: float) -> void:
 # =============================================================================
 
 func _start_ws(players: Array) -> String:
+	phantom = null
+	stillion = null
 	var solo: bool = settings.get("ws_mode", "teams") == "solo"
 	if not solo:
 		var sizes := [0, 0]
@@ -2158,7 +2300,7 @@ func set_paused(on: bool) -> void:
 
 ## Правила текущей игры (любой).
 func _game_obj() -> Object:
-	for o in [brod, gloom, nothat, tiptop, wslam, rsb, hues, dwords, wavelength, perudo, rules]:
+	for o in [stillion, fours, phantom, brod, gloom, nothat, tiptop, wslam, rsb, hues, dwords, wavelength, perudo, rules]:
 		if o != null:
 			return o
 	return null
@@ -2262,6 +2404,7 @@ func select_game(game_id: String) -> void:
 	for id in members:
 		members[id].erase("suggest")  # игра выбрана — предложения сбрасываются
 	party_game = game_id
+	_st_deck.clear()  # вышли к выбору игры — вопросы «Стиллиона» снова все
 	_broadcast_lobby()
 	party_game_changed.emit(game_id)
 
@@ -2283,6 +2426,9 @@ func end_game() -> void:
 
 
 func _finish_session() -> void:
+	fours = null
+	phantom = null
+	stillion = null
 	in_game = false
 	paused = false
 	rules = null
@@ -2330,6 +2476,13 @@ func _rpc_chat_up(text: String, kind: String) -> void:
 
 
 func _host_chat(peer: int, text: String, kind: String) -> void:
+	if in_game:
+		_match_metrics.observe(game_id,party_game,_game_obj(),seat_peers)
+		var stats_seat := seat_peers.find(peer)
+		_match_metrics.say(stats_seat,kind)
+		var snapshot := _match_metrics.snapshot(stats_seat)
+		if peer==1: player_stats.consume(snapshot)
+		else: _rpc_personal_stats.rpc_id(peer,snapshot)
 	var entry := {
 		"name": members[peer]["name"] if members.has(peer) else "?",
 		"color": PLAYER_COLORS[int(members[peer].get("color", 0))] if members.has(peer) else "",
@@ -2340,6 +2493,11 @@ func _host_chat(peer: int, text: String, kind: String) -> void:
 		"voice": _voice_of(peer),  # реплики звучат голосом персонажа, закреплённого за игроком
 	}
 	_send_chat_entry(entry)
+
+
+@rpc("authority", "reliable")
+func _rpc_personal_stats(snapshot: Dictionary) -> void:
+	player_stats.consume(snapshot)
 
 
 ## Голос персонажа для реплик: выдаётся игроку случайно из свободных (голоса в пати не повторяются)
@@ -2415,3 +2573,60 @@ var _netlog := OS.get_cmdline_user_args().has("--netlog")
 func _dbg(msg: String) -> void:
 	if _netlog:
 		print("[%s %d %.2f] %s" % [my_name, multiplayer.get_unique_id(), Time.get_ticks_msec() / 1000.0, msg])
+
+
+## Локально переключаем закрытый экран; по сети чужие роли выбирать нельзя.
+func pi_switch_seat(seat: int) -> void:
+	if mode != "offline" or phantom == null or seat < 0 or seat >= phantom.players.size():
+		return
+	pi_view_seat = seat
+	_push_state()
+
+
+## Смена личного экрана Four Souls только за одним компьютером.
+func fs_switch_seat(seat: int) -> void:
+	if mode != "offline" or fours == null or seat < 0 or seat >= fours.players.size():
+		return
+	fs_view_seat = seat
+	_push_state()
+
+
+# =============================================================================
+# «Стиллион» на хосте
+# =============================================================================
+
+## Тик правил; ответ не из списка вопроса — на проверку jev (пока проверяется, фитиль стоит).
+func _st_process(delta: float) -> void:
+	if paused:
+		return
+	if not _st_verdict.is_empty():
+		var held: Array = _st_verdict
+		_st_verdict = []
+		if held[0] == stillion and stillion.resolve_external(int(held[1]), bool(held[2]), str(held[3])):
+			_push_state()
+	if stillion.tick(delta):
+		_push_state()
+	if stillion.phase == "check" and int(stillion.pending.get("no", -1)) != _st_checking:
+		_st_checking = int(stillion.pending.no)
+		if _st_jev == null or _st_jev_for != stillion:
+			# новая партия — новый проверяющий; старый вместе с незавершёнными запросами удаляется
+			if _st_jev != null:
+				_st_jev.queue_free()
+			_st_jev = STJev.new()
+			_st_jev_for = stillion
+			_st_verdict = []
+			add_child(_st_jev)
+			var game := stillion
+			_st_jev.judged.connect(func(no: int, ok: bool, rarity: String): _st_judged(game, no, ok, rarity))
+		_st_jev.check(_st_checking, stillion.question, str(stillion.pending.text))
+
+
+## Вердикт jev: только для своей партии; на паузе — откладываем до продолжения.
+func _st_judged(game: STRules, no: int, ok: bool, rarity: String) -> void:
+	if game != stillion or stillion == null:
+		return
+	if paused:
+		_st_verdict = [game, no, ok, rarity]
+		return
+	if stillion.resolve_external(no, ok, rarity):
+		_push_state()

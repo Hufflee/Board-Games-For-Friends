@@ -64,6 +64,7 @@ func _ready() -> void:
 	if _face:
 		_face.size = card_size
 		add_child(_face)
+		_round_images(_face)
 		_face.mouse_filter = Control.MOUSE_FILTER_IGNORE  # после _ready карты, иначе она перехватит мышь
 		_face.tooltip_text = ""
 	_back = Control.new()
@@ -79,6 +80,14 @@ func _ready() -> void:
 	_sync()
 	mouse_entered.connect(func(): hovered.emit(self, true))
 	mouse_exited.connect(func(): hovered.emit(self, false))
+
+
+func _round_images(node: Node) -> void:
+	if node is TextureRect and (node as TextureRect).material == null:
+		var corners := ShaderMaterial.new()
+		corners.shader = preload("res://hub/card_corners.gdshader")
+		(node as TextureRect).material = corners
+	for child in node.get_children(): _round_images(child)
 
 
 func _sync() -> void:

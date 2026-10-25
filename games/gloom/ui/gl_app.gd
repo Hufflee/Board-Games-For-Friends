@@ -167,6 +167,11 @@ func show_rules() -> void:
 
 func show_settings() -> void:
 	var st := SettingsScreen.new()
+	# окно настроек — в оформлении окна правил этой игры
+	st.make_panel = func(): return GLStyle.panel(26)
+	st.make_title = func(t: String): return GLStyle.label(t, GLStyle.H1, GLStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "title")
+	st.make_primary = func(t: String): return GLStyle.primary(t, GLStyle.BODY, 160)
+	st.ink = GLStyle.INK
 	st.z_index = 100  # выше панелей стола
 	add_child(st)
 

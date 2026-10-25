@@ -149,6 +149,10 @@ func show_rules() -> void:
 
 func show_settings() -> void:
 	var st := SettingsScreen.new()
+	# окно настроек — в оформлении окна правил этой игры
+	st.make_panel = func(): return DWStyle.panel(DWStyle.PUMPKIN)
+	st.make_title = func(t: String): return DWStyle.title(t, DWStyle.H1)
+	st.make_primary = func(t: String): return DWStyle.primary(t, DWStyle.BODY, 180)
 	st.z_index = 100  # выше панелей стола
 	add_child(st)
 

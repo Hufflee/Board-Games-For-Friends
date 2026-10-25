@@ -1,5 +1,5 @@
 class_name PauseLayer
-extends CanvasLayer
+extends Node
 ## Пауза поверх любой игры. У хоста во время партии — кнопка «⏸ Пауза»; на паузе у всех затемнение
 ## и окно. Хост здесь же сажает за стол друзей, которые вошли в пати посреди партии: вместо бота /
 ## вылетевшего игрока или новым местом (если игра это позволяет).
@@ -7,6 +7,7 @@ extends CanvasLayer
 ## Оформление — из темы текущей игры («ConfirmPanel», «SelectedButton»). Создаёт Net.
 
 var _root: Control
+var _overlay_scene: WeakRef
 var _button: Button
 var _button_icon: Control
 const FidgetScript := preload("res://hub/fidget.gd")
@@ -28,15 +29,16 @@ var _status := ""
 
 
 func _ready() -> void:
-	layer = 95
 	_root = Control.new()
+	_root.name = "PauseOverlay"
+	_root.z_index = 70
 	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_root)
 	_dim = ColorRect.new()
 	_dim.color = Color(0, 0, 0, 0.72)
 	_dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	_dim.mouse_filter = Control.MOUSE_FILTER_STOP
+	_dim.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_dim.visible = false
 	_root.add_child(_dim)
 	_panel = PanelContainer.new()
@@ -97,6 +99,21 @@ func _process(delta: float) -> void:
 		_refresh()
 
 
+## Закрываем открытый просмотр при входе в паузу; игровые окна остаются под затемнением.
+func _hide_card_previews(scene: Node) -> void:
+	if scene == null:
+		return
+	for node: Node in scene.find_children("*", "Control", true, false):
+		if node.has_method("_hide_preview"):
+			node.call("_hide_preview")
+		else:
+			for property: Dictionary in node.get_property_list():
+				if property.name == "_preview":
+					var preview: Variant = node.get("_preview")
+					if is_instance_valid(preview) and preview is Control:
+						preview.hide()
+
+
 func _is_paused() -> bool:
 	if not Net.in_session() or Net.view.is_empty():
 		return false
@@ -105,10 +122,13 @@ func _is_paused() -> bool:
 
 func _refresh() -> void:
 	var scene := get_tree().current_scene
+	_attach_overlay(scene)
 	var in_hub := scene != null and scene.scene_file_path == HubGames.HUB_SCENE
 	# в хабе (меню) пауза и плашки не показываются — даже если от партии осталось состояние
 	var playing := Net.in_session() and not Net.view.is_empty() and (Net.in_game or not Net.is_host()) and not in_hub
 	var on := playing and _is_paused()
+	if on and not _dim.visible:
+		_hide_card_previews(scene)
 	# тема — от текущей игры (каждая ставит свою на корень окна): CanvasLayer её сам не наследует
 	if _root.theme != get_tree().root.theme:
 		_root.theme = get_tree().root.theme
@@ -116,8 +136,12 @@ func _refresh() -> void:
 	var waiting := Net.waiting_members()
 	# у стола с верхней полосой (TopBar) пауза и «зритель» — в ней
 	var has_bar := get_tree().get_first_node_in_group("top_bar") != null
+	for bar: TopBar in get_tree().get_nodes_in_group("top_bar"):
+		_lift_service(bar, on)
+		_lift_service(bar.chat, on)
 	_button.visible = playing and Net.is_host() and not on and not has_bar
-	_place_fidget(playing)  # на паузе монетка остаётся в гнезде (под затемнением, как весь стол)
+	_place_fidget(playing)
+	_order_overlay_input(scene)
 	var spectator := playing and bool(Net.view.get("spectator", false))
 	_spec_banner.visible = spectator and not on
 	_update_offer(spectator and not on)
@@ -132,6 +156,60 @@ func _refresh() -> void:
 		if on:
 			_build(waiting)
 	_place()
+
+
+## Общий canvas: стол ниже паузы, верхняя полоса/чат/монетка выше,
+## окна правил и настроек выше обоих. При смене сцены сохраняем общий оверлей.
+func _attach_overlay(scene: Node) -> void:
+	if scene == null or _root.get_parent() == scene:
+		return
+	var previous: Node = _overlay_scene.get_ref() if _overlay_scene != null else null
+	if is_instance_valid(previous) and previous.tree_exiting.is_connected(_detach_overlay):
+		previous.tree_exiting.disconnect(_detach_overlay)
+	_root.reparent(scene, false)
+	_root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_overlay_scene = weakref(scene)
+	if not scene.tree_exiting.is_connected(_detach_overlay):
+		scene.tree_exiting.connect(_detach_overlay, CONNECT_ONE_SHOT)
+
+
+func _detach_overlay() -> void:
+	if is_instance_valid(_root) and not is_queued_for_deletion():
+		_root.reparent(self, false)
+
+
+## z_index задаёт отрисовку, но GUI ищет цель мыши в обратном порядке детей.
+## Стол и монетка создаются/пересобираются после оверлея: окно паузы должно идти
+## после них, а служебные окна (правила, настройки) — после окна паузы.
+func _order_overlay_input(scene: Node) -> void:
+	if scene == null or _root.get_parent() != scene:
+		return
+	var windows: Array[Node] = []
+	var last_table := -1
+	for child: Node in scene.get_children():
+		if child == _root:
+			continue
+		if child is Control and (child as Control).z_index >= 100:
+			windows.append(child)
+		else:
+			last_table = child.get_index()
+	var misplaced := _root.get_index() < last_table
+	for window: Node in windows:
+		misplaced = misplaced or window.get_index() < _root.get_index()
+	if misplaced:
+		scene.move_child(_root, -1)
+		for window: Node in windows:
+			scene.move_child(window, -1)
+
+
+func _lift_service(control: Control, on: bool) -> void:
+	if on:
+		if not control.has_meta("pause_z"):
+			control.set_meta("pause_z", control.z_index)
+		control.z_index = 90
+	elif control.has_meta("pause_z"):
+		control.z_index = int(control.get_meta("pause_z"))
+		control.remove_meta("pause_z")
 
 
 ## Монетка живёт в сцене игры, сразу над столом (app.screen): окна поверх стола (настройки, правила,
@@ -185,7 +263,9 @@ func _label(t: String, size: int, alpha: float = 1.0) -> Label:
 	var l := Label.new()
 	l.text = t
 	l.add_theme_font_size_override("font_size", size)
-	l.add_theme_color_override("font_color", _panel.get_theme_color("font_color", "ConfirmPanel"))
+	var has_panel_color := _root.theme != null and _root.theme.has_color("font_color", "ConfirmPanel")
+	var color_type := "ConfirmPanel" if has_panel_color else "Label"
+	l.add_theme_color_override("font_color", _panel.get_theme_color("font_color", color_type))
 	l.modulate.a = alpha
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l.custom_minimum_size.x = 460
@@ -270,7 +350,7 @@ func _invite_block(col: VBoxContainer) -> void:
 	inv.tooltip_text = "Список друзей Steam — приглашение придёт им в Steam" if steam_ok else "Пати не через Steam — дайте друзьям код комнаты"
 	inv.pressed.connect(func():
 		Sfx.play("click", -6)
-		SteamInvite.open_panel(layer + 4))
+		SteamInvite.open_panel(99))
 	row.add_child(inv)
 	var code := Net.lobby_code() if party else ""
 	var cp := _btn("Скопировать код комнаты")
@@ -302,6 +382,12 @@ func _seat(peer: int, seat: int) -> void:
 ## Зритель не нажимает игровые кнопки (хост всё равно не примет его действия) — пропускаем только
 ## «служебные»: правила, настройки, выход, чат, окна подтверждения и управление видом.
 func _input(event: InputEvent) -> void:
+	if _is_paused() and (event is InputEventMouse or event is InputEventKey):
+		var target := _root.get_viewport().gui_get_focus_owner() if event is InputEventKey else _root.get_viewport().gui_get_hovered_control()
+		var dragging_coin := event is InputEventMouse and is_instance_valid(_fidget) and bool(_fidget.get("_holding"))
+		if not dragging_coin and not _pause_allowed(target):
+			_root.get_viewport().set_input_as_handled()
+			return
 	if not (event is InputEventMouseButton and event.pressed) or not bool(Net.view.get("spectator", false)):
 		return
 	var c := _root.get_viewport().gui_get_hovered_control()
@@ -309,6 +395,18 @@ func _input(event: InputEvent) -> void:
 		return
 	_root.get_viewport().set_input_as_handled()
 	Sfx.play("card_shove", -12)
+
+
+func _pause_allowed(control: Control) -> bool:
+	var node: Node = control
+	var scene := get_tree().current_scene
+	while node != null and node != scene:
+		if node == _root or node == _fidget or node is TopBar or node is K12ChatPanel:
+			return true
+		if node is Control and node.get_parent() == scene and (node as Control).z_index >= 100:
+			return true
+		node = node.get_parent()
+	return false
 
 
 func _spectator_allowed(c: Control) -> bool:

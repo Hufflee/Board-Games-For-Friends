@@ -12,6 +12,7 @@ const SettingsScreen := preload("res://games/king_of_12/ui/settings_screen.gd")
 var _room: NeonRoom
 var _ui: Control  # пати, кнопки, заголовок
 var _card: Control  # карточка выбранной игры
+var _shelf_hint: Label
 var _status: Label
 var _code: LineEdit
 var _leaving := false
@@ -33,6 +34,18 @@ func _ready() -> void:
 	add_child(_room)
 	_room.box_selected.connect(_on_box_selected)
 	_room.box_released.connect(_on_box_released)
+	_room.editor_mode_changed.connect(
+		func(on: bool):
+			if is_instance_valid(_ui):
+				_ui.visible = not on
+			if is_instance_valid(_card):
+				_card.visible = not on
+	)
+	_room.shelf_hint.connect(
+		func(text: String):
+			if is_instance_valid(_shelf_hint):
+				_shelf_hint.text = text
+	)
 	_room.panels.game_selected.connect(_on_box_selected)
 	_room.panels.game_released.connect(_on_box_released)
 	_ui = Control.new()
@@ -66,7 +79,8 @@ func _rebuild() -> void:
 	party.position = Vector2(22, 112)
 	_ui.add_child(party)
 	# подсказка снизу по центру
-	var hint := HubStyle.label("Выберите игру в шкафу — наведите и нажмите на коробку" if not in_party or Net.is_host() else "Игру запускает ведущий пати — откройте коробку и предложите ему свою", 14, HubStyle.MUTED, HORIZONTAL_ALIGNMENT_CENTER)
+	var hint := HubStyle.label(NeonRoom.HINT if not in_party or Net.is_host() else "Игру запускает ведущий пати — откройте коробку и предложите ему свою", 14, HubStyle.MUTED, HORIZONTAL_ALIGNMENT_CENTER)
+	_shelf_hint = hint
 	hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
 	hint.grow_horizontal = Control.GROW_DIRECTION_BOTH
 	hint.offset_top = -40
@@ -77,13 +91,16 @@ func _rebuild() -> void:
 	var top := HubStyle.hbox(8)
 	top.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
 	top.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	top.offset_left = -440
+	top.offset_left = -610
 	top.offset_right = -20
 	top.offset_top = 18
 	top.alignment = BoxContainer.ALIGNMENT_END
 	var news := HubStyle.button("Что нового?", 15)
 	news.pressed.connect(func(): add_child(load("res://hub/whats_new.gd").new()))
 	top.add_child(news)
+	var stats := HubStyle.button("Статистика",15)
+	stats.pressed.connect(func():add_child(load("res://hub/player_stats_screen.gd").new()))
+	top.add_child(stats)
 	var settings := HubStyle.button("Настройки", 15)
 	settings.pressed.connect(func():
 		var screen := SettingsScreen.new()

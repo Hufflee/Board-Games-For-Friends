@@ -252,17 +252,19 @@ static func theme_bbcode(t: Array) -> String:
 ## Фон с лучами, как на коробке.
 class Rays:
 	extends Control
+	var _motion := Vector2.ZERO
 
 	func _ready() -> void:
 		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 
-	func _process(_d: float) -> void:
+	func _process(delta: float) -> void:
+		_motion = preload("res://hub/cursor_parallax.gd").step(self, _motion, delta)
 		queue_redraw()
 
 	func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, size), TTStyle.bg())
-		var c := size * Vector2(0.5, 0.42)
+		var c := size * Vector2(0.5, 0.42) + _motion
 		var r := size.length()
 		var n := 36
 		var rot := Time.get_ticks_msec() / 1000.0 * 0.02

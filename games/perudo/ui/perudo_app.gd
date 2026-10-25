@@ -117,6 +117,7 @@ const RULES_TEXT := """[b]Цель.[/b] Сохранить свои кости. 
 
 func show_rules() -> void:
 	var layer := Control.new()
+	layer.z_index = 100  # правила доступны поверх окна паузы
 	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(layer)
 	var dim := ColorRect.new()
@@ -155,7 +156,12 @@ func show_rules() -> void:
 
 
 func show_settings() -> void:
-	add_child(SettingsScreen.new())
+	var st := SettingsScreen.new()
+	# окно настроек — в оформлении окна правил этой игры
+	st.make_panel = func(): return K12UI.panel(Color(0.08, 0.055, 0.035, 0.97), 8, "double")
+	st.make_title = func(t: String): return K12UI.title(t, K12UI.H1)
+	st.make_primary = func(t: String): return K12UI.button(t, K12UI.BODY, 180)
+	add_child(st)
 
 
 ## Хост пати уводит всех к выбору игры; остальные/одиночная игра — выходят на стартовый экран.

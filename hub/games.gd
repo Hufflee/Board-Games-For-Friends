@@ -135,6 +135,36 @@ const LIST := [
 		"color": Color("1f6fb8"),
 		"thickness": 0.07,
 	},
+	{
+		"id": "phantom_ink",
+		"title": "Призрачные чернила",
+		"players": "4–8 игроков",
+		"time": "15–30 минут",
+		"description": "Два духа знают один тайный предмет. Задавайте вопросы, ловите подсказки по буквам и скажите «Тишина!», прежде чем соперники поймут слишком много.",
+		"scene": "res://games/phantom_ink/ui/main.tscn",
+		"color": Color("172826"),
+		"thickness": 0.07,
+	},
+	{
+		"id": "four_souls",
+		"title": "The Binding of Isaac: Four Souls",
+		"players": "2–8 игроков",
+		"time": "60–120 минут",
+		"description": "Лут, сокровища и опасные сделки в подвале Айзека. Первым соберите четыре души; помогайте друзьям или срывайте их планы. Расширенный набор DLC включается в комнате.",
+		"scene": "res://games/four_souls/ui/main.tscn",
+		"color": Color("5d3430"),
+		"thickness": 0.07,
+	},
+	{
+		"id": "stillion",
+		"title": "Стиллион",
+		"players": "2–8 игроков",
+		"time": "10–20 минут",
+		"description": "Чёрная пушка с глазами целится в вас и надувается. Успейте напечатать ответ на вопрос, пока она не выстрелила! Чем редче ответ, тем быстрее копится запасная жизнь.",
+		"scene": "res://games/stillion/ui/main.tscn",
+		"color": Color("1c1a17"),
+		"thickness": 0.07,
+	},
 ]
 
 const HUB_SCENE := "res://hub/hub.tscn"

@@ -133,6 +133,7 @@ const RULES_TEXT := """[b]Цель.[/b] Первым пересечь финиш
 
 func show_rules() -> void:
 	var layer := Control.new()
+	layer.z_index = 100  # правила доступны поверх окна паузы
 	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(layer)
 	var dim := ColorRect.new()
@@ -166,7 +167,13 @@ func show_rules() -> void:
 
 
 func show_settings() -> void:
-	add_child(SettingsScreen.new())
+	var st := SettingsScreen.new()
+	# окно настроек — в оформлении окна правил этой игры
+	st.make_panel = func(): return BRStyle.panel(26)
+	st.make_title = func(t: String): return BRStyle.label(t, BRStyle.H1, BRStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "title")
+	st.make_primary = func(t: String): return BRStyle.primary(t, BRStyle.BODY, 160)
+	st.ink = BRStyle.INK
+	add_child(st)
 
 
 func back_to_hub() -> void:

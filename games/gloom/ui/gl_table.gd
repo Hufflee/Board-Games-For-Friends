@@ -45,6 +45,7 @@ func _ready() -> void:
 	add_child(_board)
 
 	_deck = TextureRect.new()
+	_round_card(_deck)
 	_deck.texture = GLStyle.tex("back")
 	_deck.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_deck.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -62,13 +63,16 @@ func _ready() -> void:
 	_discard_bg.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_discard_bg)
 	_discard = TextureRect.new()
+	_round_card(_discard)
 	_discard.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	_discard.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_discard.tooltip_text = "Сброс — щёлкните, чтобы посмотреть все карты"
 	_discard.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	_discard.gui_input.connect(func(e):
-		if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
-			_show_discard())
+	_discard.gui_input.connect(
+		func(e):
+			if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+				_show_discard()
+	)
 	add_child(_discard)
 	_discard_label = GLStyle.label("", GLStyle.CAP, GLStyle.BONE_DIM, HORIZONTAL_ALIGNMENT_CENTER)
 	add_child(_discard_label)
@@ -76,7 +80,9 @@ func _ready() -> void:
 	_log_panel = GLStyle.dark_panel(10)
 	var lcol := GLStyle.vbox(4)
 	_log_panel.add_child(lcol)
-	lcol.add_child(GLStyle.label("Хроника несчастий", GLStyle.CAP, GLStyle.BONE_DIM, HORIZONTAL_ALIGNMENT_LEFT, "title"))
+	lcol.add_child(
+		GLStyle.label("Хроника несчастий", GLStyle.CAP, GLStyle.BONE_DIM, HORIZONTAL_ALIGNMENT_LEFT, "title")
+	)
 	_log = RichTextLabel.new()
 	_log.bbcode_enabled = true
 	_log.scroll_following = true
@@ -104,7 +110,9 @@ func _ready() -> void:
 	add_child(_preview)
 
 	# верхняя полоса: название, ход, часы, чат и кнопки игры
-	_top = TopBar.make(self, "Gloom", func(t, z): return GLStyle.button(t, z), null, GLStyle.BONE, GLStyle.font("bold"))
+	_top = TopBar.make(
+		self, "Gloom", func(t, z): return GLStyle.button(t, z), null, GLStyle.BONE, GLStyle.font("bold")
+	)
 	_top.z_index = 40  # над столом и рукой (20), под крупным просмотром (60)
 	_top.chat.z_index = 40
 	GLStyle.restyle_chat(_top.chat)
@@ -117,20 +125,28 @@ func _ready() -> void:
 	var leave: Button
 	if Net.is_party() and Net.is_host():
 		leave = GLStyle.button("Завершить партию", 14)
-		LeaveGuard.wire(leave, "Завершить партию для всех?", "Все вернутся в лобби игры, пати сохранится.", Net.end_game)
+		LeaveGuard.wire(
+			leave, "Завершить партию для всех?", "Все вернутся в лобби игры, пати сохранится.", Net.end_game
+		)
 	elif Net.is_party():
 		leave = GLStyle.button("Покинуть пати", 14)
 		LeaveGuard.wire(leave, "Покинуть пати?", "Вы выйдете из игры и из пати.", func(): app.leave_party())
 	else:
 		leave = GLStyle.button("Выйти", 14)
-		LeaveGuard.wire(leave, "Выйти из партии?", "Игра закончится, вы вернётесь в меню.", func(): app.back_to_menu())
+		LeaveGuard.wire(
+			leave, "Выйти из партии?", "Игра закончится, вы вернётесь в меню.", func(): app.back_to_menu()
+		)
 	_top.actions.add_child(leave)
-	ChatBubbles.attach(self, func(t: String) -> Control:
-		var b := GLStyle.label(t, GLStyle.CAP, GLStyle.INK, HORIZONTAL_ALIGNMENT_CENTER)
-		b.add_theme_stylebox_override("normal", GLStyle.box(GLStyle.BONE, 6, GLStyle.INK, 2, 0.35))
-		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		b.custom_minimum_size.x = 240
-		return b, Vector2(-270, 70))
+	ChatBubbles.attach(
+		self,
+		func(t: String) -> Control:
+			var b := GLStyle.label(t, GLStyle.CAP, GLStyle.INK, HORIZONTAL_ALIGNMENT_CENTER)
+			b.add_theme_stylebox_override("normal", GLStyle.box(GLStyle.BONE, 6, GLStyle.INK, 2, 0.35))
+			b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			b.custom_minimum_size.x = 240
+			return b,
+		Vector2(-270, 70)
+	)
 	resized.connect(_layout)
 	Net.state_changed.connect(_on_state)
 	if not Net.view.is_empty():
@@ -275,7 +291,8 @@ func _build_board() -> void:
 	if _scale_for != opps.size():
 		_scale_for = opps.size()
 		_card_scale = 1.0
-	var small := (76.0 if opps.size() <= 2 else 58.0) * _card_scale
+	var base_width: float = {1: 116.0, 2: 92.0, 3: 72.0, 4: 60.0}.get(opps.size(), 64.0)
+	var small := base_width * _card_scale
 	for s in opps:
 		_board.add_child(_family_box(s, small, false))
 	_board.add_child(_family_box(_me, 100.0 * maxf(_card_scale, 0.8), true))
@@ -296,7 +313,11 @@ func _centre_box(w: float) -> Control:
 	p.add_child(row)
 	if not guests.is_empty():
 		var gcol := GLStyle.vbox(4)
-		gcol.add_child(GLStyle.label("Гости без хозяина", GLStyle.CAP, GLStyle.BONE_DIM, HORIZONTAL_ALIGNMENT_LEFT, "title"))
+		gcol.add_child(
+			GLStyle.label(
+				"Гости без хозяина", GLStyle.CAP, GLStyle.BONE_DIM, HORIZONTAL_ALIGNMENT_LEFT, "title"
+			)
+		)
 		var gr := GLStyle.hbox(6)
 		for c in guests:
 			var st := GLStack.new(c, _v["chars"][c], w)
@@ -308,7 +329,9 @@ func _centre_box(w: float) -> Control:
 		row.add_child(gcol)
 	if not sts.is_empty():
 		var scol := GLStyle.vbox(4)
-		scol.add_child(GLStyle.label("Истории", GLStyle.CAP, GLStyle.BONE_DIM, HORIZONTAL_ALIGNMENT_LEFT, "title"))
+		scol.add_child(
+			GLStyle.label("Истории", GLStyle.CAP, GLStyle.BONE_DIM, HORIZONTAL_ALIGNMENT_LEFT, "title")
+		)
 		var sr := GLStyle.hbox(6)
 		for st in sts:
 			sr.add_child(_story_card(st, w))
@@ -322,33 +345,53 @@ func _story_card(st: Dictionary, w: float) -> Control:
 	var id := int(st["id"])
 	var col := GLStyle.vbox(2)
 	var tr := TextureRect.new()
+	_round_card(tr)
 	tr.texture = GLStyle.tex("st%d" % id)
 	tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	tr.custom_minimum_size = Vector2(w, w * GLStyle.CARD.y / GLStyle.CARD.x)
 	var data: Dictionary = GLData.STORIES[id]
 	var req: Array = data["req"]
-	tr.tooltip_text = "%s\nНужно в семье (живые или мёртвые): %s. Отобрать — нужно больше, чем у владельца." % [data["name"], ", ".join(req.map(func(ic): return "«%s»" % GLData.ICON_NAMES.get(ic, ic)))]
+	tr.tooltip_text = (
+		"%s\nНужно в семье (живые или мёртвые): %s. Отобрать — нужно больше, чем у владельца."
+		% [data["name"], ", ".join(req.map(func(ic): return "«%s»" % GLData.ICON_NAMES.get(ic, ic)))]
+	)
 	var can: bool = st.get("can", false)
 	if st.get("pick", false) and int(_v.get("prompt", {}).get("seat", -1)) == _actor():
 		var pv := id if _v["prompt"]["kind"] == "pick_story" else 1000 + id
 		tr.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-		tr.gui_input.connect(func(e):
-			if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
-				_send("gl_pick", {"v": pv}))
+		tr.gui_input.connect(
+			func(e):
+				if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+					_send("gl_pick", {"v": pv})
+		)
 		tr.modulate = Color(1.2, 1.1, 0.85)
 	elif can:
 		tr.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		tr.tooltip_text += "\nЩёлкните, чтобы забрать (тратит действие)."
-		tr.gui_input.connect(func(e):
-			if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
-				_send("gl_claim", {"st": id}))
+		tr.gui_input.connect(
+			func(e):
+				if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+					_send("gl_claim", {"st": id})
+		)
 		tr.modulate = Color(1.15, 1.1, 0.9)
-	tr.mouse_entered.connect(func(): _show_preview(tr, func(ci: CanvasItem, r: Rect2): ci.draw_texture_rect(GLStyle.tex("st%d" % id), r, false)))
+	tr.mouse_entered.connect(
+		func():
+			_show_preview(
+				tr, func(ci: CanvasItem, r: Rect2): ci.draw_texture_rect(GLStyle.tex("st%d" % id), r, false)
+			)
+	)
 	tr.mouse_exited.connect(func(): _preview.visible = false)
 	col.add_child(tr)
 	var o := int(st["owner"])
-	col.add_child(GLStyle.label("забрать!" if can else (_name(o) if o >= 0 else "ничья"), GLStyle.CAP, GLStyle.BLOOD_LIGHT if can else GLStyle.BONE_DIM, HORIZONTAL_ALIGNMENT_CENTER))
+	col.add_child(
+		GLStyle.label(
+			"забрать!" if can else (_name(o) if o >= 0 else "ничья"),
+			GLStyle.CAP,
+			GLStyle.BLOOD_LIGHT if can else GLStyle.BONE_DIM,
+			HORIZONTAL_ALIGNMENT_CENTER
+		)
+	)
 	return col
 
 
@@ -356,7 +399,13 @@ func _family_box(s: int, w: float, mine: bool) -> Control:
 	var p := GLStyle.dark_panel(8)
 	p.set_meta("seat", s)
 	var active: bool = int(_v["current"]) == s and _v["phase"] in ["play", "prompt", "react"]
-	var sb := GLStyle.box(Color(GLStyle.COAL, 0.85), 6, GLStyle.BLOOD_LIGHT if active else Color(GLStyle.SILVER, 0.45), 2 if active else 1, 0.35)
+	var sb := GLStyle.box(
+		Color(GLStyle.COAL, 0.85),
+		6,
+		GLStyle.BLOOD_LIGHT if active else Color(GLStyle.SILVER, 0.45),
+		2 if active else 1,
+		0.35
+	)
 	sb.set_content_margin_all(8)
 	p.add_theme_stylebox_override("panel", sb)
 	var col := GLStyle.vbox(5)
@@ -364,7 +413,13 @@ func _family_box(s: int, w: float, mine: bool) -> Control:
 	var head := GLStyle.hbox(8)
 	var you := " (вы)" if mine and not _hotseat() else ""
 	head.add_child(PlayerTag.make_seat(_v["players"], s, int(_v["you"]), GLStyle.CAP, GLStyle.BONE, you))
-	var fl := GLStyle.label("· " + _family_name(s), GLStyle.CAP, _family_color(s).lightened(0.25), HORIZONTAL_ALIGNMENT_LEFT, "italic")
+	var fl := GLStyle.label(
+		"· " + _family_name(s),
+		GLStyle.CAP,
+		_family_color(s).lightened(0.25),
+		HORIZONTAL_ALIGNMENT_LEFT,
+		"italic"
+	)
 	head.add_child(fl)
 	var info := "  ✋%d/%d" % [int(_v["hand_counts"][s]), int(_v["limits"][s])]
 	if _v["skip_draw"][s]:
@@ -382,7 +437,13 @@ func _family_box(s: int, w: float, mine: bool) -> Control:
 	col.add_child(head)
 	var owned: Array = (_v.get("stories", []) as Array).filter(func(x): return int(x["owner"]) == s)
 	if not owned.is_empty():
-		var sl := GLStyle.label("История: " + ", ".join(owned.map(func(x): return "«%s»" % GLData.STORIES[int(x["id"])]["name"])), GLStyle.CAP, GLStyle.OK.lightened(0.3), HORIZONTAL_ALIGNMENT_LEFT, "italic")
+		var sl := GLStyle.label(
+			"История: " + ", ".join(owned.map(func(x): return "«%s»" % GLData.STORIES[int(x["id"])]["name"])),
+			GLStyle.CAP,
+			GLStyle.OK.lightened(0.3),
+			HORIZONTAL_ALIGNMENT_LEFT,
+			"italic"
+		)
 		col.add_child(sl)
 	var row := GLStyle.hbox(6)
 	for c in _chars_of(s):
@@ -449,7 +510,9 @@ func _layout_hand() -> void:
 			continue
 		var lift := 18.0 if _order[i] == _sel else 0.0
 		tc.z_index = i
-		tc.move_to(Vector2(x0 + w * 0.5 + step * i, size.y - GLCardFace.SIZE.y * 0.5 - 12 - lift), 0.0, 1.0, 0.22)
+		tc.move_to(
+			Vector2(x0 + w * 0.5 + step * i, size.y - GLCardFace.SIZE.y * 0.5 - 12 - lift), 0.0, 1.0, 0.22
+		)
 
 
 func _hand_left() -> float:
@@ -480,7 +543,10 @@ func _layout() -> void:
 	_log_panel.visible = not drafting
 	if drafting:
 		_panel.reset_size()
-		_panel.position = Vector2((size.x - _panel.size.x) * 0.5, TopBar.HEIGHT + maxf(16.0, (size.y - TopBar.HEIGHT - _panel.size.y) * 0.5))
+		_panel.position = Vector2(
+			(size.x - _panel.size.x) * 0.5,
+			TopBar.HEIGHT + maxf(16.0, (size.y - TopBar.HEIGHT - _panel.size.y) * 0.5)
+		)
 		_layout_hand()
 		return
 	_discard_bg.visible = not _v["discard"].is_empty()
@@ -640,7 +706,9 @@ func _refresh_targets() -> void:
 	if _v["phase"] == "trim":
 		var tl: Array = _v["trim_left"]
 		for c in _stacks:
-			(_stacks[c] as GLStack).highlight = 1.0 if (_actor() in tl and int(_v["chars"][c]["owner"]) == _actor()) else 0.0
+			(_stacks[c] as GLStack).highlight = (
+				1.0 if (_actor() in tl and int(_v["chars"][c]["owner"]) == _actor()) else 0.0
+			)
 
 
 # --- Ввод ---------------------------------------------------------------------------------
@@ -648,7 +716,11 @@ func _refresh_targets() -> void:
 func _on_hand_click(card: int) -> void:
 	_drag = -1  # нажатие без перетаскивания: drag_started был, dropped не будет — иначе пропадает крупный просмотр
 	var pr: Dictionary = _v.get("prompt", {})
-	if _v["phase"] == "prompt" and int(pr.get("seat", -1)) == _actor() and pr.get("kind", "") in ["discard", "give", "refresh"]:
+	if (
+		_v["phase"] == "prompt"
+		and int(pr.get("seat", -1)) == _actor()
+		and pr.get("kind", "") in ["discard", "give", "refresh"]
+	):
 		if _marked.has(card):
 			_marked.erase(card)
 		elif (pr["kind"] == "refresh" and int(pr["n"]) <= 0) or _marked.size() < int(pr["n"]):
@@ -763,42 +835,55 @@ func _on_char_picked(c: int) -> void:
 func _on_char_hover(c: int, on: bool) -> void:
 	_hover_char = c if on else -1
 	if on:
-		_show_preview(_stacks[c], func(ci: CanvasItem, r: Rect2):
-			var ch: Dictionary = _v["chars"][c]
-			ci.draw_texture_rect(GLStyle.tex(str(ch.get("img", "ch%d" % int(ch["id"])))), r, false)
-			for card in ch["stack"]:
-				ci.draw_texture_rect(GLStyle.card_tex(int(card)), r, false))
+		_show_preview(
+			_stacks[c],
+			func(ci: CanvasItem, r: Rect2):
+				var ch: Dictionary = _v["chars"][c]
+				ci.draw_texture_rect(GLStyle.tex(str(ch.get("img", "ch%d" % int(ch["id"])))), r, false)
+				for card in ch["stack"]:
+					ci.draw_texture_rect(GLStyle.card_tex(int(card)), r, false)
+		)
 	else:
 		_preview.visible = false
 
 
 func _on_hand_hover(card: int, on: bool) -> void:
 	if on and _drag < 0:
-		_show_preview(_hand[card], func(ci: CanvasItem, r: Rect2):
-			var sb := StyleBoxFlat.new()
-			sb.bg_color = Color(0.81, 0.79, 0.82, 0.14)
-			sb.set_corner_radius_all(8)
-			ci.draw_style_box(sb, r)
-			ci.draw_texture_rect(GLStyle.card_tex(card), r, false))
+		_show_preview(
+			_hand[card],
+			func(ci: CanvasItem, r: Rect2):
+				var sb := StyleBoxFlat.new()
+				sb.bg_color = Color(0.81, 0.79, 0.82, 0.14)
+				sb.set_corner_radius_all(8)
+				ci.draw_style_box(sb, r)
+				ci.draw_texture_rect(GLStyle.card_tex(card), r, false)
+		)
 	else:
 		_preview.visible = false
 
 
 func _show_preview(near: Control, drawer: Callable) -> void:
+	if Net.paused or bool(_v.get("game_paused", false)):
+		return
 	for ch in _preview.get_children():
 		ch.queue_free()
 	var h := minf(size.y * 0.62, 440.0)
 	var sz := Vector2(h * GLStyle.CARD.x / GLStyle.CARD.y, h)
 	var pic := Control.new()
+	var corners := ShaderMaterial.new()
+	corners.shader = preload("res://hub/card_corners.gdshader")
+	pic.material = corners
 	pic.size = sz
 	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	pic.draw.connect(func():
-		var sh := StyleBoxFlat.new()
-		sh.bg_color = Color(0, 0, 0, 0)
-		sh.shadow_color = Color(0, 0, 0, 0.6)
-		sh.shadow_size = 18
-		pic.draw_style_box(sh, Rect2(Vector2.ZERO, sz))
-		drawer.call(pic, Rect2(Vector2.ZERO, sz)))
+	pic.draw.connect(
+		func():
+			var sh := StyleBoxFlat.new()
+			sh.bg_color = Color(0, 0, 0, 0)
+			sh.shadow_color = Color(0, 0, 0, 0.6)
+			sh.shadow_size = 18
+			pic.draw_style_box(sh, Rect2(Vector2.ZERO, sz))
+			drawer.call(pic, Rect2(Vector2.ZERO, sz))
+	)
 	_preview.add_child(pic)
 	_preview.size = sz
 	var r := near.get_global_rect()
@@ -815,14 +900,16 @@ func _show_discard() -> void:
 		return
 	var layer := Control.new()
 	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	layer.z_index = 70
+	layer.z_index = 65
 	add_child(layer)
 	var dim := ColorRect.new()
 	dim.color = Color(0, 0, 0, 0.6)
 	dim.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	dim.gui_input.connect(func(e):
-		if e is InputEventMouseButton and e.pressed:
-			layer.queue_free())
+	dim.gui_input.connect(
+		func(e):
+			if e is InputEventMouseButton and e.pressed:
+				layer.queue_free()
+	)
 	layer.add_child(dim)
 	var p := GLStyle.panel(16)
 	p.position = Vector2(60, 50)
@@ -830,7 +917,15 @@ func _show_discard() -> void:
 	layer.add_child(p)
 	var col := GLStyle.vbox(8)
 	p.add_child(col)
-	col.add_child(GLStyle.label("Сброс · %d карт (сверху — последние)" % d.size(), GLStyle.BODY, GLStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "title"))
+	col.add_child(
+		GLStyle.label(
+			"Сброс · %d карт (сверху — последние)" % d.size(),
+			GLStyle.BODY,
+			GLStyle.INK,
+			HORIZONTAL_ALIGNMENT_LEFT,
+			"title"
+		)
+	)
 	var sc := ScrollContainer.new()
 	sc.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	sc.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -893,13 +988,16 @@ func _build_draft(col: VBoxContainer, who: String) -> void:
 	if s != _actor():
 		col.add_child(_line("%s выбирает персонажа…" % _name(s), true))
 		return
-	var picked: int = _v["chars"].filter(func(ch): return ch["kind"] == "char" and int(ch["owner"]) == s).size()
+	var picked: int = (
+		_v["chars"].filter(func(ch): return ch["kind"] == "char" and int(ch["owner"]) == s).size()
+	)
 	col.add_child(_line(who + "Выберите персонажа · %d из 4" % (picked + 1), true))
 	col.add_child(_line("Остальные вернутся в колоду и могут выпасть другим игрокам.", false))
 	var flow := GLStyle.hbox(16)
 	flow.alignment = BoxContainer.ALIGNMENT_CENTER
 	for id in _v.get("draft_options", []):
 		var tr := TextureRect.new()
+		_round_card(tr)
 		tr.texture = GLStyle.tex("ch%d" % int(id))
 		tr.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -907,14 +1005,24 @@ func _build_draft(col: VBoxContainer, who: String) -> void:
 		tr.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		tr.tooltip_text = GLData.char_name(int(id))
 		var cid := int(id)
-		tr.gui_input.connect(func(e):
-			if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
-				_send("gl_draft", {"id": cid}))
-		tr.mouse_entered.connect(func(): _show_preview(tr, func(ci: CanvasItem, r: Rect2): ci.draw_texture_rect(GLStyle.tex("ch%d" % cid), r, false)))
+		tr.gui_input.connect(
+			func(e):
+				if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
+					_send("gl_draft", {"id": cid})
+		)
+		tr.mouse_entered.connect(
+			func():
+				_show_preview(
+					tr,
+					func(ci: CanvasItem, r: Rect2): ci.draw_texture_rect(GLStyle.tex("ch%d" % cid), r, false)
+				)
+		)
 		tr.mouse_exited.connect(func(): _preview.visible = false)
 		var option := GLStyle.vbox(4)
 		option.add_child(tr)
-		var name_label := GLStyle.label(GLData.char_name(cid), GLStyle.CAP, GLStyle.INK, HORIZONTAL_ALIGNMENT_CENTER)
+		var name_label := GLStyle.label(
+			GLData.char_name(cid), GLStyle.CAP, GLStyle.INK, HORIZONTAL_ALIGNMENT_CENTER
+		)
 		name_label.custom_minimum_size.x = 112
 		name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		option.add_child(name_label)
@@ -937,10 +1045,19 @@ func _build_turn(col: VBoxContainer, who: String) -> void:
 		elif (fr.get("cards", []) as Array).is_empty():
 			fl = "Бесплатных карт: %d." % int(fr.get("left", 0))
 		else:
-			fl = "Бесплатно можно сыграть: %s." % ", ".join((fr["cards"] as Array).map(func(c): return "«%s»" % GLData.card_name(int(c))))
+			fl = (
+				"Бесплатно можно сыграть: %s."
+				% ", ".join((fr["cards"] as Array).map(func(c): return "«%s»" % GLData.card_name(int(c))))
+			)
 		col.add_child(_line(fl, false, GLStyle.BLOOD))
 	if _v["events_blocked"]:
-		col.add_child(_line("Пока сверху лежит «Застрял в поезде» / «Попал в тюрьму», события играть нельзя.", false, GLStyle.MUTED))
+		col.add_child(
+			_line(
+				"Пока сверху лежит «Застрял в поезде» / «Попал в тюрьму», события играть нельзя.",
+				false,
+				GLStyle.MUTED
+			)
+		)
 	if _sel >= 0:
 		col.add_child(_line(_hint_for(_sel), false, GLStyle.BLOOD))
 		var cd := _cd(_sel)
@@ -953,50 +1070,87 @@ func _build_turn(col: VBoxContainer, who: String) -> void:
 				for m in [["free", "Бесплатная карта"], ["chaos", "Гости и истории — ничьи"]]:
 					var mb := GLStyle.button(m[1], GLStyle.CAP)
 					var mode: String = m[0]
-					mb.pressed.connect(func():
-						_send("gl_play", {"card": s2, "target": -1, "extra": {"mode": mode}})
-						_sel = -1)
+					mb.pressed.connect(
+						func():
+							_send("gl_play", {"card": s2, "target": -1, "extra": {"mode": mode}})
+							_sel = -1
+					)
 					mr.add_child(mb)
 				col.add_child(mr)
-			var simple: bool = e.has("t") and not (e.has("t2") or e.has("with") or e.has("pick") or e.has("go"))
+			var simple: bool = (
+				e.has("t") and not (e.has("t2") or e.has("with") or e.has("pick") or e.has("go"))
+			)
 			if simple:
 				var tgt := int(_ev.get("t", -1))
-				var ap := GLStyle.primary("Применить «%s»%s" % [cd["name"], (" → " + str(_v["chars"][tgt]["name"])) if tgt >= 0 else ""], GLStyle.BODY)
+				var ap := GLStyle.primary(
+					(
+						"Применить «%s»%s"
+						% [cd["name"], (" → " + str(_v["chars"][tgt]["name"])) if tgt >= 0 else ""]
+					),
+					GLStyle.BODY
+				)
 				ap.disabled = tgt < 0
 				ap.tooltip_text = "Сначала выберите персонажа" if tgt < 0 else ""
-				ap.pressed.connect(func():
-					_send("gl_play", {"card": s2, "target": tgt})
-					_sel = -1
-					_ev = {})
+				ap.pressed.connect(
+					func():
+						_send("gl_play", {"card": s2, "target": tgt})
+						_sel = -1
+						_ev = {}
+				)
 				ap.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 				col.add_child(ap)
 			if e.get("go", false):
 				var go := GLStyle.primary("Применить «%s»" % cd["name"], GLStyle.BODY)
-				go.pressed.connect(func():
-					_send("gl_play", {"card": s2, "target": -1})
-					_sel = -1)
+				go.pressed.connect(
+					func():
+						_send("gl_play", {"card": s2, "target": -1})
+						_sel = -1
+				)
 				go.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 				col.add_child(go)
 			if e.has("pick") and int(_ev.get("pick", -1)) < 0:
-				col.add_child(_card_buttons((e["pick"] as Dictionary).keys(), func(c):
-					_ev["pick"] = c
-					_build_panel(), "В сбросе нет подходящих смертей."))
+				col.add_child(
+					_card_buttons(
+						(e["pick"] as Dictionary).keys(),
+						func(c):
+							_ev["pick"] = c
+							_build_panel(),
+						"В сбросе нет подходящих смертей."
+					)
+				)
 			if e.has("picks"):
-				col.add_child(_card_buttons(e["picks"], func(c):
-					_send("gl_play", {"card": s2, "target": -1, "extra": {"pick": c}})
-					_sel = -1, "В сбросе нет подходящих карт."))
+				col.add_child(
+					_card_buttons(
+						e["picks"],
+						func(c):
+							_send("gl_play", {"card": s2, "target": -1, "extra": {"pick": c}})
+							_sel = -1,
+						"В сбросе нет подходящих карт."
+					)
+				)
 			if e.has("stories"):
 				var row0 := HFlowContainer.new()
 				for st in e["stories"]:
 					var b := GLStyle.button("«%s»" % GLData.STORIES[int(st)]["name"], GLStyle.CAP)
 					var sid := int(st)
-					b.pressed.connect(func():
-						_send("gl_play", {"card": s2, "target": -1, "extra": {"st": sid}})
-						_sel = -1)
+					b.pressed.connect(
+						func():
+							_send("gl_play", {"card": s2, "target": -1, "extra": {"st": sid}})
+							_sel = -1
+					)
 					row0.add_child(b)
 				col.add_child(row0)
 	else:
-		col.add_child(_line("Перетащите карту на персонажа или щёлкните карту, а затем персонажа. Минусы — своим, плюсы — чужим.", false, GLStyle.MUTED))
+		(
+			col
+			. add_child(
+				_line(
+					"Перетащите карту на персонажа или щёлкните карту, а затем персонажа. Минусы — своим, плюсы — чужим.",
+					false,
+					GLStyle.MUTED
+				)
+			)
+		)
 	var row := GLStyle.hbox(10)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	if not fr.is_empty():
@@ -1007,14 +1161,25 @@ func _build_turn(col: VBoxContainer, who: String) -> void:
 	dh.disabled = left <= 0 or _my_hand().is_empty()
 	dh.tooltip_text = "Тратит действие; новые карты — только при доборе в конце хода"
 	dh.theme_type_variation = "QuietButton"
-	dh.pressed.connect(func():
-		LeaveGuard.ask(dh, "Сбросить всю руку?", "Это действие. Новые карты придут при доборе в конце хода.", "Сбросить", func(): _send("gl_discard_hand"), "Оставить"))
+	dh.pressed.connect(
+		func():
+			LeaveGuard.ask(
+				dh,
+				"Сбросить всю руку?",
+				"Это действие. Новые карты придут при доборе в конце хода.",
+				"Сбросить",
+				func(): _send("gl_discard_hand"),
+				"Оставить"
+			)
+	)
 	row.add_child(dh)
 	var end := GLStyle.primary("Закончить ход", GLStyle.BODY, 180)
-	end.pressed.connect(func():
-		_sel = -1
-		_ev = {}
-		_send("gl_end"))
+	end.pressed.connect(
+		func():
+			_sel = -1
+			_ev = {}
+			_send("gl_end")
+	)
 	row.add_child(end)
 	col.add_child(row)
 
@@ -1044,11 +1209,23 @@ func _hint_for(card: int) -> String:
 		"remove_living_char":
 			return "Выберите живого персонажа — он уйдёт из игры."
 		"swap_top_mod_from_hand":
-			return "Выберите персонажа, затем модификатор из руки — он встанет вместо верхнего." if int(_ev.get("t", -1)) < 0 else "Теперь щёлкните модификатор у себя в руке."
+			return (
+				"Выберите персонажа, затем модификатор из руки — он встанет вместо верхнего."
+				if int(_ev.get("t", -1)) < 0
+				else "Теперь щёлкните модификатор у себя в руке."
+			)
 		"swap_top_mods":
-			return "Выберите двух персонажей — их верхние модификаторы поменяются." if int(_ev.get("t", -1)) < 0 else "Теперь второго персонажа."
+			return (
+				"Выберите двух персонажей — их верхние модификаторы поменяются."
+				if int(_ev.get("t", -1)) < 0
+				else "Теперь второго персонажа."
+			)
 		"ud_from_discard":
-			return "Выберите смерть из сброса, затем персонажа с иконкой любви или отрицательным счётом." if int(_ev.get("pick", -1)) < 0 else "Теперь персонажа."
+			return (
+				"Выберите смерть из сброса, затем персонажа с иконкой любви или отрицательным счётом."
+				if int(_ev.get("pick", -1)) < 0
+				else "Теперь персонажа."
+			)
 		"second_chance":
 			return "Выберите мёртвого персонажа — смерть снимется, он оживёт. (Или держите карту, чтобы отменить чужую смерть.)"
 		"cancel_event":
@@ -1060,15 +1237,27 @@ func _hint_for(card: int) -> String:
 		"draw2_per_guest_play_any":
 			return "Возьмите по 2 карты за каждого своего живого гостя и сыграйте сколько угодно из них бесплатно."
 		"swap_all_mods_with_guest":
-			return "Выберите живого персонажа, затем живого гостя — их модификаторы поменяются." if int(_ev.get("t", -1)) < 0 else "Теперь гостя."
+			return (
+				"Выберите живого персонажа, затем живого гостя — их модификаторы поменяются."
+				if int(_ev.get("t", -1)) < 0
+				else "Теперь гостя."
+			)
 		"take_guest_from_family":
 			return "Выберите гостя из чужой семьи — он переедет к вам."
 		"move_guest_between":
-			return "Выберите живого гостя, затем любого персонажа семьи, куда он переедет." if int(_ev.get("t", -1)) < 0 else "Теперь персонажа семьи, куда переедет гость."
+			return (
+				"Выберите живого гостя, затем любого персонажа семьи, куда он переедет."
+				if int(_ev.get("t", -1)) < 0
+				else "Теперь персонажа семьи, куда переедет гость."
+			)
 		"mod_on_dead":
 			return "В этот ход один модификатор можно сыграть на мёртвого персонажа."
 		"swap_living_chars_with_opponent":
-			return "Выберите живого персонажа соперника, затем своего — они поменяются семьями." if int(_ev.get("t", -1)) < 0 else "Теперь своего персонажа."
+			return (
+				"Выберите живого персонажа соперника, затем своего — они поменяются семьями."
+				if int(_ev.get("t", -1)) < 0
+				else "Теперь своего персонажа."
+			)
 		"play_event_or_undead_from_discard":
 			return "Выберите в сбросе событие или модификатор-нежить — сыграете его бесплатно."
 		"claim_any_story_then_free_play":
@@ -1100,12 +1289,18 @@ func _card_buttons(cards: Array, on_pick: Callable, empty_text: String) -> Contr
 		var b := GLStyle.button(GLData.card_name(int(c)), GLStyle.CAP)
 		var cc := int(c)
 		b.pressed.connect(func(): on_pick.call(cc))
-		b.mouse_entered.connect(func(): _show_preview(b, func(ci: CanvasItem, r: Rect2):
-			var sb := StyleBoxFlat.new()
-			sb.bg_color = Color(0.81, 0.79, 0.82, 0.14)
-			sb.set_corner_radius_all(8)
-			ci.draw_style_box(sb, r)
-			ci.draw_texture_rect(GLStyle.card_tex(cc), r, false)))
+		b.mouse_entered.connect(
+			func():
+				_show_preview(
+					b,
+					func(ci: CanvasItem, r: Rect2):
+						var sb := StyleBoxFlat.new()
+						sb.bg_color = Color(0.81, 0.79, 0.82, 0.14)
+						sb.set_corner_radius_all(8)
+						ci.draw_style_box(sb, r)
+						ci.draw_texture_rect(GLStyle.card_tex(cc), r, false)
+				)
+		)
 		b.mouse_exited.connect(func(): _preview.visible = false)
 		row.add_child(b)
 	if cards.is_empty() and empty_text != "":
@@ -1122,7 +1317,18 @@ func _build_prompt(col: VBoxContainer, who: String) -> void:
 		col.add_child(_line("%s выбирает…" % _name(s), true))
 		return
 	if pr["kind"] in ["pick_char", "pick_discard", "pick_story"]:
-		var what: String = {"plot": "Выберите историю или живого гостя — он перейдёт к вам.", "free_guest": "Выберите гостя — он станет ничьим.", "claim": "Выберите историю — она ваша без требований.", "take_guest": "Выберите гостя — он переедет в вашу семью.", "revive": "Выберите своего мёртвого персонажа — он оживёт.", "peel": "Выберите персонажа-нежить — верхний модификатор уйдёт в сброс.", "remove_char": "Выберите своего персонажа, который уйдёт из игры."}.get(str(pr.get("then", "")), "Выберите карту из сброса — она придёт вам в руку.")
+		var what: String = (
+			{
+				"plot": "Выберите историю или живого гостя — он перейдёт к вам.",
+				"free_guest": "Выберите гостя — он станет ничьим.",
+				"claim": "Выберите историю — она ваша без требований.",
+				"take_guest": "Выберите гостя — он переедет в вашу семью.",
+				"revive": "Выберите своего мёртвого персонажа — он оживёт.",
+				"peel": "Выберите персонажа-нежить — верхний модификатор уйдёт в сброс.",
+				"remove_char": "Выберите своего персонажа, который уйдёт из игры."
+			}
+			. get(str(pr.get("then", "")), "Выберите карту из сброса — она придёт вам в руку.")
+		)
 		col.add_child(_line(who + what, true))
 		if pr["kind"] == "pick_discard":
 			col.add_child(_card_buttons(pr["options"], func(c): _send("gl_pick", {"v": c}), ""))
@@ -1140,16 +1346,30 @@ func _build_prompt(col: VBoxContainer, who: String) -> void:
 		"give":
 			text = "Отдайте %d %s игроку %s: щёлкните их в руке." % [n, _cards_word(n), _name(int(pr["to"]))]
 		"refresh":
-			text = ("Отметьте до %d карт для сброса (можно ни одной) — потом доберёте до лимита." % n) if n > 0 else "Отметьте карты, которые хотите сбросить (можно ни одной), — потом доберёте до лимита."
+			text = (
+				("Отметьте до %d карт для сброса (можно ни одной) — потом доберёте до лимита." % n)
+				if n > 0
+				else "Отметьте карты, которые хотите сбросить (можно ни одной), — потом доберёте до лимита."
+			)
 	col.add_child(_line(who + text, true))
-	var ok := GLStyle.primary("Готово (%d)" % _marked.size() if pr["kind"] == "refresh" else "Готово · %d из %d" % [_marked.size(), n], GLStyle.BODY, 200)
+	var ok := GLStyle.primary(
+		(
+			"Готово (%d)" % _marked.size()
+			if pr["kind"] == "refresh"
+			else "Готово · %d из %d" % [_marked.size(), n]
+		),
+		GLStyle.BODY,
+		200
+	)
 	ok.disabled = pr["kind"] != "refresh" and _marked.size() != n
 	if ok.disabled:
 		ok.theme_type_variation = ""
 	ok.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
-	ok.pressed.connect(func():
-		_send("gl_choose", {"cards": _marked.duplicate()})
-		_marked.clear())
+	ok.pressed.connect(
+		func():
+			_send("gl_choose", {"cards": _marked.duplicate()})
+			_marked.clear()
+	)
 	col.add_child(ok)
 
 
@@ -1171,7 +1391,9 @@ func _build_react(col: VBoxContainer, who: String) -> void:
 	col.add_child(_line("%s играет %s" % [_name(int(rv["actor"])), what], true))
 	var can: Array = rv.get("can", [])
 	if _actor() in can:
-		var resp := GLData.card_name(int((rv.get("resp", {}) as Dictionary).get(_actor(), GLData.SECOND_CHANCE)))
+		var resp := GLData.card_name(
+			int((rv.get("resp", {}) as Dictionary).get(_actor(), GLData.SECOND_CHANCE))
+		)
 		col.add_child(_line(who + "У вас есть «%s» — отменить?" % resp, false, GLStyle.BLOOD))
 		var row := GLStyle.hbox(12)
 		row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -1189,7 +1411,15 @@ func _build_react(col: VBoxContainer, who: String) -> void:
 func _build_results(col: VBoxContainer) -> void:
 	var w: Array = _v["winners"]
 	var names := w.map(func(s): return _name(int(s)))
-	col.add_child(GLStyle.label(("Самая несчастная семья — %s!" if names.size() == 1 else "Ничья: %s!") % ", ".join(names), GLStyle.H1, GLStyle.INK, HORIZONTAL_ALIGNMENT_CENTER, "title"))
+	col.add_child(
+		GLStyle.label(
+			("Самая несчастная семья — %s!" if names.size() == 1 else "Ничья: %s!") % ", ".join(names),
+			GLStyle.H1,
+			GLStyle.INK,
+			HORIZONTAL_ALIGNMENT_CENTER,
+			"title"
+		)
+	)
 	var order := range(_v["players"].size())
 	order.sort_custom(func(a, b): return int(_v["finals"][a]) < int(_v["finals"][b]))
 	for s in order:
@@ -1211,7 +1441,21 @@ func _build_results(col: VBoxContainer) -> void:
 
 
 func _line(t: String, bold: bool, color: Color = GLStyle.INK) -> Label:
-	var l := GLStyle.label(t, GLStyle.BODY if bold else GLStyle.CAP, color, HORIZONTAL_ALIGNMENT_CENTER, "bold" if bold else "regular")
+	var l := GLStyle.label(
+		t,
+		GLStyle.BODY if bold else GLStyle.CAP,
+		color,
+		HORIZONTAL_ALIGNMENT_CENTER,
+		"bold" if bold else "regular"
+	)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l.custom_minimum_size.x = 520
 	return l
+
+
+func _round_card(image: CanvasItem) -> void:
+	var corners := ShaderMaterial.new()
+	corners.shader = preload("res://hub/card_corners.gdshader")
+	image.material = corners
+
+

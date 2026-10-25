@@ -1,0 +1,81 @@
+extends SceneTree
+## Статистика: исходы, защита от повторов, рискованные решения, личные броски и график.
+var checks:=0
+var errors:=0
+func check(ok:bool,message:String)->void:
+	checks+=1
+	if not ok:errors+=1;push_error(message)
+func snapshot(id:String,won:bool,face:int=4)->Dictionary:
+	return {"id":id,"game":"perudo","seat":0,"time":1,"totals":{"result":"win" if won else "loss","decisions":2,"errors":1,"remarks":2,"messages":1,"emotes":1,"dice":{str(face):2}}}
+func _initialize()->void:
+	var path:="user://test_player_statistics_%d.json"%Time.get_ticks_usec()
+	var store:=PlayerStatsStore.new(path)
+	check(store.summary().completed==0,"Пустая статистика без выдуманных партий")
+	var snap:=snapshot("a",true)
+	check(store.consume(snap),"Первый снимок записан")
+	check(not store.consume(snap),"Повторная рассылка не удваивает данные")
+	var reloaded:=PlayerStatsStore.new(path)
+	check(reloaded.summary().wins==1 and not reloaded.consume(snap),"Повторы отсекаются и после перезапуска")
+	snap.totals.dice["4"]=3;snap.totals.remarks=3;snap.totals.messages=2
+	store.consume(snap)
+	check(store.summary().dice["4"]==3 and store.summary().remarks==3,"Накопительный снимок добавляет только разницу")
+	check(store.summary().completed==1,"Дополнительный чат не записывает победу второй раз")
+	check(not store.consume(snapshot("a",true)) and not store.consume(snap) and store.summary().remarks==3,"Запоздалый снимок не понижает счётчики и не создаёт повтор")
+	var rebound:=snapshot("a@1",true);rebound["match_id"]="a"
+	store.consume(rebound)
+	check(store.summary().completed==1,"Пересадка не дублирует итог одной партии")
+	for i in 105:store.consume(snapshot("game%d"%i,i%3!=0,6 if i%2==0 else 4))
+	var summary:=store.summary()
+	check(summary.completed==106 and summary.history.size()==100,"Итоги за всё время, график только последних 100")
+	check(summary.history[0].id=="game5" and summary.history.back().id=="game104","Порядок определяется завершением, даже в одну секунду")
+	var dice:=PlayerStatsStore.sorted_dice(summary)
+	check(dice[0].count>=dice[1].count,"Чаще выпадающая грань первая")
+	check(absf(float(dice[0].percent)+float(dice[1].percent)-100)<0.001,"Проценты бросков суммируются в 100")
+	check(PlayerStatsStore.graph_values([{"won":true},{"won":true},{"won":false}])==[0,1,2,1],"Две победы поднимают линию ровно на два деления")
+	var players:=[{"name":"Первый"},{"name":"Второй"}]
+	var perudo:=PerudoRules.new();perudo.new_game(players,5,false,33);perudo.begin()
+	var metrics:=MatchMetrics.new();metrics.observe("p","perudo",perudo,[1,2])
+	for seat in 2:perudo.shake(seat);metrics.observe("p","perudo",perudo,[1,2])
+	var count:=0
+	for value in metrics.rows[0].dice.values():count+=int(value)
+	check(count==5,"Пять костей своего стакана считаются один раз")
+	var bidder:int=perudo.turn;perudo.place_bid(bidder,1,2);var challenger:int=perudo.turn;perudo.challenge(challenger)
+	metrics.observe("p","perudo",perudo,[1,2])
+	var loser:int=perudo.reveal.loser
+	check(metrics.rows[loser].errors==1 and metrics.rows[1-loser].errors==0,"Потерявший кость получает ошибку")
+	check(metrics.rows[0].decisions==1 and metrics.rows[1].decisions==1,"Правильное решение без потери тоже входит в знаменатель")
+	var original:=metrics.snapshot(0);metrics.observe("p","perudo",perudo,[1,2])
+	check(metrics.snapshot(0).totals==original.totals,"Повтор состояния не повторяет вскрытие")
+	metrics.observe("p","perudo",perudo,[1,3])
+	check(metrics.rows[1].dice.is_empty() and metrics.rows[1].decisions==0,"Новый участник не наследует статистику прежнего места")
+	metrics.say(0,"chat");metrics.say(0,"emote");metrics.say(0,"system")
+	check(metrics.rows[0].remarks==2 and metrics.rows[0].messages==1 and metrics.rows[0].emotes==1,"Чат и реплики считаются, системные сообщения нет")
+	var fs:=FSRules.new();fs.new_game(players,false,1);fs.current=0;fs.battle=0;fs.monsters[0].hp=99;fs.phase="battle_roll"
+	fs._apply_combat({"card":fs.monsters[0].id,"hit":true,"damage":1})
+	fs._apply_combat({"card":fs.monsters[0].id,"hit":false,"damage":1})
+	metrics.observe("fs","four_souls",fs,[1,2])
+	check(metrics.rows[0].decisions==2 and metrics.rows[0].errors==1,"Айзек: попадание правильно, полученный боевой урон ошибка")
+	check(metrics.rows[1].decisions==0,"Чужой бой не становится ошибкой оппонента")
+	fs.phase="battle_roll";fs.action(0,"roll");metrics.observe("fs","four_souls",fs,[1,2])
+	check(metrics.rows[0].dice.size()==1,"Бросок Айзека учтён")
+	var nh:=NHRules.new();nh.new_game(players,1,2);nh.giver=0;nh.receiver=1;nh.phase="respond";nh.card={"g":0,"dir":1};nh.claim=0;nh.respond(1,false)
+	metrics.observe("nh","not_a_hat",nh,[1,2])
+	check(metrics.rows[1].errors==1 and metrics.rows[0].errors==0,"Шляпа: неверное обвинение приносит штраф и ошибку")
+	var br:=BRRules.new();br.new_game(players,4);br._set_roll([4,6],0);br._set_roll([4],1);br._start_turn()
+	metrics.observe("br","brodilka",br,[1,2])
+	check(metrics.rows[0].dice.get("4")==1 and metrics.rows[0].dice.get("6")==1 and metrics.rows[1].dice.get("4")==1,"Броски Бродилки не смешиваются и не стираются новым ходом")
+	check(MatchMetrics._won("phantom_ink",{"winner":1,"roles":[0,3]},1),"Победа команды Чернил")
+	check(MatchMetrics._won("word_slam",{"mode":"teams","winners":[1],"players":[{"team":1}]},0),"Победа команды Word Slam")
+	check(MatchMetrics._won("dangerous_words",{"winners":[0],"players":[{"team":0}]},0),"Победа команды Опасных слов")
+	check(MatchMetrics._won("wavelength",{"winner":1,"coop":false,"players":[{"team":1}]},0),"Победа команды Длины волны")
+	check(MatchMetrics._won("tip_top",{"won":true},0) and not MatchMetrics._won("tip_top",{"won":false},0),"Кооперативная победа/поражение Тип Топа")
+	check(MatchMetrics._won("gloom",{"winners":[0,1]},1),"Общая победа при равенстве")
+	var score_only:=snapshot("score-only",false);score_only.totals.result="unrated";store.consume(score_only)
+	check(store.summary().completed==106 and store.summary().unrated==1,"Режим без победы/поражения не искажает процент побед")
+	var st=load("res://games/stillion/logic/st_rules.gd").new();st.new_game(players,false,33)
+	st._accept(0,"Проверка","c",false,"Проверка");metrics.observe("st","stillion",st,[1,2])
+	check(metrics.rows[0].decisions==1 and metrics.rows[0].errors==0,"Стиллион: принятый ответ без потери — правильное действие")
+	st.target=1;st._boom();metrics.observe("st","stillion",st,[1,2])
+	check(metrics.rows[1].decisions==1 and metrics.rows[1].errors==1,"Стиллион: потеря жизни после молчания — ошибка")
+	DirAccess.remove_absolute(path)
+	print("PLAYER STATS: %d проверок, %d ошибок"%[checks,errors]);quit(1 if errors else 0)

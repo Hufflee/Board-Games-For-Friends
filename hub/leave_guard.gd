@@ -10,7 +10,7 @@ const HOLD_TIME := 1.0  # сколько держать кнопку выход�
 
 static func wire(btn: Button, question: String, _detail: String, on_yes: Callable) -> void:
 	btn.theme_type_variation = "QuietButton"
-	btn.ready.connect(func(): _add_gap.call_deferred(btn), CONNECT_ONE_SHOT)
+	btn.ready.connect(func(): _add_gap_ref.call_deferred(weakref(btn)), CONNECT_ONE_SHOT)
 	hold(btn, on_yes, question)
 
 
@@ -27,6 +27,12 @@ static func hold(btn: Button, on_yes: Callable, question: String = "") -> void:
 
 
 ## Отступ перед опасной кнопкой (после того как родитель достроен — иначе add_child во время сборки падает).
+static func _add_gap_ref(reference: WeakRef) -> void:
+	var button: Button = reference.get_ref() as Button
+	if is_instance_valid(button):
+		_add_gap(button)
+
+
 static func _add_gap(btn: Button) -> void:
 	if not is_instance_valid(btn):
 		return

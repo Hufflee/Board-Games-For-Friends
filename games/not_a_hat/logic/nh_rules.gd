@@ -26,9 +26,11 @@ var reveal := {}  # {g, claim, loser, receiver, giver}
 var turn_no := 0
 var log: Array = []  # [{giver, receiver, claim, result}] — последние события
 var rng := RandomNumberGenerator.new()
+var stats_risks: Array = []
 
 
 func new_game(player_list: Array, cards_each: int = 1, seed_value: int = 0) -> void:
+	stats_risks.clear()
 	players = player_list.duplicate(true)
 	start_cards = clampi(cards_each, 1, 2)
 	if seed_value != 0:
@@ -98,6 +100,7 @@ func respond(seat: int, accept: bool) -> bool:
 	if phase != "respond" or seat != receiver:
 		return false
 	if accept:
+		stats_risks.append({"seat":giver,"error":false});stats_risks.append({"seat":receiver,"error":false})
 		_log("accept")
 		hands[receiver].append(card)  # новый подарок — сверху столбика
 		# теперь он дарит свой «старый» подарок
@@ -108,6 +111,7 @@ func respond(seat: int, accept: bool) -> bool:
 		return true
 	var truth: bool = int(card["g"]) == claim
 	var loser := receiver if truth else giver
+	stats_risks.append({"seat":giver,"error":loser==giver});stats_risks.append({"seat":receiver,"error":loser==receiver})
 	reveal = {"g": card["g"], "claim": claim, "loser": loser, "receiver": receiver, "giver": giver, "truth": truth}
 	_log("truth" if truth else "lie")
 	penalties[loser].append(card["g"])

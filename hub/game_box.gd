@@ -9,6 +9,7 @@ extends Node3D
 const COVERS := "res://hub/covers/"
 const META := "res://hub/covers/meta.cfg"
 const SOFT := preload("res://hub/soft_box.gdshader")
+const EDGE_RADIUS := 0.003
 const CUP_COLORS := [Color("4a2c1e"), Color("e8b21c"), Color("2f9e3a"), Color("e8642a"), Color("c8262c"), Color("2f64c8")]
 
 var game: Dictionary
@@ -26,8 +27,10 @@ var _glow_mats: Array = []  # [материал, «пик» свечения п�
 const SPINE_BOOST := {"hues_and_cues": 1.35}
 
 var _face_mats: Array = []  # материалы картинок — показываются без света комнаты, когда игра в руках
+var _swap_halo: Node3D
 var _halo: MeshInstance3D
 var _tween: Tween
+var _hover_tween: Tween
 var _glow := 0.0
 
 
@@ -37,7 +40,7 @@ func setup(g: Dictionary, box_size: Vector3, box_color: Color) -> void:
 	color = box_color
 	if is_cups():
 		face_z = true
-		size = Vector3(0.38, 0.17, 0.2)
+		size = Vector3(0.38, 0.17, 0.26)
 		return
 	# размеры — по картинкам: обложка задаёт высоту и ширину (бо́льшая сторона = box_size.y), торец — толщину
 	var id := str(g.get("id", ""))
@@ -81,12 +84,25 @@ func is_cups() -> bool:
 	return str(game.get("id", "")) == "perudo"
 
 
+func is_figurine() -> bool:
+	return false
+
+
 func _ready() -> void:
 	if is_soon():
 		_build_soon()
 		return
 	if is_cups():
 		_build_cups()
+		var pieces := Node3D.new()
+		add_child(pieces)
+		for child in get_children():
+			if child != pieces:
+				child.reparent(pieces, false)
+		# Один центр и реальные габариты для раскладки, рамки и коллайдера.
+		var bounds := geometry_bounds(pieces)
+		size = bounds.size
+		pieces.position = -bounds.get_center()
 	else:
 		_build_box()
 	# коллизия для выбора мышью
@@ -95,10 +111,29 @@ func _ready() -> void:
 	var shape := BoxShape3D.new()
 	shape.size = size
 	cs.shape = shape
-	cs.position.y = size.y / 2.0 if is_cups() else 0.0
+	cs.position.y = 0.0
 	sb.add_child(cs)
 	sb.set_meta("game_box", self)
 	add_child(sb)
+
+
+## Габариты всех мешей в координатах root, с учётом вложенных поворотов и масштаба.
+static func geometry_bounds(root: Node3D, space: Transform3D = Transform3D.IDENTITY) -> AABB:
+	var bounds := AABB()
+	var first := true
+	for node: MeshInstance3D in root.find_children("*", "MeshInstance3D", true, false):
+		if node.mesh == null:
+			continue
+		var local := space * root.global_transform.affine_inverse() * node.global_transform
+		# Поворот AABB конуса даёт лишний запас: границу считаем по самим вершинам.
+		for surface in node.mesh.get_surface_count():
+			var arrays := node.mesh.surface_get_arrays(surface)
+			var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+			for vertex in vertices:
+				var point: Vector3 = local * vertex
+				bounds = AABB(point, Vector3.ZERO) if first else bounds.expand(point)
+				first = false
+	return bounds
 
 
 static func soft_material(half: Vector3, rad: float, col: Color, rough: float = 0.5) -> ShaderMaterial:
@@ -114,11 +149,54 @@ static func soft_material(half: Vector3, rad: float, col: Color, rough: float = 
 
 # --- Коробка --------------------------------------------------------------------------
 
+## Настоящее скругление силуэта в пределах прежних габаритов и коллизии.
+static func rounded_body(dimensions: Vector3) -> ArrayMesh:
+	var source := BoxMesh.new()
+	source.size = dimensions
+	source.subdivide_width = 12
+	source.subdivide_height = 12
+	source.subdivide_depth = 12
+	var arrays := source.get_mesh_arrays()
+	var vertices: PackedVector3Array = arrays[Mesh.ARRAY_VERTEX]
+	var normals: PackedVector3Array = arrays[Mesh.ARRAY_NORMAL]
+	var half := dimensions * 0.5
+	var radius := minf(EDGE_RADIUS, minf(half.x, minf(half.y, half.z)) * 0.25)
+	var core := half - Vector3.ONE * radius
+	for i in vertices.size():
+		var nearest := vertices[i].clamp(-core, core)
+		var normal := (vertices[i] - nearest).normalized()
+		vertices[i] = nearest + normal * radius
+		normals[i] = normal
+	arrays[Mesh.ARRAY_VERTEX] = vertices
+	arrays[Mesh.ARRAY_NORMAL] = normals
+	var mesh := ArrayMesh.new()
+	mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arrays)
+	return mesh
+
+
+## Обложка не выступает прямоугольными углами поверх скруглённого корпуса.
+static func rounded_cover(dimensions: Vector2) -> ArrayMesh:
+	var surface := SurfaceTool.new()
+	surface.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var half := dimensions * 0.5
+	var radius := minf(EDGE_RADIUS, minf(half.x, half.y) * 0.25)
+	var perimeter: Array[Vector2] = []
+	for corner in 4:
+		var angle := float(corner) * PI * 0.5
+		var center := Vector2(1.0 if corner in [0, 3] else -1.0, 1.0 if corner < 2 else -1.0) * (half - Vector2.ONE * radius)
+		for step in 5:
+			perimeter.append(center + Vector2(cos(angle + step * PI / 8.0), sin(angle + step * PI / 8.0)) * radius)
+	for i in perimeter.size():
+		for point: Vector2 in [Vector2.ZERO, perimeter[(i + 1) % perimeter.size()], perimeter[i]]:
+			surface.set_normal(Vector3.BACK)
+			surface.set_uv(Vector2(point.x / dimensions.x + 0.5, 0.5 - point.y / dimensions.y))
+			surface.add_vertex(Vector3(point.x, point.y, 0.0))
+	return surface.commit()
+
+
 func _build_box() -> void:
 	var body := MeshInstance3D.new()
-	var bm := BoxMesh.new()
-	bm.size = size
-	body.mesh = bm
+	body.mesh = rounded_body(size)
 	# цвет кромок — средний цвет края обложки, чтобы по краю не было цветной «рамки»
 	var front := cover_texture(str(game.get("id", "")), "front")
 	if front:
@@ -141,6 +219,9 @@ func _build_box() -> void:
 	_face("front", Vector3(size.x / 2.0 + 0.0008, 0, 0), Vector3(0, PI / 2.0, 0), Vector2(size.z - inset, size.y - inset), true)
 	_face("back", Vector3(-size.x / 2.0 - 0.0008, 0, 0), Vector3(0, -PI / 2.0, 0), Vector2(size.z - inset, size.y - inset), false)
 	_face("spine", Vector3(0, 0, size.z / 2.0 + 0.0008), Vector3.ZERO, Vector2(size.x - inset, size.y - inset), false)
+	if str(game.get("id", "")) == "stillion":
+		# Та же боковина сверху. Верх букв направлен к −X, от лицевой стороны +X.
+		_face("top", Vector3(0, size.y / 2.0 + 0.0008, 0), Vector3(-PI / 2.0, 0, PI), Vector2(size.x - inset, size.z - inset), false)
 	# неоновый ореол при наведении (его подхватывает glow окружения)
 	_halo = MeshInstance3D.new()
 	var hm := SphereMesh.new()  # шейдер переносит вершины на скруглённую коробку
@@ -222,6 +303,15 @@ static func _edge_color(t: Texture2D) -> Color:
 
 
 static func cover_texture(id: String, part: String) -> Texture2D:
+	if id == "stillion" and part in ["spine", "top"]:
+		var path := COVERS + "stillion_spine.png"
+		if ResourceLoader.exists(path):
+			# У исходного листа есть поля: используем только нарисованный торец.
+			var strip := AtlasTexture.new()
+			strip.atlas = load(path)
+			strip.region = Rect2(258, 0, 408, 1705)
+			strip.filter_clip = true
+			return strip
 	for ext in ["png", "jpg", "jpeg", "webp"]:
 		var p := "%s%s_%s.%s" % [COVERS, id, part, ext]
 		if ResourceLoader.exists(p):
@@ -238,15 +328,32 @@ func _face(part: String, pos: Vector3, rot: Vector3, quad: Vector2, big_title: b
 	var tex := cover_texture(str(game.get("id", "")), part)
 	if tex != null:
 		var m := MeshInstance3D.new()
-		var q := QuadMesh.new()
-		q.size = quad
-		m.mesh = q
+		m.name = "Cover_" + part
+		m.mesh = rounded_cover(quad)
 		var mat := StandardMaterial3D.new()
 		mat.albedo_texture = tex
+		if tex is AtlasTexture:
+			# В 3D область AtlasTexture задаём явно через UV материала.
+			var strip := tex as AtlasTexture
+			var atlas_size := strip.atlas.get_size()
+			mat.albedo_texture = strip.atlas
+			mat.uv1_scale = Vector3(strip.region.size.x / atlas_size.x, strip.region.size.y / atlas_size.y, 1.0)
+			mat.uv1_offset = Vector3(strip.region.position.x / atlas_size.x, strip.region.position.y / atlas_size.y, 0.0)
 		if part == "spine":
 			var k: float = SPINE_BOOST.get(str(game.get("id", "")), 1.0)
 			mat.albedo_color = Color(k, k, k)
 		mat.roughness = 0.45
+		if str(game.get("id", "")) == "four_souls" and part == "front":
+			# Обложка тёмная: возвращаем её собственные цвета, чтобы не терялась в синем свете комнаты.
+			mat.albedo_color = Color(1.05, 1.05, 1.05)
+			mat.roughness = 0.85
+			mat.metallic_specular = 0.1
+			mat.emission_enabled = true
+			mat.emission = Color.WHITE
+			mat.emission_texture = tex
+			mat.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
+			mat.emission_energy_multiplier = 0.55
+
 		mat.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
 		mat.disable_fog = true
 		_face_mats.append(mat)
@@ -254,6 +361,7 @@ func _face(part: String, pos: Vector3, rot: Vector3, quad: Vector2, big_title: b
 		m.position = pos
 		m.rotation = rot
 		add_child(m)
+
 		return
 	# нет картинки — надпись прямо на коробке
 	var l := Label3D.new()
@@ -285,6 +393,7 @@ func _build_cups() -> void:
 		var c: Color = CUP_COLORS[[0, 1, 2, 5][i]]
 		var tipped := i == 0  # первый лежит на боку, как на референсе
 		var cup := _cup(c)
+		cup.name = "BrownCup" if tipped else "Cup%d" % i
 		cup.position = Vector3(xs[i], 0.0, -0.02 + rng.randf_range(-0.012, 0.012))
 		if tipped:
 			cup.rotation = Vector3(0, 0.5, deg_to_rad(68))
@@ -292,6 +401,9 @@ func _build_cups() -> void:
 		else:
 			cup.rotation.y = rng.randf_range(-0.6, 0.6)
 		add_child(cup)
+		# Каждый стаканчик опирается отдельно: лежащий не поднимает соседей и кубики.
+		var rotated_bounds := geometry_bounds(cup, cup.transform)
+		cup.position.y -= rotated_bounds.position.y
 		# кубики того же цвета у основания; на полке не пересекаются (в т.ч. с кубиками соседей)
 		var base_die: Vector3
 		for k in 3:
@@ -493,7 +605,10 @@ func set_hovered(on: bool) -> void:
 	if hovered == on or focused:
 		return
 	hovered = on
+	if _hover_tween != null and _hover_tween.is_valid():
+		_hover_tween.kill()
 	var t := create_tween().set_parallel().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+	_hover_tween = t
 	var out := home.translated(Vector3(0, 0.012, 0.07)) if on else home
 	t.tween_property(self, "transform", out, 0.18)
 	t.tween_method(_set_glow, _glow, 1.0 if on else 0.0, 0.18)
@@ -501,6 +616,21 @@ func set_hovered(on: bool) -> void:
 		t.tween_property(_halo.material_override, "shader_parameter/strength", 0.35 if on else 0.0, 0.18)
 	if on:
 		Sfx.play("card_slide", -14, 0.08, 0.05)
+
+
+func stop_shelf_motion() -> void:
+	if has_meta("slide"):
+		var slide: Tween = get_meta("slide")
+		if slide != null and slide.is_valid():
+			slide.kill()
+	if _hover_tween != null and _hover_tween.is_valid():
+		_hover_tween.kill()
+	if _tween != null and _tween.is_valid():
+		_tween.kill()
+	hovered = false
+	_set_glow(0.0)
+	if _halo:
+		_halo.material_override.set_shader_parameter("strength", 0.0)
 
 
 ## Вылететь к игроку: target — куда, лицом к камере.
@@ -535,3 +665,42 @@ func fly_home() -> void:
 	_tween.tween_property(self, "transform", home, 0.18)
 	_tween.parallel().tween_method(_set_glow, _glow, 0.0, 0.2)
 	Sfx.play("card_slide", -8)
+
+
+## Полупрозрачная зелёная рамка по всем рёбрам коробки.
+func set_swap_highlight(on: bool, valid: bool = true) -> void:
+	if is_soon():
+		return
+	if not is_instance_valid(_swap_halo):
+		if not on:
+			return
+		_swap_halo = Node3D.new()
+		add_child(_swap_halo)
+		var outer := size + Vector3.ONE * 0.008
+		for axis in 3:
+			for side_a in [-1.0, 1.0]:
+				for side_b in [-1.0, 1.0]:
+					var edge := MeshInstance3D.new()
+					var shape := BoxMesh.new()
+					var extent := Vector3.ONE * 0.003
+					extent[axis] = outer[axis]
+					shape.size = extent
+					edge.mesh = shape
+					var at := Vector3.ZERO
+					at[(axis + 1) % 3] = outer[(axis + 1) % 3] * side_a / 2.0
+					at[(axis + 2) % 3] = outer[(axis + 2) % 3] * side_b / 2.0
+					edge.position = at
+					edge.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+					_swap_halo.add_child(edge)
+	_swap_halo.visible = on
+	var mat := StandardMaterial3D.new()
+	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	mat.albedo_color = Color(0.1, 1.0, 0.42, 0.55) if valid else Color(1.0, 0.18, 0.12, 0.55)
+	mat.emission_enabled = true
+	mat.emission = Color(mat.albedo_color, 1.0)
+	mat.emission_energy_multiplier = 0.6
+	for edge: MeshInstance3D in _swap_halo.get_children():
+		edge.material_override = mat
+
+
