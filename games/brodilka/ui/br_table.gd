@@ -194,7 +194,7 @@ func _ready() -> void:
 	var leave: Button
 	if Net.is_party() and Net.is_host():
 		leave = BRStyle.button("Завершить", BRStyle.CAP)
-		LeaveGuard.wire(leave, "Завершить партию для всех?", "Все вернутся в лобби игры, пати сохранится.", Net.end_game)
+		LeaveGuard.wire(leave, "Завершить партию для всех?", "Все вернутся к выбору игры, пати сохранится.", Net.return_to_party)
 	elif Net.is_party():
 		leave = BRStyle.button("Покинуть", BRStyle.CAP)
 		LeaveGuard.wire(leave, "Покинуть пати?", "Вы выйдете из партии и из пати.", func(): app.leave_party())

@@ -28,7 +28,7 @@ const BOXED_ROWS := 3  # ячеек с коробками (в последней
 const SHELF_LAYOUT := [
 	["wavelength", "hues_and_cues", "dangerous_words", "king_of_12", "not_a_hat"],
 	["ready_set_bet", "tip_top", "tip_top_18", "gloom", "gloomier", "stillion"],
-	["word_slam", "brodilka", "phantom_ink", "four_souls"],
+	["word_slam", "brodilka", "phantom_ink", "four_souls", "the_gang"],
 ]
 const SHELF_X := 0.25
 const PERUDO_SPACE := 0.17  # место под набор «Перудо» во второй ячейке

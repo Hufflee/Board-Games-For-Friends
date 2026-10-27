@@ -10,15 +10,28 @@ func check(ok: bool, message: String) -> void:
 func make(count: int = 8, dlc: bool = false, seed_value: int = 1) -> FSRules:
 	var players := []
 	for i in count: players.append({"name":"Игрок %d" % i})
-	var game := FSRules.new(); game.new_game(players,dlc,seed_value); return game
+	var game := FSRules.new()
+	game.new_game(players,dlc,seed_value)
+	preload("res://tests/fs_test_setup.gd").finish(game)
+	return game
 func drain(g: FSRules) -> void:
 	var limit := 0
-	while g.phase in ["priority","effect"] and limit < 500:
+	while g.phase in ["priority","effect","death","discard"] and limit < 500:
 		limit += 1
 		if g.phase == "priority": g._resolve_top()
 		elif g.phase == "effect":
 			if g.resolving.kind == "event" and str(FSData.card(int(g.resolving.card)).lua.get("type",""))=="curse": g.action(g.actor(),"effect",{"op":"attach_curse","target":g.actor()})
 			check(g.action(g.actor(),"effect_done"),"Эффект разрешается")
+		elif g.phase == "discard":
+			check(g.action(g.current, "discard", {"card": g.hands[g.current][0]}), "Обязательный сброс после срабатываний")
+		elif g.phase == "death":
+			var dying := g.actor()
+			var item := -1
+			for i in g.items[dying].size():
+				if not g.items[dying][i].eternal:
+					item = i
+					break
+			check(g.action(dying, "death", {"loot": g.hands[dying][0] if not g.hands[dying].is_empty() else -1, "item": item}), "Штраф после автоматических срабатываний")
 	check(limit < 500,"Стек завершается")
 func _initialize() -> void:
 	check(FSData.pool("loot",false).size()==154,"Лут базы точно повторяет третий мод")
@@ -124,14 +137,19 @@ func _initialize() -> void:
 						check(g.action(who,"loot",{"card":g.hands[who][0]}),"Лут разыгрывается")
 						drain(g)
 					if g.phase=="turn":g.action(g.current,"end")
+					drain(g)
 					while g.phase=="discard":g.action(g.current,"discard",{"card":g.hands[g.current][0]})
 					check(g.phase=="turn","После эффектов и конца хода игра продолжается")
 					for seat in count:check(g.coins[seat]>=0 and g.souls[seat]>=0,"Ресурсы неотрицательные")
 					var total: int = g.bank
 					for value in g.coins: total += int(value)
 					check(total==100,"В банке и у игроков ровно 100 монет")
-				g.phase="effect";g.resolving={"kind":"item","owner":0,"card":g.items[0][0].id}
-				check(g.action(0,"effect",{"op":"souls","amount":4}),"Победная душа")
-				check(g.phase=="game_over" and g.winner==0,"Четыре души приносят победу")
+				g.phase="effect";g.resolving={"kind":"item","owner":0,"card":13}
+				if g.room == 779 or g.curses[0].has(744):
+					check(not g.action(0,"effect",{"op":"souls","amount":4}),"Запрет комнаты/проклятия не разрешает победную душу")
+					check(g.winner == -1, "Запрет получения душ не создаёт победителя")
+				else:
+					check(g.action(0,"effect",{"op":"souls","amount":4}),"Победная душа")
+					check(g.phase=="game_over" and g.winner==0,"Четыре души приносят победу")
 	print("FOUR SOULS: %d проверок, ошибок: %d" % [checks,errors])
 	quit(1 if errors else 0)

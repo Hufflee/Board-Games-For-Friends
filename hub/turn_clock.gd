@@ -35,10 +35,17 @@ func _ready() -> void:
 	sb.content_margin_top = 2
 	sb.content_margin_bottom = 2
 	add_theme_stylebox_override("panel", sb)
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 5)
+	add_child(row)
+	var icon := ClockIcon.new()
+	icon.custom_minimum_size = Vector2(16, 18)
+	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	row.add_child(icon)
 	_label = Label.new()
 	_label.add_theme_font_size_override("font_size", 14)
 	_label.add_theme_color_override("font_color", Color.WHITE)
-	add_child(_label)
+	row.add_child(_label)
 	visible = false
 	Net.state_changed.connect(_on_state)
 	if not Net.view.is_empty():
@@ -61,12 +68,12 @@ func _process(_delta: float) -> void:
 	if not visible:
 		return
 	if _paused:
-		_label.text = "⏸ пауза"
+		_label.text = "пауза"
 		_label.add_theme_color_override("font_color", Color.WHITE)
 		_sb.bg_color = BG_PAUSE
 		return
 	var left := maxi(0, int(ceil((_deadline - Time.get_ticks_msec()) / 1000.0)))
-	_label.text = "⏱ %d с" % left
+	_label.text = "%d с" % left
 	if left != _last:
 		_last = left
 		Sfx.countdown(left)
@@ -77,6 +84,15 @@ func _process(_delta: float) -> void:
 
 
 ## Часы в центре сверху родителя.
+class ClockIcon extends Control:
+	func _draw() -> void:
+		var center := Vector2(8, 10)
+		draw_arc(center, 5.5, 0, TAU, 24, Color.WHITE, 1.5, true)
+		draw_line(Vector2(5, 1), Vector2(11, 1), Color.WHITE, 1.5, true)
+		draw_line(Vector2(8, 1), Vector2(8, 4), Color.WHITE, 1.5, true)
+		draw_polyline(PackedVector2Array([center + Vector2(0, -3.5), center, center + Vector2(2.5, 1.5)]), Color.WHITE, 1.5, true)
+
+
 static func top_center(offset_y: float = 4.0) -> TurnClock:
 	var c := TurnClock.new()
 	c.set_anchors_preset(Control.PRESET_CENTER_TOP)

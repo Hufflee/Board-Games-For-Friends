@@ -1,0 +1,48 @@
+{
+  "date": "2026-10-26",
+  "baseline_summary": {
+    "observations": 3,
+    "mismatches": 2,
+    "setup_errors": 0,
+    "log": "build/fs_passive_audit/followup/remaining-death.log"
+  },
+  "after_ragling_fix": {
+    "mismatches": 1,
+    "observations": [
+      {
+        "action": "После подтверждённой смерти доступна обязательная PvP-атака другого игрока",
+        "actual": false,
+        "expected": true,
+        "id": 268,
+        "matches": false,
+        "name": "Завоеватель"
+      },
+      {
+        "action": "Возврат Тряпочника при броске6 после награды (с учётом заполнения освободившейся ячейки)",
+        "actual": true,
+        "expected": true,
+        "id": 358,
+        "matches": true,
+        "name": "Тряпочник"
+      },
+      {
+        "action": "Возврат Тряпочника при броске2 после награды (с учётом заполнения освободившейся ячейки)",
+        "actual": false,
+        "expected": false,
+        "id": 358,
+        "matches": true,
+        "name": "Тряпочник"
+      }
+    ],
+    "setup_errors": 0
+  },
+  "positive_regression": "test_fs_ragling36/0;test_fs_ragling_ui13/0",
+  "limits": "Автоматическая PvP-атака Завоевателя268 остаётся незакрытой; это не подтверждение всей семантики всех монстров.",
+  "after_conquest_fix": {
+    "observations": 3,
+    "mismatches": 0,
+    "setup_errors": 0,
+    "log": "build/fs_passive_audit/followup/remaining-death-pvp.log",
+    "verification": "Завоеватель51/0 правил,9/0 UI; ENet40/0 общий пакет"
+  }
+}

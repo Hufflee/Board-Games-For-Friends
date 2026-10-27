@@ -1,0 +1,194 @@
+{
+  "model": "gpt-6.1-sol",
+  "reasoning_effort": "low",
+  "status": "baseline_before_fix",
+  "observations": [
+    {
+      "id": 6,
+      "action": "6: выплаты [2] получателю 0 банк 20 → готов=false",
+      "expected": "готов=false",
+      "actual": "{ \"готов\": false, \"получено\": 2 }",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 6,
+      "action": "6: выплаты [3] получателю 0 банк 20 → готов=true",
+      "expected": "готов=true",
+      "actual": "{ \"готов\": true, \"получено\": 3 }",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 6,
+      "action": "6: выплаты [2, 1] получателю 0 банк 20 → готов=false",
+      "expected": "готов=false",
+      "actual": "{ \"готов\": false, \"получено\": 3 }",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 6,
+      "action": "6: выплаты [3] получателю 1 банк 20 → готов=false",
+      "expected": "готов=false",
+      "actual": "{ \"готов\": false, \"получено\": 3 }",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 6,
+      "action": "6: выплаты [3] получателю 0 банк 2 → готов=false",
+      "expected": "готов=false",
+      "actual": "{ \"готов\": false, \"получено\": 2 }",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 6,
+      "action": "6: выплаты [4] получателю 0 банк 3 → готов=true",
+      "expected": "готов=true",
+      "actual": "{ \"готов\": true, \"получено\": 3 }",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 6,
+      "action": "6: выплаты [3] получателю 0 банк 0 → готов=false",
+      "expected": "готов=false",
+      "actual": "{ \"готов\": false, \"получено\": 0 }",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 6,
+      "action": "6: источник ушёл → не перезаряжается",
+      "expected": "не перезаряжается",
+      "actual": "true",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 6,
+      "action": "6: передача → старый владелец не перезаряжает",
+      "expected": "старый владелец не перезаряжает",
+      "actual": "true",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 6,
+      "action": "6: передача → новый владелец перезаряжает",
+      "expected": "новый владелец перезаряжает",
+      "actual": "false",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 18,
+      "action": "18: чужие/обычные броски → ATK=1",
+      "expected": "ATK=1",
+      "actual": "1",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 18,
+      "action": "18: после броска атаки 1 → ATK=1",
+      "expected": "ATK=1",
+      "actual": "1",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 18,
+      "action": "18: бросок 1 → урон=1 (фиксируется до триггеров)",
+      "expected": "урон=1 (фиксируется до триггеров)",
+      "actual": "1",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 18,
+      "action": "18: после броска атаки 2 → ATK=1",
+      "expected": "ATK=1",
+      "actual": "1",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 18,
+      "action": "18: бросок 2 → урон=1 (фиксируется до триггеров)",
+      "expected": "урон=1 (фиксируется до триггеров)",
+      "actual": "1",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 18,
+      "action": "18: после броска атаки 3 → ATK=2",
+      "expected": "ATK=2",
+      "actual": "1",
+      "matches": false,
+      "category": "mixed_next"
+    },
+    {
+      "id": 18,
+      "action": "18: бросок 3 → урон=1 (фиксируется до триггеров)",
+      "expected": "урон=1 (фиксируется до триггеров)",
+      "actual": "1",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 18,
+      "action": "18: после броска атаки 4 → ATK=2",
+      "expected": "ATK=2",
+      "actual": "1",
+      "matches": false,
+      "category": "mixed_next"
+    },
+    {
+      "id": 18,
+      "action": "18: бросок 4 → урон=2 (фиксируется до триггеров)",
+      "expected": "урон=2 (фиксируется до триггеров)",
+      "actual": "1",
+      "matches": false,
+      "category": "mixed_next"
+    },
+    {
+      "id": 18,
+      "action": "18: конец хода → ATK=1",
+      "expected": "ATK=1",
+      "actual": "1",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 18,
+      "action": "18: новый ход бросок 1 → ATK=1",
+      "expected": "ATK=1",
+      "actual": "1",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 18,
+      "action": "18: новый ход бросок 2 → ATK=1",
+      "expected": "ATK=1",
+      "actual": "1",
+      "matches": true,
+      "category": "mixed_next"
+    },
+    {
+      "id": 18,
+      "action": "18: новый ход бросок 3 → ATK=2",
+      "expected": "ATK=2",
+      "actual": "1",
+      "matches": false,
+      "category": "mixed_next"
+    }
+  ],
+  "mismatches": 4,
+  "setup_errors": 0,
+  "note": "Подготовленная регрессия; не естественная партия. Карта6: только пассив, активная способность не покрыта. Ожидание третьего урона отдельно подтверждено координатором по разделу Attacking официальных правил."
+}

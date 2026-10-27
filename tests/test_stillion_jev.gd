@@ -37,7 +37,7 @@ func _run() -> void:
 class FakeJev extends Node:
 	signal judged(no: int, ok: bool, rarity: String)
 	var asked := 0
-	func check(_no: int, _question: Dictionary, _answer: String) -> void:
+	func check(_no: int, _question: Dictionary, _answer: String, _appeal: bool = false) -> void:
 		asked += 1
 var paused := false
 var stillion: STRules

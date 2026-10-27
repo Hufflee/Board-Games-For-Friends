@@ -126,7 +126,7 @@ func _ready() -> void:
 	if Net.is_party() and Net.is_host():
 		leave = GLStyle.button("Завершить партию", 14)
 		LeaveGuard.wire(
-			leave, "Завершить партию для всех?", "Все вернутся в лобби игры, пати сохранится.", Net.end_game
+			leave, "Завершить партию для всех?", "Все вернутся к выбору игры, пати сохранится.", Net.return_to_party
 		)
 	elif Net.is_party():
 		leave = GLStyle.button("Покинуть пати", 14)

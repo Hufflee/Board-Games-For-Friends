@@ -2,43 +2,31 @@ extends CanvasLayer
 ## Отчёт о вылете: при запуске ставим отметку «игра запущена», при нормальном выходе снимаем.
 ## Если в прошлый раз игра закрылась аварийно (отметка осталась) — показываем окно с кнопками
 ## «Скопировать лог» и «Открыть папку с логами»: игрок сам отправляет лог разработчику.
-## Логи пишет Godot в user://logs (godot.log — текущий запуск, godot<дата>.log — прошлые).
+## Diag сохраняет подробный журнал, стеки и доступные системные данные Windows в user://logs.
 ## Те же кнопки — в настройках (CrashReport.copy_log / open_folder). Создаёт Net.
 
-const FLAG := "user://running.flag"
 const LOG_DIR := "user://logs"
-const MAX_COPY := 200000  # из лога копируем хвост — последние ~200 КБ
 
 var _crashed := false
 
 
 func _ready() -> void:
 	layer = 99
-	_crashed = FileAccess.file_exists(FLAG)
-	var f := FileAccess.open(FLAG, FileAccess.WRITE)
-	if f:
-		f.store_string(Time.get_datetime_string_from_system())
+	_crashed = not Diag.previous_session.is_empty()
 	if _crashed:
 		_show.call_deferred()
 
 
-func _exit_tree() -> void:
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(FLAG))  # нормальный выход — отметку снимаем
-
-
-func _notification(what: int) -> void:
-	if what == NOTIFICATION_WM_CLOSE_REQUEST:
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(FLAG))
-
-
 ## Лог прошлого запуска (самый свежий, кроме текущего godot.log); нет — текущий.
 static func previous_log() -> String:
+	if Diag.previous_session.has("log") and FileAccess.file_exists(str(Diag.previous_session.log)):
+		return str(Diag.previous_session.log)
 	var best := ""
 	var best_t := -1
 	var dir := DirAccess.open(LOG_DIR)
 	if dir:
 		for name in dir.get_files():
-			if name.ends_with(".log") and name != "godot.log":
+			if name.begins_with("godot") and name.ends_with(".log") and name != "godot.log":
 				var t := FileAccess.get_modified_time(LOG_DIR + "/" + name)
 				if t > best_t:
 					best_t = t
@@ -46,17 +34,14 @@ static func previous_log() -> String:
 	return best if best != "" else LOG_DIR + "/godot.log"
 
 
-## Скопировать лог в буфер обмена (хвост файла). true — получилось.
-static func copy_log(path: String = LOG_DIR + "/godot.log") -> bool:
-	var f := FileAccess.open(path, FileAccess.READ)
-	if f == null:
+## Скопировать единый отчёт нужного запуска: диагностика, Godot, событие Windows.
+static func copy_log(path: String = "") -> bool:
+	var selected_path := path if not path.is_empty() else str(Diag.session.get("log", ""))
+	if not FileAccess.file_exists(selected_path):
 		return false
-	var size := f.get_length()
-	if size > MAX_COPY:
-		f.seek(size - MAX_COPY)
-	var text := f.get_buffer(mini(size, MAX_COPY)).get_string_from_utf8()
-	DisplayServer.clipboard_set("Лог: %s\n%s\n%s" % [path.get_file(), Engine.get_version_info().string, text])
-	return true
+	var text := Diag.report_text(selected_path)
+	DisplayServer.clipboard_set(text)
+	return DisplayServer.clipboard_get() == text
 
 
 static func open_folder() -> void:
@@ -90,11 +75,11 @@ func _show() -> void:
 	col.add_theme_constant_override("separation", 12)
 	panel.add_child(col)
 	var title := Label.new()
-	title.text = "В прошлый раз игра закрылась с ошибкой"
+	title.text = "Предыдущий запуск не завершился штатно"
 	title.add_theme_font_size_override("font_size", 22)
 	col.add_child(title)
 	var text := Label.new()
-	text.text = "Помогите её исправить: скопируйте лог и отправьте его разработчику\n(например, в личные сообщения), или откройте папку с логами и пришлите файл."
+	text.text = "Скопируйте лог и отправьте его разработчику\n(например, в личные сообщения), или откройте папку с логами и пришлите файл."
 	text.add_theme_font_size_override("font_size", 15)
 	text.modulate.a = 0.85
 	col.add_child(text)

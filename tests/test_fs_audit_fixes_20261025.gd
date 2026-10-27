@@ -16,6 +16,7 @@ func make(seed_value: int = 77, count: int = 2) -> FSRules:
 	for i in count:
 		players.append({"name": "Игрок %d" % i})
 	g.new_game(players, false, seed_value)
+	preload("res://tests/fs_test_setup.gd").finish(g)
 	return g
 
 func monster(id: int) -> Dictionary:
@@ -220,6 +221,7 @@ func _test_panel() -> void:
 	net.host_offline("four_souls")
 	net.set_bots(1)
 	net.start_game()
+	preload("res://tests/fs_test_setup.gd").finish(net.fours)
 	var g := make()
 	var owner := g.current
 	loot_effect(g, 642)

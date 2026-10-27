@@ -219,7 +219,7 @@ func _build_box() -> void:
 	_face("front", Vector3(size.x / 2.0 + 0.0008, 0, 0), Vector3(0, PI / 2.0, 0), Vector2(size.z - inset, size.y - inset), true)
 	_face("back", Vector3(-size.x / 2.0 - 0.0008, 0, 0), Vector3(0, -PI / 2.0, 0), Vector2(size.z - inset, size.y - inset), false)
 	_face("spine", Vector3(0, 0, size.z / 2.0 + 0.0008), Vector3.ZERO, Vector2(size.x - inset, size.y - inset), false)
-	if str(game.get("id", "")) == "stillion":
+	if str(game.get("id", "")) in ["stillion", "gloom", "gloomier"]:
 		# Та же боковина сверху. Верх букв направлен к −X, от лицевой стороны +X.
 		_face("top", Vector3(0, size.y / 2.0 + 0.0008, 0), Vector3(-PI / 2.0, 0, PI), Vector2(size.x - inset, size.z - inset), false)
 	# неоновый ореол при наведении (его подхватывает glow окружения)
@@ -303,6 +303,8 @@ static func _edge_color(t: Texture2D) -> Color:
 
 
 static func cover_texture(id: String, part: String) -> Texture2D:
+	if part == "top" and id in ["gloom", "gloomier"]:
+		return cover_texture(id, "spine")
 	if id == "stillion" and part in ["spine", "top"]:
 		var path := COVERS + "stillion_spine.png"
 		if ResourceLoader.exists(path):

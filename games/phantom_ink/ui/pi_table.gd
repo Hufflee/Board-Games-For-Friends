@@ -129,10 +129,10 @@ func _board_team(parent: Control, t: int) -> void:
 	for i in 8:
 		var data: Dictionary = _v.rows[t][i] if i < _v.rows[t].size() else {}
 		var text := str(i + 1) + ("  ◉  " if PIData.EYES[t].has(i) else "      ")
+		var wrong_index := -1
 		if not data.is_empty():
 			if data.wrong and not str(data.text).is_empty():
-				data = data.duplicate()
-				data.text = str(data.text).left(-1) + str(data.text).right(1) + "̶"
+				wrong_index = text.length() + (2 if data.kind == "guess" else 0) + str(data.text).length() - 1
 			text += ("→ " if data.kind == "guess" else "") + str(data.text) + str(data.get("pending", "")) + ("." if data.complete else "") + ("  ✕" if data.wrong else "")
 		else:
 			text += "—"
@@ -144,6 +144,8 @@ func _board_team(parent: Control, t: int) -> void:
 			row.add_theme_color_override("font_color", Color("c96e63"))
 		var eye: bool = _v.phase == "eye" and _v.can_act and data.get("kind", "") == "clue" and not data.get("complete", true)
 		row.disabled = not eye and not data.has("question")
+		if wrong_index >= 0:
+			preload("res://games/phantom_ink/ui/pi_wrong_letter.gd").wire(row, wrong_index)
 		if eye:
 			row.pressed.connect(func(): _send("eye", [t, i]))
 		elif data.has("question"):
@@ -202,6 +204,7 @@ func _controls(col: Control) -> void:
 			_button(col, "Пропустить око", "eye_skip")
 		"turn":
 			_note(col, "Выберите 2 вопроса для духа или попробуйте назвать предмет.")
+			_note(col, "Голосуйте за вопросы кнопкой ♥ — до двух голосов от каждого медиума.")
 			var ask := _button(col, "Передать два вопроса", "ask", _selected, true)
 			ask.disabled = _selected.size() != 2
 			_questions(col)
@@ -253,14 +256,24 @@ func _entry(col: Control, text: String, kind: String, limit: int) -> void:
 
 func _questions(col: Control) -> void:
 	for q in _v.hand:
-		var b := _question_button(col, int(q), func():
+		var row := PIStyle.hbox(8)
+		col.add_child(row)
+		var b := _question_button(row, int(q), func():
 			if _selected.has(q):
 				_selected.erase(q)
 			elif _selected.size() < 2:
 				_selected.append(q)
 			_changed(_v))
+		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		if _selected.has(q):
 			b.theme_type_variation = "PrimaryButton"
+		var count: int = int(_v.get("question_votes", {}).get(q, 0))
+		var vote := PIStyle.button("♥ %d" % count, PIStyle.CAP)
+		vote.tooltip_text = "Голосовать за вопрос / снять свой голос"
+		if (_v.get("own_question_votes", []) as Array).has(q):
+			vote.theme_type_variation = "PrimaryButton"
+		vote.pressed.connect(func(): Net.send_action("question_vote", int(q)))
+		row.add_child(vote)
 
 func _question_button(col: Control, q: int, callback: Callable) -> Button:
 	var b := PIStyle.button(PIData.question(q), PIStyle.CAP)

@@ -1,0 +1,46 @@
+# Активная работа · 27.10.2026
+
+Владелец поручил не останавливаться: закончить текущий блок, отчитаться и сразу перейти к следующему из `docs/TODO_batch_2026-10-27.md`. Аудит карточных эффектов Айзека НЕ возобновлять. Отдельно разрешён будущий просмотр его пула карт. Владелец поручил при10%лимита релиз0.8.5(lite) без Айзека, затем продолжить очередь. Порог достигнут, идёт экспорт/публикация.
+
+## Текущий блок: вылеты клиентов при второй игре + диагностика
+
+У друзей экспорт0.8.4 зависает целиком, затем закрывается. Найдена старая запись REVIEW_QUEUE от24.10: сброс серверных rules, offline9 игр; она не проверяла client UI. Современный Diag26.10 отсутствует в локальном export0.8.4 (read-only поиск ресурсов в build/windows/PartyWorld.exe, результат build/client_switch_audit/export-resource-probe.json).
+
+Sol low воспроизвёл6 ScriptError в3 парах: живые старые WL/Hues app/table получали game_started/view следующей игры до deferred удаления. **Это подтверждённая ошибка, но не доказанный нативный crash.** Исходный тест/логи сохранены: tests/test_client_game_switch.gd; build/client_switch_audit/low-client-repro.md.
+
+Координатор исправил Net/Hub/Fidget (backup backups/client_switch_2026-10-27): отключение подписчиков уходящего UI по сцене в ancestry, очистка view при смене игры даже при incoming active lobby, started(game,match) ждёт свежего view, отбрасываются чужие game/старые match. RPC старта передают идентификаторы. Hub_ready подхватывает уже установленную игру; Fidget защищён от deferred вызовов вне дерева/после await.
+
+Low повтор: tests/test_client_game_switch_fixed.gd cases0..3 =62/0, низкий отчёт low-client-fixed-review.md. Настоящий headless ENet =16/0, build/client_switch_audit/enet-low-172337/result.json. Регрессия координатора: Net Gang85/0, границы48/0, batch26_rules26/0, compile173.
+
+### Незавершённое / исполнители
+
+- Medium Bohr `01a17a27-dda2-79d3-9c01-0c1b51697450` сейчас исправляет ТОЛЬКО `hub/luma_wipe.gd` и `hub/hub.gd` после отдельного найденного графического блокера: D3D12-клиент дошёл до WL, затем при быстром старте Hues остался вHub с корректным viewHues, ScriptError0, процесс жив. Исходный result build/client_switch_audit/enet-low-172450/result.json; baseline5checks/timeout, не успех. Ожидается medium-transition.md, generation/замена устаревшей цели уже в работе. Net/Fidget ему не поручены.
+- Low Peirce `01a17a29-b535-7da3-85c7-2832d5c5dc14` завершил ревью диагностики (ниже); теперь проверяет дополнительный case: старый WLapp остаётся после Net.leave(), party_game уже пустой, затем подключение кHues. Подозрение: retire(previous_game="") пропускает actual старый root. Scope tests/test_client_switch_rejoin.gd, low-rejoin.md; production не правит. Дождаться подтверждения, затем исправить только нужный путь и повторить.
+- Основной Net пока заморожен для этих проверок; известен ещё вопрос к диагностическим деталям: _safe_details whitelist не включает новые технические поля Net (`предыдущая_игра`, `подписок`, `ожидаемая_партия`, `игра_пакета`, `партия_пакета`, `игра_команды`). Добавлять только типизированные известные метаданные, без payload/секретов, с тестом; не вводить произвольный details dump.
+
+### Диагностика уже реализована и принята low
+
+Medium изменил diagnostic_logger/diagnostics/windows_crash_info/crash_report и docs/CRASH_REPORTING.md, backup backups/client_diagnostics_2026-10-27. После лимита2МиБ сохраняется ограниченный хвост и отдельные последние ошибки; спутники ротируются/удаляются с сеансом. Контекст сбрасывается при смене game/match/in_game; публичные поля/details проверяются по whitelist; engine snapshot и восстановление прошлого отчёта, честная недоступность неизвестного --log-file; оценка engine start дляPID и монотонный timeoutWindows.
+
+Отчёт medium-diagnostics.md. Low-diagnostics-review.md:36/0+20/0, независимые27/0, два реальных recovery seed-kill/verify/clean, Windows fixtures. Настоящий найденный Event1000/native dump не заявлять; нет гарантии после OS kill/сбоя диска/раннего native crash. Маркер нештатного завершения не означает доказанную ошибку программы.
+
+### Запуски / текущие дополнительные проверки
+
+Все Dummy/свой APPDATA. Обычный sandbox блокирует даже loopback: два старых ENet-runner timeout members1 не являются gamebug. Успешные запуски — exec_command с require_escalated для127.0.0.1.
+
+`tools/run_client_switch_enet.py` + `tests/client_switch_net_probe.gd`: headless host/client по умолчанию; CS_RENDER=1 даёт клиенту настоящий Forward Plus/D3D12 и скрытое окно --position -32000,-32000, хост headless. После medium-transition повторить этот runner с эскалацией и новым профилем; затем при необходимости low-review малой правки.
+
+Дополнительная матрица `tests/test_client_switch_matrix.gd` с настоящими16 rules/view/app: build/client_switch_audit/matrix-final2.log =50asserts/1 engine error, **не успешный общий прогон**. Ошибок схем ScriptError type2 нет; один type0 ShaderCompiler `custom_samplers` в st_cannon.gd73 под headless. Не выдавать за native crash или новую ошибку Net. Перед матрицей были две ошибки подготовки harness (ранний HubGames до autoload и неправильная роль временного host); сохранены matrix-before-runtime-load.log/matrix-final.log. Фабрика теперь имеет отдельный SceneMultiplayer/Offline peer под своим NodePath. Нельзя статически тянуть UI/Net классы в SceneTree-тест до autoload.
+
+## Очередь после текущего блока
+
+Полный список: TODO_batch_2026-10-27.md, включая добавленный просмотр чужих комнат (глазики/домик, голубое свечение, live-раскладка/действия, выключатель действий, подсказки).
+
+Уточнения владельца уже получены и записаны: Стиллион принимает **содержательное** слово из ответа2–3 слов, не общее «Новый». Новые Steam-комнаты **публичные по умолчанию**. HuffleSoft splash взять из `C:/Users/rabin/Desktop/VolleyballNEW/game/ui/boot/hufflesoft_splash.gd`, звук подобрать разрешено. The Gang теперь только тёмный, без TTS в пользовательском тексте, новый дизайн по коробке, реальные drag-фишки и общая2D-анимация переворота за край. Это отдельные следующие задачи; не считать исполненными.
+
+AGENTS/DevDecisions обновлены: после5мин без ответа на уточнение переходить к независимой задаче или продолжать с явным предположением; обязательные разрешения временем не заменяются. Сейчас ожидающих пользовательских уточнений нет.
+
+## Релизная точка (актуальнее предыдущего статуса)
+D3D12+ENet финал21/0, enet-low-174347; low-transition-review принят29/0+13/0+767/0; compile173. Клиентский блок завершён в воспроизведённом покрытии, нативный crash не доказан. См. docs/CLIENT_SWITCH_REPORT_2026-10-27.md. Далее пункт1 TODO_batch: фильтры/анимации/чат. Не возобновлять аудит Айзека. Экспорт0.8.5lite исключает games/four_souls; исходники сохраняются. Первый export не нашёл шаблоны в изолированном APPDATA; скопированы только Windows-шаблоны, идёт повтор release085-export-final.log.
+
+Чистый export-approved завершён0; готовый exe smoke0; PCK3214 файлов, нет games/four_souls, естьGang/Diag/project.binary. Идёт zip/коммит/пуш/релиз, см.RELEASE_0.8.5_LITE.md. Нативный crash не объявлять исправленным.

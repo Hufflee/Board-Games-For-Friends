@@ -32,6 +32,7 @@ var _q_cat: Label
 var _q_text: Label
 var _q_bar: ProgressBar
 var _answer: LineEdit
+var _appeal: Button
 var _send: Button
 var _who: Label
 var _used_box: VBoxContainer
@@ -137,6 +138,11 @@ func _ready() -> void:
 	var lg := STStyle.label("очки шкалы", STStyle.CAP, STStyle.muted())
 	legend.add_child(lg)
 	scol.add_child(legend)
+	_appeal = STStyle.button("Оспорить ответ", STStyle.CAP)
+	_appeal.tooltip_text = "Повторная подробная проверка Jev: один раз для отклонённого ответа. Фитиль на время проверки остановлен."
+	_appeal.visible = false
+	_appeal.pressed.connect(func(): Net.send_action("st_appeal", {"as": int(_v.target)}))
+	scol.add_child(_appeal)
 	# поле ответа
 	var bottom := PanelContainer.new()
 	bottom.add_theme_stylebox_override("panel", STStyle.box(STStyle.paper(), 14, 4, 5, 12))
@@ -410,7 +416,7 @@ func _update_used() -> void:
 
 ## Отвечать может тот, в кого целится пушка (на одном компьютере — любой, за того игрока).
 func _can_answer() -> bool:
-	if _v.phase != "fuse" or bool(_v.get("spectator", false)):
+	if _v.phase != "fuse" or bool(_v.get("spectator", false)) or Net.paused or bool(_v.get("game_paused", false)):
 		return false
 	var tgt: int = _v.target
 	if bool(_v.players[tgt].bot):
@@ -422,12 +428,16 @@ func _update_input() -> void:
 	var tgt: int = _v.target
 	var name := str(_v.players[tgt].name)
 	var can := _can_answer()
-	_answer.editable = can
+	_appeal.visible = bool(_v.get("can_appeal", false)) and not bool(_v.get("spectator", false)) and (Net.mode == "offline" or int(_v.get("seat", -1)) == tgt)
+	var local_seat := int(_v.get("seat", -1))
+	var may_prepare: bool = not bool(_v.get("spectator", false)) and _v.phase != "game_over" and (Net.mode == "offline" or (local_seat >= 0 and local_seat < _v.players.size() and bool(_v.players[local_seat].get("alive", false))))
+	_answer.editable = may_prepare
+	_answer.placeholder_text = "Печатайте ответ и жмите Enter" if can else "Можно подготовить ответ заранее…"
 	_send.disabled = not can
 	if _v.phase == "new_q":
 		_who.text = "Приготовьтесь!"
 	elif _v.phase == "check":
-		_who.text = "Проверяем ответ…"
+		_who.text = "Подробно перепроверяем…" if _v.get("appeal_checking", false) else "Проверяем ответ…"
 	elif _v.phase == "game_over":
 		_who.text = "Игра окончена"
 	elif bool(_v.players[tgt].bot):
@@ -436,7 +446,7 @@ func _update_input() -> void:
 		_who.text = ("Отвечает %s!" % name) if Net.mode == "offline" else "Ваш ответ!"
 	else:
 		_who.text = "Отвечает %s" % name
-	if can and not _answer.has_focus():
+	if can and not _answer.has_focus() and get_viewport().gui_get_focus_owner() == null and not _top.chat.expanded:
 		_answer.grab_focus()
 
 

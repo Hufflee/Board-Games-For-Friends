@@ -172,13 +172,20 @@ static func forget() -> void:
 
 
 func _reset_pos() -> void:
+	if not is_inside_tree() or is_queued_for_deletion():
+		return
+	var tree := get_tree()
 	var vs := get_viewport_rect().size
 	var bar := get_tree().get_first_node_in_group("top_bar")
 	if bar != null and bar.get("coin_dock") != null:
 		var dock: Control = bar.coin_dock  # у стола с верхней полосой — в гнезде слева от часов
 		# полоса раскладывается не сразу — ждём пару кадров, пока гнездо встанет на место
-		await get_tree().process_frame
-		await get_tree().process_frame
+		await tree.process_frame
+		if not is_inside_tree() or is_queued_for_deletion():
+			return
+		await tree.process_frame
+		if not is_inside_tree() or is_queued_for_deletion():
+			return
 		if is_instance_valid(dock) and saved_pos.x < 0:
 			position = dock.global_position + (dock.size - size) * 0.5
 			_in_dock = true
@@ -226,6 +233,8 @@ func _game_key() -> String:
 
 ## Обновить облик. animated — подбросить монетку и сменить облик в полёте (смена темы).
 func _refresh_style(animated: bool) -> void:
+	if not is_inside_tree() or is_queued_for_deletion():
+		return
 	var want := _style_for()
 	if want == _style or want == _pending:
 		return
@@ -256,6 +265,14 @@ func _has_secret() -> bool:
 
 func _has_point(p: Vector2) -> bool:
 	return p.distance_to(size * 0.5) <= R + 4
+
+
+func _get_tooltip(at_position: Vector2) -> String:
+	if not is_visible_in_tree() or modulate.a < 0.1 or not _has_point(at_position):
+		return ""
+	if not _has_point(get_local_mouse_position()):
+		return ""
+	return tooltip_text
 
 
 func _gui_input(e: InputEvent) -> void:

@@ -12,6 +12,7 @@ func check(ok: bool, message: String) -> void:
 func make() -> FSRules:
 	var g := FSRules.new()
 	g.new_game([{"name": "Первый"}, {"name": "Второй"}], false, 77)
+	preload("res://tests/fs_test_setup.gd").finish(g)
 	g.current = 0
 	g.monsters[0].hp = 3
 	g.monsters[0].dc = 1

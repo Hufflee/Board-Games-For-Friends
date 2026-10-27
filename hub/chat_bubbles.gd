@@ -28,7 +28,7 @@ func _ready() -> void:
 
 
 func _on_chat(entry: Dictionary) -> void:
-	if entry.get("kind", "") == "system" or not is_visible_in_tree():
+	if entry.get("kind", "") == "system" or not is_visible_in_tree() or not Net.chat_entry_visible(entry):
 		return
 	_queue.append("%s: %s" % [entry.get("name", ""), str(entry.get("text", "")).left(60)])
 	if _queue.size() > 3:

@@ -362,8 +362,8 @@
       "name": "Аккумулятор/Car Battery",
       "source_kind": "treasure",
       "source_type": "paidtreasure",
-      "response_kind": "paid",
-      "reason": "Тип способности взят из исходного мода: поворот, платная, одноразовая или пассивная."
+      "response_kind": "hybrid",
+      "reason": "На русском изображении есть и поворотная, и платная способность; исходный Lua-тип неполон."
     },
     {
       "id": 45,
@@ -410,8 +410,8 @@
       "name": "Вечный D6/Eternal D6",
       "source_kind": "treasure",
       "source_type": "atreasure",
-      "response_kind": "tap",
-      "reason": "Тип способности взят из исходного мода: поворот, платная, одноразовая или пассивная."
+      "response_kind": "hybrid",
+      "reason": "На русском изображении есть и поворотная, и платная способность; исходный Lua-тип неполон."
     },
     {
       "id": 51,
@@ -1994,8 +1994,8 @@
       "name": "Технология Х/Tech X",
       "source_kind": "treasure",
       "source_type": "atreasure",
-      "response_kind": "tap",
-      "reason": "Тип способности взят из исходного мода: поворот, платная, одноразовая или пассивная."
+      "response_kind": "hybrid",
+      "reason": "На русском изображении есть и поворотная, и платная способность; исходный Lua-тип неполон."
     },
     {
       "id": 249,
@@ -7074,7 +7074,7 @@
       "name": "Глюк/Glitch",
       "source_kind": "eternal",
       "source_type": "",
-      "response_kind": "conditional",
+      "response_kind": "passive",
       "reason": "Визуально проверены значки и текст русской вечной карты; специальная цена/условие остаётся по тексту."
     },
     {

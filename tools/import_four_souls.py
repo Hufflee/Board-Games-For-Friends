@@ -1,6 +1,7 @@
 """Импорт иллюстраций и сравнение двух русских наборов; Lua не исполняется.
 python tools/import_four_souls.py --workshop "папка Mods/Workshop"
 Нужны Pillow и пользовательские JSON 2143991933, 2738213595, 2370232448.
+Скачанные листы хранятся в backups/fs_import_sheets, игра использует art/cards.
 """
 import json,re,collections,hashlib,urllib.request,concurrent.futures,time
 from pathlib import Path
@@ -11,7 +12,12 @@ parser=argparse.ArgumentParser(description='Импорт русских карт
 parser.add_argument('--workshop',type=Path,default=Path.home()/'Documents/My Games/Tabletop Simulator/Mods/Workshop')
 parser.add_argument('--project',type=Path,default=Path(__file__).resolve().parents[1])
 args=parser.parse_args()
-src=args.workshop;root=args.project/'games/four_souls';art=root/'art';(art/'sheets').mkdir(parents=True,exist_ok=True);(art/'cards').mkdir(exist_ok=True)
+src = args.workshop
+root = args.project / 'games/four_souls'
+art = root / 'art'
+sheets = args.project / 'backups/fs_import_sheets'
+sheets.mkdir(parents=True, exist_ok=True)
+(art / 'cards').mkdir(exist_ok=True)
 a=json.loads((src/'2738213595.json').read_text(encoding='utf-8-sig'));b=json.loads((src/'2370232448.json').read_text(encoding='utf-8-sig'))
 def canonical(s):
  parts=s.split('/');en=max(parts,key=lambda p:len(re.findall('[a-zA-Z]',p))-2*len(re.findall('[А-Яа-яЁё]',p))).lower().strip()
@@ -61,17 +67,19 @@ for char in characters:
  if char['key'] in seen:
   cards[char['card']]['base']=False
   if char['item']>=0:cards[char['item']]['base']=False
-  continue
+  char['base']=False
+  # Одно имя с другим стартовым предметом — отдельный вариант DLC.
+  if any(old['key']==char['key'] and old['item']==char['item'] for old in unique):continue
  seen.add(char['key']);unique.append(char)
 characters=unique
 for card in cards:
  if card['kind']=='bonus':card['base']=card['key'] in ['soulofgreed','soulofguppy','soulofgluttony']
-(art/'sheets'/'.gdignore').touch()
+(sheets/'.gdignore').touch()
 manifest={'cards':cards,'characters':characters,'sources':{'layout':'2143991933.json','assets':'2738213595.json','baseline':'2370232448.json'},'base_counts':{k:sum(v.values()) for k,v in third.items()},'unmatched_baseline':missing,'source_urls':urls}
 (art/'manifest.json').write_text(json.dumps(manifest,ensure_ascii=False,indent=2),encoding='utf-8');print('CARDS',len(cards),'CHARACTERS',len(characters),'SHEETS',len(urls),'UNMATCHED',missing,flush=True)
 # Качаем только исходники второго мода. Не исполняем Lua, читаем лишь свойства карт.
 def fetch(kv):
- key,url=kv;dest=art/'sheets'/(key+'.jpg')
+ key,url=kv;dest=sheets/(key+'.jpg')
  if dest.exists():return key,True,''
  url=re.sub(r'https?://cloud-[0-9]+\.steamusercontent.com', 'https://steamusercontent-a.akamaihd.net',url)
  for attempt in range(3):
@@ -91,7 +99,7 @@ with concurrent.futures.ThreadPoolExecutor(max_workers=6) as pool:
 groups=collections.defaultdict(list)
 for c in cards:groups[c['sheet']].append(c)
 for sheet,group in groups.items():
- path=art/'sheets'/(sheet+'.jpg')
+ path=sheets/(sheet+'.jpg')
  if not path.exists():continue
  im=Image.open(path);im.load()
  for c in group:

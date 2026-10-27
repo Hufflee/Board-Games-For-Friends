@@ -36,6 +36,18 @@ static func response_kind(id: int) -> String:
 	return str(_responses[id].response_kind) if id>=0 and id<_responses.size() else "none"
 static func item_response_kind(id: int) -> String:
 	return "passive" if card(id).get("kind","")=="loot" else response_kind(id)
+
+## Напечатанная вечность сохраняется при любом способе получения предмета.
+## Мошна Хранителя и Клещ не входят в колоду вечных стартовых предметов.
+static func item_entry(id: int, force_eternal: bool = false) -> Dictionary:
+	var printed_eternal: bool = card(id).get("kind", "") == "eternal" or id in [69, 503]
+	var counters: int = {5: 3, 202: 9}.get(id, 0)
+	return {"id": id, "tapped": id in [22, 60, 199], "eternal": force_eternal or printed_eternal, "counters": counters}
+
+## Только безусловная собственная перезарядка по напечатанному тексту.
+## Не включает выбор другого предмета и условные броски в конце хода.
+static func end_turn_recharge(id: int) -> bool:
+	return id in [84, 822, 824, 828, 834, 849, 893, 899]
 static func draw_loot_back(canvas: CanvasItem,rect: Rect2) -> void:
 	canvas.draw_texture_rect(preload("res://games/four_souls/art/backs/loot.webp"),rect,false)
 static func stat(id: int, key: String, fallback: int) -> int:
@@ -43,6 +55,9 @@ static func stat(id: int, key: String, fallback: int) -> int:
 
 static func effect_title(effect: Dictionary) -> String:
 	match str(effect.get("kind","")):
+		"player_attack": return "Объявление атаки другого игрока"
+		"forced_discard": return title(int(effect.card)) + ": обязательный сброс лута"
+		"player_combat": return "Боевой урон в PvP: %d" % int(effect.damage)
 		"attack": return "Объявление атаки"
 		"purchase": return "Покупка сокровища"
 		"death": return "Смерть игрока"

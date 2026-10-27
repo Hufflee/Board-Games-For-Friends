@@ -26,6 +26,7 @@ var _quick_btn: Button
 var _quick: HFlowContainer
 var quick_open := false
 var _unread := 0
+var _channel: OptionButton
 
 
 func _ready() -> void:
@@ -46,7 +47,7 @@ func _ready() -> void:
 		b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		b.focus_mode = Control.FOCUS_NONE
 		b.pressed.connect(func():
-			Net.send_chat(r, "emote")
+			Net.send_chat(r, "emote", _team_channel())
 			quick_open = false
 			_sync())
 		_quick.add_child(b)
@@ -92,12 +93,19 @@ func _ready() -> void:
 	_input.text_changed.connect(func(_t): _sync_caret())
 	_sync_caret()
 	var in_row := K12UI.hbox(4)
+	_channel = OptionButton.new()
+	_channel.add_item("Всем")
+	_channel.add_item("Команде")
+	_channel.tooltip_text = "Командные сообщения видят только участники вашей команды"
+	in_row.add_child(_channel)
 	in_row.add_child(_input)
 	in_row.add_child(_quick_btn)
 	_body.add_child(in_row)
 	for e in Net.chat_log:
 		_append(e)
 	Net.chat_received.connect(_on_chat)
+	Net.state_changed.connect(_on_game_state)
+	_on_game_state(Net.view)
 	Net.lobby_changed.connect(_on_lobby)
 	_colors_key = _member_colors_key()
 	var parent := get_parent() as Control
@@ -107,10 +115,25 @@ func _ready() -> void:
 
 
 func _on_submit(text: String) -> void:
-	Net.send_chat(text)
+	Net.send_chat(text, "chat", _team_channel())
 	_input.clear()
 	_input.release_focus()
 	_sync_caret()  # отправили — курсор пропадает до первого нового символа
+
+
+func _team_channel() -> bool:
+	return _channel != null and _channel.visible and _channel.selected == 1 and Net.chat_team() >= 0
+
+
+func _on_game_state(_view: Dictionary) -> void:
+	if _channel == null:
+		return
+	_channel.visible = Net.chat_team() >= 0
+	if not _channel.visible:
+		_channel.select(0)
+	_log.clear()
+	for entry in Net.chat_log:
+		_append(entry)
 
 
 ## Пустое поле — курсора нет (прозрачный); есть хоть один символ — обычный цвет курсора из темы игры.
@@ -165,7 +188,11 @@ func _color_of(entry: Dictionary) -> String:
 
 
 func _append(entry: Dictionary) -> void:
+	if not Net.chat_entry_visible(entry):
+		return
 	var text := str(entry["text"]).replace("[", "(").replace("]", ")")
+	if entry.get("scope", "all") == "team":
+		text = "[color=#a4c9d8][команде][/color] " + text
 	var who := str(entry.get("name", "")).replace("[", "(").replace("]", ")")
 	var col := _color_of(entry)
 	if col != "":
@@ -220,7 +247,7 @@ func _unhandled_key_input(event: InputEvent) -> void:
 		elif ke.keycode >= KEY_KP_1 and ke.keycode <= KEY_KP_9:
 			n = ke.keycode - KEY_KP_1
 		if n >= 0 and n < REACTIONS.size() and not ke.ctrl_pressed and not ke.alt_pressed:
-			Net.send_chat(REACTIONS[n], "emote")
+			Net.send_chat(REACTIONS[n], "emote", _team_channel())
 			get_viewport().set_input_as_handled()
 			return
 	if event.is_pressed() and (event as InputEventKey).keycode == KEY_ENTER and not _input.has_focus():

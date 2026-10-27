@@ -43,9 +43,9 @@ static func available() -> bool:
 
 
 ## Тело запроса — отдельно, чтобы его можно было проверить в тестах без сети.
-static func request_body(question: Dictionary, answer: String) -> Dictionary:
+static func request_body(question: Dictionary, answer: String, appeal: bool = false) -> Dictionary:
 	var english := str(question.get("cat", "")) == "Английский язык"
-	return {
+	var body := {
 		"model": MODEL,
 		"state": {
 			"quiz_category": question.get("cat", ""),
@@ -69,6 +69,10 @@ static func request_body(question: Dictionary, answer: String) -> Dictionary:
 			},
 		},
 	}
+	if appeal:
+		body.state["review_mode"] = "independent detailed appeal"
+		body.questions.correct.instructions += " This is an appeal of a rejected answer. Re-evaluate independently and carefully: verify every factual constraint of the question, alternative names and transliterations, spelling corrections, regional terminology, and reasonable everyday interpretations. An earlier rejection is not evidence. Accept if the answer meets the question; reject if it contradicts a factual constraint. Do not accept merely because the player appealed."
+	return body
 
 
 ## Разбор ответа API: noul может прийти как bool, число-вероятность или словарь с вероятностями.
@@ -116,13 +120,13 @@ static func log_new_answer(question: Dictionary, answer: String, verdict: Dictio
 
 
 ## Отправить ответ на проверку; результат — сигнал judged(no, ok, rarity). Ошибка сети — не засчитано.
-func check(no: int, question: Dictionary, answer: String) -> void:
+func check(no: int, question: Dictionary, answer: String, appeal: bool = false) -> void:
 	var key := api_key()
 	if key == "":
 		judged.emit(no, false, "s")
 		return
 	var http := HTTPRequest.new()
-	http.timeout = TIMEOUT
+	http.timeout = 18.0 if appeal else TIMEOUT
 	add_child(http)
 	http.request_completed.connect(func(result: int, code: int, _h: PackedStringArray, body: PackedByteArray):
 		http.queue_free()
@@ -135,7 +139,7 @@ func check(no: int, question: Dictionary, answer: String) -> void:
 			log_new_answer(question, answer, verdict)
 		judged.emit(no, bool(verdict.ok), str(verdict.rarity)))
 	var headers := PackedStringArray(["Content-Type: application/json", "Authorization: Bearer " + key])
-	var err := http.request(URL, headers, HTTPClient.METHOD_POST, JSON.stringify(request_body(question, answer)))
+	var err := http.request(URL, headers, HTTPClient.METHOD_POST, JSON.stringify(request_body(question, answer, appeal)))
 	if err != OK:
 		http.queue_free()
 		judged.emit(no, false, "s")

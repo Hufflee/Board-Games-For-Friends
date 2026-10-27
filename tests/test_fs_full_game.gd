@@ -16,12 +16,18 @@ func make(count: int = 2, expanded: bool = false, seed_value: int = 17) -> FSRul
 	for i in count:
 		players.append({"name": "Игрок %d" % i})
 	g.new_game(players, expanded, seed_value)
+	preload("res://tests/fs_test_setup.gd").finish(g)
 	return g
 
 func _initialize() -> void:
 	_run.call_deferred()
 
 func _run() -> void:
+	var target_check := make()
+	target_check.monsters = [
+		{"id": 272, "hp": 1, "dc": 0, "at": 0},
+		{"id": 450, "hp": 1, "dc": 1, "at": 1}]
+	check(target_slot(target_check) == 1, "Сценарий выбирает атакуемого монстра вместо Лавочника")
 	# Следующее действие уже ждёт ручную карту; бросок этой карты не должен застрять.
 	var g := make()
 	var owner := g.current
@@ -81,8 +87,14 @@ func play_game(count: int, expanded: bool, seed_value: int) -> void:
 		steps += 1
 		var ok := false
 		match g.phase:
+			"discard_target":
+				ok = send(g, g.current, "discard_target", {"target": g.current})
+			"forced_discard":
+				ok = send(g, g.actor(), "forced_discard", {"item": 0})
 			"turn":
-				if g.free_loot > 0 and not g.hands[g.current].is_empty():
+				if int(g.get_view(g.current).get("required_player_attacks", 0)) > 0:
+					ok = send(g, g.current, "attack_player", {"target": g.get_view(g.current).player_attack_targets[0]})
+				elif g.free_loot > 0 and not g.hands[g.current].is_empty():
 					ok = send(g, g.current, "loot", {"card": g.hands[g.current][0]})
 				elif not g.bought and g.coins[g.current] >= 10:
 					ok = send(g, g.current, "buy", {"slot": 0})
@@ -91,7 +103,14 @@ func play_game(count: int, expanded: bool, seed_value: int) -> void:
 				else:
 					ok = send(g, g.current, "end")
 			"priority":
-				if g.battle >= 0 or g.stack.back().kind == "attack":
+				if g.stack.is_empty():
+					check(false, "Окно ответов не может иметь пустой стек: %d/%s/%d" % [count, expanded, seed_value])
+					print("EMPTY PRIORITY: ", g._after_stack, " resolving=", g.resolving, " log=", g.log.slice(-8))
+					break
+				if not g.paused_effects.is_empty() and g.stack.any(func(entry): return entry.kind == "effect_roll"):
+					var roller: int = int(g.paused_effects.back().get("roller", g.paused_effects.back().effect.owner))
+					ok = send(g, roller, "effect_roll")
+				elif g.battle >= 0 or g.battle_player >= 0 or g.stack.back().kind in ["attack", "player_attack"]:
 					ok = send(g, g.current, "roll")
 				elif not g.attacked:
 					ok = send(g, g.current, "attack", {"slot": target_slot(g)})
@@ -100,6 +119,12 @@ func play_game(count: int, expanded: bool, seed_value: int) -> void:
 			"battle_roll":
 				ok = send(g, g.current, "roll")
 			"effect":
+				if bool(g.resolving.get("requires_reward_roll", false)) and not g.resolving.has("reward_roll"):
+					ok = send(g, g.actor(), "effect_roll")
+					continue
+				if g.resolving.has("spawn_card"):
+					ok = send(g, g.actor(), "place_bloat", {"slot": g.get_view(g.actor()).spawn_slots[0]})
+					continue
 				var card := FSData.card(int(g.resolving.card))
 				if g.resolving.kind == "reward" and str(card.lua.get("type", "")) == "boss":
 					send(g, g.actor(), "effect", {"op": "souls", "amount": 1})
@@ -146,11 +171,14 @@ func send(g: FSRules, seat: int, kind: String, arg = null) -> bool:
 
 ## Слабый персонаж выбирает посильную цель; слишком сильных монстров можно накрыть верхом колоды.
 func target_slot(g: FSRules) -> int:
+	if int(g.get_view(g.current).get("forced_deck_attacks", 0)) > 0:
+		return -1
 	var best := -1
 	var score := INF
+	var visible: Array = g.get_view(g.current).monsters
 	for i in g.monsters.size():
 		var m: Dictionary = g.monsters[i]
-		if FSData.card(int(m.id)).get("key", "") in ["stoney", "deathshead"]:
+		if bool(visible[i].get("untargetable", false)):
 			continue
 		var difficulty := float(m.hp) * float(m.at) / maxf(1, 7 - int(m.dc))
 		if difficulty < score:

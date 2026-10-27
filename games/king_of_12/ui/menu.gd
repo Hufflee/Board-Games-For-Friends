@@ -96,7 +96,7 @@ func _ready() -> void:
 	bottom2.add_child(hub_btn)
 	var quit_btn := K12UI.button("Выйти из игры", K12UI.CAP, 190)
 	quit_btn.theme_type_variation = "QuietButton"  # опасное действие — приглушено
-	quit_btn.pressed.connect(func(): get_tree().quit())
+	quit_btn.pressed.connect(func(): Sfx.request_quit())
 	bottom2.add_child(quit_btn)
 	col.add_child(bottom2)
 

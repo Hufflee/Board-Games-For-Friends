@@ -1,6 +1,7 @@
 extends Control
 ## Стол Four Souls: закрытая рука, открытые карты, приоритет и ручная панель эффектов.
 const HealthBar := preload("res://games/four_souls/ui/fs_health.gd")
+const PassiveRules := preload("res://games/four_souls/logic/fs_passives.gd")
 var app: Node
 var _v: Dictionary = {}
 var _body: VBoxContainer
@@ -18,6 +19,20 @@ var _play_note: Label
 var _drag_entry: Dictionary = {}
 static var _hand_orders: Dictionary = {}
 const EXTRA_OPS := [
+	["expand_monsters", "Расширить ячейки монстров"],
+	["destroy_soul", "Уничтожить карту души по индексу"],
+	["pay_coins", "Заплатить монеты за способность (с учётом скидки)"],
+	["deactivate", "Деактивировать предмет"],
+	["item_to_soul", "Превратить невечный предмет в душу"],
+	["give_loot", "Передать свою карту лута выбранному игроку"],
+	["discard_loot", "Сбросить свою карту лута"],
+	["expand_shop", "Расширить магазин"],
+	["temporary_monster_dc", "Защита монстра до конца хода ±"],
+	["set_roll", "Установить результат ожидающего броска"],
+	["reveal_hand", "Посмотреть руку выбранного игрока"],
+	["swap_items", "Обменяться невечными предметами"],
+	["discard_monster", "Сбросить неатакуемого сейчас монстра"],
+	["discard_shop", "Сбросить и заменить предмет магазина"],
 	["extra_turn", "Дополнительный ход выбранному игроку"],
 	["self_underdeck", "Эту карту лута — под низ колоды"],
 	["give_item", "Передать свой предмет выбранному игроку"],
@@ -83,12 +98,16 @@ func _process(_delta: float) -> void:
 
 
 func _can_roll_die() -> bool:
+	if _v.get("resolving", {}).has("spawn_card"):
+		return false
 	if _roll_request_revision >= 0 or Net.paused or bool(_v.get("game_paused", false)):
 		return false
 	if int(_v.seat) < 0:
 		return false
-	if _v.phase == "effect":
-		return _v.seat == _v.actor
+	if _v.phase == "effect" or bool(_v.get("effect_pending", false)):
+		# Переброс делает владелец исходного кубика; автор ручной карты остаётся прежним.
+		var roller: int = int(_v.resolving.get("reroll_request", {}).get("owner", _v.resolving.owner))
+		return _v.seat == roller
 	if _pending_effect_roll():
 		return _v.seat == _v.stack.filter(func(e): return e.kind == "effect_roll").back().owner
 	return (
@@ -116,7 +135,7 @@ func _throw_die(_velocity: Vector2) -> void:
 	_roll_request_revision = int(_v.revision)
 	_die.draggable = false
 	var before: int = int(_v.roll_no)
-	Net.send_action("effect_roll" if _v.phase == "effect" or _pending_effect_roll() else "roll")
+	Net.send_action("effect_roll" if _v.phase == "effect" or bool(_v.get("effect_pending", false)) or _pending_effect_roll() else "roll")
 	# Следующий бросок может сначала открыть ручной ответ/награду.
 	# Он не должен держать общий кубик в бесконечном ожидании результата.
 	if int(_v.roll_no)==before and _v.phase in ["effect","death","turn"]:
@@ -258,6 +277,8 @@ func _changed(view: Dictionary) -> void:
 						and view.seat == view.current
 						and view.battle < 0
 						and not view.attacked
+						and int(view.get("forced_deck_attacks", 0)) == 0
+						and int(view.get("required_player_attacks", 0)) == 0
 						and not bool(m.get("untargetable", false))
 					)
 				)
@@ -267,7 +288,7 @@ func _changed(view: Dictionary) -> void:
 		health.name = "MonsterHealth%d" % i
 		group.add_child(health)
 		group.add_child(FSStyle.label("%d+  ·  ⚔ %d" % [m.dc, m.at], FSStyle.CAP))
-	_note(center, "МАГАЗИН · каждое сокровище 10¢", FSStyle.BODY)
+	_note(center, "МАГАЗИН · каждое сокровище %d¢" % int(view.get("shop_price", 10)), FSStyle.BODY)
 	var shop_row := FSStyle.hbox(8)
 	center.add_child(shop_row)
 	for i in view.shop.size():
@@ -280,7 +301,7 @@ func _changed(view: Dictionary) -> void:
 				func():
 					_card_dialog(
 						id,
-						"Купить · 10¢",
+						"Купить · %d¢" % int(view.get("shop_price", 10)),
 						"buy",
 						{"slot": i},
 						(
@@ -288,7 +309,7 @@ func _changed(view: Dictionary) -> void:
 							and view.seat == view.current
 							and view.battle < 0
 							and not view.bought
-							and int(view.players[int(view.current)].coins) >= 10
+							and int(view.players[int(view.current)].coins) >= int(view.get("shop_price", 10))
 						)
 					)
 			)
@@ -317,6 +338,9 @@ func _changed(view: Dictionary) -> void:
 			b.tooltip_text = FSData.title(int(id))
 			b.pressed.connect(
 				func():
+					if int(id) in [692, 693, 694, 695, 696]:
+						_bonus_dialog(int(id))
+						return
 					_card_dialog(
 						int(id),
 						"Забрать душу · условие выполнено",
@@ -341,7 +365,7 @@ func _changed(view: Dictionary) -> void:
 	_controls(actions)
 	_hands(view)
 	_die.visible = (
-		view.phase in ["battle_roll", "effect"]
+		view.phase in ["battle_roll", "effect"] or bool(view.get("effect_pending", false))
 		or view.stack.any(
 			_is_roll_event
 		)
@@ -375,7 +399,11 @@ func _hands(view: Dictionary) -> void:
 		for item: Dictionary in player.items:
 			_card(public_row,int(item.id),Vector2(64,86),func(): _card_dialog(int(item.id),"Закрыть просмотр","",null,false))
 		var backs: Array = []
-		for i in int(player.hand_count): backs.append({"key":"back:%d"%i,"id":-1,"face_up":false,"back_drawer":FSData.draw_loot_back})
+		for i in int(player.hand_count):
+			if player.has("hand"):
+				backs.append({"key": "open:%d" % i, "id": int(player.hand[i]), "face_up": true})
+			else:
+				backs.append({"key":"back:%d"%i,"id":-1,"face_up":false,"back_drawer":FSData.draw_loot_back})
 		_fan(public_row,backs,"opponent",false)
 	if view.seat < 0: return
 	var own := FSStyle.vbox(2); own.size_flags_horizontal=Control.SIZE_EXPAND_FILL; own.size_flags_stretch_ratio=1.35; row.add_child(own)
@@ -523,6 +551,7 @@ func _switch(seat: int) -> void:
 	_unlocked = -2; Net.fs_switch_seat(seat)
 func _card(parent: Control,id: int,dimensions: Vector2,callback: Callable) -> void:
 	var button := Button.new(); button.custom_minimum_size = dimensions; button.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+	button.set_meta("card_id", id)
 	button.add_theme_stylebox_override("normal",StyleBoxEmpty.new()); button.add_theme_stylebox_override("hover",FSStyle.box(FSStyle.GOLD))
 	var image := TextureRect.new(); image.texture = FSData.texture(id); image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE; image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_round_image(image)
@@ -588,8 +617,41 @@ func _inventory(seat: int) -> void:
 		_card(extra,int(id),Vector2(72,100),func(): _show_preview(int(id)))
 	for soul in _v.players[seat].souls_cards:
 		_card(extra,int(soul.id),Vector2(72,100),func(): _show_preview(int(soul.id)))
+	for id in _v.players[seat].get("hand", []):
+		_card(extra,int(id),Vector2(72,100),func(): _show_preview(int(id)))
 	_close_button(col)
 func _controls(col: Control) -> void:
+	if bool(_v.get("starting_pending", false)):
+		_note(col, "Завершите подготовку партии", FSStyle.H1)
+		_note(col, "Применятся начальные свойства выбранного предмета, затем начнётся первый ход.")
+		if _v.seat == _v.current:
+			_button(col, "Начать первый ход", "finish_start", null, true)
+		return
+	if _v.phase == "starting_item":
+		_note(col, "Предмет Эдема", FSStyle.H1)
+		_note(col, "Выберите один из трёх. Он станет вечным; остальные вернутся под низ колоды.")
+		if _v.seat == _v.actor:
+			var choices := HFlowContainer.new()
+			col.add_child(choices)
+			for id in _v.get("starting_options", []):
+				_card(choices, int(id), Vector2(80, 112), func(): _send("choose_starting_item", {"card": int(id)}))
+		return
+	if _v.phase in ["discard_target", "forced_discard"]:
+		_note(col, FSData.title(int(_v.discard_choice.card)) + " · сброс лута", FSStyle.BODY)
+		if _v.phase == "discard_target":
+			_note(col, "Активный игрок выбирает, кто сбросит две карты.")
+			if _v.seat == _v.current:
+				for target in _v.players.size():
+					_button(col, "Сбросить лут: " + str(_v.players[target].name), "discard_target", {"target": target})
+		else:
+			_note(col, "%s: осталось сбросить %d" % [_v.players[int(_v.actor)].name, int(_v.discard_choice.remaining)])
+			if _v.seat == _v.actor:
+				for index in _v.hand.size():
+					var id: int = int(_v.hand[index])
+					var discard_button := _button(col, "Сбросить №%d: %s" % [index + 1, FSData.title(id)], "forced_discard", {"item": index})
+					discard_button.mouse_entered.connect(func(): _schedule_preview(id))
+					discard_button.mouse_exited.connect(_hide_preview)
+		return
 	if _v.phase == "game_over":
 		_note(col,"Четыре души!",FSStyle.H1); _note(col,"Победил «%s»" % _v.players[int(_v.winner)].name,FSStyle.BODY)
 		if Net.is_host():
@@ -607,16 +669,41 @@ func _controls(col: Control) -> void:
 	if _v.phase == "priority" and int(_v.get("death_actor", -1)) == int(_v.seat) and _v.seat >= 0:
 		_death_controls(col)
 		return
-	if _v.phase in ["turn","priority"] and _v.seat == _v.current and _v.battle < 0:
+	if bool(_v.get("effect_pending", false)):
+		if _v.resolving.has("spawn_card"):
+			_spawn_controls(col)
+			return
+		_note(col, FSData.title(int(_v.resolving.card)))
+		_note(col, "Следующее действие по карте сначала разрешит сработавшие пассивы.")
+		if _v.seat == int(_v.resolving.owner):
+			_effect_controls(col)
+		return
+	if _v.phase in ["turn","priority"] and _v.seat == _v.current and _v.battle < 0 and int(_v.get("battle_player", -1)) < 0:
 		_note(col,"Лут за ход: %d · персонаж %s" % [int(_v.free_loot),"готов" if _v.players[int(_v.seat)].ready else "повёрнут"])
-		_button(col,"Закончить ход","end",null,true)
+		var required: int = int(_v.get("forced_deck_attacks", 0))
+		var player_required: int = int(_v.get("required_player_attacks", 0))
+		if player_required > 0:
+			_note(col, "Завоеватель: выберите игрока. Защита цели4+.")
+			for target: int in _v.get("player_attack_targets", []):
+				_button(col, "Атаковать игрока: " + str(_v.players[target].name), "attack_player", {"target": target})
+		if required > 0:
+			_note(col, "Засада: ещё атак верха колоды — %d" % required)
+		_button(col,"Закончить ход","end",null,true).disabled = required > 0 or player_required > 0
 		var blind_attack := FSStyle.button("Атаковать верх колоды",FSStyle.CAP)
-		blind_attack.disabled = _v.attacked
+		blind_attack.disabled = _v.attacked or (player_required > 0 and required == 0)
 		blind_attack.pressed.connect(_choose_top_attack); col.add_child(blind_attack)
 		_button(col,"Купить вслепую · 10¢","buy",{"slot":-1}).disabled = _v.bought
+		if int(_v.get("discard_treasure", -1)) >= 0:
+			_button(col, "Купить из сброса · %d¢" % int(_v.get("shop_price", 10)), "buy", {"slot": -2}).disabled = _v.bought
 		_note(col,"Сложные эффекты и пассивные условия выполняют участники по тексту русской карты.")
-	elif _v.phase == "battle_roll": _note(col,"Схватите кубик, потяните и отпустите, чтобы атаковать.")
+	elif _v.phase == "battle_roll":
+		if int(_v.get("battle_player", -1)) >= 0:
+			_note(col, "Атака: %s · защита4+" % str(_v.players[int(_v.battle_player)].name))
+		_note(col,"Схватите кубик, потяните и отпустите, чтобы атаковать.")
 	elif _v.phase == "effect":
+		if _v.resolving.has("spawn_card"):
+			_spawn_controls(col)
+			return
 		_note(col,FSData.title(int(_v.resolving.card)))
 		if _v.resolving.kind == "reward": _note(col,"Начислите награды и души строго по убитой карте, затем завершите эффект.")
 		var show := FSStyle.button("Прочитать карту",FSStyle.CAP); show.pressed.connect(func(): _show_preview(int(_v.resolving.card))); col.add_child(show)
@@ -625,8 +712,21 @@ func _controls(col: Control) -> void:
 	elif _v.phase == "discard": _note(col,"Нажимайте на лишние карты в руке, чтобы сбросить их.")
 	if _v.seat >= 0 and _v.phase in ["turn","priority"]:
 		var deal := FSStyle.button("Передать монеты",FSStyle.CAP); deal.pressed.connect(_trade); col.add_child(deal)
+func _spawn_controls(col: Control) -> void:
+	_note(col, "Разместите Утопца", FSStyle.BODY)
+	_note(col, "Выберите ячейку вне боя. Живые нижние карты сохранятся.")
+	if int(_v.seat) != int(_v.resolving.owner):
+		_note(col, "Ждём выбора активного игрока.")
+		return
+	for slot: int in _v.get("spawn_slots", []):
+		if slot < _v.monsters.size():
+			_note(col, "Ячейка %d: %s" % [slot + 1, FSData.title(int(_v.monsters[slot].id))])
+		_button(col, "Выложить Утопца · ячейка %d" % (slot + 1), "place_bloat", {"slot": slot})
+
 func _effect_controls(col: Control) -> void:
 	_note(col,"Если карта требует бросок — бросьте кубик мышью. На него можно ответить.")
+	if PassiveRules.AUTOMATIC_OPS.has(int(_v.resolving.card)) or PassiveRules.ATTACK.has(int(_v.resolving.card)) or PassiveRules.HEALTH.has(int(_v.resolving.card)):
+		_note(col, "Постоянные бонусы и подключённые обязательные срабатывания этой карты учтены автоматически. Не повторяйте их вручную.")
 	if _v.resolving.has("reroll_request"):
 		_note(col, "Вы управляете исходным броском. Перебросьте кубик мышью; затем эффект вернётся владельцу карты.")
 		return
@@ -636,6 +736,9 @@ func _effect_controls(col: Control) -> void:
 	for player in _v.players: target.add_item(str(player.name))
 	target.select(int(_v.actor)); col.add_child(target)
 	var op := OptionButton.new()
+	op.fit_to_longest_item = false
+	op.clip_text = true
+	op.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var operations := OPS + EXTRA_OPS
 	for entry in operations: op.add_item(entry[1])
 	if _v.resolving.kind == "event" and str(FSData.card(int(_v.resolving.card)).lua.get("type","")) == "curse":
@@ -644,11 +747,22 @@ func _effect_controls(col: Control) -> void:
 		_note(col,"Это проклятие: выберите игрока, передайте ему карту и завершите эффект.")
 	col.add_child(op)
 	var amount := SpinBox.new(); amount.min_value = -99; amount.max_value = 99; amount.value = 1; col.add_child(amount)
-	_note(col,"Номер предмета / монстра / карты руки (слева направо); передача — свой предмет")
+	_note(col,"Номер предмета / монстра / карты руки / души слева направо; передача — свой предмет")
 	var index := SpinBox.new(); index.min_value = 1; index.max_value = 99; index.value = 1; col.add_child(index)
+	var other_index := SpinBox.new()
+	other_index.min_value = 1
+	other_index.max_value = 99
+	other_index.value = 1
+	other_index.tooltip_text = "Номер предмета выбранного игрока при обмене"
+	other_index.visible = false
+	col.add_child(other_index)
+	op.item_selected.connect(func(selected: int): other_index.visible = operations[selected][0] == "swap_items")
 	var apply := FSStyle.button("Применить",FSStyle.CAP)
-	apply.pressed.connect(func(): _send("effect",{"target":target.selected,"op":operations[op.selected][0],"amount":int(amount.value),"item":int(index.value)-1})); col.add_child(apply)
-	_button(col,"Эффект выполнен","effect_done",null,true)
+	apply.pressed.connect(func(): _send("effect",{"target":target.selected,"op":operations[op.selected][0],"amount":int(amount.value),"item":int(index.value)-1,"other_item":int(other_index.value)-1})); col.add_child(apply)
+	var needs_roll: bool = bool(_v.resolving.get("requires_reward_roll", false)) and not _v.resolving.has("reward_roll")
+	if needs_roll:
+		_note(col, "После награды бросьте кубик: при1 или6 Тряпочник вернётся на верх колоды.")
+	_button(col,"Эффект выполнен","effect_done",null,true).disabled = needs_roll
 	if not _v.peek.is_empty():
 		_note(col,"Только вы видите просмотренные карты.")
 		for revealed: Dictionary in _v.peek.get("hands", []):
@@ -690,6 +804,18 @@ func _trade() -> void:
 	col.add_child(target)
 	var amount := SpinBox.new(); amount.min_value = 1; amount.max_value = maxi(1,int(_v.players[int(_v.seat)].coins)); amount.value = 1; col.add_child(amount)
 	var send := FSStyle.primary("Передать"); send.pressed.connect(func(): _send("trade",{"target":target.get_selected_id(),"amount":int(amount.value)})); col.add_child(send); _close_button(col)
+
+func _bonus_dialog(id: int) -> void:
+	var col := _dialog()
+	_note(col, FSData.title(id), FSStyle.H1)
+	_note(col, "Получателя выбирает активный игрок после выполнения условия карты.")
+	var eligible: Array = _v.get("bonus_targets", {}).get(id, [])
+	if eligible.is_empty():
+		_note(col, "Условие ещё не выполнено или получение душ запрещено.")
+	for seat in eligible:
+		var button := _button(col, "Отдать душу · " + str(_v.players[int(seat)].name), "claim", {"card": id, "target": int(seat)})
+		button.disabled = _v.seat != _v.current or _v.phase not in ["turn", "priority"]
+	_close_button(col)
 func _journal() -> void:
 	var col := _dialog(); _note(col,"Журнал подвала",FSStyle.H1)
 	var text := RichTextLabel.new(); text.custom_minimum_size = Vector2(700,minf(450,size.y-200)); text.text = "\n".join(_v.log); col.add_child(text); _close_button(col)
@@ -704,4 +830,4 @@ func _choose_top_attack() -> void:
 
 
 func _is_roll_event(effect: Dictionary) -> bool:
-	return effect.kind in ["attack", "roll", "combat", "effect_roll", "monster_death", "death", "monster_trigger"]
+	return effect.kind in ["attack", "player_attack", "player_combat", "forced_discard", "roll", "combat", "effect_roll", "monster_death", "death", "monster_trigger"]

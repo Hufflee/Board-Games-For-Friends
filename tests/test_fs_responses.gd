@@ -8,6 +8,7 @@ func check(ok: bool,message: String) -> void:
 func make() -> FSRules:
 	var game:=FSRules.new()
 	game.new_game([{"name":"Первый"},{"name":"Второй"},{"name":"Третий"},{"name":"Четвёртый"}],false,77)
+	preload("res://tests/fs_test_setup.gd").finish(game)
 	game.current=0;game.phase="turn";game.stack=[];game.next_action={}
 	for i in 4: game.character_ready[i]=true;game.dead[i]=false
 	return game

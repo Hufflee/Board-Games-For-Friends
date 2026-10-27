@@ -4,6 +4,16 @@ extends RefCounted
 
 const LIST := [
 	{
+		"id": "the_gang",
+		"title": "The Gang",
+		"players": "3–10 игроков",
+		"time": "20–30 минут",
+		"description": "Кооперативный покер: оцените силу своей руки с помощью фишек, не раскрывая карты. Откройте три хранилища раньше третьей тревоги! Базовые правила; до10 игроков по расширению TTS.",
+		"scene": "res://games/the_gang/ui/main.tscn",
+		"color": Color("6b3127"),
+		"thickness": 0.06,
+	},
+	{
 		"id": "king_of_12",
 		"title": "Дюжина короля",
 		"players": "2–8 игроков",

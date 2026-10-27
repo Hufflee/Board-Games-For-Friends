@@ -1,7 +1,7 @@
 extends SceneTree
 ## Полная партия через интерфейс без подмены игрового состояния.
 ## APPDATA должен быть изолирован. Сложные награды подтверждаются планом по прочитанной карте.
-const OUT := "res://build/fs_acceptance/"
+var OUT := "res://build/fs_acceptance/" + (OS.get_environment("FS_UI_RUN") if not OS.get_environment("FS_UI_RUN").is_empty() else "post-passive-fixes26") + "/"
 var app: Control
 var table: Control
 var net: Node
@@ -55,6 +55,13 @@ func click(control: Control, corner: bool = false) -> bool:
 		parent = parent.get_parent()
 	await frames(3)
 	var rect := control.get_global_rect()
+	# Вложенная прокрутка может оставлять видимой только часть кнопки.
+	# Нажимаем внутри пересечения, а не в центре необрезанного прямоугольника.
+	parent = control.get_parent()
+	while parent != null:
+		if parent is ScrollContainer:
+			rect = rect.intersection(parent.get_global_rect())
+		parent = parent.get_parent()
 	var at := rect.position + Vector2(12, 25) if corner else rect.get_center()
 	var motion := InputEventMouseMotion.new()
 	motion.position = at
@@ -65,8 +72,24 @@ func click(control: Control, corner: bool = false) -> bool:
 	if corner:
 		await create_timer(0.18).timeout
 		at = control.get_global_rect().position + Vector2(12, 25)
-	await mouse(at, true)
-	await mouse(at, false)
+	if control is Button and control.text == "Принять штраф":
+		print("PAY INPUT: seat=", table._v.seat, " actor=", table._v.actor,
+			" point=", at, " visible=", rect, " full=", control.get_global_rect())
+		control.pressed.connect(func(): print("PAY SIGNAL: ", table._v.seat), CONNECT_ONE_SHOT)
+	# Обычный клик отправляем одной последовательностью: постороннее движение
+	# физической мыши между кадрами не должно превратить его в отпускание вне кнопки.
+	for down in [true, false]:
+		var pointer := InputEventMouseMotion.new()
+		pointer.position = at
+		pointer.global_position = at
+		Input.parse_input_event(pointer)
+		var event := InputEventMouseButton.new()
+		event.position = at
+		event.global_position = at
+		event.button_index = MOUSE_BUTTON_LEFT
+		event.pressed = down
+		Input.parse_input_event(event)
+	await frames(4)
 	return true
 
 func press(text: String) -> bool:
@@ -78,7 +101,7 @@ func snap(name: String) -> void:
 
 func unlock(seat: int) -> void:
 	if int(table._v.seat) != seat:
-		var selects := table.find_children("*", "OptionButton", true, false)
+		var selects := table.find_children("*", "OptionButton", true, false).filter(func(node): return node.is_visible_in_tree())
 		# Первый переключатель — обычный hotseat-выбор игрока.
 		var selector: OptionButton = selects[0]
 		selector.select(seat)
@@ -121,7 +144,7 @@ func roll() -> void:
 	await mouse(motion.position, false)
 	note("Бросить кубик", "Один жест — один бросок, либо сначала ручной ответ/награда",
 		"roll_no %d→%d; фаза %s; кубик %s" % [before, table._v.roll_no, table._v.phase, table._die.state],
-		int(table._v.roll_no) == before + 1 or table._v.phase in ["effect", "death", "turn", "game_over"])
+		int(table._v.roll_no) == before + 1 or table._v.phase in ["effect", "death", "turn", "game_over", "discard_target", "forced_discard"])
 	if int(table._v.roll_no) == before + 1:
 		var blocked: bool = not table._die.draggable
 		await mouse(table._die.center(), true)
@@ -130,20 +153,34 @@ func roll() -> void:
 			"roll_no=%d, блокировка=%s" % [table._v.roll_no, blocked], blocked and int(table._v.roll_no) == before + 1)
 
 func choose_monster() -> int:
-	var best := 0
+	if int(table._v.get("forced_deck_attacks", 0)) > 0:
+		return -1
+	var best := -1
 	var score := INF
 	for i in table._v.monsters.size():
 		var monster: Dictionary = table._v.monsters[i]
-		if FSData.card(int(monster.id)).key in ["stoney", "deathshead"]:
+		if bool(monster.get("untargetable", false)):
 			continue
 		var difficulty := float(monster.hp) * float(monster.at) / maxf(1, 7 - int(monster.dc))
+		if int(monster.id) == 281:
+			difficulty = 20.0
 		if difficulty < score:
 			score = difficulty
 			best = i
+	# Обычный игрок не обязан снова идти на заведомо непосильного босса:
+	# верх колоды даёт другой бой и позволяет продолжить проверку игрового цикла.
+	if score > 3.0:
+		return -1
 	return best
 
 func attack() -> void:
 	var slot := choose_monster()
+	if slot < 0:
+		var before: int = table._v.revision
+		await press("Атаковать верх колоды")
+		await press(FSData.title(int(table._v.monsters[0].id)))
+		note("Атаковать верх колоды", "Новая атака объявлена с выбором накрываемой ячейки", str(table._v.phase), int(table._v.revision) > before)
+		return
 	var health: Control = table.find_child("MonsterHealth%d" % slot, true, false)
 	var id: int = table._v.monsters[slot].id
 	await click(health.get_parent().get_child(0))
@@ -164,9 +201,26 @@ func manual_effect() -> void:
 	await press("Прочитать карту")
 	await snap("manual-card")
 	print("NEEDS CARD PLAN: ", steps, " ", id, " ", FSData.title(id), " ", effect.kind)
-	while not FileAccess.file_exists(reply_path):
+	var plan: Array = []
+	while true:
+		if FileAccess.file_exists(reply_path):
+			var parsed := JSON.new()
+			if parsed.parse(FileAccess.get_file_as_string(reply_path)) == OK and parsed.data is Array:
+				plan = parsed.data
+				break
+		# Файл ответа может быть уже создан, но ещё не дописан внешним процессом.
 		await create_timer(0.3).timeout
-	var plan: Array = JSON.parse_string(FileAccess.get_file_as_string(reply_path))
+	# Между запросом карты и ответом тест мог быть оставлен на паузе владельцем.
+	if net.paused:
+		await press("Продолжить игру")
+		await frames(3)
+		note("Возобновить проверку после паузы", "Пауза снята до операций карты", str(net.paused), not net.paused)
+	# Полноразмерные карты этих боссов сверены отдельно: кроме ресурсов дают душу.
+	# Не завершать награду, если оператор пропустил напечатанную часть.
+	if effect.kind == "reward" and id in [415, 429, 465]:
+		if not plan.any(func(operation): return operation.get("op", "") == "souls" and int(operation.get("amount", 0)) == 1):
+			note("Полнота награды", "Помимо ресурсов начислить одну напечатанную душу", FSData.title(id), false)
+			return
 	table._hide_preview()
 	for operation: Dictionary in plan:
 		if bool(operation.get("roll", false)):
@@ -175,12 +229,13 @@ func manual_effect() -> void:
 				await roll()
 			note("Бросок по награде карты", "Результат получен жестом мыши", "Выпало %d" % int(table._v.last_roll))
 			continue
-		var options := table.find_children("*", "OptionButton", true, false)
+		var options := table.find_children("*", "OptionButton", true, false).filter(func(node): return node.is_visible_in_tree())
 		var target: OptionButton = options[options.size() - 2]
 		var op: OptionButton = options[options.size() - 1]
 		target.select(int(operation.get("target", table._v.actor)))
-		for i in table.OPS.size():
-			if table.OPS[i][0] == operation.op:
+		var operations: Array = table.OPS + table.EXTRA_OPS
+		for i in operations.size():
+			if operations[i][0] == operation.op:
 				op.select(i)
 		var spins := table.find_children("*", "SpinBox", true, false)
 		spins[0].value = int(table._v.last_roll) if operation.get("amount") is String and operation.amount == "last_roll" else int(operation.get("amount", 1))
@@ -191,12 +246,18 @@ func manual_effect() -> void:
 			"%s: %s" % [FSData.title(id), JSON.stringify(operation)], table._v.revision > before)
 		if table._v.phase == "game_over":
 			break
-	if table._v.phase == "effect":
+	if table._v.phase == "effect" or bool(table._v.get("effect_pending", false)):
 		await press("Эффект выполнен")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(request_path))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(reply_path))
 
+func place_bloat() -> void:
+	var slot: int = table._v.spawn_slots[0]
+	await press("Выложить Утопца · ячейка %d" % (slot + 1))
+	note("Разместить Утопца после Пипа", "Выбран другой слот, исходная награда остаётся доступной", str(table._v.phase), not table._v.resolving.has("spawn_card"))
+
 func _run() -> void:
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUT))
 	root.size = Vector2i(1280, 720)
 	root.title = "FS ACCEPTANCE UI"
 	var pid_file := FileAccess.open(OUT + "ui-pid.txt", FileAccess.WRITE)
@@ -231,6 +292,8 @@ func _run() -> void:
 		"Игроков %d, монстров %d, магазин %d" % [table._v.players.size(), table._v.monsters.size(), table._v.shop.size()],
 		table._v.players.size() == 2 and table._v.monsters.size() == 2 and table._v.shop.size() == 2)
 	await unlock(int(table._v.actor))
+	# Переход из лобби ещё может перехватывать ввод после появления стола.
+	await create_timer(1.0, true, false, true).timeout
 	await snap("start")
 	await press("Пауза")
 	await create_timer(0.5).timeout
@@ -239,14 +302,44 @@ func _run() -> void:
 	await create_timer(0.5).timeout
 	note("Продолжить игру", "Пауза снята", "Пауза=" + str(net.paused), not net.paused)
 	while table._v.phase != "game_over" and steps < 1800 and errors == 0:
+		if net.paused:
+			await press("Продолжить игру")
+			await frames(3)
 		steps += 1
 		await unlock(int(table._v.current) if table._v.phase in ["turn", "priority", "battle_roll", "discard"] else int(table._v.actor))
 		var view: Dictionary = table._v
 		if steps % 10 == 0:
 			await snap("latest")
 		match str(view.phase):
+			"discard_target":
+				var target: int = (int(view.current) + 1) % view.players.size()
+				await press("Сбросить лут: " + str(view.players[target].name))
+				note("Выбрать цель Гордыни", "Цель выбрана, открыто окно ответов", str(table._v.phase), table._v.phase == "priority")
+			"forced_discard":
+				var id: int = int(view.hand[0])
+				await press("Сбросить №1: " + FSData.title(id))
+				note("Обязательный сброс лута", "Владелец выбирает свою карту; другие руки скрыты", FSData.title(id), table._v.players[int(view.seat)].hand_count == int(view.players[int(view.seat)].hand_count) - 1)
+			"starting_item":
+				var chosen: int = view.starting_options[0]
+				for button: Button in table.find_children("*", "Button", true, false):
+					if int(button.get_meta("card_id", -1)) == chosen:
+						await click(button)
+						break
+				note("Выбрать стартовый предмет Эдема", "Предмет выбран, остальные возвращены под низ", str(chosen))
 			"turn", "priority":
-				if view.phase == "priority" and (view.battle >= 0 or view.stack.any(func(e): return e.kind == "attack")):
+				if int(view.get("required_player_attacks", 0)) > 0 and view.phase == "turn":
+					var target: int = view.player_attack_targets[0]
+					await press("Атаковать игрока: " + str(view.players[target].name))
+					note("Объявить PvP-атаку Завоевателя", "Выбран другой живой игрок, открыто окно ответов", str(table._v.phase), table._v.phase == "priority")
+					continue
+				if bool(view.get("effect_pending", false)) and view.resolving.has("spawn_card"):
+					await unlock(int(view.resolving.owner))
+					await place_bloat()
+					continue
+				if bool(view.get("starting_pending", false)):
+					await press("Начать первый ход")
+					continue
+				if view.phase == "priority" and (view.battle >= 0 or int(view.get("battle_player", -1)) >= 0 or view.stack.any(func(e): return e.kind in ["attack", "player_attack"])):
 					await roll()
 				else:
 					var loot := -1
@@ -270,14 +363,20 @@ func _run() -> void:
 			"battle_roll":
 				await roll()
 			"effect":
-				await manual_effect()
+				if view.resolving.has("spawn_card"):
+					await place_bloat()
+				else:
+					await manual_effect()
 			"death":
 				var seat: int = view.actor
 				var money: int = view.players[seat].coins
+				var before_revision: int = view.revision
 				await press("Принять штраф")
-				note("Принять штраф за смерть", "Потеря лута/невечного предмета/1 монеты, переход хода",
+				# Отложенные пассивы могут вернуть монету сразу после штрафа.
+				# Точное списание отдельно проверяют регрессии правил и двух смертей.
+				note("Принять штраф за смерть", "Штраф принят, состояние обновлено; затем разрешаются пассивы/следующий штраф",
 					"До: %d монет, после: %d; фаза %s" % [money, table._v.players[seat].coins, table._v.phase],
-					table._v.players[seat].coins == maxi(0, money - 1))
+					int(table._v.revision) > before_revision and table._v.log.has(str(view.players[seat].name) + " получает штраф за смерть"))
 			"discard":
 				await play_loot(int(view.hand[0]))
 			_:
@@ -291,4 +390,4 @@ func _run() -> void:
 	output.store_string(JSON.stringify({"errors": errors,"steps":steps,"counts":counts,"final":table._v}, "\t"))
 	output.close()
 	print("UI JOURNEY FINISHED: ", steps, " / errors ", errors)
-	quit(1 if errors else 0)
+	await root.get_node("Sfx").request_quit(1 if errors else 0)

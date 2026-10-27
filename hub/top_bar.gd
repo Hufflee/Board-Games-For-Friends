@@ -44,6 +44,8 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 	t.add_theme_stylebox_override("panel", bar)
 	t.place()
 	t.mouse_filter = Control.MOUSE_FILTER_STOP
+	t.z_as_relative = false
+	t.z_index = 90
 	t.add_to_group("top_bar")
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 12)
@@ -133,6 +135,8 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 	# чат — выпадает справа под полосой, в свёрнутом виде его не видно
 	t.chat = K12ChatPanel.new()
 	t.chat.docked_top = true
+	t.chat.z_as_relative = false
+	t.chat.z_index = 95
 	t.chat.corner_margin = Vector2(12, HEIGHT + 8)
 	parent.add_child(t.chat)
 	parent.add_child(t)

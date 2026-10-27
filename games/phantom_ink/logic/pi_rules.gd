@@ -12,6 +12,7 @@ var deck: Array = []
 var discard: Array = []
 var refreshed: Array = [false, false]
 var votes: Array = [-1, -1]
+var question_votes: Array = [{}, {}]  # команда → место → до двух выбранных вопросов
 var object_card := 0
 var object_slot := -1
 var offered: Array = []
@@ -34,6 +35,7 @@ func new_game(members: Array, chosen_roles: Array, seed_value: int = 0) -> void:
 	discard = []
 	refreshed = [false, false]
 	votes = [-1, -1]
+	question_votes = [{}, {}]
 	offered = []
 	winner = -1
 	revision = 0
@@ -82,6 +84,17 @@ func action(seat: int, kind: String, arg = null) -> bool:
 	var t: int = int(roles[seat] / 2)
 	var ok := false
 	match kind:
+		"question_vote":
+			if phase == "turn" and arg is int and hands[t].has(arg):
+				var selected: Array = question_votes[t].get(seat, []).duplicate()
+				if selected.has(arg):
+					selected.erase(arg)
+				elif selected.size() < 2:
+					selected.append(arg)
+				else:
+					return false
+				question_votes[t][seat] = selected
+				ok = true
 		"object":
 			if phase == "object" and arg is int and arg >= 0 and arg < 6:
 				votes[t] = arg
@@ -107,12 +120,14 @@ func action(seat: int, kind: String, arg = null) -> bool:
 			if phase in ["turn", "eye"] and not refreshed[t]:
 				discard.append_array(hands[t])
 				hands[t] = []
+				question_votes[t] = {}
 				_draw(t, 7)
 				refreshed[t] = true
 				ok = true
 		"ask":
 			if phase == "turn" and arg is Array and arg.size() == 2 and arg[0] != arg[1] and hands[t].has(arg[0]) and hands[t].has(arg[1]):
 				offered = arg.duplicate()
+				question_votes[t] = {}
 				for q in offered:
 					hands[t].erase(q)
 				phase = "question"
@@ -200,6 +215,7 @@ func tick(delta: float) -> bool:
 
 func _begin_turn() -> void:
 	phase = "turn"
+	question_votes[team] = {}
 	if PIData.EYES[team].has(rows[team].size()):
 		for group in rows:
 			for row in group:
@@ -225,6 +241,13 @@ func get_view(seat: int, _show_all: bool = false) -> Dictionary:
 	var role: int = roles[seat] if seat >= 0 and seat < roles.size() else -1
 	var t: int = int(role / 2) if role >= 0 else -1
 	var spirit := role >= 0 and role % 2 == 1
+	var counts := {}
+	var own_votes: Array = []
+	if t >= 0 and not spirit:
+		own_votes = question_votes[t].get(seat, []).duplicate()
+		for selected: Array in question_votes[t].values():
+			for q in selected:
+				counts[q] = int(counts.get(q, 0)) + 1
 	var visible_rows: Array = rows.duplicate(true)
 	for rt in 2:
 		for row in visible_rows[rt]:
@@ -232,6 +255,7 @@ func get_view(seat: int, _show_all: bool = false) -> Dictionary:
 			if rt != t:
 				row.erase("question")
 	return {"phase": phase, "team": team, "seat": seat, "role": role, "roles": roles.duplicate(), "players": players.duplicate(true), "rows": visible_rows,
+		"question_votes": counts, "own_question_votes": own_votes,
 		"hand": hands[t].duplicate() if t >= 0 and not spirit else [], "offered": offered.duplicate() if t == team else [],
 		"object_card": object_card if spirit or phase == "game_over" else -1, "object_slot": object_slot if spirit or phase == "game_over" else -1,
 		"votes": votes.duplicate() if spirit else [], "discard": discard.duplicate(), "refreshed": refreshed.duplicate(),

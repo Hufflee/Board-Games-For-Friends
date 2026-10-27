@@ -20,6 +20,7 @@ const FUSE_MIN := 5.0
 const FUSE_STEP := 1.0  # каждый верный ответ на этот вопрос — фитиль короче; новый вопрос — снова FUSE_START
 const NEW_Q_TIME := 2.2  # «Новый вопрос!»: пауза перед показом вопроса и фитиля
 const CHECK_TIMEOUT := 8.0  # jev не ответил — ответ не засчитан
+const APPEAL_TIMEOUT := 22.0
 
 var players: Array = []  # {name, lives, meter, parts, alive, bot}; parts — редкости ответов на шкале по порядку
 var max_lives := MAX_LIVES  # задать до new_game()
@@ -36,6 +37,7 @@ var fuse_len := FUSE_START
 var fuse_t := 0.0
 var phase_t := 0.0
 var pending: Dictionary = {}  # ответ на проверке jev: {seat, text, no}
+var rejected: Dictionary = {}  # последнее отклонение Jev; одно оспаривание на ответ
 var last: Dictionary = {}  # последнее событие для стола: {kind, seat, name, rarity, typo, text, no}
 var event_no := 0
 var winner := -1
@@ -54,6 +56,7 @@ func new_game(player_list: Array, use_bots: bool = false, seed_value: int = 0) -
 	else:
 		rng.randomize()
 	players.clear()
+	rejected = {}
 	for p: Dictionary in player_list:
 		players.append({"name": str(p.get("name", "Игрок")), "lives": max_lives, "meter": 0, "parts": [], "alive": true,
 			"last_answer": "", "bot": bool(p.get("bot", false)) or (use_bots and bool(p.get("local", false)))})
@@ -78,6 +81,15 @@ func alive_count() -> int:
 func action(seat: int, kind: String, arg) -> bool:
 	var a: Dictionary = arg if arg is Dictionary else {}
 	match kind:
+		"st_appeal":
+			if not can_appeal(seat):
+				return false
+			rejected["appealed"] = true
+			pending = {"seat": seat, "text": rejected.text, "no": event_no + 1, "appeal": true}
+			phase = "check"
+			phase_t = 0.0
+			_bump()
+			return true
 		"st_answer":
 			return submit(seat, str(a.get("text", "")))
 	return false
@@ -87,6 +99,7 @@ func action(seat: int, kind: String, arg) -> bool:
 func submit(seat: int, text: String) -> bool:
 	if phase != "fuse" or seat != target or STJudge.normalize(text).is_empty():
 		return false
+	rejected = {}
 	players[seat].last_answer = text.strip_edges().left(60)
 	var found := STJudge.lookup(question, text)
 	if found.found:
@@ -111,6 +124,7 @@ func resolve_external(no: int, ok: bool, rarity: String = "s", name: String = ""
 		return false
 	var seat: int = pending.seat
 	var text: String = pending.text
+	var appealed: bool = bool(pending.get("appeal", false))
 	pending = {}
 	phase = "fuse"
 	var shown := name if name != "" else text.strip_edges()
@@ -119,8 +133,13 @@ func resolve_external(no: int, ok: bool, rarity: String = "s", name: String = ""
 	elif ok:
 		_accept(seat, shown, rarity if POINTS.has(rarity) else "s", false, text)
 	else:
+		rejected = {"seat": seat, "text": text, "question": q_no, "appealed": appealed}
 		_event("wrong", seat, {"text": text})
 	return true
+
+
+func can_appeal(seat: int) -> bool:
+	return external_check and phase == "fuse" and seat == target and not rejected.is_empty() and int(rejected.get("seat", -1)) == seat and int(rejected.get("question", -1)) == q_no and not bool(rejected.get("appealed", false))
 
 
 ## Время идёт только на хосте. true — состояние изменилось (разослать).
@@ -152,7 +171,7 @@ func tick(delta: float) -> bool:
 				_boom()
 				return true
 		"check":
-			if phase_t >= CHECK_TIMEOUT and not pending.is_empty():
+			if not pending.is_empty() and phase_t >= (APPEAL_TIMEOUT if pending.get("appeal", false) else CHECK_TIMEOUT):
 				return resolve_external(int(pending.no), false)
 		"boom":
 			if phase_t >= BOOM_TIME:
@@ -175,6 +194,7 @@ func get_view(seat: int) -> Dictionary:
 		"question": {"cat": "" if phase == "new_q" else question.get("cat", ""), "text": "" if phase == "new_q" else question.get("text", ""), "no": q_no},
 		"q_left": maxf(0.0, QUESTION_TIME - q_time), "used": used_view,
 		"fuse_len": fuse_len, "fuse_t": fuse_t, "checking": phase == "check",
+		"can_appeal": can_appeal(target), "appeal_checking": bool(pending.get("appeal", false)),
 		"last": last.duplicate(), "winner": winner, "revision": revision,
 		"max_lives": max_lives, "meter_max": meter_max,
 	}
@@ -237,6 +257,7 @@ func _boom() -> void:
 
 ## Пушка поворачивается к следующему; на смене цели — новый вопрос, если пора.
 func _turn_to(seat: int) -> void:
+	rejected = {}
 	if q_time >= QUESTION_TIME or q_losses >= LOSSES_PER_QUESTION or _unused_left() == 0:
 		_new_question(seat)
 	else:
@@ -245,6 +266,7 @@ func _turn_to(seat: int) -> void:
 
 ## Смена вопроса: пауза «Новый вопрос!» (NEW_Q_TIME), фитиль — снова полный, потом наведение на seat.
 func _new_question(seat: int) -> void:
+	rejected = {}
 	_next_question()
 	target = seat
 	phase = "new_q"

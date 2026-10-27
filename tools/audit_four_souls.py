@@ -10,9 +10,10 @@ args = parser.parse_args()
 art = args.project / "games/four_souls/art"
 manifest = json.loads((art / "manifest.json").read_text(encoding="utf-8"))
 # На этих 45 картах Lua-тип отсутствует: значки/тексты проверены по русским изображениям.
-passive_eternals = {838, 855, 857, 861, 867, 877, 881, 885, 903, 910}
+passive_eternals = {838, 855, 857, 861, 867, 877, 881, 883, 885, 903, 910}
 paid_eternals = {853, 869, 873, 875, 901}
 hybrid_eternals = {843, 879}
+hybrid_treasures = {44, 50, 248}
 catalog = []
 for card in manifest["cards"]:
     card_id = card["id"]
@@ -29,11 +30,15 @@ for card in manifest["cards"]:
         timing = ("passive" if card_id in passive_eternals else
                   "paid" if card_id in paid_eternals else
                   "hybrid" if card_id in hybrid_eternals else
-                  "conditional" if card_id == 883 else "tap")
+                  "tap")
         reason = "Визуально проверены значки и текст русской вечной карты; специальная цена/условие остаётся по тексту."
     elif kind == "treasure":
         timing = {"atreasure": "tap", "otreasure": "tap", "paidtreasure": "paid"}.get(lua_type, "passive")
+        if card_id in hybrid_treasures:
+            timing = "hybrid"
         reason = "Тип способности взят из исходного мода: поворот, платная, одноразовая или пассивная."
+        if card_id in hybrid_treasures:
+            reason = "На русском изображении есть и поворотная, и платная способность; исходный Lua-тип неполон."
         if card_id in {94, 257}:
             timing = "paid" if card_id == 94 else "tap"
             reason = "Особое сокровище: проверен значок на изображении (Экспериментальное лечение / Ящик Пандоры)."

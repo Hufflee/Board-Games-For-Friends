@@ -6,7 +6,8 @@ uniform vec2 ring_center = vec2(640.0, 360.0);
 uniform vec2 motion = vec2(0.0);
 void fragment() {
 	vec2 p = UV * surface_size / surface_size.y;
-	float rings = abs(sin(length(p - ring_center / surface_size.y) * 52.0));
+	// Ближайшие кольца смещаются заметнее дальнего цветного фона.
+	float rings = abs(sin(length(p - (ring_center + motion * 0.7) / surface_size.y) * 52.0));
 	float line = 1.0 - smoothstep(0.02, 0.12, rings);
 	vec2 wash = p - motion / surface_size.y;
 	float waves = 0.5 + 0.5 * sin(wash.x * 3.4 + sin(wash.y * 2.8));

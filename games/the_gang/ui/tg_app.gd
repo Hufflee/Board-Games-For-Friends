@@ -1,0 +1,231 @@
+extends Control
+## Меню, лобби и стилизованные окна The Gang; сетевой транспорт общий Net.
+
+const Table := preload("res://games/the_gang/ui/tg_table.gd")
+const Settings := preload("res://games/king_of_12/ui/settings_screen.gd")
+const RULES := """[b]Одна команда — одно ограбление.[/b] Откройте3 хранилища раньше третьей тревоги. Игра рассчитана на3–10 человек;7–10 — расширение из предоставленного TTS-мода.
+
+[b]Ваши карты — секрет.[/b] У каждого две личные карты. Не называйте их, не показывайте и не намекайте на комбинацию. Общайтесь оценкой силы руки через фишки. Блефовать не нужно!
+
+[b]Четыре раунда.[/b] Префлоп: общих карт нет. Флоп: открываются3. Тёрн и ривер: ещё по одной. В каждом раунде новый цвет фишек: белый, жёлтый, оранжевый, красный.
+
+[b]Фишки.[/b] Чем больше звёзд, тем сильнее вы считаете свою руку относительно остальных. Очереди нет. Нажмите на свободную или чужую фишку, чтобы забрать её себе; прежний владелец останется без фишки. Ваша предыдущая фишка вернётся в центр. Можно вернуть свою фишку, но нельзя выдавать её другому. Когда фишки есть у всех, раунд сразу заканчивается.
+
+[b]Вскрытие.[/b] После ривера руки открываются в порядке красных фишек: от1 к старшей. Сравнивается лучшая комбинация ровно из5 любых карт среди ваших2 и5 общих. Порядок должен идти от слабой к сильной; точное равенство допустимо. Любая ошибка даёт одну тревогу, правильный порядок — одно хранилище.
+
+[b]Старшинство.[/b] Старшая карта → пара → две пары → тройка → стрит → флеш → фулл-хаус → каре → стрит-флеш. Роял-флеш — старший стрит-флеш. При равенстве учитываются все кикеры; масти равны. Туз может быть младшим вA2345 или старшим в10JQKA, но не вKA234.
+
+[b]Таймер.[/b] Лимит относится ко всему раунду. По его истечении отсутствующие фишки распределяются случайно, уже выбранные сохраняются. Если лимит выключен, отключившийся игрок получает свободную фишку после60 секунд раунда. Полноценных ботов в базовой версии нет.
+
+[b]Проверка на одном компьютере.[/b] Выбирайте место в верхнем списке. Сначала рука скрыта — нажмите «Посмотреть карты». Переключение места снова скрывает карты."""
+
+var screen: Control
+var _lobby_body: VBoxContainer
+var _lobby_error: Label
+var _dark := false
+
+func _ready() -> void:
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	get_tree().root.theme = TGStyle.theme()
+	_dark = Prefs.dark_theme()
+	Prefs.changed.connect(_on_prefs)
+	Net.lobby_changed.connect(_on_lobby)
+	Net.game_started.connect(show_table)
+	Net.game_ended.connect(show_lobby)
+	Net.session_closed.connect(show_menu)
+	Net.party_game_changed.connect(_on_party)
+	if Net.in_session() and Net.party_game != "the_gang":
+		_go_hub()
+	elif Net.in_game:
+		show_table()
+	elif Net.in_session():
+		show_lobby()
+	else:
+		show_menu()
+
+func _set_screen(next: Control) -> void:
+	if is_instance_valid(screen):
+		remove_child(screen)
+		screen.queue_free()
+	screen = next
+	screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	add_child(screen)
+
+func _centered() -> VBoxContainer:
+	var root_control := Control.new()
+	root_control.add_child(TGStyle.Background.new())
+	var center := CenterContainer.new()
+	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root_control.add_child(center)
+	var panel := PanelContainer.new()
+	panel.custom_minimum_size.x = 640
+	center.add_child(panel)
+	var col := TGStyle.column(16)
+	panel.add_child(col)
+	_set_screen(root_control)
+	return col
+
+func show_menu(message: String = "") -> void:
+	var col := _centered()
+	col.add_child(TGStyle.heading("THE GANG", 48))
+	col.add_child(TGStyle.label("КООПЕРАТИВНЫЙ ПОКЕР · 3–10 ИГРОКОВ", 16, TGStyle.GOLD))
+	col.add_child(RoomPanel.make("the_gang", TGStyle.button, TGStyle.label))
+	var local := TGStyle.primary("Играть на одном компьютере")
+	local.name = "LocalGame"
+	local.pressed.connect(func():
+		Net.host_offline("the_gang")
+		Net.set_bots(2))
+	col.add_child(local)
+	var lan := TGStyle.row()
+	var host := TGStyle.button("Создать LAN")
+	host.pressed.connect(func(): Net.host_enet(Net.PORT, "the_gang"))
+	lan.add_child(host)
+	var address := LineEdit.new()
+	address.placeholder_text = "IP хоста"
+	address.custom_minimum_size.x = 180
+	lan.add_child(address)
+	var join := TGStyle.button("Войти по IP")
+	join.pressed.connect(func(): Net.join_enet(address.text.strip_edges()))
+	lan.add_child(join)
+	col.add_child(lan)
+	var rules := TGStyle.button("Правила")
+	rules.pressed.connect(show_rules)
+	col.add_child(rules)
+	var back := TGStyle.button("← К выбору игры")
+	back.pressed.connect(_go_hub)
+	col.add_child(back)
+	if not message.is_empty():
+		col.add_child(TGStyle.label(message, 16, TGStyle.GOLD))
+
+func show_lobby() -> void:
+	_lobby_body = _centered()
+	_rebuild_lobby()
+
+func _on_lobby() -> void:
+	if Net.party_game != "the_gang" and Net.in_session():
+		_go_hub()
+	elif not Net.in_game:
+		if not is_instance_valid(_lobby_body) or not _lobby_body.is_inside_tree():
+			show_lobby()
+		else:
+			_rebuild_lobby()
+
+func _rebuild_lobby() -> void:
+	TGStyle.clear(_lobby_body)
+	_lobby_body.add_child(TGStyle.heading("THE GANG · СОБИРАЕМ КОМАНДУ"))
+	_lobby_body.add_child(TGStyle.label("Базовая игра · 3–10 мест · без ботов", 16, TGStyle.GOLD))
+	var data: Dictionary = Net.lobby_view
+	var members: Array = data.get("members", [])
+	var member_grid := GridContainer.new()
+	member_grid.columns = 2
+	member_grid.add_theme_constant_override("h_separation", 24)
+	_lobby_body.add_child(member_grid)
+	for member: Dictionary in members:
+		member_grid.add_child(PlayerTag.make(member, members, 16, TGStyle.INK))
+	if Net.mode == "offline" and Net.is_host():
+		var row := TGStyle.row()
+		var add := TGStyle.button("+ Игрок")
+		add.name = "AddPlayer"
+		add.disabled = members.size() >= 10
+		add.pressed.connect(func(): Net.set_bots(Net.bots + 1))
+		row.add_child(add)
+		var remove := TGStyle.button("− Игрок")
+		remove.disabled = members.size() <= 3
+		remove.pressed.connect(func(): Net.set_bots(Net.bots - 1))
+		row.add_child(remove)
+		_lobby_body.add_child(row)
+		_lobby_body.add_child(TGStyle.label("На столе переключайте места: чужие карты открываются только после выбора места.", 16, TGStyle.MUTED))
+	_lobby_body.add_child(TurnClock.settings_row(TGStyle.button, TGStyle.label))
+	if Net.is_host():
+		var start := TGStyle.primary("Начать ограбление")
+		start.name = "StartGame"
+		start.disabled = members.size() < 3 or members.size() > 10
+		start.pressed.connect(func():
+			var error := Net.start_game()
+			if not error.is_empty():
+				_lobby_error.text = error)
+		_lobby_body.add_child(start)
+	else:
+		_lobby_body.add_child(TGStyle.label("Ждём старта от хоста…"))
+	var chat := TGStyle.button("Чат")
+	chat.pressed.connect(func():
+		var panel := K12ChatPanel.new()
+		panel.expanded = true
+		screen.add_child(panel))
+	_lobby_body.add_child(chat)
+	var back := TGStyle.button("← К выбору игры")
+	LeaveGuard.wire(back, "Выйти?", "Вы вернётесь к выбору игры.", back_to_hub)
+	_lobby_body.add_child(back)
+	_lobby_error = TGStyle.label("", 16, TGStyle.GOLD)
+	_lobby_body.add_child(_lobby_error)
+
+func show_table() -> void:
+	var table := Table.new()
+	table.app = self
+	_set_screen(table)
+
+func _popup(title: String, text: String) -> void:
+	var overlay := ColorRect.new()
+	overlay.color = Color(0.02, 0.05, 0.06, 0.82)
+	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	overlay.z_index = 110
+	add_child(overlay)
+	var margin := MarginContainer.new()
+	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	for side in ["left", "right", "top", "bottom"]:
+		margin.add_theme_constant_override("margin_" + side, 48)
+	overlay.add_child(margin)
+	var panel := PanelContainer.new()
+	margin.add_child(panel)
+	var col := TGStyle.column()
+	panel.add_child(col)
+	col.add_child(TGStyle.heading(title))
+	var body := RichTextLabel.new()
+	body.bbcode_enabled = true
+	body.text = text
+	body.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_child(body)
+	var close := TGStyle.primary("Понятно")
+	close.name = "CloseRules"
+	close.pressed.connect(overlay.queue_free)
+	col.add_child(close)
+
+func show_rules() -> void:
+	_popup("ПРАВИЛА THE GANG", RULES)
+
+func show_settings() -> void:
+	var settings := Settings.new()
+	settings.make_panel = func(): return PanelContainer.new()
+	settings.make_title = TGStyle.heading
+	settings.make_primary = func(text: String):
+		var close := TGStyle.primary(text)
+		close.name = "CloseSettings"
+		return close
+	settings.ink = TGStyle.INK
+	add_child(settings)
+
+func back_to_hub() -> void:
+	if Net.is_party() and Net.is_host():
+		Net.return_to_party()
+	else:
+		Net.leave()
+		_go_hub()
+
+func _go_hub() -> void:
+	get_tree().change_scene_to_file.call_deferred(HubGames.HUB_SCENE)
+
+func _on_party(id: String) -> void:
+	if id != "the_gang":
+		_go_hub()
+
+func _on_prefs() -> void:
+	if _dark == Prefs.dark_theme():
+		return
+	_dark = Prefs.dark_theme()
+	get_tree().root.theme = TGStyle.theme()
+	if Net.in_game:
+		show_table()
+	elif Net.in_session():
+		show_lobby()
+	else:
+		show_menu()

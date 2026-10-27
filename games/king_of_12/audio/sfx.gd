@@ -39,6 +39,7 @@ var volume := 1.0
 var _music: AudioStreamPlayer
 var _music_i := 0
 var _music_started := false
+var _quitting := false
 var _playlist: Array = []  # полные пути; пусто — музыка таверны
 var _repeat_left := 0  # короткий трек (луп) повторяем, чтобы музыка не менялась каждые 15 секунд
 var _fade: Tween
@@ -57,6 +58,7 @@ var _last := {}
 
 
 func _ready() -> void:
+	get_tree().auto_accept_quit = false
 	_theme_before = Prefs.theme_mode
 	Prefs.changed.connect(func():
 		if _theme_before != Prefs.theme_mode:
@@ -81,8 +83,37 @@ func _ready() -> void:
 	Net.session_closed.connect(func(_r): stop_victory())
 
 
+## Штатный выход: аудиосервер получает время отпустить Ogg до удаления дерева.
+func request_quit(exit_code: int = 0) -> void:
+	if _quitting:
+		return
+	_quitting = true
+	stop_audio()
+	await get_tree().create_timer(0.1, true, false, true).timeout
+	# На тяжёлом кадре таймер истекает раньше следующего обновления аудиосервера.
+	await get_tree().process_frame
+	await get_tree().process_frame
+	get_tree().quit(exit_code)
+
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_CLOSE_REQUEST:
+		request_quit()
+
+## Синхронная часть завершения, также доступна тестам перед прямым SceneTree.quit.
+func stop_audio() -> void:
+	for tween in [_fade, _victory_tween]:
+		if tween != null and tween.is_valid():
+			tween.kill()
+	for player in get_tree().root.find_children("*", "AudioStreamPlayer", true, false):
+		player.stop()
+		player.stream = null
+	_cache.clear()
+
+
 ## Фоновая музыка (треки по кругу). Повторный вызов ничего не делает.
 func start_music() -> void:
+	if _quitting:
+		return
 	if _music_started:
 		return
 	_music_started = true
@@ -92,6 +123,8 @@ func start_music() -> void:
 
 ## Сменить музыку (у каждой игры может быть своя). Пустой список — музыка таверны.
 func set_playlist(paths: Array) -> void:
+	if _quitting:
+		return
 	set_ambience("")  # фон — только у игры, которая сама его включила (после set_playlist)
 	if paths == _playlist:
 		return
@@ -106,6 +139,8 @@ func set_playlist(paths: Array) -> void:
 
 ## Фоновый шум по кругу ("" — выключить).
 func set_ambience(path: String, vol_db: float = -16.0) -> void:
+	if _quitting:
+		return
 	if path == "":
 		_ambience.stop()
 		_ambience.stream = null
@@ -126,6 +161,8 @@ func set_ambience(path: String, vol_db: float = -16.0) -> void:
 
 
 func _on_track_end() -> void:
+	if _quitting:
+		return
 	if _repeat_left > 0:
 		_repeat_left -= 1
 		_music.play()  # тот же луп ещё раз — без смены настроения
@@ -146,6 +183,8 @@ func _track_db(path: String) -> float:
 
 
 func _next_track() -> void:
+	if _quitting:
+		return
 	var list: Array = _playlist if not _playlist.is_empty() else MUSIC.map(func(m): return DIR + m)
 	var path: String = list[_music_i % list.size()]
 	_music.stream = load(path)
@@ -172,6 +211,8 @@ const VICTORY_DB := -20.0  # тише музыки игры: тема громк
 
 
 func victory() -> void:
+	if _quitting:
+		return
 	# одна партия — одна победная тема (стол мог пересоздаться: смена темы, переподключение)
 	var gid := str(Net.view.get("game_id", ""))
 	if gid != "" and gid == _victory_gid:
@@ -235,6 +276,8 @@ func chat_voice(text: String, voice: String) -> void:
 
 
 func babble(text: String, voice: String, style: String = "", extra_db: float = 0.0) -> void:
+	if _quitting:
+		return
 	if muted:
 		return
 	if style == "":
@@ -269,6 +312,8 @@ func babble(text: String, voice: String, style: String = "", extra_db: float = 0
 
 
 func play(sound: String, vol_db: float = 0.0, pitch_var: float = 0.06, min_gap: float = 0.04) -> void:
+	if _quitting:
+		return
 	if sound in ["shuffle", "game_start", "card_flip"] and Time.get_ticks_msec() < _theme_silent_until:
 		return
 	if muted or not SOUNDS.has(sound):

@@ -8,11 +8,14 @@ const LobbyScreen := preload("res://games/stillion/ui/st_lobby.gd")
 const SettingsScreen := preload("res://games/king_of_12/ui/settings_screen.gd")
 
 var screen: Control
+var _theme_mode := ""
 
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	get_tree().root.theme = STStyle.theme()
+	_theme_mode = Prefs.theme_mode
+	Prefs.changed.connect(_on_prefs_changed)
 	Sfx.start_music()
 	Net.lobby_changed.connect(_on_lobby_changed)
 	Net.game_started.connect(show_table)
@@ -38,12 +41,28 @@ func _set_screen(s: Control) -> void:
 
 
 ## Смена светлой/тёмной темы: тема пересобирается, текущий экран — заново.
+func _on_prefs_changed() -> void:
+	if _theme_mode != Prefs.theme_mode:
+		_theme_mode = Prefs.theme_mode
+		restyle()
+
+
 func restyle() -> void:
+	var draft := ""
+	var chat_draft := ""
+	var chat_open := false
+	if screen is TableScreen and is_instance_valid(screen._answer):
+		draft = screen._answer.text
+		chat_draft = screen._top.chat._input.text
+		chat_open = screen._top.chat.expanded
 	get_tree().root.theme = STStyle.theme()
 	if screen is LobbyScreen:
 		show_lobby()
 	elif Net.in_game or not Net.view.is_empty():
 		show_table()
+		screen._answer.text = draft
+		screen._top.chat._input.text = chat_draft
+		screen._top.chat.expanded = chat_open
 	else:
 		show_menu()
 

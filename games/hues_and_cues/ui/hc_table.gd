@@ -63,7 +63,7 @@ func _ready() -> void:
 	var leave: Button
 	if Net.is_party() and Net.is_host():
 		leave = HCStyle.button("Завершить партию", 14)
-		LeaveGuard.wire(leave, "Завершить партию для всех?", "Все вернутся в лобби игры, пати сохранится.", Net.end_game)
+		LeaveGuard.wire(leave, "Завершить партию для всех?", "Все вернутся к выбору игры, пати сохранится.", Net.return_to_party)
 	elif Net.is_party():
 		leave = HCStyle.button("Покинуть пати", 14)
 		LeaveGuard.wire(leave, "Покинуть пати?", "Вы выйдете из партии и из пати.", func(): app.leave_party())
@@ -129,12 +129,14 @@ func _layout() -> void:
 	var h := size.y
 	var side_w := 270.0
 	var top := get_node("Top") as Control
-	top.position = Vector2(20, TopBar.HEIGHT + 4)
-	top.size = Vector2(w - 40, 46)
-	_board.position = Vector2(12, 106)
-	_board.size = Vector2(w - side_w - 44, h - 106 - 124)
-	_side.position = Vector2(w - side_w - 20, 110)
-	_side.size = Vector2(side_w, h - 110 - 76)
+	var header_bottom := maxf(TopBar.HEIGHT, _top.get_combined_minimum_size().y)
+	top.position = Vector2(20, header_bottom + 8)
+	top.size = Vector2(w - side_w - 44, maxf(46, top.get_combined_minimum_size().y))
+	var board_top := top.position.y + top.size.y + 8
+	_board.position = Vector2(12, board_top)
+	_board.size = Vector2(w - side_w - 44, maxf(100, h - board_top - 124))
+	_side.position = Vector2(w - side_w - 20, header_bottom + 16)
+	_side.size = Vector2(side_w, h - _side.position.y - 76)
 	_action.position = Vector2(24, h - 116)
 	_action.size = Vector2(w - side_w - 72, 100)
 	_hover_label.position = Vector2(w - side_w - 140, h - 140)
@@ -242,6 +244,7 @@ func _update_cues() -> void:
 		return
 	for i in cues.size():
 		var pill := PanelContainer.new()
+		pill.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		pill.add_theme_stylebox_override("panel", HCStyle.box(HCStyle.CARD, 22, HCStyle.LINE, 1, HCStyle.SHADOW, 10))
 		var row := HCStyle.hbox(10)
 		var n := HCStyle.label("%d" % (i + 1), HCStyle.CAP, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, "bold")
@@ -254,7 +257,12 @@ func _update_cues() -> void:
 		badge.add_child(n)
 		badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		row.add_child(badge)
-		row.add_child(HCStyle.label(str(cues[i]), HCStyle.BODY, HCStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "bold"))
+		var cue := HCStyle.label(str(cues[i]), HCStyle.BODY, HCStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "bold")
+		cue.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		cue.clip_text = true
+		cue.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		cue.tooltip_text = str(cues[i])
+		row.add_child(cue)
 		pill.add_child(row)
 		_cues_row.add_child(pill)
 	if _v["passed"]:
@@ -427,7 +435,12 @@ func _cue_form(row: HBoxContainer, second: bool) -> void:
 	_cue_error = HCStyle.label("Нельзя: базовые цвета, цифры и координаты, повтор; во второй — «светлее/темнее».", HCStyle.CAP, HCStyle.MUTED)
 	col.add_child(_cue_error)
 	row.add_child(col)
-	_cue_edit.grab_focus.call_deferred()
+	_focus_cue_if_free.call_deferred()
+
+
+func _focus_cue_if_free() -> void:
+	if is_instance_valid(_cue_edit) and get_viewport().gui_get_focus_owner() == null and not _top.chat.expanded:
+		_cue_edit.grab_focus()
 
 
 func _send_cue(second: bool) -> void:

@@ -79,8 +79,8 @@ func _ready() -> void:
 	var leave_btn: Button
 	if Net.is_party() and Net.is_host():
 		leave_btn = K12UI.button("Завершить партию", K12UI.CAP)
-		leave_btn.tooltip_text = "Все вернутся в лобби игры, пати сохранится"
-		LeaveGuard.wire(leave_btn, "Завершить партию для всех?", "Все вернутся в лобби игры, пати сохранится.", Net.end_game)
+		leave_btn.tooltip_text = "Все вернутся к выбору игры, пати сохранится"
+		LeaveGuard.wire(leave_btn, "Завершить партию для всех?", "Все вернутся к выбору игры, пати сохранится.", Net.return_to_party)
 	elif Net.is_party():
 		leave_btn = K12UI.button("Покинуть пати", K12UI.CAP)
 		LeaveGuard.wire(leave_btn, "Покинуть пати?", "Вы выйдете из партии и из пати.", func(): app.leave_party())

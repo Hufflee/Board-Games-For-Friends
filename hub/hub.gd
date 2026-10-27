@@ -61,6 +61,9 @@ func _ready() -> void:
 	Net.session_closed.connect(_on_closed)
 	Net.status_changed.connect(_set_status)
 	_rebuild()
+	# Хост мог уже выбрать следующую игру, пока клиент выходил из предыдущей сцены.
+	if Net.is_party() and not Net.party_game.is_empty():
+		_on_lobby.call_deferred()
 
 
 func _rebuild() -> void:
@@ -108,7 +111,7 @@ func _rebuild() -> void:
 		add_child(screen))
 	top.add_child(settings)
 	var quit := HubStyle.button("Выход", 15)
-	quit.pressed.connect(func(): get_tree().quit())
+	quit.pressed.connect(func(): Sfx.request_quit())
 	top.add_child(quit)
 	_ui.add_child(top)
 	# версия игры — мелко в правом нижнем углу
@@ -336,6 +339,8 @@ func _on_lobby() -> void:
 	if Net.is_party() and Net.party_game != "":
 		_open_by_id(Net.party_game)
 	else:
+		if LumaWipe.cancel_party_request():
+			_leaving = false
 		_rebuild()
 
 
@@ -343,23 +348,27 @@ func _on_party_game(game_id: String) -> void:
 	if game_id != "":
 		_open_by_id(game_id)
 	else:
-		_rebuild()
+		_on_lobby()
 
 
 func _open_by_id(game_id: String) -> void:
+	if not Net.is_party() or game_id != Net.party_game:
+		return
 	for g in HubGames.LIST:
 		if g["id"] == game_id:
-			_open_scene(g, true)  # ведущий запустил игру для всей пати
+			_open_scene(g, true, true)  # ведущий запустил игру для всей пати
 
 
-func _open_scene(g: Dictionary, wipe: bool = false) -> void:
-	if _leaving or HubGames.is_release_soon(g):
+func _open_scene(g: Dictionary, wipe: bool = false, party_request: bool = false) -> void:
+	if (_leaving and not party_request) or HubGames.is_release_soon(g):
 		return
 	HubGames.apply_settings(g)
 	_leaving = true
 	Sfx.play("game_start", -4)
 	if wipe:
 		var context := {"game": g}
+		if party_request:
+			context["party_game"] = Net.party_game
 		if is_instance_valid(_room):
 			context["camera"] = _room.camera
 			if is_instance_valid(_room.focused) and _room.focused.game.get("id") == g.get("id"):
@@ -372,6 +381,7 @@ func _open_scene(g: Dictionary, wipe: bool = false) -> void:
 
 ## Ошибка загрузки не должна оставлять кнопку запуска заблокированной.
 func _on_transition_failed(message: String) -> void:
-	_leaving = false
+	if not LumaWipe.is_running():
+		_leaving = false
 	_set_status(message)
 

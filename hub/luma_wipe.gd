@@ -23,6 +23,11 @@ var _scene_ready := false
 var _capture_ready := true
 var _origin: WeakRef
 var _box_viewport: SubViewport
+var _generation := 0
+var _party_game := ""
+var _committed := false
+var _load_paths: Array[String] = []
+var _stopping := false
 
 
 ## Перемешанная колода: каждый эффект встречается за цикл, на стыке циклов нет повтора.
@@ -39,21 +44,29 @@ static func next_effect() -> int:
 	return _last_effect
 
 
-## Возвращает false, если переход не запущен. Повторный вызов не создаёт второй слой.
+## Обычный повтор отвергается; актуальный запрос пати заменяет цель в существующем слое.
 static func change_scene(path: String, context: Dictionary = {}) -> bool:
 	var tree := Engine.get_main_loop() as SceneTree
-	if tree == null or is_instance_valid(_active):
+	if tree == null:
 		return false
 	if not ResourceLoader.exists(path, "PackedScene"):
 		push_error("Переход: сцена не найдена — " + path)
 		return false
+	var party_game := str(context.get("party_game", ""))
+	if not party_game.is_empty() and (not Net.is_party() or Net.party_game != party_game):
+		return false
+	if is_instance_valid(_active):
+		if party_game.is_empty():
+			return false
+		return _active._replace_target(path, party_game)
+	Diag.mark("Запрошен переход к игре", {"целевая_сцена": path})
 	# В headless нет кадра для эффекта; сохраняем возможность служебного запуска.
 	if DisplayServer.get_name() == "headless":
 		return tree.change_scene_to_file(path) == OK
 	var image := tree.root.get_texture().get_image()
 	if image == null or image.is_empty():
 		return tree.change_scene_to_file(path) == OK
-	var error := ResourceLoader.load_threaded_request(path, "PackedScene")
+	var error := _begin_load(path)
 	if error != OK:
 		push_error("Переход: не удалось начать загрузку — " + path)
 		return false
@@ -62,7 +75,10 @@ static func change_scene(path: String, context: Dictionary = {}) -> bool:
 	transition.layer = 120
 	transition.process_mode = Node.PROCESS_MODE_ALWAYS
 	transition._path = path
+	transition._load_paths.append(path)
+	transition._party_game = party_game
 	transition._effect = next_effect()
+	Diag.mark("Эффект перехода выбран", {"эффект": EFFECTS[transition._effect], "целевая_сцена": path})
 	if tree.current_scene:
 		transition._origin = weakref(tree.current_scene)
 	_active = transition
@@ -70,6 +86,59 @@ static func change_scene(path: String, context: Dictionary = {}) -> bool:
 	transition.add_to_group("scene_transition")
 	transition._setup(ImageTexture.create_from_image(image), tree.root.get_visible_rect().size, context)
 	return true
+
+
+static func is_running() -> bool:
+	return is_instance_valid(_active)
+
+
+static func cancel_party_request() -> bool:
+	if not is_instance_valid(_active) or _active._party_game.is_empty():
+		return false
+	_active._stop()
+	return true
+
+
+func _replace_target(path: String, party_game: String) -> bool:
+	if _path == path and _party_game == party_game and _owner_is_current():
+		return true
+	var error := _begin_load(path)
+	if error != OK:
+		return false
+	if not _load_paths.has(path):
+		_load_paths.append(path)
+	_generation += 1
+	_path = path
+	_party_game = party_game
+	_origin = weakref(get_tree().current_scene) if get_tree().current_scene else null
+	_switching = false
+	_scene_ready = false
+	_committed = false
+	_elapsed = 0.0
+	_t = 0.0
+	(_rect.material as ShaderMaterial).set_shader_parameter("progress", 0.0)
+	Diag.mark("Цель активного перехода заменена", {"целевая_сцена": path})
+	return true
+
+
+static func _begin_load(path: String) -> Error:
+	var status := ResourceLoader.load_threaded_get_status(path)
+	if status in [ResourceLoader.THREAD_LOAD_IN_PROGRESS, ResourceLoader.THREAD_LOAD_LOADED]:
+		return OK
+	return ResourceLoader.load_threaded_request(path, "PackedScene")
+
+
+func _drain_loads() -> void:
+	# Забираем завершённые отменённые загрузки без ожидания потока и без создания сцен.
+	for path: String in _load_paths.duplicate():
+		if path == _path and not _stopping:
+			continue
+		var status := ResourceLoader.load_threaded_get_status(path)
+		if status == ResourceLoader.THREAD_LOAD_IN_PROGRESS:
+			continue
+		if status == ResourceLoader.THREAD_LOAD_LOADED:
+			ResourceLoader.load_threaded_get(path)
+		_load_paths.erase(path)
 
 
 func _setup(texture: Texture2D, viewport_size: Vector2, context: Dictionary = {}) -> void:
@@ -164,6 +233,17 @@ func _input(_event: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
+	_drain_loads()
+	if _stopping:
+		if _load_paths.is_empty():
+			queue_free()
+		return
+	if not _party_game.is_empty() and (not Net.is_party() or Net.party_game != _party_game):
+		_abort("")
+		return
+	if not _owner_is_current():
+		_stop()
+		return
 	_elapsed += delta
 	if not _scene_ready:
 		if _switching or _elapsed < PREP or not _capture_ready:
@@ -175,35 +255,76 @@ func _process(delta: float) -> void:
 			_abort("Не удалось загрузить игру. Попробуйте ещё раз.")
 			return
 		_switching = true
-		_switch_scene.call_deferred()
+		_switch_scene.call_deferred(_generation)
 		return
 	_t += delta
 	var progress := clampf(_t / float(DURATIONS[_effect]), 0.0, 1.0)
 	(_rect.material as ShaderMaterial).set_shader_parameter("progress", 0.5 - 0.5 * cos(progress * PI))
 	if progress >= 1.0:
-		queue_free()
+		_stop()
 
 
-func _switch_scene() -> void:
+func _switch_scene(generation: int) -> void:
+	if not _is_current(generation) or not _owner_is_current():
+		return
+	Diag.mark("Загрузка сцены завершена; создание экрана", {"целевая_сцена": _path})
 	var scene := ResourceLoader.load_threaded_get(_path) as PackedScene
+	_load_paths.erase(_path)
 	if scene == null or get_tree().change_scene_to_packed(scene) != OK:
 		_abort("Не удалось открыть игру. Попробуйте ещё раз.")
 		return
+	_committed = true
 	# Старый кадр непрозрачен, пока новая сцена строится и рисует первые кадры.
 	await get_tree().process_frame
+	if not _is_current(generation):
+		return
 	await get_tree().process_frame
+	if not _is_current(generation):
+		return
 	await RenderingServer.frame_post_draw
+	if not _is_current(generation) or not _owner_is_current():
+		return
 	_scene_ready = true
+	Diag.mark("Первый кадр новой сцены отрисован", {"целевая_сцена": _path})
 	_t = 0.0
 
 
 func _abort(message: String) -> void:
-	push_error("Переход: " + message)
+	if not message.is_empty():
+		push_error("Переход: " + message)
+	_stop()
 	if _origin:
 		var origin: Object = _origin.get_ref()
-		if is_instance_valid(origin) and origin.has_method("_on_transition_failed"):
+		if is_instance_valid(origin) and origin == get_tree().current_scene and origin.has_method("_on_transition_failed"):
 			origin._on_transition_failed(message)
-	queue_free()
+
+
+func _is_current(generation: int) -> bool:
+	var party_current := _party_game.is_empty() or (Net.is_party() and Net.party_game == _party_game)
+	return _active == self and generation == _generation and not is_queued_for_deletion() and party_current
+
+
+func _owner_is_current() -> bool:
+	var current := get_tree().current_scene
+	if _committed:
+		return current == null or current.scene_file_path == _path
+	return _origin != null and is_instance_valid(_origin.get_ref()) and current == _origin.get_ref()
+
+
+func _stop() -> void:
+	_generation += 1
+	if _active == self:
+		_active = null
+	_stopping = true
+	# Хвост фоновой загрузки не держит экран/ввод и не мешает следующему переходу.
+	if is_instance_valid(_rect):
+		_rect.hide()
+		_rect.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	set_process(true)
+	set_process_input(false)
+	_drain_loads()
+	if _load_paths.is_empty():
+		queue_free()
 
 
 func _exit_tree() -> void:

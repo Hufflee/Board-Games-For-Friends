@@ -187,17 +187,20 @@ func _order_overlay_input(scene: Node) -> void:
 	var windows: Array[Node] = []
 	var last_table := -1
 	for child: Node in scene.get_children():
-		if child == _root:
+		if child == _root or child == _fidget:
 			continue
 		if child is Control and (child as Control).z_index >= 100:
 			windows.append(child)
 		else:
 			last_table = child.get_index()
 	var misplaced := _root.get_index() < last_table
+	misplaced = misplaced or (is_instance_valid(_fidget) and _fidget.get_index() < _root.get_index())
 	for window: Node in windows:
 		misplaced = misplaced or window.get_index() < _root.get_index()
 	if misplaced:
 		scene.move_child(_root, -1)
+		if is_instance_valid(_fidget):
+			scene.move_child(_fidget, -1)
 		for window: Node in windows:
 			scene.move_child(window, -1)
 
@@ -228,10 +231,11 @@ func _place_fidget(show: bool) -> void:
 		_fidget = FidgetScript.new()
 		sc.add_child(_fidget)
 	_fidget.visible = true
-	var screen = sc.get("screen")
-	var want := (screen as Node).get_index() + 1 if screen is Node and (screen as Node).get_parent() == sc else sc.get_child_count() - 1
-	if _fidget.get_index() != mini(want, sc.get_child_count() - 1):
-		sc.move_child(_fidget, mini(want, sc.get_child_count() - 1))
+	# Служебная монета должна оставаться доступна и над окном паузы (70).
+	_fidget.z_as_relative = false
+	_fidget.z_index = 85
+	# Порядок GUI важен отдельно от z_index: монета следует за панелью паузы.
+	# Окна настроек/правил остаются последними в _order_overlay_input.
 
 
 func _place() -> void:

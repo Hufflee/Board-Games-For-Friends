@@ -54,7 +54,7 @@ func _ready() -> void:
 	var leave: Button
 	if Net.is_party() and Net.is_host():
 		leave = HCStyle.button("Завершить партию", HCStyle.CAP)
-		LeaveGuard.wire(leave, "Завершить партию для всех?", "Все вернутся в лобби игры, пати сохранится.", Net.end_game)
+		LeaveGuard.wire(leave, "Завершить партию для всех?", "Все вернутся к выбору игры, пати сохранится.", Net.return_to_party)
 	elif Net.is_party():
 		leave = HCStyle.button("Покинуть пати", HCStyle.CAP)
 		LeaveGuard.wire(leave, "Покинуть пати?", "Вы выйдете из партии и из пати.", func(): app.leave_party())
