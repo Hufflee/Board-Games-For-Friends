@@ -44,6 +44,7 @@ var _queue: Array = []
 var _moved := false  # фишка текущего игрока пошла вперёд в свой ход
 var _rolled := false  # бросок в этом ходу уже был
 var _ending := false  # идут эффекты «в конце хода»
+var _finish_boost := 0
 
 
 func new_game(player_list: Array, seed_value: int = 0, start_coins: int = START_COINS) -> void:
@@ -197,6 +198,7 @@ func _start_turn() -> void:
 	_moved = false
 	_rolled = false
 	_ending = false
+	_finish_boost = 0
 	last_roll.clear()
 	if skip[turn] > 0:
 		skip[turn] -= 1
@@ -223,7 +225,7 @@ func roll(seat: int) -> bool:
 		return answer(seat, 0)
 	if phase != "roll" or seat != turn:
 		return false
-	_do_roll(0)
+	_do_roll(_finish_boost)
 	return true
 
 
@@ -493,26 +495,19 @@ func _cell_fx(s: int) -> void:
 			_move(s, 10)
 			_queue.push_front({k = "cell", seat = s})
 		"mine":
-			var d := rng.randi_range(1, 6)
-			_set_roll([d],s)
-			if d == 1 and not has_shop(s, "helmet"):
-				skip[s] += 1
-				_log(s, "шахта: 1 — пропустит ход")
-			elif d == 6:
-				_win(s, "нашёл сокровище в шахте!")
-			else:
-				_log(s, "шахта: %d — +10 монет" % d)
-				_gain(s, 10)
+			_ask(s, "card_die", ["Бросить кубик"], "Шахта: схвати кубик мышью и брось", {fx = "mine"})
 		"nooo":
 			var nn := 3 if has_shop(s, "charm") else 10
 			_log(s, "Нееет! −%d монет%s" % [nn, " (оберег)" if nn == 3 else ""])
 			_lose(s, nn)
 		"luck_die":
-			var sum := 0
-			for k in 3:
-				sum += rng.randi_range(1, 6)
-			_log(s, "кубик удачи: +%d" % sum)
-			_move(s, sum)
+			_ask(s, "card_die", ["Бросить кубик"], "Кубик удачи: бросок 1 из 3", {fx = "luck_die", left = 3, sum = 0})
+		"finish":
+			if s == turn:
+				_rolled = false
+				_finish_boost = 0
+				if coins[s] >= 5:
+					_ask(s, "boost", ["Без доплаты", "+1 за 5 монет"] + (["+2 за 10 монет"] if coins[s] >= 10 else []), "Финиш-сейф: доплатить к броску?")
 		"gum":
 			stuck[s] = true
 			_log(s, "прилипает к жвачке — теперь бросает на финиш")
@@ -949,8 +944,12 @@ func use_card(seat: int, idx: int, target: int = -1) -> bool:
 # ---------- схватка ----------
 
 func _duel(s: int, o: int) -> void:
-	var a := rng.randi_range(1, 6) + 2 + (2 if has_shop(s, "glove") else 0)
-	var b := rng.randi_range(1, 6) + (2 if has_shop(o, "glove") else 0)
+	_ask(s, "card_die", ["Бросить кубик"], "Схватка с %s: бросок нападающего" % name_of(o), {fx = "duel_attack", other = o})
+
+
+func _duel_result(s: int, o: int, attack: int, defend: int) -> void:
+	var a := attack + 2 + (2 if has_shop(s, "glove") else 0)
+	var b := defend + (2 if has_shop(o, "glove") else 0)
 	_log(s, "схватка с %s: %d против %d" % [name_of(o), a, b])
 	var w := s if a > b else o
 	if a == b:
@@ -982,14 +981,13 @@ func _resolve(p: Dictionary, ch: int) -> void:
 				"shop":
 					_shop_offer(s, int(d.n), bool(d.free), true)
 		"boost":
-			var add := ch
+			_finish_boost = ch
 			_lose(s, [0, 5, 10][ch])
-			phase = "roll"
-			_do_roll(add)
+			_rolled = false  # выбор доплаты не заменяет ручной бросок
 		"card_die":
 			var result := rng.randi_range(1, 6)
 			_set_roll([result],s)
-			_log(s, "бросает кубик для карты: %d" % result)
+			_log(s, "бросает кубик: %d" % result)
 			match str(d.fx):
 				"die_coins_or_move":
 					if result <= 3: _gain(s, 10)
@@ -998,6 +996,27 @@ func _resolve(p: Dictionary, ch: int) -> void:
 					if result <= 3: _lose(s, 5)
 					else: _move(s, -10)
 				"die_back": _move(s, -result)
+				"mine":
+					if result == 1 and not has_shop(s, "helmet"):
+						skip[s] += 1
+						_log(s, "шахта: 1 — пропустит ход")
+					elif result == 6:
+						_win(s, "нашёл сокровище в шахте!")
+					else:
+						_log(s, "шахта: %d — +10 монет" % result)
+						_gain(s, 10)
+				"luck_die":
+					var total := int(d.sum) + result
+					var left := int(d.left) - 1
+					if left > 0:
+						_ask(s, "card_die", ["Бросить кубик"], "Кубик удачи: бросок %d из 3 · сумма %d" % [4 - left, total], {fx = "luck_die", left = left, sum = total})
+					else:
+						_log(s, "кубик удачи: +%d" % total)
+						_move(s, total)
+				"duel_attack":
+					_ask(int(d.other), "card_die", ["Бросить кубик"], "Схватка: бросок защищающегося", {fx = "duel_defend", attacker = s, attack = result})
+				"duel_defend":
+					_duel_result(int(d.attacker), s, int(d.attack), result)
 		"die":
 			_walk(int(p.options[ch]))
 		"buy":
@@ -1023,11 +1042,9 @@ func _resolve(p: Dictionary, ch: int) -> void:
 			shop[s].remove_at(ch)
 		"steal", "burn":
 			var v: int = d.seats[ch]
-			var c: int = shop[v].pop_back()
-			if p.kind == "steal" and shop[s].size() < shop_max(s):
-				shop[s].append(c)
-			else:
-				disc_shop.append(c)
+			_choose_shop_card(s, v, p.kind == "burn")
+		"shop_pick":
+			_take_shop_card(s, int(d.victim), ch, bool(d.burn))
 		"target":
 			var o: int = d.seats[ch]
 			var n: int = d.n
@@ -1094,14 +1111,28 @@ func _resolve(p: Dictionary, ch: int) -> void:
 				0: _pay(l, s, 10)
 				1: _push_back(l, 10)
 				2:
-					var c: int = shop[l].pop_back()
-					if shop[s].size() < shop_max(s):
-						shop[s].append(c)
-					else:
-						disc_shop.append(c)
+					_choose_shop_card(s, l, false)
 
 
 # ---------- монеты ----------
+## Одну карту забираем сразу; при нескольких игрок сам выбирает изображение.
+func _choose_shop_card(seat: int, victim: int, burn: bool) -> void:
+	if shop[victim].size() == 1:
+		_take_shop_card(seat, victim, 0, burn)
+	elif shop[victim].size() > 1:
+		_ask(seat, "shop_pick", _shop_names(victim), "Выбери карту Лавки у %s" % name_of(victim), {victim = victim, burn = burn, offer = shop[victim].duplicate()})
+
+
+func _take_shop_card(seat: int, victim: int, index: int, burn: bool) -> void:
+	if index < 0 or index >= shop[victim].size():
+		return
+	var card: int = shop[victim][index]
+	shop[victim].remove_at(index)
+	if not burn and shop[seat].size() < shop_max(seat):
+		shop[seat].append(card)
+	else:
+		disc_shop.append(card)
+
 
 func _gain(s: int, n: int) -> void:
 	coins[s] += n

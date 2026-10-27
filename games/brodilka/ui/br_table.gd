@@ -44,9 +44,7 @@ var _manual_until := 0  # мс: до этого времени камера не
 var _ui_waits := false  # пришло новое состояние, но персонаж ещё идёт — эффект клетки покажем, когда дойдёт
 var _tex_scale := 1.0  # во сколько раз картинка поля плотнее его координат (апскейл ×2 — 2.0)
 const BOARD_W := 3534.0  # ширина поля в координатах (пиксели исходной board.webp)
-const LABEL_DELAY := 1200  # мс: подсказка по надписи на глобальной карте через 1,2 с наведения
-var _label_wait := -1  # над какой надписью курсор (ждём LABEL_DELAY)
-var _label_since := 0
+var _label_dismissed := false  # поглотить и отпускание клика, закрывшего подсказку
 var _cam_tween: Tween
 
 var _pawns: Array = []  # Pawn по местам
@@ -91,11 +89,6 @@ func _ready() -> void:
 	_board.clip_contents = true
 	_board.mouse_filter = Control.MOUSE_FILTER_STOP
 	_board.gui_input.connect(_on_board_input)
-	_board.mouse_exited.connect(func():
-		# курсор ушёл с поля — подсказка по надписи не нужна
-		_label_wait = -1
-		_label_i = -1
-		_label_view.visible = false)
 	add_child(_board)
 	var under := ColorRect.new()  # вокруг поля, когда оно показано целиком, — тёмное дерево, а не доски фона
 	under.color = BRStyle.WOOD_DARK.darkened(0.25)
@@ -366,31 +359,17 @@ func _focus(animate: bool = true, seat: int = -1) -> void:
 	_cam_tween.tween_property(_map, "position", want, 0.6).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
 
 
-## Наведение на надпись поля: её кусок картинки — крупно и ровно в центре экрана.
-func _hover_label(at: Vector2) -> void:
+## Печатная надпись под курсором (координаты поля).
+func _label_at(at: Vector2) -> int:
 	var p := (at - _map.position) / _zoom
-	var hit := -1
 	for i in LABELS.size():
 		if (LABELS[i][0] as Rect2).has_point(p):
-			hit = i
-			break
-	if hit == _label_wait:
-		return
-	# сменилась надпись под курсором — прежняя подсказка прячется, новая покажется через LABEL_DELAY
-	_label_wait = hit
-	_label_since = Time.get_ticks_msec()
-	_label_i = -1
-	_label_view.visible = false
+			return i
+	return -1
 
 
-## Курсор держится над надписью LABEL_DELAY — крупно в центре экрана.
-func _check_label() -> void:
-	if _label_wait < 0 or _label_i == _label_wait or Time.get_ticks_msec() - _label_since < LABEL_DELAY:
-		return
-	if _dragging:
-		_label_since = Time.get_ticks_msec()
-		return
-	var hit := _label_wait
+## По нажатию показываем надпись крупно; наведение её не открывает.
+func _show_map_label(hit: int) -> void:
 	_label_i = hit
 	var r: Rect2 = LABELS[hit][0]
 	var rot: float = LABELS[hit][1]
@@ -424,6 +403,10 @@ func _step_at(at: Vector2) -> int:
 
 ## Клик по полю: если просят тянуть карту — клик по нужной колоде тянет её.
 func _click_board(at: Vector2) -> void:
+	var label_hit := _label_at(at)
+	if label_hit >= 0:
+		_show_map_label(label_hit)
+		return
 	var p: Dictionary = _v.get("prompt", {})
 	if p.is_empty() or int(p["seat"]) != _actor():
 		return
@@ -491,7 +474,6 @@ func _zoom_at(at: Vector2, k: float) -> void:
 
 ## Стрелки / WASD двигают поле.
 func _process(delta: float) -> void:
-	_check_label()
 	if _step_hl:
 		var show := not _dice_rolling()
 		if show != _step_hl.visible:
@@ -513,6 +495,19 @@ func _process(delta: float) -> void:
 	_manual_until = Time.get_ticks_msec() + 5000
 
 
+## Закрывающий клик не активирует поле или кнопку под просмотром.
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed and _label_view.visible:
+			_label_view.visible = false
+			_label_i = -1
+			_label_dismissed = true
+			get_viewport().set_input_as_handled()
+		elif not event.pressed and _label_dismissed:
+			_label_dismissed = false
+			get_viewport().set_input_as_handled()
+
+
 func _on_board_input(e: InputEvent) -> void:
 	if e is InputEventMouseButton:
 		var mb := e as InputEventMouseButton
@@ -527,9 +522,8 @@ func _on_board_input(e: InputEvent) -> void:
 			_drag_last = mb.position
 			_board.mouse_default_cursor_shape = Control.CURSOR_DRAG if mb.pressed else Control.CURSOR_ARROW
 	elif e is InputEventMouseMotion and not _dragging:
-		_hover_label((e as InputEventMouseMotion).position)
 		# над клеткой, куда можно пойти, — курсор «рука» (можно щёлкнуть)
-		_board.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if _step_at((e as InputEventMouseMotion).position) >= 0 else Control.CURSOR_ARROW
+		_board.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if _step_at((e as InputEventMouseMotion).position) >= 0 or _label_at((e as InputEventMouseMotion).position) >= 0 else Control.CURSOR_ARROW
 	elif e is InputEventMouseMotion and _dragging:
 		var mm := e as InputEventMouseMotion
 		if _cam_tween:
@@ -1116,7 +1110,7 @@ func _open_dialog(text: String, options: Array, on_pick: Callable, local: bool, 
 	t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	col.add_child(t)
 	# Лавка Джо: открытые карты картинками — щёлкни, чтобы взять (наведение — крупно)
-	if kind == "buy" and data.has("offer"):
+	if kind in ["buy", "shop_pick"] and data.has("offer"):
 		var cards := BRStyle.hbox(16)
 		cards.alignment = BoxContainer.ALIGNMENT_CENTER
 		var offer: Array = data["offer"]
@@ -1129,7 +1123,7 @@ func _open_dialog(text: String, options: Array, on_pick: Callable, local: bool, 
 			tr.mouse_filter = Control.MOUSE_FILTER_STOP
 			tr.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 			_hoverable(tr)
-			var jj := j + 1
+			var jj := j + (1 if kind == "buy" else 0)
 			tr.gui_input.connect(func(e: InputEvent):
 				if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
 					_preview.visible = false
@@ -1145,7 +1139,7 @@ func _open_dialog(text: String, options: Array, on_pick: Callable, local: bool, 
 			frame.add_child(tr)
 			cards.add_child(frame)
 		col.add_child(cards)
-		options = [options[0]]  # дальше — только «Ничего не брать»
+		options = [options[0]] if kind == "buy" else []  # выбор чужой карты — самими картинками
 	var flow := HFlowContainer.new()
 	flow.alignment = FlowContainer.ALIGNMENT_CENTER
 	flow.add_theme_constant_override("h_separation", 8)

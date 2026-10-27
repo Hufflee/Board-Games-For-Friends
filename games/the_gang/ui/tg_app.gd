@@ -3,31 +3,29 @@ extends Control
 
 const Table := preload("res://games/the_gang/ui/tg_table.gd")
 const Settings := preload("res://games/king_of_12/ui/settings_screen.gd")
-const RULES := """[b]Одна команда — одно ограбление.[/b] Откройте3 хранилища раньше третьей тревоги. Игра рассчитана на3–10 человек;7–10 — расширение из предоставленного TTS-мода.
+const RULES := """[b]Одна команда — одно ограбление.[/b] Откройте 3 хранилища раньше третьей тревоги. В одной команде от 3 до 10 игроков.
 
 [b]Ваши карты — секрет.[/b] У каждого две личные карты. Не называйте их, не показывайте и не намекайте на комбинацию. Общайтесь оценкой силы руки через фишки. Блефовать не нужно!
 
-[b]Четыре раунда.[/b] Префлоп: общих карт нет. Флоп: открываются3. Тёрн и ривер: ещё по одной. В каждом раунде новый цвет фишек: белый, жёлтый, оранжевый, красный.
+[b]Четыре раунда.[/b] Префлоп: общих карт нет. Флоп: открываются 3. Тёрн и ривер: ещё по одной. В каждом раунде новый цвет фишек: белый, жёлтый, оранжевый, красный.
 
 [b]Фишки.[/b] Чем больше звёзд, тем сильнее вы считаете свою руку относительно остальных. Очереди нет. Нажмите на свободную или чужую фишку, чтобы забрать её себе; прежний владелец останется без фишки. Ваша предыдущая фишка вернётся в центр. Можно вернуть свою фишку, но нельзя выдавать её другому. Когда фишки есть у всех, раунд сразу заканчивается.
 
-[b]Вскрытие.[/b] После ривера руки открываются в порядке красных фишек: от1 к старшей. Сравнивается лучшая комбинация ровно из5 любых карт среди ваших2 и5 общих. Порядок должен идти от слабой к сильной; точное равенство допустимо. Любая ошибка даёт одну тревогу, правильный порядок — одно хранилище.
+[b]Вскрытие.[/b] После ривера руки открываются в порядке красных фишек: от 1 к старшей. Сравнивается лучшая комбинация ровно из 5 любых карт среди ваших 2 и 5 общих. Порядок должен идти от слабой к сильной; точное равенство допустимо. Любая ошибка даёт одну тревогу, правильный порядок — одно хранилище.
 
-[b]Старшинство.[/b] Старшая карта → пара → две пары → тройка → стрит → флеш → фулл-хаус → каре → стрит-флеш. Роял-флеш — старший стрит-флеш. При равенстве учитываются все кикеры; масти равны. Туз может быть младшим вA2345 или старшим в10JQKA, но не вKA234.
+[b]Старшинство.[/b] Старшая карта → пара → две пары → тройка → стрит → флеш → фулл-хаус → каре → стрит-флеш. Роял-флеш — старший стрит-флеш. При равенстве учитываются все кикеры; масти равны. Туз может быть младшим в A2345 или старшим в 10JQKA, но не в KA234.
 
-[b]Таймер.[/b] Лимит относится ко всему раунду. По его истечении отсутствующие фишки распределяются случайно, уже выбранные сохраняются. Если лимит выключен, отключившийся игрок получает свободную фишку после60 секунд раунда. Полноценных ботов в базовой версии нет.
+[b]Таймер.[/b] Лимит относится ко всему раунду. По его истечении отсутствующие фишки распределяются случайно, уже выбранные сохраняются. Если лимит выключен, отключившийся игрок получает свободную фишку после 60 секунд раунда. Полноценных ботов в базовой версии нет.
 
 [b]Проверка на одном компьютере.[/b] Выбирайте место в верхнем списке. Сначала рука скрыта — нажмите «Посмотреть карты». Переключение места снова скрывает карты."""
 
 var screen: Control
 var _lobby_body: VBoxContainer
 var _lobby_error: Label
-var _dark := false
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	get_tree().root.theme = TGStyle.theme()
-	_dark = Prefs.dark_theme()
 	Prefs.changed.connect(_on_prefs)
 	Net.lobby_changed.connect(_on_lobby)
 	Net.game_started.connect(show_table)
@@ -136,6 +134,12 @@ func _rebuild_lobby() -> void:
 		_lobby_body.add_child(row)
 		_lobby_body.add_child(TGStyle.label("На столе переключайте места: чужие карты открываются только после выбора места.", 16, TGStyle.MUTED))
 	_lobby_body.add_child(TurnClock.settings_row(TGStyle.button, TGStyle.label))
+	var references := TGStyle.row()
+	for entry in [["Правила", show_rules], ["Комбинации", show_poker_reference], ["Настройки", show_settings]]:
+		var reference := TGStyle.button(entry[0])
+		reference.pressed.connect(entry[1])
+		references.add_child(reference)
+	_lobby_body.add_child(references)
 	if Net.is_host():
 		var start := TGStyle.primary("Начать ограбление")
 		start.name = "StartGame"
@@ -164,7 +168,7 @@ func show_table() -> void:
 	table.app = self
 	_set_screen(table)
 
-func _popup(title: String, text: String) -> void:
+func _popup(title: String, text: String) -> Control:
 	var overlay := ColorRect.new()
 	overlay.color = Color(0.02, 0.05, 0.06, 0.82)
 	overlay.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
@@ -189,9 +193,37 @@ func _popup(title: String, text: String) -> void:
 	close.name = "CloseRules"
 	close.pressed.connect(overlay.queue_free)
 	col.add_child(close)
+	return col
 
 func show_rules() -> void:
-	_popup("ПРАВИЛА THE GANG", RULES)
+	var col := _popup("ПРАВИЛА THE GANG", RULES)
+	var reference := TGStyle.button("Памятка покерных комбинаций")
+	reference.name = "PokerReference"
+	reference.pressed.connect(show_poker_reference)
+	col.add_child(reference)
+	col.move_child(reference, col.get_child_count() - 2)
+
+func show_poker_reference() -> void:
+	var col := _popup("ПОКЕРНЫЕ КОМБИНАЦИИ", "")
+	var body := col.get_child(1)
+	col.remove_child(body)
+	body.queue_free()
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	col.add_child(scroll)
+	col.move_child(scroll, 1)
+	var center := VBoxContainer.new()
+	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(center)
+	var image := TextureRect.new()
+	image.name = "PokerReferenceImage"
+	image.texture = preload("res://hub/covers/poker combination.jpg")
+	image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	image.custom_minimum_size = Vector2(648, 1067)
+	image.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	center.add_child(image)
 
 func show_settings() -> void:
 	var settings := Settings.new()
@@ -219,13 +251,4 @@ func _on_party(id: String) -> void:
 		_go_hub()
 
 func _on_prefs() -> void:
-	if _dark == Prefs.dark_theme():
-		return
-	_dark = Prefs.dark_theme()
-	get_tree().root.theme = TGStyle.theme()
-	if Net.in_game:
-		show_table()
-	elif Net.in_session():
-		show_lobby()
-	else:
-		show_menu()
+	pass  # У The Gang одна тёмная тема; общая настройка не пересоздаёт стол.

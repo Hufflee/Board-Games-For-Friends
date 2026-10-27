@@ -79,6 +79,9 @@ func show_menu(message: String = "") -> void:
 	var settings := BRStyle.button("Настройки", BRStyle.BODY, 150)
 	settings.pressed.connect(show_settings)
 	row.add_child(settings)
+	var pool := BRStyle.button("Пул карт", BRStyle.BODY, 150)
+	pool.pressed.connect(show_card_pool)
+	row.add_child(pool)
 	col.add_child(row)
 	var back := BRStyle.button("← К выбору игры", BRStyle.CAP)
 	back.theme_type_variation = "QuietButton"
@@ -160,10 +163,27 @@ func show_rules() -> void:
 	text.add_theme_constant_override("line_separation", 4)
 	text.text = RULES_TEXT
 	col.add_child(text)
+	var pool := BRStyle.button("Посмотреть пул карт", BRStyle.BODY)
+	pool.pressed.connect(show_card_pool)
+	col.add_child(pool)
 	var close := BRStyle.primary("Понятно", BRStyle.BODY, 160)
 	close.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	close.pressed.connect(layer.queue_free)
 	col.add_child(close)
+
+
+## Только печатный каталог: закрытая информация партии не читается.
+func show_card_pool() -> void:
+	if has_node("CardPool"):
+		return
+	var entries := []
+	for index in BRData.GOODBAD.size():
+		entries.append({"title": "Хорошо / Плохо · %d" % (index + 1), "group": "Хорошо / Плохо", "path": BRData.gb_image(index)})
+	for index in BRData.TADAM.size():
+		entries.append({"title": "Тадам · %d: %s" % [index + 1, BRData.TADAM[index].text], "group": "Тадам", "path": BRData.tadam_image(index)})
+	for index in BRData.SHOP.size():
+		entries.append({"title": BRData.SHOP[index].name, "group": "Лавка Джо", "path": BRData.shop_image(index)})
+	load("res://hub/card_pool_browser.gd").open(self, "Большая бродилка · Пул карт", entries, BRStyle.box(BRStyle.parch()))
 
 
 func show_settings() -> void:

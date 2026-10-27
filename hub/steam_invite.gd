@@ -9,7 +9,8 @@ const STATES := {0: "не в сети", 1: "в сети", 2: "занят", 3: "�
 var _list: VBoxContainer
 var _status: Label
 var _invited := {}
-var _browse := false  # окно «Пати друзей»: не приглашать, а войти к другу
+var _browse := false  # публичные пати Steam, без ограничения списком друзей
+var _refresh: Button
 
 
 ## Окно «Пригласить друзей». Открывается поверх любого экрана.
@@ -26,9 +27,12 @@ static func open_panel(on_layer: int = 50) -> void:
 	layer._build_panel()
 
 
-## Окно «Пати друзей»: друзья, которые сейчас в пати этой игры, — кнопка «Войти».
+## Открытые пати этой игры в Steam: доступные комнаты, независимо от дружбы.
 static func open_browser(on_layer: int = 50) -> void:
 	var tree := Engine.get_main_loop() as SceneTree
+	for node: Node in tree.root.get_children():
+		if node is SteamInvite and node._browse:
+			return
 	var layer := SteamInvite.new()
 	layer.set_meta("panel", true)
 	layer._browse = true
@@ -84,7 +88,8 @@ func _build_panel() -> void:
 	col.add_theme_constant_override("separation", 10)
 	p.add_child(col)
 	col.add_child(_label("Browse lobbies" if _browse else "Пригласить друзей из Steam", 22))
-	col.add_child(_label("Друзья из Steam, которые сейчас собрались в этой игре." if _browse else "Друг получит приглашение в Steam и прямо в игре, если она запущена.", 13, Color(1, 1, 1, 0.6)))
+	var hint := _label("Открытые пати этой игры со всего мира." if _browse else "Друг получит приглашение в Steam и прямо в игре, если она запущена.", 13, Color(1, 1, 1, 0.6))
+	col.add_child(hint)
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(0, 340)
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -103,6 +108,7 @@ func _build_panel() -> void:
 		ov.pressed.connect(func(): Net.steam.activateGameOverlayInviteDialog(Net.lobby_id))
 		row.add_child(ov)
 	var refresh := Button.new()
+	_refresh = refresh
 	refresh.text = "Обновить"
 	refresh.pressed.connect(_fill)
 	row.add_child(refresh)
@@ -111,14 +117,18 @@ func _build_panel() -> void:
 	close.pressed.connect(queue_free)
 	row.add_child(close)
 	col.add_child(row)
+	if _browse:
+		Net.steam_lobbies_changed.connect(_on_steam_lobbies_changed)
 	_fill()
 
 
 func _fill() -> void:
 	for c in _list.get_children():
+		_list.remove_child(c)
 		c.queue_free()
 	if _browse:
-		_fill_parties()
+		Net.request_steam_lobbies()
+		_on_steam_lobbies_changed()
 		return
 	if not Net.steam_ok or Net.lobby_id == 0:
 		_list.add_child(_label("Приглашать через Steam можно из пати, созданной через Steam.", 15, Color(1, 1, 1, 0.8)))
@@ -161,35 +171,40 @@ func _fill() -> void:
 		_list.add_child(row)
 
 
-func _fill_parties() -> void:
-	if not Net.steam_ok:
-		_list.add_child(_label("Steam недоступен — запустите Steam и перезапустите игру.", 15, Color(1, 1, 1, 0.8)))
+func _on_steam_lobbies_changed() -> void:
+	for child: Node in _list.get_children():
+		_list.remove_child(child)
+		child.queue_free()
+	_refresh.disabled = Net.steam_lobbies_loading
+	_status.text = "Ищем открытые пати…" if Net.steam_lobbies_loading else Net.steam_lobbies_error
+	if Net.steam_lobbies_loading or not Net.steam_lobbies_error.is_empty():
 		return
-	var parties := Net.steam_friend_parties()
+	var parties: Array[Dictionary] = Net.steam_public_lobbies
 	if parties.is_empty():
-		var l := _label("Сейчас никто из друзей не собрал пати. Создайте свою и пригласите их — или нажмите «Обновить» чуть позже.", 15, Color(1, 1, 1, 0.8))
+		var l := _label("Открытых пати пока нет. Создайте свою или обновите список позже.", 15, Color(1, 1, 1, 0.8))
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		l.custom_minimum_size.x = 400
 		_list.add_child(l)
 		return
 	for f in parties:
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 8)
-		var av := TextureRect.new()
-		av.custom_minimum_size = Vector2(32, 32)
-		av.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		av.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		av.texture = Net.avatar(int(f["id"]))
-		row.add_child(av)
 		var nm := _label("Пати: %s" % f["name"], 16)
 		nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		nm.custom_minimum_size.x = 220
+		nm.clip_text = true
+		nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		row.add_child(nm)
+		row.add_child(_label("%d/%d" % [f.members, f.capacity], 14))
 		var b := Button.new()
-		b.text = "Войти"
+		b.text = "Нет данных" if f.capacity <= 0 else ("Мест нет" if f.full else "Войти")
+		b.disabled = f.full
 		var lobby: int = f["lobby"]
 		b.pressed.connect(func():
-			_status.text = "Входим в пати %s…" % f["name"]
-			Net.join_steam(lobby)
-			queue_free())
+			if Net.join_public_steam_lobby(lobby):
+				queue_free()
+			else:
+				_status.text = "Комната недоступна или заполнена. Обновите список.")
 		row.add_child(b)
 		_list.add_child(row)
 

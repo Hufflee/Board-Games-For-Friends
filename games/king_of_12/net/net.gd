@@ -20,6 +20,7 @@ signal status_changed(text: String)
 signal chat_received(entry: Dictionary)
 signal pause_changed
 signal ghost_received(peer: int, data: Dictionary)  # «тень» чужого действия (фишку тащат) — без хоста-логики, только показать
+signal steam_lobbies_changed
 
 const APP_ID := 480
 const PORT := 24565
@@ -27,6 +28,7 @@ const MAX_PLAYERS := 8
 const PARTY_CAPACITY := 10  # The Gang расширяет пати; пределы остальных игр сохраняются.
 const LOBBY_TAG := "bgff_party"
 const STEAM_LOBBY_FRIENDS_ONLY := 1
+const STEAM_LOBBY_PUBLIC := 2
 var bot_delay := 0.9  # пауза перед ходом бота
 const AUTO_ROLL := 30.0  # человек не бросил кубик — бросаем за него
 const REVEAL_SLACK := 20.0  # Оракул наступает во время вскрытия карт — даём время его досмотреть
@@ -104,6 +106,12 @@ var _client_start_pending := false
 var _client_expected_match := ""
 
 var _hosting_steam := false
+var steam_public_lobbies: Array[Dictionary] = []
+var steam_lobbies_loading := false
+var steam_lobbies_error := ""
+var _steam_lobby_refresh_again := false
+var _steam_lobby_request := 0
+var _steam_lobby_source: Object
 
 
 func _ready() -> void:
@@ -213,7 +221,7 @@ func host_steam(game_id: String = "king_of_12") -> void:
 	_create_game = game_id
 	_hosting_steam = true
 	status_changed.emit("Создаём пати в Steam…")
-	steam.createLobby(STEAM_LOBBY_FRIENDS_ONLY, PARTY_CAPACITY)
+	steam.createLobby(STEAM_LOBBY_PUBLIC, PARTY_CAPACITY)
 
 
 func join_steam(id: int) -> void:
@@ -253,8 +261,7 @@ func steam_friends() -> Array:
 	return list
 
 
-## Друзья, которые сейчас в пати этой игры (лобби Steam только для друзей — общий поиск их не покажет,
-## поэтому ищем через «во что играет друг»). [{id, name, lobby}]
+## Старые пати друзей доступны отдельно, в том числе friends-only. Код/приглашение работают как прежде.
 func steam_friend_parties() -> Array:
 	var list := []
 	if not steam_ok:
@@ -268,6 +275,105 @@ func steam_friend_parties() -> Array:
 			list.append({"id": fid, "name": steam.getFriendPersonaName(fid), "lobby": lobby})
 	list.sort_custom(func(a, b): return str(a["name"]).naturalnocasecmp_to(str(b["name"])) < 0)
 	return list
+
+
+## Поиск Steam асинхронный. Повтор во время ожидания объединяется в один следующий refresh.
+func request_steam_lobbies() -> bool:
+	if not steam_ok or steam == null:
+		steam_lobbies_loading = false
+		steam_public_lobbies.clear()
+		steam_lobbies_error = "Steam недоступен — запустите Steam и перезапустите игру."
+		steam_lobbies_changed.emit()
+		return false
+	if steam_lobbies_loading and _steam_lobby_source == steam:
+		_steam_lobby_refresh_again = true
+		return true
+	if _steam_lobby_source != steam:
+		if is_instance_valid(_steam_lobby_source):
+			var old_callback := _on_steam_lobby_list.bind(_steam_lobby_source)
+			if _steam_lobby_source.is_connected("lobby_match_list", old_callback):
+				_steam_lobby_source.disconnect("lobby_match_list", old_callback)
+		_steam_lobby_source = steam
+	var callback := _on_steam_lobby_list.bind(steam)
+	if not steam.is_connected("lobby_match_list", callback):
+		steam.connect("lobby_match_list", callback)
+	_steam_lobby_request += 1
+	_steam_lobby_refresh_again = false
+	steam_lobbies_loading = true
+	steam_lobbies_error = ""
+	steam_lobbies_changed.emit()
+	# Фильтры сбрасываются Steam после каждого запроса; 3 — весь мир, 0 — точное совпадение.
+	steam.addRequestLobbyListDistanceFilter(3)
+	steam.addRequestLobbyListStringFilter("game", LOBBY_TAG, 0)
+	steam.addRequestLobbyListStringFilter("appid", str(steam.getAppID()), 0)
+	steam.addRequestLobbyListResultCountFilter(5000)
+	var request := _steam_lobby_request
+	steam.requestLobbyList()
+	get_tree().create_timer(25.0).timeout.connect(_on_steam_lobby_timeout.bind(request))
+	return true
+
+
+func _on_steam_lobby_timeout(request: int) -> void:
+	if request != _steam_lobby_request or not steam_lobbies_loading:
+		return
+	steam_lobbies_loading = false
+	_steam_lobby_refresh_again = false
+	steam_lobbies_error = "Steam не ответил на поиск. Попробуйте обновить список."
+	steam_lobbies_changed.emit()
+
+
+func _on_steam_lobby_list(lobbies: Array, source: Object) -> void:
+	if source != steam or not steam_lobbies_loading:
+		return
+	steam_lobbies_loading = false
+	if _steam_lobby_refresh_again:
+		request_steam_lobbies()
+		return
+	var found: Array[Dictionary] = []
+	var seen := {}
+	for value: Variant in lobbies:
+		if not value is int or value <= 0 or value == lobby_id or seen.has(value):
+			continue
+		var id: int = value
+		seen[id] = true
+		if not _steam_public_lobby_matches(id):
+			continue
+		var count: int = steam.getNumLobbyMembers(id)
+		var capacity: int = steam.getLobbyMemberLimit(id)
+		var name: String = steam.getLobbyData(id, "host")
+		name = name.replace("\n", " ").replace("\r", " ").strip_edges().left(64)
+		found.append({"lobby": id, "name": name if not name.is_empty() else "Пати Steam",
+			"members": maxi(0, count), "capacity": maxi(0, capacity),
+			"full": capacity <= 0 or count >= capacity})
+	found.sort_custom(func(a: Dictionary, b: Dictionary) -> bool:
+		return str(a.name).naturalnocasecmp_to(str(b.name)) < 0)
+	steam_public_lobbies = found
+	steam_lobbies_error = ""
+	steam_lobbies_changed.emit()
+
+
+func _steam_public_lobby_matches(id: int) -> bool:
+	return steam.getLobbyData(id, "game") == LOBBY_TAG and steam.getLobbyData(id, "appid") == str(steam.getAppID())
+
+
+## Вход именно из браузера: проверяем свежую вместимость, не меняя маршрут кода/приглашения.
+func join_public_steam_lobby(id: int) -> bool:
+	if not steam_ok or steam == null or steam_lobbies_loading:
+		return false
+	var listed := false
+	for room: Dictionary in steam_public_lobbies:
+		if room.lobby == id:
+			listed = true
+			break
+	if not listed or not _steam_public_lobby_matches(id):
+		status_changed.emit("Эта комната больше недоступна. Обновите список.")
+		return false
+	var capacity: int = steam.getLobbyMemberLimit(id)
+	if capacity <= 0 or int(steam.getNumLobbyMembers(id)) >= capacity:
+		status_changed.emit("В этой комнате нет свободных мест. Обновите список.")
+		return false
+	join_steam(id)
+	return true
 
 
 func invite_friend(friend_id: int) -> bool:
@@ -337,9 +443,7 @@ func _on_lobby_created(result: int, id: int) -> void:
 		status_changed.emit("Steam не создал лобби (код %d)." % result)
 		return
 	lobby_id = id
-	steam.setLobbyData(id, "game", LOBBY_TAG)
-	steam.setLobbyData(id, "host", my_name)
-	steam.setLobbyJoinable(id, true)
+	_publish_steam_lobby(id)
 	var peer: MultiplayerPeer = ClassDB.instantiate("SteamMultiplayerPeer")
 	var err: int = peer.create_host(0)
 	if err != OK:
@@ -350,6 +454,13 @@ func _on_lobby_created(result: int, id: int) -> void:
 	_reset_host()
 	party_game = _create_game
 	_broadcast_lobby()
+
+
+func _publish_steam_lobby(id: int) -> void:
+	steam.setLobbyData(id, "game", LOBBY_TAG)
+	steam.setLobbyData(id, "host", my_name)
+	steam.setLobbyData(id, "appid", str(steam.getAppID()))
+	steam.setLobbyJoinable(id, true)
 
 
 func _on_lobby_joined(id: int, _permissions: int, _locked: bool, response: int) -> void:

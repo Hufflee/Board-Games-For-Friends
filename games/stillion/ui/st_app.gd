@@ -51,10 +51,12 @@ func restyle() -> void:
 	var draft := ""
 	var chat_draft := ""
 	var chat_open := false
+	var cannon_state := {}
 	if screen is TableScreen and is_instance_valid(screen._answer):
 		draft = screen._answer.text
 		chat_draft = screen._top.chat._input.text
 		chat_open = screen._top.chat.expanded
+		cannon_state = screen._cannon.animation_state()
 	get_tree().root.theme = STStyle.theme()
 	if screen is LobbyScreen:
 		show_lobby()
@@ -63,6 +65,8 @@ func restyle() -> void:
 		screen._answer.text = draft
 		screen._top.chat._input.text = chat_draft
 		screen._top.chat.expanded = chat_open
+		if not cannon_state.is_empty():
+			screen._cannon.restore_animation(cannon_state)
 	else:
 		show_menu()
 

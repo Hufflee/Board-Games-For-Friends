@@ -57,7 +57,7 @@ func show_menu(message: String = "") -> void:
 		Net.set_bots(3))
 	col.add_child(local)
 	var row := FSStyle.hbox()
-	for entry in [["Правила", show_rules], ["Настройки", show_settings], ["К выбору игры", back_to_hub]]:
+	for entry in [["Правила", show_rules], ["Пул карт", show_card_pool], ["Настройки", show_settings], ["К выбору игры", back_to_hub]]:
 		var b := FSStyle.button(entry[0])
 		b.pressed.connect(entry[1])
 		row.add_child(b)
@@ -126,10 +126,24 @@ func show_rules() -> void:
 	text.add_theme_constant_override("line_separation", 4)
 	text.text = RULES_TEXT
 	col.add_child(text)
+	var pool := FSStyle.button("Посмотреть пул карт")
+	pool.pressed.connect(show_card_pool)
+	col.add_child(pool)
 	var close := FSStyle.primary("Понятно")
 	close.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	close.pressed.connect(layer.queue_free)
 	col.add_child(close)
+
+
+## База и дополнения доступны в каталоге независимо от текущей раздачи.
+func show_card_pool() -> void:
+	if has_node("CardPool"):
+		return
+	var names := {"treasure": "Сокровища", "loot": "Лут", "monster": "Монстры", "event": "События", "room": "Комнаты", "character": "Персонажи", "eternal": "Стартовые предметы", "bonus": "Бонусные души"}
+	var entries := []
+	for card: Dictionary in FSData.data().cards:
+		entries.append({"title": FSData.title(int(card.id)), "group": names.get(card.kind, card.kind), "base": bool(card.base), "path": "res://games/four_souls/art/cards/%d.webp" % int(card.id)})
+	load("res://hub/card_pool_browser.gd").open(self, "Айзек · Пул карт", entries, FSStyle.box(FSStyle.surface()))
 
 
 func show_settings() -> void:

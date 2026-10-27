@@ -84,7 +84,7 @@ func _rebuild() -> void:
 	var phase := str(_view.get("phase", ""))
 	var round_number := clampi(int(_view.get("round_no", 1)), 1, 4)
 	var me := int(_view.get("seat", -1))
-	_top.info.text = "Ограбление%d · %s" % [int(_view.get("heist_no", 1)), ["Префлоп", "Флоп", "Тёрн", "Ривер"][round_number - 1]]
+	_top.info.text = "Ограбление %d · %s" % [int(_view.get("heist_no", 1)), ["Префлоп", "Флоп", "Тёрн", "Ривер"][round_number - 1]]
 	_players.add_child(TGStyle.heading("КОМАНДА", 24))
 	if bool(_view.get("hotseat", false)):
 		_players.add_child(TGStyle.label("Нажмите имя для смены места", 12, TGStyle.MUTED))
@@ -143,7 +143,7 @@ func _take(value: int) -> void:
 	_send("take", {"value": value})
 
 func _build_rank(me: int, chips: Array, players: Array) -> void:
-	var note := TGStyle.label("Оцените свою руку.1 — слабейшая, %d — сильнейшая. Чужую фишку можно забрать." % players.size(), 16, TGStyle.MUTED)
+	var note := TGStyle.label("Оцените свою руку. 1 — слабейшая, %d — сильнейшая. Чужую фишку можно забрать." % players.size(), 16, TGStyle.MUTED)
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_main.add_child(note)
 	var chip_row := TGStyle.row(8)

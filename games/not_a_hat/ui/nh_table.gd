@@ -1,5 +1,5 @@
 extends Control
-## Стол «Это не шляпа!»: игроки по кругу (вы — внизу), у каждого столбик подарков рубашкой вверх
+## Стол «Это не шляпа!»: игроки по кругу, подарки рядом в порядке передачи
 ## и штрафные карты; в центре — магазин подарков; подарок в пути — между дарителем и получателем,
 ## рядом — облачко «У меня для тебя подарок: …». Внизу — действие игрока.
 
@@ -11,6 +11,7 @@ var _seats: Array = []  # Control на каждого игрока (таблич
 var _shop: NHCard
 var _shop_label: Label
 var _moving: NHCard
+var _moving_holder: Control
 var _bubble: Label
 var _panel: PanelContainer
 var _panel_key := ""
@@ -20,6 +21,13 @@ var _celebrated := false
 var _filter := ""
 var _picker: GridContainer
 var _top: TopBar
+var _hand_cards: Dictionary = {}
+var _visual_key := ""
+var _motion: Tween
+var _exchange: Tween
+var _exchange_cards: Array[NHCard] = []
+var _moving_destination := Vector2.ZERO
+var _exchange_epoch := 0
 
 
 func _ready() -> void:
@@ -35,8 +43,11 @@ func _ready() -> void:
 	_layer.add_child(_shop_label)
 	_moving = NHCard.new(-1, 1)
 	_moving.visible = false
-	_moving.z_index = 5
-	_layer.add_child(_moving)
+	_moving_holder = Control.new()
+	_moving_holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_moving_holder.z_index = 5
+	_layer.add_child(_moving_holder)
+	_moving_holder.add_child(_moving)
 	_bubble = NHStyle.label("", NHStyle.BODY, NHStyle.INK, HORIZONTAL_ALIGNMENT_CENTER, true)
 	_bubble.add_theme_stylebox_override("normal", NHStyle.box(NHStyle.PAPER, 16, NHStyle.INK, 3, 0.25))
 	_bubble.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -116,7 +127,10 @@ func _send(kind: String, arg: Dictionary = {}) -> void:
 # --- Раскладка ----------------------------------------------------------------------
 
 func _center() -> Vector2:
-	return Vector2(size.x * 0.5 - 60, TopBar.HEIGHT + (size.y - TopBar.HEIGHT) * 0.40)
+	var bottom := size.y - 160.0
+	if is_instance_valid(_panel):
+		bottom = size.y - maxf(_panel.get_combined_minimum_size().y, 100.0) - 28.0
+	return Vector2(size.x * 0.5 - 60, (TopBar.HEIGHT + 16.0 + bottom) * 0.5)
 
 
 ## Место игрока s на эллипсе: вы — внизу, по часовой стрелке дальше.
@@ -124,7 +138,7 @@ func _seat_pos(s: int) -> Vector2:
 	var n: int = maxi(1, (_v.get("players", []) as Array).size())
 	var k := posmod(s - _me, n)
 	var a := PI / 2.0 - TAU * k / n  # против часовой: «вправо» (+1) от вас — справа на экране
-	var r := Vector2(minf(size.x * 0.36, 560), minf((size.y - TopBar.HEIGHT) * 0.28, 240))
+	var r := Vector2(minf(size.x * 0.38, 560), maxf(24.0, _center().y - TopBar.HEIGHT - 88.0))
 	return _center() + Vector2(cos(a) * r.x, sin(a) * r.y)
 
 
@@ -148,16 +162,30 @@ func _on_state(v: Dictionary) -> void:
 	var prev: Dictionary = _v
 	_v = v
 	_me = v["you"]
-	_build_seats()
 	_top.info.text = _info_text()
+	var visual_key := JSON.stringify([v.get("game_id", ""), v.you, v.phase, v.turn_no,
+		v.hands, v.card, v.penalties, v.giver, v.receiver, v.claim, v.players,
+		v.shop_top, v.shop_left, v.get("hotseat", false)])
+	if visual_key == _visual_key:
+		return
+	_visual_key = visual_key
+	_cancel_exchange()
+	if is_instance_valid(_motion):
+		_motion.kill()
+	var old_positions := _hand_positions()
+	var incoming_position := _moving_holder.position
 	_shop.set_card(int(v["shop_top"]), 1)
 	_shop.tooltip_text = "Магазин подарков: верхний подарок виден всем"
 	_shop_label.text = "Магазин · %d" % int(v["shop_left"])
-	_update_moving(prev)
 	var key := "%s/%d/%d/%d" % [v["phase"], v["turn_no"], v["claim"], _actor()]
 	if key != _panel_key:
 		_panel_key = key
 		_build_panel()
+	_build_seats(prev)
+	_layout()
+	_update_moving(prev)
+	if _is_accept(prev):
+		_animate_exchange(prev, old_positions, incoming_position)
 	_layout.call_deferred()
 	_sounds(prev)
 
@@ -195,10 +223,11 @@ func _sounds(prev: Dictionary) -> void:
 				Sfx.victory()
 
 
-func _build_seats() -> void:
+func _build_seats(prev: Dictionary) -> void:
 	for c in _seats:
 		c.queue_free()
 	_seats.clear()
+	_hand_cards.clear()
 	var n: int = _v["players"].size()
 	for s in n:
 		var box := NHStyle.vbox(4)
@@ -216,23 +245,35 @@ func _build_seats() -> void:
 		tag.add_child(trow)
 		tag.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		box.add_child(tag)
-		# столбик подарков: новый — сверху, старый — внизу (его и дарят)
+		# Порядок слева направо совпадает с очередью правил: старый подарок передарят первым.
 		var col := Control.new()
 		var hand: Array = _v["hands"][s]
-		col.custom_minimum_size = Vector2(NHStyle.CARD.x, NHStyle.CARD.y + 26 * maxi(0, hand.size() - 1)) * 0.82
+		var factor := 0.82 if n <= 6 else 0.68
+		var width := NHStyle.CARD.x * factor
+		col.custom_minimum_size = Vector2(hand.size() * (width + 8) - 8, NHStyle.CARD.y * factor + 20)
 		col.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		col.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		for k in range(hand.size() - 1, -1, -1):
+		var cards: Array[NHCard] = []
+		for k in hand.size():
 			var cd: Dictionary = hand[k]
-			var card := NHCard.new(int(cd["g"]), int(cd["dir"]))
-			card.set_card(int(cd["g"]), int(cd["dir"]))
-			card.scale = Vector2.ONE * 0.82
+			var old_g := int(cd.g)
+			if prev.get("phase", "") == "memorize" and _v.phase != "memorize":
+				if s < prev.hands.size() and k < prev.hands[s].size():
+					old_g = int(prev.hands[s][k].g)
+			var card := NHCard.new(old_g, int(cd["dir"]))
+			card.scale = Vector2.ONE * factor
 			card.pivot_offset = Vector2.ZERO
-			card.position = Vector2(0, 26 * 0.82 * (hand.size() - 1 - k))
-			if k == 0 and hand.size() > 1:
-				card.tooltip_text = "Старый подарок — его передарят следующим"
+			card.position = Vector2(k * (width + 8), 0)
+			card.glow = 0.7 if k == 0 and s == int(_v.receiver) and _v.phase == "respond" else 0.0
 			col.add_child(card)
+			cards.append(card)
+			var caption := NHStyle.label("Дальше" if k == 0 else "Новый", NHStyle.CAP, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, true)
+			caption.position = Vector2(k * (width + 8), NHStyle.CARD.y * factor + 3)
+			caption.size = Vector2(width, 17)
+			caption.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			col.add_child(caption)
 		box.add_child(col)
+		_hand_cards[s] = cards
 		# штрафные карты — маленькие, лицом вверх
 		var pens: Array = _v["penalties"][s]
 		if not pens.is_empty():
@@ -251,6 +292,8 @@ func _build_seats() -> void:
 			box.add_child(prow)
 		_layer.add_child(box)
 		_seats.append(box)
+		for k in cards.size():
+			cards[k].set_card(int(hand[k].g), int(hand[k].dir), cards[k].gift != int(hand[k].g))
 
 
 ## Подарок в пути: летит от дарителя к получателю, рядом — облачко с названием.
@@ -267,7 +310,7 @@ func _update_moving(prev: Dictionary) -> void:
 		g = int(_v["reveal"]["giver"])
 		r = int(_v["reveal"]["receiver"])
 	_moving.visible = true
-	_moving.set_card(int(cd["g"]), int(cd["dir"]))
+	_moving.set_card(int(cd["g"]), int(cd["dir"]), not _is_accept(prev))
 	_moving.glow = 1.0 if ph == "reveal" else 0.0
 	# подарок в пути — на полпути между дарителем и получателем (не поверх магазина)
 	var mid := _seat_pos(g).lerp(_seat_pos(r), 0.5)
@@ -276,28 +319,121 @@ func _update_moving(prev: Dictionary) -> void:
 	var from := _seat_pos(g).lerp(mid, 0.55)
 	var to := _seat_pos(r).lerp(mid, 0.55)
 	var target := (from if ph == "give" else to) - NHStyle.CARD * 0.5
+	_moving_destination = target
 	if int(_v["turn_no"]) != _last_turn and ph == "give":
 		_last_turn = int(_v["turn_no"])
 		var start := (_center() if _v["from_shop"] else _seat_pos(g)) - NHStyle.CARD * 0.5
-		_moving.position = start
-		_moving.scale = Vector2.ONE * 0.8
+		_moving_holder.position = start
+		_moving_holder.scale = Vector2.ONE * 0.8
 		var t := create_tween().set_parallel()
-		t.tween_property(_moving, "position", target, 0.35).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-		t.tween_property(_moving, "scale", Vector2.ONE, 0.35)
+		_motion = t
+		t.tween_property(_moving_holder, "position", target, 0.35).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		t.tween_property(_moving_holder, "scale", Vector2.ONE, 0.35)
 	elif ph == "respond" and prev.get("phase", "") == "give":
-		create_tween().tween_property(_moving, "position", target, 0.4).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
-	elif ph == "reveal" and prev.get("phase", "") != "reveal":
-		var t2 := create_tween()
-		t2.tween_property(_moving, "scale", Vector2(0.05, 1.1), 0.12)
-		t2.tween_property(_moving, "scale", Vector2(1.25, 1.25), 0.18).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		_motion = create_tween()
+		_motion.tween_property(_moving_holder, "position", target, 0.4).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 	else:
-		_moving.position = target
+		_moving_holder.position = target
 	if int(_v["claim"]) >= 0 and ph in ["respond", "reveal"]:
 		_bubble.visible = true
 		_bubble.text = "«У меня для тебя подарок: %s!»" % NHData.gift_name(int(_v["claim"]))
 		_bubble.reset_size()
 		var bp := _seat_pos(g).lerp(_center(), 0.15) + Vector2(-_bubble.size.x * 0.5, -NHStyle.CARD.y * 0.5 - _bubble.size.y - 30)
 		_bubble.position = Vector2(clampf(bp.x, 8, size.x - _bubble.size.x - 300), clampf(bp.y, 60, size.y - 200))
+
+
+func _hand_positions() -> Dictionary:
+	var result := {}
+	for seat: int in _hand_cards:
+		var positions: Array[Vector2] = []
+		for card: NHCard in _hand_cards[seat]:
+			positions.append(_layer.get_global_transform().affine_inverse() * card.get_global_transform().origin)
+		result[seat] = positions
+	return result
+
+
+func _is_accept(prev: Dictionary) -> bool:
+	return prev.get("phase", "") == "respond" and _v.phase == "give" and not _v.from_shop \
+		and int(_v.giver) == int(prev.receiver) and int(_v.turn_no) == int(prev.turn_no) + 1 \
+		and prev.get("game_id", "") == _v.get("game_id", "")
+
+
+func _exchange_sprite(card_data: Dictionary, at: Vector2, factor: Vector2) -> Control:
+	var holder := Control.new()
+	holder.position = at
+	holder.scale = factor
+	holder.z_index = 8
+	holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_layer.add_child(holder)
+	var card := NHCard.new(int(card_data.g), int(card_data.dir))
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	holder.add_child(card)
+	_exchange_cards.append(card)
+	return holder
+
+
+func _animate_exchange(prev: Dictionary, old_positions: Dictionary, incoming: Vector2) -> void:
+	if is_instance_valid(_motion):
+		_motion.kill()
+	_moving.visible = false
+	var epoch := _exchange_epoch
+	# Контейнеры сначала раскладывают новые слоты; отдельные держатели двигаются независимо от flip.
+	await get_tree().process_frame
+	if epoch != _exchange_epoch:
+		return
+	var seat := int(prev.receiver)
+	if not old_positions.has(seat) or not _hand_cards.has(seat):
+		_moving.visible = true
+		return
+	var old_hand: Array = prev.hands[seat]
+	var new_cards: Array = _hand_cards[seat]
+	var destinations := _hand_positions()
+	for card: NHCard in new_cards:
+		card.visible = false
+	var factor: Vector2 = new_cards[0].scale
+	var accepted := _exchange_sprite(prev.card, incoming, Vector2.ONE)
+	var outgoing := _exchange_sprite(old_hand[0], old_positions[seat][0], factor)
+	var accepted_card: NHCard = accepted.get_child(0)
+	var new_g := int(_v.hands[seat][-1].g)
+	accepted_card.set_card(new_g, int(_v.hands[seat][-1].dir), true)
+	_exchange = create_tween().set_parallel()
+	_exchange.tween_property(accepted, "position", destinations[seat][-1], 0.55).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	_exchange.tween_property(accepted, "scale", factor, 0.55)
+	_exchange.tween_property(outgoing, "position", _moving_destination, 0.55).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	_exchange.tween_property(outgoing, "scale", Vector2.ONE, 0.55)
+	if old_hand.size() > 1:
+		var remaining := _exchange_sprite(old_hand[1], old_positions[seat][1], factor)
+		_exchange.tween_property(remaining, "position", destinations[seat][0], 0.55).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	_exchange.chain().tween_callback(_finish_exchange.bind(epoch))
+
+
+func _finish_exchange(epoch: int) -> void:
+	if epoch != _exchange_epoch:
+		return
+	_moving_holder.position = _moving_destination
+	_moving_holder.scale = Vector2.ONE
+	_moving.visible = true
+	_cancel_exchange()
+
+
+func _cancel_exchange() -> void:
+	_exchange_epoch += 1
+	if is_instance_valid(_exchange):
+		_exchange.kill()
+	for card: NHCard in _exchange_cards:
+		if is_instance_valid(card):
+			card.get_parent().queue_free()
+	_exchange_cards.clear()
+	for seat: int in _hand_cards:
+		for card: NHCard in _hand_cards[seat]:
+			if is_instance_valid(card):
+				card.visible = true
+
+
+func _exit_tree() -> void:
+	_cancel_exchange()
+	if is_instance_valid(_motion):
+		_motion.kill()
 
 
 # --- Нижняя панель: действие игрока -------------------------------------------------
@@ -322,7 +458,7 @@ func _build_panel() -> void:
 		"give":
 			if actor == g:
 				var who := ("(за %s) " % _name(g)) if _hotseat() else ""
-				var what := "новый подарок из магазина" if _v["from_shop"] else "свой старый подарок (нижнюю карту)"
+				var what := "новый подарок из магазина" if _v["from_shop"] else "свой старый подарок (левую карту)"
 				col.add_child(_line("%sВы дарите %s игроку %s. Что это за подарок?" % [who, what, _name(r)], true))
 				_build_picker(col)
 			else:
@@ -334,7 +470,7 @@ func _build_panel() -> void:
 				var row := NHStyle.hbox(14)
 				row.alignment = BoxContainer.ALIGNMENT_CENTER
 				var yes := NHStyle.primary("Спасибо!", NHStyle.BODY, 200)
-				yes.tooltip_text = "Принять: подарок ляжет сверху, а вы подарите свой старый"
+				yes.tooltip_text = "Новый подарок займёт правое место, левый вы передарите дальше" if (_v.hands[r] as Array).size() > 1 else "Принять подарок и передарить прежний"
 				yes.pressed.connect(func(): _send("nh_respond", {"accept": true}))
 				row.add_child(yes)
 				var no := NHStyle.button("Это не %s!" % claim.to_lower(), NHStyle.BODY, 200)

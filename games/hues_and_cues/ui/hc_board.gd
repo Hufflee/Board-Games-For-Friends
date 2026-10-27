@@ -136,9 +136,9 @@ static func filtered_color(color: Color, channel: int) -> Color:
 		return color
 	if channel == 3:
 		var value := color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722
-		return Color(value, value, value, color.a)
+		return color.lerp(Color(value, value, value, color.a), 0.8)
 	var tint: Color = [Color("3b62ff"), Color("39ed64"), Color("ff404b")][clampi(channel, 0, 2)]
-	return color.lerp(tint, 0.567)
+	return color.lerp(tint, 0.567 * 0.9)
 
 
 ## Клетки неподвижны: по кольцам «перепрыгивают» только оттенки, с разгоном и торможением.
@@ -166,6 +166,21 @@ func set_filter_view(filter_id: int, giver_view: bool, round_started: bool = tru
 	color_filter = filter_id
 	_giver_view = giver_view
 	_round_started = round_started
+
+
+## Только локальное состояние анимации: тема не запускает текущий раунд заново.
+func animation_state() -> Dictionary:
+	var state := {}
+	for key in ["distorted", "color_order", "color_filter", "_display_order", "_spin_start", "_spin_turns", "_giver_view", "_round_started", "_filter_amount", "_distort_intro", "_reveal_active", "_reveal_elapsed", "_dim"]:
+		state[key] = get(key)
+	return state.duplicate(true)
+
+
+func restore_animation(state: Dictionary) -> void:
+	for key in animation_state():
+		if state.has(key):
+			set(key, state[key])
+	queue_redraw()
 
 
 func _ready() -> void:

@@ -8,12 +8,16 @@ const SettingsScreen := preload("res://games/king_of_12/ui/settings_screen.gd")
 const LOGO_CELLS := [8, 64, 129, 233, 318, 413, 446, 207, 290]
 
 const SKIP_INTRO_META := &"hc_skip_intro_once"  # передача флага через полную перезагрузку темы
+const BOARD_RESUME_META := &"hc_theme_board_resume"
+var _board_resume := {}
 var _intro_pending := true
 var screen: Control
 
 
 func _ready() -> void:
 	var root := get_tree().root
+	_board_resume = root.get_meta(BOARD_RESUME_META, {})
+	root.remove_meta(BOARD_RESUME_META)
 	_intro_pending = not bool(root.get_meta(SKIP_INTRO_META, false))
 	if root.has_meta(SKIP_INTRO_META):
 		root.remove_meta(SKIP_INTRO_META)
@@ -106,6 +110,8 @@ func _on_game_started() -> void:
 func show_table() -> void:
 	var t := TableScreen.new()
 	t.play_intro = _intro_pending
+	t.distorted_resume = _board_resume
+	_board_resume = {}
 	_intro_pending = false
 	t.app = self
 	_set_screen(t)
@@ -222,5 +228,7 @@ func _on_closed(reason: String) -> void:
 ## Сменили тему в настройках — пересобрать экран в новой палитре (партия продолжается: стол строится из Net.view).
 func _on_prefs() -> void:
 	if HCStyle.sync_prefs():
+		if screen is TableScreen and screen._v.get("distorted", false):
+			get_tree().root.set_meta(BOARD_RESUME_META, {"match": Net.game_id, "round": int(screen._v["round_no"]), "board": screen._board.animation_state()})
 		# новая тема — вступление (окрашивание поля) проигрывается заново
 		get_tree().reload_current_scene.call_deferred()

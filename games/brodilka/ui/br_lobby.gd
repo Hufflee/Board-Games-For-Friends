@@ -52,6 +52,12 @@ func _rebuild() -> void:
 	back.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	head.add_child(back)
 	_body.add_child(head)
+	var references := BRStyle.hbox(12)
+	for entry in [["Правила", app.show_rules], ["Пул карт", app.show_card_pool]]:
+		var reference := BRStyle.button(entry[0], BRStyle.CAP)
+		reference.pressed.connect(entry[1])
+		references.add_child(reference)
+	_body.add_child(references)
 	if data["mode"] == "offline":
 		var tl := BRStyle.label("Игра на одном компьютере: ходите по очереди за всех — экран показывает, чей сейчас ход.", BRStyle.CAP, BRStyle.MUTED)
 		tl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART

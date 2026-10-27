@@ -3,6 +3,10 @@ extends Control
 ## Карточка «Это не шляпа!»: лицом — белая с чёрным рисунком и подписью; рубашкой — розовая
 ## с белой стрелкой, куда её передавать (влево / вправо).
 
+const Flip := preload("res://hub/card_flip.gd")
+var _flip: Node
+var _front_gift := -1
+
 var gift := -1  # -1 — рубашкой вверх
 var dir := 1  # -1 — стрелка влево, 1 — вправо
 var glow := 0.0:  # подсветка (сейчас передаётся / вскрыта)
@@ -13,6 +17,7 @@ var glow := 0.0:  # подсветка (сейчас передаётся / вс
 
 func _init(g: int = -1, d: int = 1) -> void:
 	gift = g
+	_front_gift = g
 	dir = d
 	custom_minimum_size = NHStyle.CARD
 	size = NHStyle.CARD
@@ -20,10 +25,29 @@ func _init(g: int = -1, d: int = 1) -> void:
 	pivot_offset = NHStyle.CARD * 0.5
 
 
-func set_card(g: int, d: int) -> void:
-	gift = g
+func _ready() -> void:
+	_flip = Flip.attach(self, _show_side, gift >= 0)
+
+
+func set_card(g: int, d: int, animate: bool = false) -> void:
+	if g >= 0:
+		_front_gift = g
 	dir = d
+	if is_instance_valid(_flip):
+		if animate:
+			_flip.flip_to(g >= 0)
+			if not _flip.busy:
+				_show_side(_flip.face_up)
+		else:
+			_flip.set_face(g >= 0)
+	else:
+		gift = g
 	tooltip_text = NHData.gift_name(g) if g >= 0 else ("Рубашка: передаётся " + ("влево" if d < 0 else "вправо"))
+	queue_redraw()
+
+
+func _show_side(up: bool) -> void:
+	gift = _front_gift if up else -1
 	queue_redraw()
 
 

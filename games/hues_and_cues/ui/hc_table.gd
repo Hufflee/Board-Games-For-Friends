@@ -4,6 +4,7 @@ extends Control
 
 var app: Node
 var play_intro := false  # только начало партии, не обновления состояния
+var distorted_resume := {}
 
 var _v := {}
 var _me := 0
@@ -71,7 +72,7 @@ func _ready() -> void:
 		leave = HCStyle.button("Выйти", 14)
 		LeaveGuard.wire(leave, "Выйти из партии?", "Игра закончится, вы вернётесь в меню.", func(): app.back_to_menu())
 	_top.actions.add_child(leave)
-	_top.chat.z_index = 80  # поверх бокового меню и панели хода
+	_top.chat.z_index = 95  # поверх бокового меню и панели хода
 	HCStyle.restyle_chat(_top.chat)
 	_tint_top()
 
@@ -111,6 +112,9 @@ func _ready() -> void:
 		b.custom_minimum_size.x = 240
 		return b, Vector2(-620, 70))
 
+	# GUI выбирает получателя мыши по порядку дерева, а не по z_index.
+	# Панели поля создаются позже TopBar и иначе перекрывают ввод чата.
+	move_child(_top.chat, -1)
 	resized.connect(_layout)
 	_layout()
 	Net.state_changed.connect(_on_state)
@@ -204,6 +208,10 @@ func _update_board(phase: String) -> void:
 			_distorted_round = int(_v["round_no"])
 			_board.play_distorted_round(_v["color_order"], filter_id, int(_v["board_seed"]), float(_v["spin_start"]), float(_v["spin_turns"]), giver_view)
 		_board.set_filter_view(filter_id, giver_view, phase != "prepare")
+		if not distorted_resume.is_empty():
+			if distorted_resume.get("match") == Net.game_id and int(distorted_resume.get("round", -1)) == int(_v["round_no"]):
+				_board.restore_animation(distorted_resume["board"])
+			distorted_resume = {}
 	var seat_for_color: int = _v["guesser"] if _hotseat() and int(_v["guesser"]) >= 0 else _me
 	_board.my_color = HCStyle.piece_color(seat_for_color)
 	if phase == "pick" and _am_giver():

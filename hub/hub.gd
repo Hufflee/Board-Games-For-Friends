@@ -242,6 +242,7 @@ func _party_create_panel() -> Control:
 	v.add_child(HubStyle.label("Steam: " + Net.my_name if Net.steam_ok else "Steam недоступен — запустите Steam и перезапустите игру", 13, Color("7dffc8") if Net.steam_ok else HubStyle.MUTED))
 	var create := HubStyle.primary("Создать пати (Steam)", 16)
 	create.disabled = not Net.steam_ok
+	create.tooltip_text = "Новая пати общедоступна и появится в Browse lobbies."
 	create.pressed.connect(func(): Net.host_steam(""))
 	v.add_child(create)
 	var join_row := HubStyle.hbox(6)
@@ -256,7 +257,7 @@ func _party_create_panel() -> Control:
 	v.add_child(join_row)
 	var browse := HubStyle.button("Browse lobbies", 14)
 	browse.disabled = not Net.steam_ok
-	browse.tooltip_text = "Друзья из Steam, которые сейчас собрались в этой игре"
+	browse.tooltip_text = "Открытые пати этой игры в Steam, не только у друзей"
 	browse.pressed.connect(func(): SteamInvite.open_browser())
 	v.add_child(browse)
 	if not Net.last_join.is_empty():

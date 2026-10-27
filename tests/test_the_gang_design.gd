@@ -1,0 +1,55 @@
+extends "res://tests/test_the_gang_ui.gd"
+## Одна тёмная тема, выбранный таймер, исправленный текст, памятка и оформление720p.
+func _run() -> void:
+	await frames()
+	root.size = Vector2i(1280, 720)
+	net = root.get_node("Net")
+	var style = load("res://games/the_gang/ui/tg_style.gd")
+	var preferences := root.get_node("Prefs")
+	preferences.theme_mode = "light"
+	style.theme()
+	var color: Color = style.BG
+	preferences.theme_mode = "dark"
+	style.theme()
+	check(style.BG == color and color.get_luminance() < 0.1, "Только одна тёмная тема")
+	net.host_offline("the_gang")
+	net.set_bots(2)
+	app = load("res://games/the_gang/ui/main.tscn").instantiate()
+	root.add_child(app)
+	current_scene = app
+	await frames(15)
+	var selected: Array = app.find_children("*", "Button", true, false).filter(func(b): return b.theme_type_variation == "SelectedButton")
+	check(selected.size() == 1, "Текущий таймер выделен ровно один раз")
+	check(selected[0].get_theme_stylebox("disabled").bg_color == style.GOLD, "Выбранный таймер залит золотым")
+	check(selected[0].get_theme_color("font_disabled_color") == style.BG, "Цифры выбранного таймера контрастны")
+	check(not app.RULES.to_lower().contains("tts"), "В правилах нет TTS")
+	var regex := RegEx.new()
+	regex.compile("[А-Яа-яЁё][0-9]")
+	check(regex.search(app.RULES) == null, "Числа отделены пробелами")
+	await shot("design-lobby")
+	app.show_rules()
+	await frames(10)
+	await click(app.find_child("PokerReference", true, false))
+	await frames(10)
+	var popup: Control = app.get_child(app.get_child_count() - 1)
+	var image := app.find_child("PokerReferenceImage", true, false) as TextureRect
+	check(image != null and image.texture != null, "Памятка комбинаций загружена")
+	check(image.size.y > root.size.y, "Памятка читается с вертикальной прокруткой")
+	await shot("design-poker")
+	await click(popup.find_child("CloseRules", true, false))
+	await click(app.find_child("CloseRules", true, false))
+	check(net.start_game().is_empty(), "Партия запускается")
+	await frames(15)
+	var table: Control = app.screen
+	await click(app.find_child("PeekCards", true, false))
+	check(table._peek, "Карты открыты перед сменой общей темы")
+	preferences.theme_mode = "light"
+	preferences.changed.emit()
+	await frames(5)
+	check(app.screen == table and table._peek, "Общая тема не пересоздаёт стол и руку")
+	await shot("design-table")
+	print("THE GANG DESIGN: ", checks, " проверок, ", errors, " ошибок")
+	net.leave()
+	app.queue_free()
+	await frames()
+	await root.get_node("Sfx").request_quit(1 if errors else 0)

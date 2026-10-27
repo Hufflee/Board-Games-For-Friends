@@ -59,6 +59,22 @@ var _anger := 0.0
 var _sprite_scale := 1.0
 
 
+## Визуальное состояние сохраняется при смене темы, правила и таймер остаются на хосте.
+func animation_state() -> Dictionary:
+	var state := {}
+	for key in ["aim", "inflate", "burning", "fuse_left", "fuse_duration", "_angle", "_t", "_pressure", "_spring_v", "_recoil", "_flash", "_blink", "_smoke", "_sparks", "_frame", "_old_frame", "_turn_blend", "_anger"]:
+		state[key] = get(key)
+	return state.duplicate(true)
+
+
+func restore_animation(state: Dictionary) -> void:
+	for key in animation_state():
+		if state.has(key):
+			set(key, state[key])
+	_sync_sprite(0.0)
+	queue_redraw()
+
+
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
