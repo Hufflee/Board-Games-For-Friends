@@ -140,7 +140,7 @@ func _ready() -> void:
 		b.add_theme_stylebox_override("normal", HCStyle.box(HCStyle.SURFACE, 14, HCStyle.LINE, 1, HCStyle.SHADOW, 10))
 		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		b.custom_minimum_size.x = 240
-		return b, Vector2(-590, 10))
+		return b, Vector2(-590, TopBar.HEIGHT + 16))
 
 	resized.connect(_layout)
 	_layout()
@@ -857,6 +857,7 @@ func _update_bottom() -> void:
 		col.add_child(HCStyle.label("Ваша догадка" + ((" (за %s)" % _name(_seat())) if _hotseat() else ""), HCStyle.BODY, HCStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "bold"))
 		var row := HCStyle.hbox(8)
 		_guess_edit = LineEdit.new()
+		_guess_edit.keep_editing_on_text_submit = true
 		_guess_edit.placeholder_text = "Напишите слово и нажмите Enter (можно и голосом — рассказчик отметит)"
 		_guess_edit.max_length = 60
 		_guess_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -876,8 +877,12 @@ func _update_bottom() -> void:
 func _send_guess() -> void:
 	if _guess_edit == null or _guess_edit.text.strip_edges() == "":
 		return
-	_send("ws_guess", {"text": _guess_edit.text})
+	# У хоста _send синхронно перестраивает панель при верной догадке.
+	# Заканчиваем работу с редактором до callback: после него поле может уже исчезнуть.
+	var text := _guess_edit.text
 	_guess_edit.clear()
+	_guess_edit.grab_focus()
+	_send("ws_guess", {"text": text})
 
 
 func _refresh_chips() -> void:

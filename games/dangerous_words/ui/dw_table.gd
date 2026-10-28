@@ -373,6 +373,7 @@ func _build_traps(col: VBoxContainer) -> void:
 		var add := DWStyle.hbox(8)
 		add.alignment = BoxContainer.ALIGNMENT_CENTER
 		_cand_edit = LineEdit.new()
+		_cand_edit.keep_editing_on_text_submit = true
 		_cand_edit.placeholder_text = "Слово-ловушка… (Enter)"
 		_cand_edit.custom_minimum_size.x = 280
 		_cand_edit.max_length = 40

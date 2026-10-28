@@ -27,7 +27,7 @@ const BOXED_ROWS := 3  # ячеек с коробками (в последней
 ## Какие коробки на какой полке (сверху вниз, слева направо).
 const SHELF_LAYOUT := [
 	["wavelength", "hues_and_cues", "dangerous_words", "king_of_12", "not_a_hat"],
-	["ready_set_bet", "tip_top", "tip_top_18", "gloom", "gloomier", "stillion"],
+	["ready_set_bet", "tip_top_18", "gloom", "gloomier", "stillion"],
 	["word_slam", "brodilka", "phantom_ink", "four_souls", "the_gang"],
 ]
 const SHELF_X := 0.25

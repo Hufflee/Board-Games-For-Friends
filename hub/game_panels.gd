@@ -118,6 +118,8 @@ var _panel_point := Vector2.ZERO
 var _hover := -1
 var _selected := -1
 var _t := 0.0
+var _grid_scale := 1.0
+var _layout_viewport := Vector2.ZERO
 var _shader: Shader
 var _anchor := Transform3D.IDENTITY  # плоскость панелей перед камерой (снимается при открытии)
 var _launcher: Node3D  # стеклянный квадратик справа сверху от шкафа
@@ -382,7 +384,7 @@ func _make(g: Dictionary) -> Dictionary:
 		"home": Transform3D.IDENTITY, "depth": 1.0, "seed": randf() * TAU, "tilt": Vector2.ZERO, "label_a": 0.0, "shadow": shadow, "smat": smat}
 
 
-## Раскладка: сетка по 4 в ряд в плоскости перед камерой, с лёгким разбросом глубины и поворота.
+## Раскладка вписывается в правую часть окна; размер зависит от числа игр и пропорций окна.
 func _layout() -> void:
 	var fwd := -camera.global_transform.basis.z
 	var right := camera.global_transform.basis.x
@@ -392,26 +394,38 @@ func _layout() -> void:
 	_anchor = Transform3D(Basis(right, up, -fwd), center)
 	var n := _items.size()
 	var rows := int(ceil(float(n) / COLS))
+	_layout_viewport = camera.get_viewport().get_visible_rect().size
+	var top_left := camera.project_position(_layout_viewport * Vector2(0.42, 0.14), DIST)
+	var bottom_right := camera.project_position(_layout_viewport * Vector2(0.94, 0.82), DIST)
+	var area_width := absf((bottom_right - top_left).dot(right))
+	var area_height := absf((bottom_right - top_left).dot(up))
+	var columns := mini(COLS, maxi(1, n))
+	var grid_width := columns * CELL.x + maxi(0, columns - 1) * GAP.x
+	var grid_height := maxi(1, rows) * PANEL_H + maxi(0, rows - 1) * GAP.y
+	_grid_scale = minf(1.0, minf(area_width / grid_width, area_height / grid_height))
+	var grid_center := (top_left + bottom_right) * 0.5 - center
+	var center_x := grid_center.dot(right)
+	var center_y := grid_center.dot(up)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 12345  # раскладка одна и та же при каждом открытии
 	for i in n:
 		var r := i / COLS
 		var c := i % COLS
 		var in_row := mini(COLS, n - r * COLS)
-		var x := (c - (in_row - 1) * 0.5) * (CELL.x + GAP.x) + CENTER.x
-		var y := ((rows - 1) * 0.5 - r) * (CELL.y + GAP.y) + CENTER.y
+		var x := (c - (in_row - 1) * 0.5) * (CELL.x + GAP.x) * _grid_scale + center_x
+		var y := ((rows - 1) * 0.5 - r) * (CELL.y + GAP.y) * _grid_scale + center_y
 		var z := rng.randf_range(-0.06, 0.06)
 		# повернуты к центру (как экраны вокруг человека в VR) + немного вразнобой
 		# сначала — лицом к игроку (сетка правее центра: без этого правый столбец камера видит сбоку,
 		# и его поворот «съедается» перспективой), потом — симметрично к среднему столбцу
 		var face_yaw := atan2(-x, DIST - z)
 		var face_pitch := atan2(y, DIST - z)
-		var yaw := face_yaw - (x - CENTER.x) * TURN + rng.randf_range(-0.04, 0.04)
+		var yaw := face_yaw - (x - center_x) * TURN + rng.randf_range(-0.04, 0.04)
 		var pitch := face_pitch + rng.randf_range(-0.04, 0.04)
 		var roll := rng.randf_range(-0.03, 0.03)
 		var b := Basis.from_euler(Vector3(pitch, yaw, roll))
-		var deeper := CENTER_DEPTH if absf(x - CENTER.x) < 0.01 else 0.0
-		_items[i]["home"] = Transform3D(b, Vector3(x, y, z * 0.6 + absf(x - CENTER.x) * 0.18 - deeper))
+		var deeper := CENTER_DEPTH if absf(x - center_x) < 0.01 else 0.0
+		_items[i]["home"] = Transform3D(b, Vector3(x, y, z * 0.6 + absf(x - center_x) * 0.18 - deeper))
 		_items[i]["depth"] = 1.0 + z * 6.0
 
 
@@ -676,6 +690,8 @@ func _unhandled_input(e: InputEvent) -> void:
 
 
 func _process(delta: float) -> void:
+	if is_open and camera.get_viewport().get_visible_rect().size != _layout_viewport:
+		_layout()
 	if _panel_press >= 0 and _panel_drag < 0 and _selected < 0:
 		_panel_hold += delta
 		if _panel_hold >= 0.4:
@@ -717,7 +733,7 @@ func _process(delta: float) -> void:
 		var depth: float = it["depth"]
 		var mat: ShaderMaterial = it["mat"]
 		var target: Transform3D
-		var target_scale := 1.0
+		var target_scale := _grid_scale
 		var glow := 0.0
 		if not root.visible:
 			continue
@@ -759,7 +775,7 @@ func _process(delta: float) -> void:
 				var sp := camera.unproject_position(root.global_position)
 				var dv := (mp - sp) / (vp.get_visible_rect().size.y * 0.12)
 				tilt = Vector2(clampf(dv.x, -1, 1), clampf(dv.y, -1, 1))
-				target_scale = 1.06
+				target_scale = 1.06 * _grid_scale
 				glow = 0.7
 			it["tilt"] = (it["tilt"] as Vector2).lerp(tilt, k)
 			var tl: Vector2 = it["tilt"]
@@ -771,8 +787,9 @@ func _process(delta: float) -> void:
 			root.global_transform = xf
 			root.scale = Vector3.ONE * lerpf(FLY_SCALE, target_scale, fly)
 		else:
+			var previous_scale := root.scale
 			root.global_transform = root.global_transform.interpolate_with(target, k)
-			root.scale = root.scale.lerp(Vector3.ONE * target_scale, k)
+			root.scale = previous_scale.lerp(Vector3.ONE * target_scale, k)
 		# постер внутри стекла — свой параллакс (глубже стекла)
 		var tl2: Vector2 = it["tilt"]
 		mat.set_shader_parameter("shift", Vector2(-m.x * 0.02 + tl2.x * 0.012, m.y * 0.02 - tl2.y * 0.01))

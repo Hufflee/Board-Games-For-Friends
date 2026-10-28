@@ -238,6 +238,7 @@ func _controls(col: Control) -> void:
 
 func _entry(col: Control, text: String, kind: String, limit: int) -> void:
 	var input := LineEdit.new()
+	input.keep_editing_on_text_submit = true
 	input.max_length = limit
 	input.placeholder_text = "Ответ" if limit > 1 else "Буква или пробел"
 	col.add_child(input)

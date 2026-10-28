@@ -85,7 +85,10 @@ func attach_net(net: Node) -> void:
 	net.lobby_changed.connect(_on_lobby)
 	net.game_started.connect(func(): mark("Сигнал начала партии"))
 	net.game_ended.connect(func(): mark("Партия завершена"))
-	net.session_closed.connect(func(_reason): mark("Соединение закрыто"))
+	net.session_closed.connect(func(reason):
+		var details: Dictionary = net.last_disconnect.duplicate(true)
+		details["причина_для_игрока"] = reason
+		mark("Соединение закрыто", details))
 	mark("Сеть инициализирована")
 
 
@@ -185,6 +188,22 @@ func _safe_details(details: Dictionary) -> Dictionary:
 		elif key == "драйвер_GPU" and value is PackedStringArray:
 			# Данные самого движка, а не произвольные контейнеры из сетевого состояния.
 			safe[key] = Array(value).slice(0, 4)
+		elif key in ["причина", "причина_для_игрока", "сеть_до_выхода", "игра_до_выхода", "партия_до_выхода", "роль_до_выхода", "тип_peer"] and value is String:
+			safe[key] = value.left(512)
+		elif key in ["лобби_до_выхода", "статус_peer", "peer", "handle", "предыдущее_состояние", "код", "состояние", "время_мс"] and value is int:
+			safe[key] = value
+		elif key == "была_партия" and value is bool:
+			safe[key] = value
+		elif key == "транспорт" and value is Array:
+			var events: Array = []
+			for event: Variant in value.slice(0, 16):
+				if event is Dictionary:
+					events.append(load("res://hub/connection_diagnostics.gd").safe_event(event))
+			safe[key] = events
+		elif key in ["событие", "описание", "данные"]:
+			var cleaned: Dictionary = load("res://hub/connection_diagnostics.gd").safe_event(details)
+			if cleaned.has(key):
+				safe[key] = cleaned[key]
 	return safe
 
 

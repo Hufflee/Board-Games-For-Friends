@@ -25,6 +25,7 @@ var _bid_box: PanelContainer
 var _history: Label
 var _banner: Label
 var _panel: PanelContainer
+var _selection_round := ""
 var _qty := 1
 var _face := 2
 var _maputo := false
@@ -225,6 +226,13 @@ func _on_state(v: Dictionary) -> void:
 
 
 func _apply(v: Dictionary) -> void:
+	var selection_round := str([v.get("game_id", ""), v["round_no"]])
+	if selection_round != _selection_round:
+		_selection_round = selection_round
+		_qty = 1
+		_maputo = false
+		if _face == 1:
+			_face = 2  # Сохраняем номинал, кроме запрещённых первым ходом единиц.
 	_v = v
 	_me = v["you"]
 	_n = v["players"].size()
@@ -404,7 +412,8 @@ func _min_q(face: int) -> int:
 func _update_panel() -> void:
 	K12UI.clear(_panel)
 	var phase: String = _v["phase"]
-	var my_turn: bool = phase == "bid" and _v["turn"] == _me and _v["counts"][_me] > 0
+	var can_act := _can_act()
+	var my_turn: bool = phase == "bid" and _v["turn"] == _me and can_act
 	if phase == "reveal":
 		_update_panel_reveal_done()
 		return
@@ -433,7 +442,8 @@ func _update_panel() -> void:
 		return
 	if not my_turn:
 		var who: String = _v["players"][_v["turn"]]["name"]
-		col.add_child(K12UI.label("Ходит %s…" % who if _v["counts"][_me] > 0 else "Вы выбыли — смотрите, кто победит. Ходит %s…" % who, K12UI.BODY, K12UI.MUTED, HORIZONTAL_ALIGNMENT_CENTER))
+		col.add_child(K12UI.label("Ходит %s…" % who, K12UI.BODY, K12UI.MUTED, HORIZONTAL_ALIGNMENT_CENTER))
+		_add_calza(col)
 		return
 	if not _valid(_qty, _face):
 		var mq := _min_q(_face)
@@ -468,6 +478,7 @@ func _update_panel() -> void:
 	row.add_child(K12UI.label("×", K12UI.H1, K12UI.CREAM))
 	for f in range(1, 7):
 		var b := Button.new()
+		b.name = "BidFace%d" % f
 		b.toggle_mode = true
 		b.button_pressed = f == _face
 		b.custom_minimum_size = Vector2(54, 54)
@@ -479,7 +490,7 @@ func _update_panel() -> void:
 		var face := f
 		b.pressed.connect(func():
 			_face = face
-			if not _valid(_qty, _face):
+			if _face == 1 or not _valid(_qty, _face):
 				_qty = maxi(_min_q(_face), 1)
 			_update_panel()
 			_layout())
@@ -501,13 +512,8 @@ func _update_panel() -> void:
 			Sfx.play("arr", -2)
 			Net.send_action("challenge"))
 		act.add_child(dudo)
-		var calza := K12UI.button("Калзак!", K12UI.BODY)
-		calza.tooltip_text = "Ставка верна ровно: угадаете — вернёте себе кость, нет — потеряете"
-		calza.add_theme_color_override("font_color", K12UI.GREEN)
-		calza.pressed.connect(func():
-			Sfx.play("card_shove")
-			Net.send_action("calza"))
-		act.add_child(calza)
+
+		_add_calza(act)
 	if _v["can_maputo"]:
 		var mp := CheckBox.new()
 		mp.text = "Объявить Палифико"
@@ -835,3 +841,26 @@ func _seat_color(seat: int) -> Color:
 	if seat < 0 or seat >= players.size():
 		return PerudoCup.seat_color(seat)
 	return Net.color_of(int(players[seat].get("color", 0)))
+
+
+## Права действий отделены от очереди хода: calza разрешена вне очереди, ставки/дудо — нет.
+func _can_act() -> bool:
+	return (
+		_me >= 0 and _me < _v.get("counts", []).size() and int(_v["counts"][_me]) > 0
+		and not bool(_v.get("spectator", false)) and not bool(_v.get("game_paused", false))
+		and not Net.paused
+	)
+
+
+func _add_calza(parent: Control) -> void:
+	if not _can_act() or not bool(_v.get("can_calza", false)):
+		return
+	var calza := K12UI.button("Калзак!", K12UI.BODY)
+	calza.name = "Calza"
+	calza.tooltip_text = "Ставка верна ровно: угадаете — вернёте себе кость, нет — потеряете. Можно вне очереди."
+	calza.add_theme_color_override("font_color", K12UI.GREEN)
+	calza.pressed.connect(func():
+		if _can_act() and bool(_v.get("can_calza", false)):
+			Sfx.play("card_shove")
+			Net.send_action("calza"))
+	parent.add_child(calza)

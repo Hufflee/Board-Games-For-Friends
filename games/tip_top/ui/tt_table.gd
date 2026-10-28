@@ -524,6 +524,7 @@ func _update_right() -> void:
 				col.add_child(TTStyle.label("Ваш ответ" + ((" (%s)" % _name(s)) if _hotseat() else ""), TTStyle.CAP, TTStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "bold"))
 				col.add_child(TTStyle.label("1 — от %s, 10 — до %s.\nНомер не называть!" % [_v["card"][_v["theme"]][1], _v["card"][_v["theme"]][2]], TTStyle.CAP, Color(TTStyle.INK, 0.7)))
 				_answer_edit = LineEdit.new()
+				_answer_edit.keep_editing_on_text_submit = true
 				_answer_edit.max_length = TTRules.MAX_ANSWER
 				_answer_edit.placeholder_text = "Например: «Кубик льда»"
 				_answer_edit.text_submitted.connect(func(_t): _send_answer())

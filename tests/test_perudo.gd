@@ -41,7 +41,7 @@ func make(n: int = 3) -> PerudoRules:
 func test_bid_rules() -> void:
 	var r := make()
 	check(r.phase == "bid", "после тряски — ставки")
-	check(r.can_bid(1, 2), "первая ставка любая")
+	check(r.can_bid(1, 2), "первая ставка на обычный номинал")
 	check(r.place_bid(0, 3, 5), "ставка «3 пятёрки»")
 	check(not r.place_bid(0, 4, 5), "не в свой ход нельзя")
 	check(r.can_bid(3, 6), "3 шестёрки после 3 пятёрок")
@@ -58,16 +58,17 @@ func test_ones_rules() -> void:
 	check(not r.can_bid(2, 1), "«2 единицы» после «5 пятёрок» нельзя")
 	r.place_bid(1, 3, 1)
 	check(r.can_bid(4, 1), "единицы → больше единиц")
-	check(not r.can_bid(5, 6), "с 3 единиц нельзя на 5 шестёрок (нужно ≥ 6)")
-	check(r.can_bid(6, 2), "6 двоек: удвоено и выше последней «5 пятёрок»")
+	check(not r.can_bid(5, 6), "с 3 единиц нельзя на 5 шестёрок (нужно ≥ 7)")
+	check(not r.can_bid(6, 2) and r.can_bid(7, 2), "после 3 единиц минимум7 двоек")
 	var r2 := make()
 	r2.place_bid(0, 6, 5)
 	r2.place_bid(1, 3, 1)
 	check(not r2.can_bid(6, 2), "после «6 пятёрок» — «3 единицы» нельзя «6 двоек» (пример из правил)")
-	check(r2.can_bid(6, 6), "…а «6 шестёрок» можно")
+	check(not r2.can_bid(6, 6) and r2.can_bid(7, 6), "даже для шестёрок после3 единиц минимум7")
 	var r3 := make()
-	r3.place_bid(0, 2, 1)
-	check(r3.can_bid(4, 6), "«4 шестёрки» после «2 единиц» (пример из правил)")
+	r3.place_bid(0, 3, 2)
+	r3.place_bid(1, 2, 1)
+	check(not r3.can_bid(4, 6) and r3.can_bid(5, 6), "после2 единиц минимум5 обычных")
 	check(not r3.can_bid(3, 6), "«3 шестёрки» после «2 единиц» нельзя")
 
 
@@ -83,6 +84,8 @@ func test_challenge() -> void:
 	check(r.phase == "roll" and r.starter == 1 and r.turn == 1, "новый раунд начинает проигравший")
 	var r2 := make()
 	r2.dice = [[1, 2, 2, 5, 6], [2, 3, 4, 4, 6], [1, 1, 2, 3, 6]]
+	r2.turn = 2
+	r2.place_bid(2, 7, 2)
 	r2.place_bid(0, 4, 1)
 	r2.challenge(1)
 	check(r2.reveal["count"] == 3 and r2.reveal["loser"] == 0, "единицы считаются только как единицы; проиграл поставивший")

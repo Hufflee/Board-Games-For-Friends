@@ -1,0 +1,1 @@
+Анимация предоставлена владельцем: C:/Users/rabin/Desktop/VolleyballNEW/game/ui/boot/hufflesoft_splash.gd. Адаптированы пути, сигнал завершения и звук. Nunito Black — предоставленный шрифт Nunito (SIL Open Font License). Звук hufflesoft_chime.wav создан процедурно для проекта: три мягких синусоидальных ноты, без сторонних записей.

@@ -424,6 +424,7 @@ func _cue_form(row: HBoxContainer, second: bool) -> void:
 	col.add_child(HCStyle.label(head + (" · ваш цвет %s" % HCData.coord(t) if t >= 0 else ""), HCStyle.BODY, HCStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "bold"))
 	var line := HCStyle.hbox(8)
 	_cue_edit = LineEdit.new()
+	_cue_edit.keep_editing_on_text_submit = true
 	_cue_edit.placeholder_text = "например: «лаванда»" if not second else "например: «морская волна»"
 	_cue_edit.max_length = 40
 	_cue_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL

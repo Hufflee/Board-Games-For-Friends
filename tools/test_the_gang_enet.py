@@ -8,7 +8,7 @@ import subprocess
 import time
 
 ROOT = Path(__file__).resolve().parents[1]
-OUT = ROOT / "build/the_gang_research/enet"
+OUT = Path(os.environ.get("TG_TEST_OUT", ROOT / "build/the_gang_research/enet"))
 GODOT = Path("C:/Users/rabin/Desktop/ШТУКИ/godot/Godot_v4.7.2-stable_win64_console.exe")
 OUT.mkdir(parents=True, exist_ok=True)
 checks = 0

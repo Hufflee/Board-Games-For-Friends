@@ -1,6 +1,21 @@
 extends Control
 ## 2D-стол: публичная история фишек, закрытая личная рука и общее вскрытие.
 
+const Flip := preload("res://hub/card_flip.gd")
+const Chip := preload("res://games/the_gang/ui/tg_chip.gd")
+
+var _faces: Array[bool] = [false, false]
+var _flips: Array[Node] = []
+var _hand_key := ""
+var _center_zone: Control
+var _hand_zone: Control
+var _drag_chip: Control
+var _drag_ghost: Control
+var _drag_revision := -1
+var _drag_seat := -1
+var _drag_value := 0
+var _drag_holder := -1
+
 var app: Node
 var _view: Dictionary = {}
 var _top: TopBar
@@ -64,8 +79,11 @@ func _on_state(view: Dictionary) -> void:
 	_view = view
 	var seat := int(view.get("seat", -1))
 	var heist := int(view.get("heist_no", 0))
-	if seat != _last_seat or heist != _last_heist:
+	var hand_key := str([view.get("game_id", ""), view.get("hand", []), view.get("spectator", false)])
+	if seat != _last_seat or heist != _last_heist or hand_key != _hand_key:
+		_faces = [false, false]
 		_peek = false
+	_hand_key = hand_key
 	_last_seat = seat
 	_last_heist = heist
 	_rebuild()
@@ -77,6 +95,11 @@ func _send(kind: String, data: Dictionary = {}) -> void:
 func _rebuild() -> void:
 	if _view.is_empty():
 		return
+	_cancel_drag()
+	for flip in _flips:
+		if is_instance_valid(flip):
+			flip.cancel()
+	_flips.clear()
 	_preview.hide()
 	TGStyle.clear(_players)
 	TGStyle.clear(_main)
@@ -109,14 +132,13 @@ func _rebuild() -> void:
 				value = int(history[index][seat])
 			if index == round_number - 1 and phase == "rank" and seat < chips.size():
 				value = int(chips[seat])
-			var marker := TGStyle.button("%d" % value if value > 0 else "·", 12)
-			marker.custom_minimum_size = Vector2(40, 20)
-			for state in ["normal", "hover", "pressed", "disabled", "focus"]:
-				marker.add_theme_stylebox_override(state, TGStyle.box(TGStyle.PANEL, 1))
-			marker.add_theme_color_override("font_color", TGStyle.ROUND_COLORS[index])
-			marker.disabled = phase != "rank" or index != round_number - 1 or value == 0 or me < 0 or bool(_view.get("spectator", false))
-			marker.pressed.connect(_take.bind(value))
-			chip_row.add_child(marker)
+			if index == round_number - 1 and phase == "rank" and value > 0 and seat != me:
+				chip_row.add_child(_chip(value, seat, 36))
+			else:
+				var marker := TGStyle.label("%d" % value if value > 0 else "·", 12, TGStyle.ROUND_COLORS[index])
+				marker.custom_minimum_size = Vector2(36, 24)
+				marker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+				chip_row.add_child(marker)
 		player_row.add_child(chip_row)
 		_players.add_child(player_row)
 	var status := TGStyle.row(24)
@@ -133,7 +155,7 @@ func _rebuild() -> void:
 	board.add_child(board_row)
 	var community: Array = _view.get("community", [])
 	for index in 5:
-		_add_card(board_row, int(community[index]) if index < community.size() else -1, Vector2(92, 132))
+		_add_card(board_row, int(community[index]) if index < community.size() else -1, Vector2(84, 120))
 	if phase == "rank":
 		_build_rank(me, chips, players)
 	else:
@@ -143,50 +165,41 @@ func _take(value: int) -> void:
 	_send("take", {"value": value})
 
 func _build_rank(me: int, chips: Array, players: Array) -> void:
-	var note := TGStyle.label("Оцените свою руку. 1 — слабейшая, %d — сильнейшая. Чужую фишку можно забрать." % players.size(), 16, TGStyle.MUTED)
+	var note := TGStyle.label("Перетащите фишку к своим картам. 1 — слабейшая, %d — сильнейшая. Чужую можно забрать." % players.size(), 16, TGStyle.MUTED)
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_main.add_child(note)
-	var chip_row := TGStyle.row(8)
+	var center_panel := PanelContainer.new()
+	center_panel.name = "ChipCenter"
+	_center_zone = center_panel
+	_main.add_child(center_panel)
+	var center := TGStyle.column(4)
+	center_panel.add_child(center)
+	center.add_child(TGStyle.label("ЦЕНТР · сюда можно вернуть свою фишку", 14, TGStyle.MUTED))
+	var chip_row := TGStyle.row(6)
+	chip_row.custom_minimum_size.y = 54
 	chip_row.alignment = BoxContainer.ALIGNMENT_CENTER
-	_main.add_child(chip_row)
+	center.add_child(chip_row)
 	for value in range(1, players.size() + 1):
-		var holder := chips.find(value)
-		var b := TGStyle.button("%d★" % value, 20)
-		b.name = "Chip%d" % value
-		b.custom_minimum_size = Vector2(60, 54)
-		var color: Color = TGStyle.ROUND_COLORS[int(_view.round_no) - 1]
-		if holder >= 0:
-			color = color.darkened(0.4)
-		b.add_theme_stylebox_override("normal", TGStyle.box(color, 8))
-		b.add_theme_color_override("font_color", Color("102329"))
-		b.disabled = me < 0 or bool(_view.get("spectator", false)) or holder == me
-		b.tooltip_text = "В центре" if holder < 0 else "У %s" % str(players[holder].get("name", "игрока"))
-		b.pressed.connect(_take.bind(value))
-		chip_row.add_child(b)
+		if chips.find(value) < 0:
+			chip_row.add_child(_chip(value, -1, 52))
 	var hand_panel := PanelContainer.new()
+	hand_panel.name = "HandDropZone"
+	_hand_zone = hand_panel
 	_main.add_child(hand_panel)
 	var hand := TGStyle.column(8)
 	hand_panel.add_child(hand)
 	var hand_header := TGStyle.row()
 	hand.add_child(hand_header)
 	hand_header.add_child(TGStyle.heading("ВАШИ КАРТЫ" if me >= 0 else "РЕЖИМ ЗРИТЕЛЯ", 24))
-	if me >= 0 and not bool(_view.get("spectator", false)):
-		var peek := TGStyle.button("Скрыть карты" if _peek else "Посмотреть карты")
-		peek.name = "PeekCards"
-		peek.pressed.connect(func():
-			_peek = not _peek
-			_rebuild())
-		hand_header.add_child(peek)
-		var give_back := TGStyle.button("Вернуть фишку")
-		give_back.disabled = me >= chips.size() or int(chips[me]) == 0
-		give_back.pressed.connect(func(): _send("return"))
-		hand_header.add_child(give_back)
+	hand.add_child(TGStyle.label("Потяните край карты, чтобы открыть или скрыть её", 14, TGStyle.MUTED))
 	var cards := TGStyle.row(12)
 	cards.alignment = BoxContainer.ALIGNMENT_CENTER
 	hand.add_child(cards)
 	var personal: Array = _view.get("hand", [])
 	for index in 2:
-		_add_card(cards, int(personal[index]) if _peek and index < personal.size() else -1, Vector2(108, 154))
+		_add_personal(cards, int(personal[index]) if index < personal.size() and me >= 0 and not bool(_view.get("spectator", false)) else -1, index)
+	if me >= 0 and me < chips.size() and int(chips[me]) > 0:
+		cards.add_child(_chip(int(chips[me]), me, 64))
 	var tip := TGStyle.label("Не называйте карты и комбинацию: общение идёт через фишки.", 16, TGStyle.MUTED)
 	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	hand.add_child(tip)
@@ -232,19 +245,20 @@ func _build_result(phase: String, players: Array) -> void:
 
 func _add_card(parent: Control, id: int, dimensions: Vector2) -> void:
 	var texture := load("res://games/the_gang/art/cards/%s.webp" % (str(id) if id >= 0 else "back")) as Texture2D
-	var face := TextureRect.new()
-	face.texture = texture
-	face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-	face.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-	var card := K12TableCard.new("", true, face, dimensions)
-	card.draggable = false
+	var card := TextureRect.new()
+	card.texture = texture
+	card.custom_minimum_size = dimensions
+	card.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	card.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	card.mouse_filter = Control.MOUSE_FILTER_STOP
+	var corners := ShaderMaterial.new()
+	corners.shader = preload("res://hub/card_corners.gdshader")
+	card.material = corners
 	if id >= 0:
-		card.hovered.connect(func(_card: K12TableCard, on: bool):
-			if on:
-				_show_preview(texture, card)
-			else:
-				_preview.hide())
+		card.mouse_entered.connect(func(): _show_preview(texture, card))
+		card.mouse_exited.connect(_preview.hide)
 	parent.add_child(card)
+
 
 func _show_preview(texture: Texture2D, card: Control) -> void:
 	TGStyle.clear(_preview)
@@ -258,3 +272,107 @@ func _show_preview(texture: Texture2D, card: Control) -> void:
 	_preview.reset_size()
 	_preview.position = Vector2(clampf(card.global_position.x + card.size.x + 12, 0, size.x - 250), clampf(card.global_position.y - 160, TopBar.HEIGHT + 8, size.y - 350))
 	_preview.show()
+
+
+func _can_play() -> bool:
+	return str(_view.get("phase", "")) == "rank" and int(_view.get("seat", -1)) >= 0 		and not bool(_view.get("spectator", false)) and not Net.paused and not bool(_view.get("game_paused", false))
+
+
+func _chip(value: int, holder: int, diameter: int) -> Control:
+	var chip := Chip.new()
+	chip.name = "Chip%d" % value
+	chip.value = value
+	chip.round_index = clampi(int(_view.get("round_no", 1)) - 1, 0, 3)
+	chip.custom_minimum_size = Vector2.ONE * diameter
+	chip.tooltip_text = "Перетащите к своим картам" if holder != int(_view.get("seat", -1)) else "Перетащите в центр"
+	chip.gui_input.connect(_chip_input.bind(chip, value, holder))
+	return chip
+
+
+func _chip_input(event: InputEvent, chip: Control, value: int, holder: int) -> void:
+	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed and _can_play():
+		_cancel_drag()
+		_drag_chip = chip
+		_drag_value = value
+		_drag_holder = holder
+		_drag_seat = int(_view.seat)
+		_drag_revision = int(_view.revision)
+		var ghost := Chip.new()
+		ghost.value = value
+		ghost.round_index = clampi(int(_view.round_no) - 1, 0, 3)
+		ghost.size = Vector2.ONE * 64
+		ghost.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		ghost.z_index = 94
+		add_child(ghost)
+		_drag_ghost = ghost
+		ghost.global_position = event.global_position - ghost.size * 0.5
+		chip.modulate.a = 0.35
+		chip.accept_event()
+
+
+func _input(event: InputEvent) -> void:
+	if not is_instance_valid(_drag_ghost):
+		return
+	if not _can_play() or _drag_revision != int(_view.get("revision", -1)) or _drag_seat != int(_view.get("seat", -1)):
+		_cancel_drag()
+		return
+	if event is InputEventMouseMotion:
+		_drag_ghost.global_position = event.position - _drag_ghost.size * 0.5
+	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
+		_cancel_drag()
+		get_viewport().set_input_as_handled()
+	elif event is InputEventMouseButton and not event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var take: bool = _hand_zone.get_global_rect().has_point(event.position) and _drag_holder != _drag_seat
+		var give_back: bool = _center_zone.get_global_rect().has_point(event.position) and _drag_holder == _drag_seat
+		var value := _drag_value
+		_cancel_drag()
+		get_viewport().set_input_as_handled()
+		if take:
+			_send("take", {"value": value})
+		elif give_back:
+			_send("return")
+
+
+func _process(_delta: float) -> void:
+	if not _can_play():
+		_cancel_drag()
+		for flip in _flips:
+			if is_instance_valid(flip) and flip.busy:
+				flip.cancel()
+
+
+func _cancel_drag() -> void:
+	if is_instance_valid(_drag_chip):
+		_drag_chip.modulate.a = 1.0
+	if is_instance_valid(_drag_ghost):
+		_drag_ghost.queue_free()
+	_drag_chip = null
+	_drag_ghost = null
+
+
+func _add_personal(parent: Control, id: int, index: int) -> void:
+	# Лицо берём только из личного view; закрытый preview не содержит его текстуры.
+	var card := TextureRect.new()
+	card.name = "PersonalCard%d" % index
+	card.custom_minimum_size = Vector2(100, 142)
+	card.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	card.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	card.mouse_filter = Control.MOUSE_FILTER_STOP
+	var corners := ShaderMaterial.new()
+	corners.shader = preload("res://hub/card_corners.gdshader")
+	card.material = corners
+	parent.add_child(card)
+	var show_side := func(up: bool):
+		card.texture = load("res://games/the_gang/art/cards/%s.webp" % (str(id) if up and id >= 0 else "back"))
+		_preview.hide()
+	var flip: Node = Flip.attach(card, show_side, _faces[index] and id >= 0, true)
+	flip.can_interact = func(): return _can_play() and id >= 0
+	flip.flipped.connect(func(up: bool):
+		_faces[index] = up
+		_peek = _faces.has(true))
+	_flips.append(flip)
+	card.mouse_entered.connect(func():
+		if flip.face_up and not flip.busy and id >= 0:
+			_show_preview(card.texture, card))
+	card.mouse_exited.connect(_preview.hide)
+

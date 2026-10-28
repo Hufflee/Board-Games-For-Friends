@@ -40,7 +40,11 @@ static func make(id: String, make_button: Callable, make_label: Callable) -> Roo
 	p._status = make_label.call("", 13)
 	p._status.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	p.add_child(p._status)
-	Net.status_changed.connect(func(t):
-		if is_instance_valid(p._status):
-			p._status.text = t)
+	Net.status_changed.connect(p._on_status_changed)
 	return p
+
+
+## Метод принадлежит панели: Godot отключит его при её удалении.
+func _on_status_changed(text: String) -> void:
+	if is_instance_valid(_status):
+		_status.text = text

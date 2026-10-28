@@ -64,6 +64,7 @@ func _ready() -> void:
 	# Хост мог уже выбрать следующую игру, пока клиент выходил из предыдущей сцены.
 	if Net.is_party() and not Net.party_game.is_empty():
 		_on_lobby.call_deferred()
+	load("res://hub/version_notice.gd").schedule(self)
 
 
 func _rebuild() -> void:

@@ -159,6 +159,7 @@ func _ready() -> void:
 	_who.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	brow.add_child(_who)
 	_answer = LineEdit.new()
+	_answer.keep_editing_on_text_submit = true
 	_answer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_answer.placeholder_text = "Печатайте ответ и жмите Enter"
 	_answer.add_theme_font_size_override("font_size", 22)

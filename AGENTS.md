@@ -1,7 +1,7 @@
 # Настольные игры с друзьями
 
 Сборник цифровых версий настольных игр для игры с друзьями (Steam / локальная сеть / один компьютер).
-Godot **4.7**, GDScript, рендер Forward Plus (d3d12), физика Jolt. Главная сцена — хаб `res://hub/hub.tscn`.
+Godot **4.7**, GDScript, рендер Forward Plus (d3d12), физика Jolt. Точка запуска — `res://hub/boot/boot.tscn` (заставка HuffleSoft), затем хаб `res://hub/hub.tscn`. Возвраты из игр идут прямо в хаб, не в заставку.
 
 Godot: `C:\Users\rabin\Desktop\ШТУКИ\godot\Godot_v4.7.2-stable_win64_console.exe` (console-версия — для запуска из терминала, видно вывод).
 

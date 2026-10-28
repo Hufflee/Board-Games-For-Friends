@@ -22,6 +22,11 @@ signal pause_changed
 signal ghost_received(peer: int, data: Dictionary)  # «тень» чужого действия (фишку тащат) — без хоста-логики, только показать
 signal steam_lobbies_changed
 
+const ConnectionDiagnostics := preload("res://hub/connection_diagnostics.gd")
+var last_disconnect: Dictionary = {}
+var _steam_transport_events: Array[Dictionary] = []
+var _leaving := false
+
 const APP_ID := 480
 const PORT := 24565
 const MAX_PLAYERS := 8
@@ -152,6 +157,10 @@ func _init_steam() -> void:
 	steam.lobby_joined.connect(_on_lobby_joined)
 	steam.join_requested.connect(_on_join_requested)
 	steam.lobby_invite.connect(_on_lobby_invite)
+	if steam.has_signal("network_connection_status_changed"):
+		steam.connect("network_connection_status_changed", _on_steam_connection_status)
+	if steam.has_signal("network_messages_session_failed"):
+		steam.connect("network_messages_session_failed", _on_steam_message_failure)
 	# Запуск по приглашению: +connect_lobby <id>
 	var args := OS.get_cmdline_args()
 	var i := args.find("+connect_lobby")
@@ -389,7 +398,22 @@ func _on_lobby_invite(inviter: int, lobby: int, _game: int) -> void:
 	SteamInvite.show_incoming(steam.getFriendPersonaName(inviter), lobby)
 
 
-func leave() -> void:
+func leave(reason: String = "Добровольный выход или смена подключения") -> void:
+	if _leaving:
+		return
+	_leaving = true
+	if not mode.is_empty():
+		last_disconnect = {
+			"причина": reason, "сеть_до_выхода": mode, "игра_до_выхода": party_game,
+			"партия_до_выхода": game_id, "лобби_до_выхода": lobby_id,
+			"роль_до_выхода": "хост" if is_host() else "клиент",
+			"была_партия": in_game, "транспорт": _steam_transport_events.duplicate(true)
+		}
+		var peer := multiplayer.multiplayer_peer
+		if peer != null:
+			last_disconnect["тип_peer"] = peer.get_class()
+			last_disconnect["статус_peer"] = peer.get_connection_status()
+		Diag.mark("Соединение закрывается до очистки", last_disconnect)
 	_client_start_pending = false
 	_client_expected_match = ""
 	gang = null
@@ -418,6 +442,29 @@ func leave() -> void:
 	chat_log.clear()
 	lobby_view = {}
 	view = {}
+	_steam_transport_events.clear()
+	_leaving = false
+
+
+## Только диагностика: Steam-событие само по себе не выгоняет участника из пати.
+func _remember_steam_transport(event: Dictionary) -> void:
+	if mode != "steam" or _leaving:
+		return
+	event["время_мс"] = Time.get_ticks_msec()
+	_steam_transport_events.append(event)
+	if _steam_transport_events.size() > 16:
+		_steam_transport_events.pop_front()
+	Diag.mark("Состояние Steam-соединения", event)
+
+
+func _on_steam_connection_status(handle: int, connection: Dictionary, old_state: int) -> void:
+	_remember_steam_transport({"событие": "network_connection_status_changed", "handle": handle,
+		"предыдущее_состояние": old_state, "данные": ConnectionDiagnostics.safe_state(connection)})
+
+
+func _on_steam_message_failure(reason: int, _remote_steam_id: int, state: int, debug_message: String) -> void:
+	_remember_steam_transport({"событие": "network_messages_session_failed", "код": reason,
+		"состояние": state, "описание": debug_message.left(512)})
 
 
 func _reset_host() -> void:
@@ -499,13 +546,17 @@ func _on_connected_to_server() -> void:
 
 
 func _on_connection_failed() -> void:
-	leave()
+	if _leaving or mode.is_empty():
+		return
+	leave("connection_failed: подключение не установлено")
 	session_closed.emit("Не удалось подключиться к хосту.")
 
 
 func _on_server_disconnected() -> void:
+	if _leaving or mode.is_empty():
+		return
 	var was_playing := not view.is_empty()
-	leave()
+	leave("server_disconnected: транспорт потерял связь с хостом")
 	if was_playing:
 		session_closed.emit("Связь с хостом потеряна. Если партия ещё идёт — нажмите «Вернуться в партию».")
 	else:
@@ -526,6 +577,8 @@ func _on_peer_connected(_id: int) -> void:
 
 
 func _on_peer_disconnected(id: int) -> void:
+	if not mode.is_empty() and not _leaving:
+		Diag.mark("Участник отключён транспортом", {"peer": id, "транспорт": _steam_transport_events.duplicate(true)})
 	if not is_host() or not members.has(id):
 		return
 	var pname: String = members[id]["name"]
@@ -601,7 +654,7 @@ func _rpc_hello(player_name: String, steam_id: int = 0) -> void:
 
 @rpc("authority", "reliable")
 func _rpc_kicked(reason: String) -> void:
-	leave()
+	leave("Исключение из пати: " + reason)
 	session_closed.emit(reason)
 
 

@@ -15,6 +15,7 @@ const SOUNDS := {
 	"card_flip": ["card-fan-1", "card-fan-2"],
 	"shuffle": ["card-shuffle"],
 	"game_start": ["cards-pack-open-1"],
+	"hufflesoft": ["res://hub/audio/hufflesoft_chime.wav"],
 	"chip": ["chip-lay-1", "chip-lay-2", "chip-lay-3"],
 	"chips_soft": ["chips-collide-1", "chips-collide-2"],
 	"chips_win": ["chips-stack-1", "chips-stack-2"],

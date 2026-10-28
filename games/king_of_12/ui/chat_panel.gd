@@ -81,6 +81,7 @@ func _ready() -> void:
 	_log.add_theme_color_override("default_color", K12UI.CREAM)
 	_body.add_child(_log)
 	_input = LineEdit.new()
+	_input.keep_editing_on_text_submit = true
 	_input.placeholder_text = "Сообщение… (Enter — отправить)"
 	_input.max_length = 200
 	_input.add_theme_font_size_override("font_size", 13)
@@ -117,7 +118,6 @@ func _ready() -> void:
 func _on_submit(text: String) -> void:
 	Net.send_chat(text, "chat", _team_channel())
 	_input.clear()
-	_input.release_focus()
 	_sync_caret()  # отправили — курсор пропадает до первого нового символа
 
 
@@ -219,8 +219,15 @@ func _sync() -> void:
 	_quick_btn.text = "Скрыть" if quick_open else "Фразы"
 	if expanded:
 		_unread = 0
+		_raise_for_input.call_deferred()
 	_toggle.text = ("Свернуть чат" if expanded else "Чат") + (" (%d)" % _unread if _unread > 0 else "")
 	_place.call_deferred()
+
+
+## GUI проверяет порядок узлов отдельно от z_index: поздние панели стола не должны закрывать чат мыши.
+func _raise_for_input() -> void:
+	if expanded and is_inside_tree() and not is_queued_for_deletion():
+		get_parent().move_child(self, -1)
 
 
 ## Держим панель в правом нижнем углу и целиком внутри родителя.

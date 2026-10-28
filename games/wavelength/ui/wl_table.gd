@@ -343,6 +343,7 @@ func _update_panel() -> void:
 				col.add_child(_hint("Придумайте подсказку: что на этой шкале стоит там же, где центр зоны?"))
 				var row := HCStyle.hbox(8)
 				_clue_edit = LineEdit.new()
+				_clue_edit.keep_editing_on_text_submit = true
 				_clue_edit.placeholder_text = "например: Кофе"
 				_clue_edit.max_length = 80
 				_clue_edit.custom_minimum_size.x = 420

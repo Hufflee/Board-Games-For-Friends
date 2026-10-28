@@ -526,6 +526,7 @@ func _line(t: String, bold: bool, color: Color = NHStyle.INK) -> Label:
 ## Выбор названия подарка: поиск + сетка всех подарков (картинка и подпись).
 func _build_picker(col: VBoxContainer) -> void:
 	var find := LineEdit.new()
+	find.keep_editing_on_text_submit = true
 	find.placeholder_text = "Поиск подарка: начните вводить название…"
 	find.text = _filter
 	find.custom_minimum_size.x = 700

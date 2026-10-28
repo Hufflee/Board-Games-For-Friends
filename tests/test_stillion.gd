@@ -30,7 +30,7 @@ func _initialize() -> void:
 func _questions() -> void:
 	var all := STQuestions.all()
 	check(STQuestions.categories().size() == 10, "10 категорий (сейчас %d)" % STQuestions.categories().size())
-	check(all.size() >= 120, "вопросов не меньше 120 (сейчас %d)" % all.size())
+	check(all.size() >= 240, "вопросов не меньше 240 (сейчас %d)" % all.size())
 	for q: Dictionary in all:
 		var counts := {"c": 0, "s": 0, "u": 0, "e": 0}
 		var seen := {}
@@ -219,7 +219,7 @@ func _deck_session() -> void:
 	var seen := {}
 	var repeats := 0
 	var last := {}
-	for game in 3:
+	for game in 6:
 		var r := STRules.new()
 		r.deck = deck
 		r.new_game([{"name": "А"}, {"name": "Б"}], false, 11 + game)
@@ -230,7 +230,7 @@ func _deck_session() -> void:
 			last = r.question
 			if k < 39:
 				r._next_question()
-	check(repeats == 0 and seen.size() == total, "%d вопросов за 3 партии без повторов (повторов: %d)" % [total, repeats])
+	check(repeats == 0 and seen.size() == total, "%d вопросов за 6 партий без повторов (повторов: %d)" % [total, repeats])
 	check(deck.is_empty(), "колода сессии израсходована")
 	var r2 := STRules.new()
 	r2.deck = deck

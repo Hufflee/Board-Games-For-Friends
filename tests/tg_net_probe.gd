@@ -2,7 +2,7 @@ extends SceneTree
 ## Узел трёхпроцессной проверки Net/ENet The Gang; команды и атомарные снимки в build.
 var net: Node
 var role := OS.get_environment("TG_ROLE")
-var folder := "res://build/the_gang_research/enet"
+var folder := OS.get_environment("TG_TEST_OUT") if not OS.get_environment("TG_TEST_OUT").is_empty() else "res://build/the_gang_research/enet"
 var last_id := -1
 var elapsed := 0.0
 

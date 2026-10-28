@@ -85,22 +85,19 @@ static func coin_progress(game_id: String, secrets: Dictionary) -> Vector2i:
 
 
 func _coins() -> void:
-	_body.add_child(_label("МОНЕТЫ", HubStyle.CYAN, 19))
-	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	grid.add_theme_constant_override("h_separation", 24)
-	grid.add_theme_constant_override("v_separation", 8)
-	_body.add_child(grid)
+	var collection := HubStyle.vbox(8)
+	collection.name = "CoinsCollection"
+	_body.add_child(collection)
+	collection.add_child(_label("МОНЕТЫ", HubStyle.CYAN, 19))
 	for game: Dictionary in HubGames.LIST:
 		if not _filter.is_empty() and str(game.id) != _filter:
 			continue
 		var progress := coin_progress(str(game.id), Prefs.coin_secrets)
 		var color := Color("8ee6a0") if progress.x == progress.y else HubStyle.YELLOW
-		var title := HubStyle.label(str(game.title), 16, HubStyle.TEXT)
-		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		grid.add_child(title)
-		grid.add_child(HubStyle.label("%d/%d" % [progress.x, progress.y], 16, color))
+		var line := HubStyle.hbox(8)
+		collection.add_child(line)
+		line.add_child(HubStyle.label(str(game.title), 16, HubStyle.TEXT))
+		line.add_child(HubStyle.label("%d/%d" % [progress.x, progress.y], 16, color))
 
 
 func _rebuild() -> void:
@@ -145,7 +142,6 @@ func _rebuild() -> void:
 		var graph := WinGraph.new()
 		graph.history = row.history
 		_body.add_child(graph)
-	_coins()
 	_body.add_child(_label("ВЫПАДЕНИЯ КУБИКОВ", HubStyle.CYAN, 19))
 	var dice := PlayerStatsStore.sorted_dice(row)
 	if dice.is_empty():
@@ -199,6 +195,7 @@ func _rebuild() -> void:
 				13
 			)
 		)
+	_coins()
 
 
 func _unhandled_input(event: InputEvent) -> void:

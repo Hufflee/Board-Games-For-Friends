@@ -42,18 +42,43 @@ static func distance(a: String, b: String) -> int:
 	return prev[b.length()]
 
 
-## Ищет ответ в списке вопроса. Возвращает {found, name, rarity, typo} или {found: false}.
-## Точное совпадение — сразу; иначе ближайший вариант в пределах допустимых опечаток.
+## Общие слова отдельно не определяют многословный ответ. Полный точный ответ разрешён всегда.
+const PARTIAL_STOP := ["а", "и", "в", "во", "на", "с", "со", "из", "от", "по", "к", "ко", "для", "за", "под", "над", "без", "у", "о", "об", "не", "или", "как", "это", "новый", "новая", "новое", "новые", "нового", "новой", "старый", "старая", "старое", "большой", "большая", "большое", "маленький", "маленькая", "маленькое", "первый", "второй", "третий", "один", "два", "три", "город", "страна", "река", "море", "фильм", "игра", "книга", "часть", "a", "an", "the", "and", "or", "of", "to", "in", "on", "at", "by", "for", "with", "from", "new", "old", "big", "little", "large", "small", "one", "two", "three", "part"]
+const PARTIAL_ENTITIES := ["game", "movie", "film", "city", "country", "book", "sea", "river"]
+const PARTIAL_RARITIES := ["c", "s", "u", "e"]
+
+## Ищет полный ответ, затем точное содержательное слово ответа из2–3слов, затем опечатку.
+## Если слово подходит разным ответам, оставляем проверку Jev, а не выбираем случайный вариант.
 static func lookup(question: Dictionary, typed: String) -> Dictionary:
 	var n := normalize(typed)
 	if n.is_empty():
 		return {"found": false}
+	for a: Dictionary in question.answers:
+		if a.alts.has(n):
+			return {"found": true, "name": a.name, "rarity": a.rarity, "typo": false}
+	if not n.contains(" ") and n.length() >= 2 and not n.is_valid_int() and not n in PARTIAL_STOP and not n in PARTIAL_ENTITIES and not n in _ROMAN:
+		var candidates := {}
+		for a: Dictionary in question.answers:
+			for alt: String in a.alts:
+				var words := alt.split(" ", false)
+				if words.size() in [2, 3] and words.has(n):
+					var family := base(key(str(a.name)))
+					if not candidates.has(family) or PARTIAL_RARITIES.find(a.rarity) < PARTIAL_RARITIES.find(candidates[family].rarity):
+						candidates[family] = a  # Без номера не выдаём редкость самой редкой части серии.
+		if candidates.size() == 1:
+			var answer: Dictionary = candidates.values()[0]
+			var family_key: String = candidates.keys()[0]
+			# Алиас может быть задан только одной части: редкость берём по всей канонической серии.
+			for member: Dictionary in question.answers:
+				if base(key(str(member.name))) == family_key and PARTIAL_RARITIES.find(member.rarity) < PARTIAL_RARITIES.find(answer.rarity):
+					answer = member
+			return {"found": true, "name": answer.name, "rarity": answer.rarity, "typo": false, "partial": true}
+		if candidates.size() > 1:
+			return {"found": false, "ambiguous": true}
 	var best: Dictionary = {}
 	var best_d := 999
 	for a: Dictionary in question.answers:
 		for alt: String in a.alts:
-			if alt == n:
-				return {"found": true, "name": a.name, "rarity": a.rarity, "typo": false}
 			var d := distance(alt, n)
 			if d <= allowed_typos(alt.length()) and d < best_d:
 				best_d = d

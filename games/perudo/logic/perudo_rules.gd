@@ -161,11 +161,11 @@ func can_bid(q: int, face: int, _declare_maputo: bool = false) -> bool:
 
 
 ## Та же проверка по данным из get_view() — для интерфейса клиента.
-static func check_bid(bid: Dictionary, bids: Array, maputo: bool, total: int, q: int, face: int) -> bool:
+static func check_bid(bid: Dictionary, _bids: Array, maputo: bool, total: int, q: int, face: int) -> bool:
 	if face < 1 or face > FACES or q < 1 or q > total:
 		return false
 	if bid.is_empty():
-		return true
+		return face != 1  # Первый номинал свободен, но единицы первым ходом запрещены.
 	var pq: int = bid["q"]
 	var pf: int = bid["face"]
 	if maputo:
@@ -175,17 +175,8 @@ static func check_bid(bid: Dictionary, bids: Array, maputo: bool, total: int, q:
 	if face == 1:
 		return q >= ceili(pq / 2.0)  # переход на единицы: можно вдвое меньше
 	if pf == 1:
-		# с единиц на другой номинал: не меньше удвоенного и выше последней ставки «не на единицы»
-		if q < pq * 2:
-			return false
-		var last := {}
-		for i in range(bids.size() - 1, -1, -1):
-			if bids[i]["face"] != 1:
-				last = bids[i]
-				break
-		if last.is_empty():
-			return true
-		return q > last["q"] or (q == last["q"] and face > last["face"])
+		return q >= pq * 2 + 1
+
 	# повышаешь номинал — количество то же; больше костей — номинал не выше прежнего
 	if face > pf:
 		return q == pq
@@ -217,13 +208,23 @@ func challenge(seat: int) -> bool:
 
 ## «Калзак!» — ставка верна ровно. Угадал — возвращает себе кость (не больше, чем было на старте), нет — теряет кость.
 func calza(seat: int) -> bool:
-	if not bid.is_empty() and bid["seat"] == seat:
+	if not can_calza(seat):
 		return false
 	return _reveal_bid(seat, true)
 
 
+## «Калзак» доступен любому живому участнику, кроме автора текущей ставки.
+func can_calza(seat: int) -> bool:
+	return (
+		phase == "bid" and not bid.is_empty() and seat >= 0 and seat < counts.size()
+		and alive(seat) and int(bid["seat"]) != seat
+	)
+
+
 func _reveal_bid(seat: int, is_calza: bool) -> bool:
-	if phase != "bid" or seat != turn or bid.is_empty():
+	if phase != "bid" or bid.is_empty() or seat < 0 or seat >= counts.size() or not alive(seat):
+		return false
+	if (is_calza and not can_calza(seat)) or (not is_calza and seat != turn):
 		return false
 	var face: int = bid["face"]
 	var wild := face != 1 and not maputo
@@ -337,6 +338,7 @@ func get_view(seat: int) -> Dictionary:
 		"bids": bids.duplicate(true),
 		"maputo": maputo,
 		"can_maputo": can_maputo(seat) if seat >= 0 else false,
+		"can_calza": can_calza(seat),
 		"total": total_dice(),
 		"round_no": round_no,
 		"reveal": reveal.duplicate(true),
