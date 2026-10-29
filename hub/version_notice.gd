@@ -1,24 +1,34 @@
 extends Control
-## Однократное представление новой игры после заставки, с локальным флагом версии.
+## Однократное представление новой игры после заставки, с личным флагом игры.
 const CACHE := "user://announcements.cfg"
-const VERSION := "0.8.5"
-const GAME_ID := "the_gang"
+const GAME_ID := "things_in_rings"
 const AFTER_SPLASH_MS := 2000
 
 static func pending() -> bool:
-	if str(ProjectSettings.get_setting("application/config/version", "")) != VERSION:
-		return false
 	var cache := ConfigFile.new()
 	cache.load(CACHE)
-	return not bool(cache.get_value("seen", VERSION, false))
+	return not bool(cache.get_value("seen_games", GAME_ID, false))
 
 static func schedule(hub: Control) -> void:
 	var tree := hub.get_tree()
+	if hub.has_meta(&"new_game_notice_scheduled"):
+		return
 	if not tree.root.has_meta(&"startup_finished_msec") or not pending():
 		return
+	hub.set_meta(&"new_game_notice_scheduled", true)
 	var deadline := int(tree.root.get_meta(&"startup_finished_msec")) + AFTER_SPLASH_MS
 	var delay := maxf(0.001, float(deadline - Time.get_ticks_msec()) / 1000.0)
 	await tree.create_timer(delay).timeout
+	# Таймер считает кадры и может проснуться раньше реальных двух секунд.
+	for retry in range(8):
+		if not is_instance_valid(hub) or not hub.is_inside_tree() or hub.is_queued_for_deletion():
+			return
+		var remaining := deadline - Time.get_ticks_msec()
+		if remaining <= 0:
+			break
+		await tree.create_timer(maxf(0.001, float(remaining) / 1000.0)).timeout
+	if Time.get_ticks_msec() < deadline:
+		return  # При повторном раннем пробуждении оставляем игру непросмотренной.
 	if not is_instance_valid(hub) or not hub.is_inside_tree() or hub.is_queued_for_deletion():
 		return
 	if tree.current_scene != hub or hub.get("_leaving") or not pending():
@@ -38,7 +48,7 @@ static func schedule(hub: Control) -> void:
 	hub.add_child(banner)
 	var cache := ConfigFile.new()
 	cache.load(CACHE)
-	cache.set_value("seen", VERSION, true)
+	cache.set_value("seen_games", GAME_ID, true)
 	var error := cache.save(CACHE)
 	if error != OK:
 		push_warning("Не удалось сохранить показ новой игры: %d" % error)
@@ -62,7 +72,7 @@ func _ready() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(title)
-	var name_label := HubStyle.neon_label("THE GANG", 26, HubStyle.PINK)
+	var name_label := HubStyle.neon_label("THINGS IN RINGS", 26, HubStyle.PINK)
 	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(name_label)

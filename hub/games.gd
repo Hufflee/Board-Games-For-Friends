@@ -4,6 +4,16 @@ extends RefCounted
 
 const LIST := [
 	{
+		"id": "things_in_rings",
+		"title": "Things in Rings",
+		"players": "2–6 игроков",
+		"time": "20 минут",
+		"description": "Находите тайные правила цветных колец! Знающий размещает подсказки, искатели раскладывают вещи по пересечениям. Вдвоём — кооператив; смысл проверяет живой игрок.",
+		"scene": "res://games/things_in_rings/ui/main.tscn",
+		"color": Color("cf765d"),
+		"thickness": 0.06,
+	},
+	{
 		"id": "the_gang",
 		"title": "The Gang",
 		"players": "3–10 игроков",
@@ -84,7 +94,6 @@ const LIST := [
 		"time": "30 минут",
 		"description": "Кооператив: у каждого тайный номер от 1 до 10, все отвечают на тему с нужной силой, а капитан выстраивает ответы по порядку. Единороги или какашки?",
 		"scene": "res://games/tip_top/ui/main.tscn",
-		"shelf": false,  # на полке одна коробка — «Для взрослых», версия выбирается переключателем в карточке
 		"variants": ["tip_top_18", "tip_top"],
 		"variant_label": "Обычный",
 	},

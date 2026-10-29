@@ -8,6 +8,9 @@ var _selected: Array = []
 var _unlocked_seat := -2
 var _preview: Control
 var _knock: AudioStreamPlayer
+# Намерение продолжить только собственное текущее угадывание после ответа духа.
+var _guess_focus: Dictionary = {}
+
 
 func _ready() -> void:
 	add_child(PIStyle.Backdrop.new())
@@ -42,6 +45,8 @@ func _changed(view: Dictionary) -> void:
 		return
 	if not _v.is_empty() and _v.phase == "judge" and int(view.revision) > int(_v.revision) and (view.phase == "guess" or view.phase == "game_over" and view.winner >= 0):
 		_knock.play()
+	if not _guess_focus.is_empty() and not _same_guess(view):
+		_guess_focus.clear()
 	_v = view
 	PIStyle.clear(_body)
 	if is_instance_valid(_preview):
@@ -242,6 +247,8 @@ func _entry(col: Control, text: String, kind: String, limit: int) -> void:
 	input.max_length = limit
 	input.placeholder_text = "Ответ" if limit > 1 else "Буква или пробел"
 	col.add_child(input)
+	if kind == "letter" and not _guess_focus.is_empty():
+		_restore_guess_focus.call_deferred(weakref(input))
 	var error := PIStyle.label("", PIStyle.CAP)
 	col.add_child(error)
 	var send := PIStyle.primary(text)
@@ -251,9 +258,47 @@ func _entry(col: Control, text: String, kind: String, limit: int) -> void:
 		if valid.search(input.text) == null or input.text.strip_edges().is_empty() and limit > 1:
 			error.text = "Используйте только буквы и пробелы."
 			return
+		if kind == "letter":
+			_guess_focus = {
+				"seat": int(_v.seat), "game_id": str(_v.get("game_id", "")),
+				"team": int(_v.team), "row": _v.rows[int(_v.team)].size()
+			}
+		# Синхронный Net удаляет редактор. Этот же Enter не должен затем открыть чат.
+		get_viewport().set_input_as_handled()
 		_send(kind, input.text))
 	col.add_child(send)
 	input.text_submitted.connect(func(_text): send.pressed.emit())
+
+## Не переносим фокус между местами, партиями или следующими попытками.
+func _same_guess(view: Dictionary) -> bool:
+	return (
+		view.get("phase", "") in ["guess", "judge"]
+		and not bool(view.get("spectator", false))
+		and int(view.get("seat", -1)) == int(_guess_focus.seat)
+		and str(view.get("game_id", "")) == str(_guess_focus.game_id)
+		and int(view.get("team", -1)) == int(_guess_focus.team)
+		and view.rows[int(view.team)].size() == int(_guess_focus.row)
+	)
+
+
+## Deferred вызывается после раскладки; чужой фокус (в том числе чат) не трогаем.
+func _restore_guess_focus(input_ref: WeakRef) -> void:
+	var input := input_ref.get_ref() as LineEdit
+	if (
+		not is_instance_valid(input) or input.is_queued_for_deletion()
+		or is_queued_for_deletion() or not is_inside_tree() or not is_visible_in_tree()
+		or app.get("screen") != self or not input.is_visible_in_tree()
+		or _guess_focus.is_empty() or not _same_guess(_v)
+		or _v.phase != "guess" or not bool(_v.get("can_act", false))
+		or bool(_v.get("game_paused", false)) or Net.paused
+	):
+		return
+	var focus := get_viewport().gui_get_focus_owner()
+	if focus != null and focus != input:
+		return
+	input.grab_focus()
+	input.edit()
+
 
 func _questions(col: Control) -> void:
 	for q in _v.hand:

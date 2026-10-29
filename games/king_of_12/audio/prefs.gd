@@ -1,5 +1,5 @@
 extends Node
-## Автозагрузка Prefs: настройки игрока (громкость, экран, масштаб) и локальная статистика партий.
+## Автозагрузка Prefs: настройки игрока (громкость, экран) и локальная статистика партий.
 
 signal changed
 
@@ -17,6 +17,7 @@ var resolution := "1280x720"  # размер окна в оконном режи
 const RESOLUTIONS := ["1280x720", "1600x900", "1920x1080", "2560x1440"]
 var _applied_res := ""  # какой размер окна уже ставили — чтобы не сбрасывать окно, растянутое мышью
 var ui_scale := 1.0
+var _render_resolution := ""  # только явно выбранная растровая поверхность fullscreen
 var tutorial_seen := false
 var graphics := 2  # качество графики: 0 — низкое, 1 — среднее, 2 — высокое
 var show_fps := false
@@ -51,7 +52,7 @@ func _ready() -> void:
 		music_volume = cfg.get_value("audio", "music", music_volume)
 		sfx_volume = cfg.get_value("audio", "sfx", sfx_volume)
 		fullscreen = cfg.get_value("video", "fullscreen", fullscreen)
-		ui_scale = cfg.get_value("video", "ui_scale", ui_scale)
+		ui_scale = 1.0  # устаревший масштаб больше не влияет на интерфейс
 		tutorial_seen = cfg.get_value("game", "tutorial_seen", tutorial_seen)
 		graphics = cfg.get_value("video", "graphics", graphics)
 		show_fps = cfg.get_value("video", "show_fps", show_fps)
@@ -60,6 +61,7 @@ func _ready() -> void:
 		theme_mode = cfg.get_value("video", "theme_mode", theme_mode)
 		window_mode = cfg.get_value("video", "window_mode", "borderless" if fullscreen else "windowed")
 		resolution = cfg.get_value("video", "resolution", resolution)
+		_render_resolution = cfg.get_value("video", "render_resolution", "")
 		chat_volume = cfg.get_value("audio", "chat", chat_volume)
 		perudo_coin_secret = cfg.get_value("game", "perudo_coin_secret", perudo_coin_secret)
 		coin_secrets = cfg.get_value("game", "coin_secrets", {"perudo": true} if perudo_coin_secret else {})
@@ -80,8 +82,8 @@ func apply() -> void:
 	_apply_audio()
 	if not DisplayServer.get_name().begins_with("headless"):
 		_apply_window()
-	if get_tree().root.content_scale_factor != ui_scale:
-		get_tree().root.content_scale_factor = ui_scale
+	ui_scale = 1.0
+	get_tree().root.content_scale_factor = 1.0
 	# графика: вертикальная синхронизация, потолок кадров (видеокарта не греется зря), масштаб 3D-сцены со сглаживанием FSR
 	var vs := DisplayServer.VSYNC_ENABLED if vsync else DisplayServer.VSYNC_DISABLED
 	if DisplayServer.window_get_vsync_mode() != vs:
@@ -118,6 +120,33 @@ func _apply_window() -> void:
 		var sz := Vector2i(int(p[0]), int(p[1])).min(area.size - Vector2i(16, 48))
 		DisplayServer.window_set_size(sz)
 		DisplayServer.window_set_position(area.position + (area.size - sz) / 2)
+	var root := get_tree().root
+	var render_size := _resolution_size(_render_resolution)
+	if not windowed and render_size != Vector2i.ZERO:
+		# Fullscreen-окно остаётся размером с монитор; меняется настоящая
+		# растровая поверхность игры, включая 2D, а не множитель UI.
+		root.content_scale_mode = Window.CONTENT_SCALE_MODE_VIEWPORT
+		root.content_scale_size = render_size
+	else:
+		root.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
+		root.content_scale_size = Vector2i(
+			ProjectSettings.get_setting("display/window/size/viewport_width", 1280),
+			ProjectSettings.get_setting("display/window/size/viewport_height", 720))
+
+
+func _resolution_size(text: String) -> Vector2i:
+	var parts := text.split("x")
+	if parts.size() != 2 or not parts[0].is_valid_int() or not parts[1].is_valid_int():
+		return Vector2i.ZERO
+	var parsed := Vector2i(int(parts[0]), int(parts[1]))
+	return parsed if parsed.x > 0 and parsed.y > 0 else Vector2i.ZERO
+
+
+## Фактическая растровая поверхность игры, а не сохранённый размер окна.
+func current_resolution() -> Vector2i:
+	if get_tree().root.content_scale_mode == Window.CONTENT_SCALE_MODE_CANVAS_ITEMS:
+		return DisplayServer.window_get_size()
+	return get_tree().root.get_texture().get_size()
 
 
 ## Счётчик кадров в углу экрана (настройка «Показывать FPS»).
@@ -163,6 +192,7 @@ func save() -> void:
 	cfg.set_value("video", "theme_mode", theme_mode)
 	cfg.set_value("video", "window_mode", window_mode)
 	cfg.set_value("video", "resolution", resolution)
+	cfg.set_value("video", "render_resolution", _render_resolution)
 	cfg.save(SETTINGS)
 
 
@@ -174,6 +204,12 @@ func dark_theme() -> bool:
 
 
 func set_value(key: String, value) -> void:
+	if key == "resolution":
+		_applied_res = ""
+		if window_mode != "windowed":
+			_render_resolution = str(value)
+		elif DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_MAXIMIZED:
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
 	set(key, value)
 	save()
 	apply()

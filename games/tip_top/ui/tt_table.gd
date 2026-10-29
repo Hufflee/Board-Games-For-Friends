@@ -499,6 +499,8 @@ func _update_right() -> void:
 	# недописанный ответ переживает перестройку панели (её вызывают чужие ответы)
 	var draft := ""
 	var caret := 0
+	var owner := get_viewport().gui_get_focus_owner()
+	var continue_answer: bool = owner == null or owner == _answer_edit
 	if is_instance_valid(_answer_edit):
 		draft = _answer_edit.text
 		caret = _answer_edit.caret_column
@@ -535,7 +537,8 @@ func _update_right() -> void:
 				go.pressed.connect(_send_answer)
 				col.add_child(go)
 				_right.add_child(p)
-				_answer_edit.grab_focus.call_deferred()
+				if continue_answer:
+					_focus_answer_if_free.call_deferred(weakref(_answer_edit), _seat(), _round)
 			else:
 				_right.add_child(TTStyle.label("Ответ отправлен. Ждём остальных…", TTStyle.CAP, TTStyle.WHITE, HORIZONTAL_ALIGNMENT_CENTER, "bold"))
 		"order":
@@ -574,9 +577,25 @@ func _update_right() -> void:
 				_right.add_child(TTStyle.label("Команда угадывает ваш номер…", TTStyle.CAP, TTStyle.WHITE, HORIZONTAL_ALIGNMENT_CENTER, "bold"))
 
 
+## Чужой ответ пересоздаёт панель, но не должен перетягивать ввод из чата или служебного окна.
+func _focus_answer_if_free(reference: WeakRef, seat: int, round_no: int) -> void:
+	var edit := reference.get_ref() as LineEdit
+	if not is_instance_valid(edit) or edit != _answer_edit or not edit.is_visible_in_tree():
+		return
+	if is_queued_for_deletion() or _seat() != seat or _round != round_no or _v.get("phase", "") != "answer":
+		return
+	if Net.paused or bool(_v.get("game_paused", false)) or bool(_v.get("spectator", false)) or _top.chat.expanded:
+		return
+	var owner := get_viewport().gui_get_focus_owner()
+	if owner == null or owner == edit:
+		edit.grab_focus()
+
+
 func _send_answer() -> void:
 	if _answer_edit == null or _answer_edit.text.strip_edges() == "":
 		return
+	# Net может удалить редактор синхронно: тот же Enter не должен затем открыть чат.
+	get_viewport().set_input_as_handled()
 	_send("tt_answer", {"text": _answer_edit.text})
 	Sfx.play("card_place", -4)
 

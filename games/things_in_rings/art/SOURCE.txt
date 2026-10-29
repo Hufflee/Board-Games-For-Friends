@@ -1,0 +1,45 @@
+Things in Rings — исходные изображения карточек
+
+Источник: предоставленный владельцем мод Tabletop Simulator,
+https://steamcommunity.com/sharedfiles/filedetails/?id=3573400283
+Локальные исходные данные: TTS3573400283.json (Lua не исполнялся).
+Правила: hub/covers/TIR_rulebook_v17.pdf (2 страницы).
+Авторство из PDF: Design — Peter C. Hayward; Illustration — Snow Conrad;
+Graphic Design — Snow Conrad, Anca Gavril. Издатель оригинала — Allplay.
+
+Карточки извлечены только для личной игры с друзьями. Права на оригинальные
+изображения и название принадлежат их правообладателям. Этот материал
+не включается в лицензию кода проекта; перед публичным коммерческим
+распространением необходимы собственные ассеты или разрешение правообладателей.
+
+342 действительных CardID (270 Thing, 24 Attribute, 24 Word, 24 Context),
+4 рубашки. Непустые ячейки атласов, не входящие в DeckIDs, не добавлялись.
+В игре только готовые WebP; исходные 17 атласов остаются в build/tir29/sheets.
+URL, размеры и SHA256 атласов: build/tir29/sheets-manifest.json.
+Состав и SHA256 карточек: logic/tr_catalog.json.
+
+Оформление коробки hub/covers/things_in_rings_{front,back,spine}.png — новая
+композиция из оригинальных карточек, цветных колец и надписей. Шрифт Nunito
+взят из hub/fonts/hufflesoft_Nunito-Black.ttf (OFL_Nunito.txt).
+Русский перевод — справочный, выполнен и визуально сверен Codex 29.10.2026.
+Правила Word всегда применяются к английским названиям, а не к переводу.
+
+
+Публичные URL оригинальных атласов:
+https://steamusercontent-a.akamaihd.net/ugc/10908796963995363755/F945EDFF4FE2C63D4C080A72C0A5B78C3D3EC43D/
+https://steamusercontent-a.akamaihd.net/ugc/10944366740195670428/55D5FDB0C88664C8FD5C797709E62BA0C8F5617A/
+https://steamusercontent-a.akamaihd.net/ugc/12059461325397610030/1ECD251ECD72DCF15875E5824669B8813E368D3E/
+https://steamusercontent-a.akamaihd.net/ugc/12197864609298420064/DD3A67A42207251A9D8D20568003879DE7515B9F/
+https://steamusercontent-a.akamaihd.net/ugc/12940590038044465108/375D627A3A3B87CF384B6A0CB7CD1637B0911C25/
+https://steamusercontent-a.akamaihd.net/ugc/13202214830112536787/8EB0745F07458F3592C905CAB584E6D2CFC220C8/
+https://steamusercontent-a.akamaihd.net/ugc/13242780933574301817/E395FAB33CA3BAF2408F3D5FB85E48F91DAF50C6/
+https://steamusercontent-a.akamaihd.net/ugc/13575106483397994988/4FEE9544FD69B1E2070846C2F14E732AFCD8912E/
+https://steamusercontent-a.akamaihd.net/ugc/13657908716890603105/8159B9E758422560661C0FEF70A70BD462E33417/
+https://steamusercontent-a.akamaihd.net/ugc/14733645107466097767/C9815E4AE53A0D3F4EC2FD6EA43B9D23B0FB67EF/
+https://steamusercontent-a.akamaihd.net/ugc/15244831624854273572/375CBD9FF964B23E4A3EE6FED21A7309FB44A300/
+https://steamusercontent-a.akamaihd.net/ugc/15713480199514757535/B10887B90450DBC283C181ECD3B5E2D25DA2EBCD/
+https://steamusercontent-a.akamaihd.net/ugc/16086247987245352827/11DD611A24D2130A72CDB50A380664845FEE5380/
+https://steamusercontent-a.akamaihd.net/ugc/17227724540592134328/D79CB16978932B6A50CADAACE106F3375397C545/
+https://steamusercontent-a.akamaihd.net/ugc/17894751776142526688/2C9D5030C723BE71B66C356AC74B5F2AD21F2DB4/
+https://steamusercontent-a.akamaihd.net/ugc/18119920769088460485/B88B654DD20C3281015B0E2F3119E8CC030DC712/
+https://steamusercontent-a.akamaihd.net/ugc/9828973274523914477/511902D2D6EA47BC1D1E4C8C86B7F83C5BBBD168/

@@ -116,7 +116,7 @@ var _grab := Vector2.ZERO  # где схватили (от центра)
 var _press_at := Vector2.ZERO
 var _moved := false
 var _samples: Array = []  # [время, позиция] — скорость броска по последним движениям
-var _style := "neon"
+var _style := "king_of_12"
 
 
 func _ready() -> void:
@@ -214,7 +214,7 @@ func _style_for() -> String:
 		if gc[0] == key:
 			var st: String = key + ("_dark" if gc[1] and Prefs.dark_theme() else "")
 			return st + "_secret" if secret and TEXTURES.has(st + "_secret") else st
-	return "hues" if "hues_and_cues" in g else ("gold" if "brodilka" in g else ("silver" if "gloom" in g else "neon"))
+	return "hues" if "hues_and_cues" in g else ("gold" if "brodilka" in g else ("silver" if "gloom" in g else "king_of_12"))
 
 
 ## Ключ игры для секрета и монет: perudo / id из GAME_COINS / "" (у остальных секрета нет).

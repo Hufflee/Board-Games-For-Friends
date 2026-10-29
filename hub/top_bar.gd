@@ -1,22 +1,26 @@
 class_name TopBar
 extends PanelContainer
 ## Общая верхняя полоса стола: слева мелкое название игры и часы, под ними ход/раунд, по центру гнездо монетки, справа — общие кнопки
-## (чат, пауза у хоста, «стать зрителем», пригласить) и кнопки игры (правила, настройки, тема, выход).
+## Клавиша Esc выдвигает прежний ряд действий из-за верхнего края; слева всё видно постоянно.
 ## Всё общее живёт здесь, а стол игры начинается ниже (HEIGHT) — ничего не залезает на поле.
 ## Чат раскрывается выпадающей панелью справа под полосой. Пока полоса на экране, PauseLayer
 ## свои кнопки не показывает (группа "top_bar").
 ## Оформление — от игры: make_button(text, size) -> Button, фон полосы (StyleBox), цвета текста.
 
 const HEIGHT := 48.0
+static var _saved_match := ""
+static var _saved_menu_open := false
+var _match_key := ""
 const MAX_INFO_W := 340.0  # строка хода/раунда длиннее — обрезается многоточием перед монеткой
 
 var title: Label
 var info: Label  # фаза / раунд — игра пишет сюда сама
-var actions: HBoxContainer  # сюда игра кладёт свои кнопки (правила, настройки, тема, выход)
+var actions: HBoxContainer  # прежний однорядный набор кнопок игры
 var chat: K12ChatPanel
 var coin_dock: Control  # место для монетки-антистресса (Fidget встаёт сюда по умолчанию)
 var coin_center := false  # гнездо монетки — по центру полосы (в некоторых играх), а не за часами
 var coin_at := Callable()  # своё место гнезда: -> Vector2 (центр в экранных координатах), напр. под панелью игры
+var _victory_screen: Control
 var _clock: TurnClock
 var _left: VBoxContainer
 
@@ -26,12 +30,27 @@ var _pause_btn: Button
 var _pause_icon: PlayPauseIcon
 var _spec_btn: Button
 var _invite_btn: Button
+var _esc_btn: Button
+var _drawer: HBoxContainer
+var _menu_open := false
+var _menu_tween: Tween
+var _menu_amount := 0.0:
+	set(value):
+		_menu_amount = value
+		_place_actions()
+
 
 
 ## bar — фон полосы (null — прозрачная: сквозь неё виден фон игры);
 ## text — цвет надписей; parent — экран стола (чат вешается на него).
 static func make(parent: Control, game_title: String, make_button: Callable, bar: StyleBox, text: Color, title_font: Font = null) -> TopBar:
 	var t := TopBar.new()
+	t._match_key = Net.game_id
+	if _saved_match != t._match_key or t._match_key.is_empty():
+		_saved_match = t._match_key
+		_saved_menu_open = false
+	t._menu_open = _saved_menu_open
+	t._menu_amount = 1.0 if t._menu_open else 0.0
 	t._make_button = make_button
 	if bar == null:
 		var sb := StyleBoxFlat.new()
@@ -86,11 +105,24 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 	t._clock.scale = Vector2(0.8, 0.8)  # в строке мелкого названия — чуть меньше
 	head.add_child(t._clock)
 	row.add_child(spacer)
-	var right := HBoxContainer.new()
-	right.add_theme_constant_override("separation", 6)
-	right.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	right.alignment = BoxContainer.ALIGNMENT_END
-	row.add_child(right)
+	t._esc_btn = load("res://hub/escape_key.gd").new()
+	t._esc_btn.set_ink(text)
+	t._esc_btn.name = "EscapeMenu"
+	t._esc_btn.tooltip_text = "Показать или скрыть меню (Escape)"
+	t._esc_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	t._esc_btn.set_meta("top_bar_escape", true)
+	t._esc_btn.pressed.connect(t.toggle_menu)
+	row.add_child(t._esc_btn)
+	# Ряд движется целиком в прежней верхней полосе; плашки под ним нет.
+	var overlay := Control.new()
+	overlay.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	t.add_child(overlay)
+	t._drawer = HBoxContainer.new()
+	t._drawer.name = "ActionDrawer"
+	t._drawer.visible = t._menu_open
+	t._drawer.add_theme_constant_override("separation", 6)
+	overlay.add_child(t._drawer)
+	var right := t._drawer
 	t._chat_btn = t._btn("Чат", "Чат и быстрые фразы (Enter)")
 	t._chat_btn.pressed.connect(func(): t.chat.expanded = not t.chat.expanded)
 	right.add_child(t._chat_btn)
@@ -140,6 +172,14 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 	t.chat.corner_margin = Vector2(12, HEIGHT + 8)
 	parent.add_child(t.chat)
 	parent.add_child(t)
+	var victory := load("res://hub/victory_screen.gd").new() as Control
+	victory.table = parent
+	victory.make_button = make_button
+	victory.game = "gloomier" if Net.party_game == "gloom" and str(Net.settings.get("gl_sets", "base")) == "gm" else Net.party_game
+	var entry := HubGames.by_id(Net.party_game)
+	victory.accent = entry.get("color", Color("b99346"))
+	parent.add_child(victory)
+	t._victory_screen = victory
 	return t
 
 
@@ -169,6 +209,29 @@ func _invite() -> void:
 
 
 func _process(_d: float) -> void:
+	if is_instance_valid(_victory_screen):
+		_victory_screen.sync(Net.view)
+	# z_index влияет на рисунок, но поздние контейнеры стола перехватывают GUI.
+	# Поднимаем полосу только под немодальными соседями; окна остаются последними.
+	var parent := get_parent()
+	if parent != null:
+		var target := parent.get_child_count() - 1
+		for sibling: Node in parent.get_children():
+			if sibling != self and sibling is Control and sibling.is_visible_in_tree() and sibling.z_index >= 100:
+				target = mini(target, sibling.get_index() - 1)
+		# GUI выбирает узлы по дереву, независимо от z_index. Общий финал и чат
+		# должны идти после поздно созданных игровых панелей, но перед модальными окнами.
+		var ordered: Array[Control] = []
+		if is_instance_valid(_victory_screen):
+			ordered.append(_victory_screen)
+		if is_instance_valid(chat):
+			ordered.append(chat)
+		ordered.append(self)
+		for index: int in ordered.size():
+			var wanted := maxi(0, target - ordered.size() + 1 + index)
+			if ordered[index].get_index() != wanted:
+				parent.move_child(ordered[index], wanted)
+		z_index = maxi(z_index, 90)
 	if coin_dock and _left:
 		# гнездо — вплотную за часами (или за названием, если часов нет) либо за строкой хода — что длиннее;
 		# слишком длинная строка обрезается многоточием перед монеткой (не дальше MAX_INFO_W)
@@ -198,6 +261,89 @@ func _process(_d: float) -> void:
 	_invite_btn.visible = Net.is_party()
 	_spec_btn.visible = playing and not spectator and Net.can_spectate()
 	var unread := chat.unread() if chat else 0
-	var t := ("Скрыть чат" if chat and chat.expanded else "Чат") + (" (%d)" % unread if unread > 0 else "")
+	var t := "Чат" + (" (%d)" % unread if unread > 0 else "")
 	if _chat_btn.text != t:
 		_chat_btn.text = t
+	_place_actions()
+
+
+## Тот же однорядный набор и размеры; лишь очень длинный ряд уменьшаем до свободной ширины.
+func _place_actions() -> void:
+	if not is_instance_valid(_drawer) or not is_instance_valid(_esc_btn):
+		return
+	var natural := _drawer.get_combined_minimum_size()
+	var right := _esc_btn.global_position.x - 6.0
+	var left := _left.get_global_rect().end.x + 12.0
+	if not coin_center and not coin_at.is_valid():
+		left = maxf(left, coin_dock.get_global_rect().end.x + 12.0)
+	var fit := minf(1.0, maxf(1.0, right - left) / maxf(1.0, natural.x))
+	# Раньше правый HBox растягивался по высоте общей строки вместе с левым блоком.
+	_drawer.size = Vector2(natural.x, maxf(natural.y, _left.size.y))
+	_drawer.scale = Vector2(fit, fit)
+	var height := _drawer.size.y * fit
+	var shown_y := global_position.y + (size.y - height) * 0.5
+	var hidden_y := -height - 2.0
+	_drawer.global_position = Vector2(right - natural.x * fit, lerpf(hidden_y, shown_y, _menu_amount))
+
+
+## Повторное нажатие разворачивает текущую анимацию без второго обработчика.
+func toggle_menu() -> void:
+	set_menu_open(not _menu_open)
+
+
+func set_menu_open(open: bool) -> void:
+	_menu_open = open
+	if not _match_key.is_empty() and Net.game_id == _match_key:
+		_saved_match = _match_key
+		_saved_menu_open = open
+	if _menu_tween != null and _menu_tween.is_valid():
+		_menu_tween.kill()
+	if open:
+		_drawer.show()
+	# Во время закрытия панель уже не принимает клики по старой позиции.
+	_drawer.mouse_filter = Control.MOUSE_FILTER_STOP if open else Control.MOUSE_FILTER_IGNORE
+	_set_drawer_input(_drawer, open)
+	_menu_tween = create_tween()
+	_menu_tween.set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+	_menu_tween.tween_property(self, "_menu_amount", 1.0 if open else 0.0, 0.22)
+	if not open:
+		_menu_tween.tween_callback(_drawer.hide)
+
+
+func _set_drawer_input(node: Node, on: bool) -> void:
+	for child: Node in node.get_children():
+		if child is Control:
+			# При закрытии не меняем disabled: права и состояние задаёт игра.
+			if not on and child.has_focus():
+				child.release_focus()
+			if not on and not child.has_meta("drawer_mouse_filter"):
+				child.set_meta("drawer_mouse_filter", child.mouse_filter)
+			if on and child.has_meta("drawer_mouse_filter"):
+				child.mouse_filter = int(child.get_meta("drawer_mouse_filter"))
+				child.remove_meta("drawer_mouse_filter")
+			elif not on:
+				child.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_set_drawer_input(child, on)
+
+
+## Окна правил/настроек могут закрываться без set_input_as_handled().
+## Поэтому наличие видимого модального слоя проверяем до переключения меню.
+func _has_modal(node: Node) -> bool:
+	if node == null or node == self or node == chat:
+		return false
+	if node is Window and node != get_tree().root and node.visible:
+		return true
+	if node is Control and node.is_visible_in_tree() and node.z_index >= 100:
+		return true
+	for child: Node in node.get_children():
+		if _has_modal(child):
+			return true
+	return false
+
+
+func _unhandled_input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_ESCAPE:
+		if _has_modal(get_tree().current_scene):
+			return
+		toggle_menu()
+		get_viewport().set_input_as_handled()

@@ -116,9 +116,13 @@ func _ready() -> void:
 
 
 func _on_submit(text: String) -> void:
-	Net.send_chat(text, "chat", _team_channel())
+	# Поглощаем Enter до синхронного Net: экран может пересоздаться.
+	get_viewport().set_input_as_handled()
+	var team := _team_channel()
 	_input.clear()
 	_sync_caret()  # отправили — курсор пропадает до первого нового символа
+	_input.release_focus()
+	Net.send_chat(text, "chat", team)
 
 
 func _team_channel() -> bool:
@@ -211,16 +215,17 @@ func _sync() -> void:
 		return
 	_body.visible = expanded
 	if docked_top:
-		_top_row.visible = false
+		_top_row.visible = expanded
 		visible = expanded
 	if not expanded:
 		quick_open = false
+		_input.release_focus()
 	_quick.visible = quick_open
 	_quick_btn.text = "Скрыть" if quick_open else "Фразы"
 	if expanded:
 		_unread = 0
 		_raise_for_input.call_deferred()
-	_toggle.text = ("Свернуть чат" if expanded else "Чат") + (" (%d)" % _unread if _unread > 0 else "")
+	_toggle.text = ("Скрыть чат" if expanded else "Чат") + (" (%d)" % _unread if _unread > 0 else "")
 	_place.call_deferred()
 
 
@@ -246,6 +251,11 @@ func _place() -> void:
 
 func _unhandled_key_input(event: InputEvent) -> void:
 	var ke := event as InputEventKey
+	if ke == null:
+		return
+	var focused := get_viewport().gui_get_focus_owner()
+	if focused is LineEdit or focused is TextEdit:
+		return
 	# 1–8 (и на цифровой панели) — быстрая реплика без открытия чата; пока пишут в поле — цифры печатаются
 	if ke.pressed and not ke.echo and not _input.has_focus() and Net.in_session():
 		var n := -1
@@ -257,10 +267,11 @@ func _unhandled_key_input(event: InputEvent) -> void:
 			Net.send_chat(REACTIONS[n], "emote", _team_channel())
 			get_viewport().set_input_as_handled()
 			return
-	if event.is_pressed() and (event as InputEventKey).keycode == KEY_ENTER and not _input.has_focus():
-		expanded = true
-		_input.grab_focus()
+	if ke.pressed and not ke.echo and ke.keycode in [KEY_ENTER, KEY_KP_ENTER] and not ke.ctrl_pressed and not ke.alt_pressed:
 		get_viewport().set_input_as_handled()
+		expanded = not expanded
+		if expanded:
+			_input.grab_focus()
 
 
 ## Ряд кнопок быстрых реакций.

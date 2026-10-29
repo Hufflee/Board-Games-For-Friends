@@ -79,7 +79,7 @@ func _ready() -> void:
 	add_child(_ambience)
 	# победная тема не должна доигрывать в лобби / другой игре
 	if get_tree().has_signal("scene_changed"):
-		get_tree().connect("scene_changed", stop_victory)
+		get_tree().connect("scene_changed", _on_victory_scene_changed)
 	Net.game_ended.connect(stop_victory)
 	Net.session_closed.connect(func(_r): stop_victory())
 
@@ -198,10 +198,10 @@ func _next_track() -> void:
 	_music.volume_db = -30.0
 	_music.play()
 	_fade = create_tween()
-	_fade.tween_property(_music, "volume_db", _track_db(path), 2.5).set_trans(Tween.TRANS_SINE)
+	_fade.tween_property(_music, "volume_db", -40.0 if is_instance_valid(_victory) and _victory.playing else _track_db(path), 2.5).set_trans(Tween.TRANS_SINE)
 
 
-## Победная тема: тише остальной музыки, музыка игры приглушается и возвращается после.
+## Победная тема повторяется до ухода с итогов партии; музыка игры приглушается.
 ## Обрывается при выходе в лобби / другую игру / меню (stop_victory).
 var _victory: AudioStreamPlayer
 var _victory_tween: Tween
@@ -214,28 +214,43 @@ const VICTORY_DB := -20.0  # тише музыки игры: тема громк
 func victory() -> void:
 	if _quitting:
 		return
-	# одна партия — одна победная тема (стол мог пересоздаться: смена темы, переподключение)
-	var gid := str(Net.view.get("game_id", ""))
-	if gid != "" and gid == _victory_gid:
+	var outcome: Dictionary = preload("res://hub/victory_result.gd").resolve(Net.party_game, Net.view)
+	if not outcome.finished or outcome.winners.is_empty():
 		return
-	_victory_gid = gid
+	# Пересоздание стола при смене темы не сбрасывает проигрывание.
+	var gid := str(Net.view.get("game_id", Net.game_id))
+	if is_instance_valid(_victory) and _victory.playing and gid == _victory_gid:
+		return
 	stop_victory()
+	_victory_gid = gid
 	if _victory == null:
-		_victory = AudioStreamPlayer.new()  # свой плеер: его всегда можно остановить при выходе
+		_victory = AudioStreamPlayer.new()
 		_victory.bus = "Music"
 		add_child(_victory)
-	_victory.stream = load(DIR + VICTORY)
+	# Локальная копия: loop не изменяет закешированный ресурс для других плееров.
+	var stream := load(DIR + VICTORY).duplicate() as AudioStreamMP3
+	stream.loop = true
+	_victory.stream = stream
 	_victory.volume_db = VICTORY_DB
 	_victory.play()
+	if _fade and _fade.is_valid():
+		_fade.kill()
 	_victory_tween = create_tween()
-	_victory_tween.tween_property(_music, "volume_db", -26.0, 0.5)
-	_victory_tween.tween_interval(6.0)
-	_victory_tween.tween_property(_victory, "volume_db", -40.0, 2.5)  # тема затихает…
-	_victory_tween.parallel().tween_property(_music, "volume_db", _cur_music_db(), 2.5)  # …и возвращается музыка игры
-	_victory_tween.tween_callback(_victory.stop)
+	_victory_tween.tween_property(_music, "volume_db", -40.0, 0.5)
+
+
+## Смена/пересоздание самой сцены игры на итогах не должна начинать тему заново.
+func _on_victory_scene_changed() -> void:
+	var scene := get_tree().current_scene
+	var target: String = HubGames.by_id(Net.party_game).get("scene", "")
+	if Net.in_game and str(Net.view.get("phase", "")) == "game_over" and scene != null:
+		if scene.scene_file_path == target:
+			return
+	stop_victory()
 
 
 func stop_victory() -> void:
+	_victory_gid = ""
 	if _victory_tween and _victory_tween.is_valid():
 		_victory_tween.kill()
 	if is_instance_valid(_victory):

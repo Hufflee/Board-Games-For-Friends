@@ -1,0 +1,7 @@
+Kenney — Interface Sounds (2020), CC0 1.0.
+Official source: https://kenney.nl/assets/interface-sounds
+Download: https://opengameart.org/sites/default/files/kenney_interfaceSounds.zip
+Retrieved: 2026-10-29.
+correct.ogg = Audio/confirmation_002.ogg; wrong.ogg = Audio/error_004.ogg.
+Archive SHA256: F2193D072726D6758A5F7871B2DCC54DCCE0D5C35C6F0A62F92549B327C81232
+Unmodified original files; license in Kenney-LICENSE.txt.

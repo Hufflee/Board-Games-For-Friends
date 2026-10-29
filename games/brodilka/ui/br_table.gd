@@ -1176,6 +1176,7 @@ func _show_results() -> void:
 	var w := int(_v["winner"])
 	Sfx.victory()
 	var layer := Control.new()
+	layer.name = "FinalResults"
 	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(layer)
 	var dim := ColorRect.new()

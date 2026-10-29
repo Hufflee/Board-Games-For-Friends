@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="Настольные игры с друзьями"
-config/version="0.8.6"
+config/version="0.8.7"
 run/main_scene="res://hub/boot/boot.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 run/flush_stdout_on_print=true

@@ -228,11 +228,11 @@ func _build_toast(from_name: String, lobby: int) -> void:
 	ok.pressed.connect(func():
 		queue_free()
 		Net.join_steam(lobby))
-	row.add_child(ok)
 	var no := Button.new()
 	no.text = "Отклонить"
 	no.pressed.connect(queue_free)
 	row.add_child(no)
+	row.add_child(ok)
 	col.add_child(row)
 	Sfx.play("chips_win", -4)
 	get_tree().create_timer(45.0).timeout.connect(func():

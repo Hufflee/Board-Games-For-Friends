@@ -40,6 +40,7 @@ func wait_marker(name: String) -> bool:
 	return FileAccess.file_exists(qa_dir.path_join(name))
 
 func click(control: Control) -> void:
+	await load("res://tests/fixtures/top_bar_menu29.gd").reveal(control)
 	if control == null:
 		check(false, "Цель настоящего клика существует")
 		return

@@ -168,7 +168,7 @@ func get_view(seat: int, show_all: bool = false) -> Dictionary:
 		var col := []
 		for c in hands[s]:
 			# подарки на столе — рубашкой вверх: видна только стрелка (в памятке — лицом всем)
-			col.append({"g": c["g"] if (phase == "memorize" or show_all) else -1, "dir": c["dir"]})
+			col.append({"g": c["g"] if (phase in ["memorize", "game_over"] or show_all) else -1, "dir": c["dir"]})
 		hv.append(col)
 	var moving := {}
 	if not card.is_empty():

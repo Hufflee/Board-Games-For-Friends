@@ -105,6 +105,7 @@ static func row_layout(
 		if (
 			not piles.is_empty()
 			and (lying or int(poses.get(id, 1)) == 0)
+			and not str(id) in FIGURINES
 			and bool(piles.back().lying)
 			and float(piles.back().height) + ext.y <= height + 0.0005
 		):
@@ -150,6 +151,26 @@ static func row_layout(
 		)
 		x = maxf(x, float(figure.right))
 	return {"boxes": boxes, "piles": piles, "width": x}
+
+
+## Старые свободные места действуют до первого ручного переноса.
+static func figure_ratios(config: Dictionary) -> Variant:
+	return -1.0 if bool(config.get("neighbor_order", false)) else config.get("figure_positions", config.get("figure_x", 1.0))
+
+
+## Миграция идёт по видимым группам, сохраняя внутренний порядок горизонтальных стопок.
+static func visible_order(ids: Array, sizes: Dictionary, poses: Dictionary, config: Dictionary) -> Array:
+	var layout := row_layout(ids, sizes, poses, float(config.height), figure_ratios(config), float(config.width) - GAP)
+	var groups: Array = layout.piles.duplicate(true)
+	for id: String in FIGURINES:
+		if ids.has(id) and not groups.any(func(group): return group.ids.has(id)):
+			var ext: Vector3 = sizes[id]
+			groups.append({"ids": [id], "x": (layout.boxes[id] as Transform3D).origin.x - ext.x * 0.5})
+	groups.sort_custom(func(a, b): return float(a.x) < float(b.x))
+	var ordered: Array = []
+	for group: Dictionary in groups:
+		ordered.append_array(group.ids)
+	return ordered
 
 
 static func normalized(source: Dictionary) -> Dictionary:
@@ -232,7 +253,7 @@ static func solve(
 							sizes,
 							poses,
 							float(cfg.height),
-							cfg.get("figure_positions", cfg.get("figure_x", 1.0)),
+							figure_ratios(cfg),
 							float(capacities[destination])
 						)
 						. width
@@ -251,7 +272,7 @@ static func solve(
 								sizes,
 								poses,
 								float(cfg.height),
-								cfg.get("figure_positions", cfg.get("figure_x", 1.0)),
+								figure_ratios(cfg),
 								float(capacities[i])
 							)
 							. width
@@ -274,7 +295,7 @@ static func solve(
 						sizes,
 						poses,
 						float(cfg.height),
-						cfg.get("figure_positions", cfg.get("figure_x", 1.0)),
+						figure_ratios(cfg),
 						float(capacities[destination])
 					)
 					. width
@@ -301,7 +322,7 @@ static func solve(
 			float(cfg.height),
 			ordered,
 			capacities,
-			cfg.get("figure_positions", cfg.get("figure_x", 1.0))
+			figure_ratios(cfg)
 		):
 			return {
 				"ok": false,

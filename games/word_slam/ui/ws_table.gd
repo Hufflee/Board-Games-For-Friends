@@ -11,6 +11,7 @@ const TEAM_NAMES := ["Синие", "Оранжевые"]
 const TEAM_COLORS := [Color("5f7fbf"), Color("d9895a")]
 const LEVEL_COLORS := {"green": Color("6fbf73"), "yellow": Color("e8c547"), "red": Color("e06a5a")}
 const CARD_GAP := 8.0
+const WordCard := preload("res://games/word_slam/ui/ws_word_card.gd")
 
 var app: Node
 
@@ -200,7 +201,7 @@ func _key() -> int:
 
 
 func _am_storyteller() -> bool:
-	return _v.get("storytellers", []).has(_seat())
+	return not _v.get("spectator", false) and _v.get("storytellers", []).has(_seat())
 
 
 func _send(kind: String, arg: Dictionary = {}) -> void:
@@ -572,7 +573,7 @@ func _step_falling(delta: float) -> void:
 
 
 func _per_row() -> int:
-	return maxi(1, int((_shelves.size.x * 0.5 - 28.0) / (WSCardFace.SIZE.x + CARD_GAP)))
+	return WSRules.WORDS_PER_ROW
 
 
 func _slot(shelf: int, i: int) -> Vector2:
@@ -588,6 +589,8 @@ func _sync_cards(revealing: bool = false) -> void:
 	var qn := 0
 	for sh in 2:
 		for k in _rows[sh].size():
+			if _rows[sh][k] == "":
+				continue
 			if str(_rows[sh][k]) == "?":
 				_rows[sh][k] = "?%d" % qn  # закрытые карточки — у каждой свой ключ
 				qn += 1
@@ -596,6 +599,8 @@ func _sync_cards(revealing: bool = false) -> void:
 	for key in _cards.keys():
 		if not want.has(key):
 			var old: K12TableCard = _cards[key]
+			if old.dragging and _am_storyteller() and _v.get("phase", "") == "play" and not key.contains("|"):
+				continue
 			var cov := old.get_node_or_null("Cover")
 			if cov != null and revealing:
 				drop.append(cov)
@@ -603,13 +608,15 @@ func _sync_cards(revealing: bool = false) -> void:
 			_cards.erase(key)
 	var phase: String = _v.get("phase", "")
 	for sh in 2:
-		var editable: bool = _am_storyteller() and phase == "play" and _editable_shelf(sh)
+		var editable: bool = _am_storyteller() and phase == "play" and _editable_shelf(sh) and not get_tree().paused
 		for k in _rows[sh].size():
 			var id: String = _rows[sh][k]
+			if id == "":
+				continue
 			var key := _card_key(sh, id)
 			if not _cards.has(key):
 				var face_id := "?" if id.begins_with("?") else id
-				var c := K12TableCard.new("ws_" + key, true, WSCardFace.new(face_id), WSCardFace.SIZE)
+				var c := WordCard.new("ws_" + key, true, WSCardFace.new(face_id), WSCardFace.SIZE)
 				_shelves.add_child(c)
 				c.place(_slot(sh, k) + Vector2(0, -20))
 				c.modulate.a = 0.0
@@ -637,6 +644,7 @@ func _sync_cards(revealing: bool = false) -> void:
 
 func _wire(c: K12TableCard, id: String) -> void:
 	c.dropped.connect(func(card, at): _on_card_dropped(id, card, at))
+	c.cancelled.connect(func(): _cancel_card(id, c))
 	c.double_clicked.connect(func(_card):
 		if _am_storyteller() and _v["phase"] == "play":
 			_remove(id))
@@ -646,7 +654,8 @@ func _wire(c: K12TableCard, id: String) -> void:
 	c.clicked.connect(func(_card): _layout_cards(true))
 	c.hovered.connect(func(card: K12TableCard, on: bool):
 		if not card.dragging and card.draggable:
-			card.move_to(card.center(), 0.0, 1.06 if on else 1.0, 0.1))
+			# Отдельная тень не обрывает возвращение в слот при входе указателя.
+			card._lift_to(0.35 if on else 0.0))
 
 
 func _layout_cards(animate: bool) -> void:
@@ -671,12 +680,15 @@ func _where(at: Vector2) -> Array:
 	var sh := 0 if at.x < _shelves.size.x * 0.5 else 1
 	var per := _per_row()
 	var w := _shelves.size.x * 0.5
-	var col := clampi(int((at.x - sh * w - 18.0) / (WSCardFace.SIZE.x + CARD_GAP) + 0.5), 0, per)
+	var col := clampi(int((at.x - sh * w - 18.0) / (WSCardFace.SIZE.x + CARD_GAP)), 0, per - 1)
 	var row := clampi(int((at.y - 30.0) / 50.0), 0, 3)
 	return [sh, row * per + col]
 
 
 func _on_card_dropped(id: String, card: K12TableCard, at: Vector2) -> void:
+	if not _am_storyteller() or _v.get("phase", "") != "play" or get_tree().paused:
+		_cancel_card(id, card)
+		return
 	var w := _where(at)
 	var from := -1
 	for sh in 2:
@@ -688,33 +700,66 @@ func _on_card_dropped(id: String, card: K12TableCard, at: Vector2) -> void:
 			_layout_cards(true)
 			return
 		w = [-1, -1]
-	var cur_key := _card_key(from, id) if from >= 0 else id
+	var old := _rows.duplicate(true)
+	var source: int = _rows[from].find(id) if from >= 0 else -1
 	if from >= 0:
-		_rows[from].erase(id)
-	_cards.erase(cur_key)
+		_rows[from][source] = ""
 	if w[0] < 0:
+		_cards.erase(_card_key(from, id) if from >= 0 else id)
 		var t := create_tween()
 		t.tween_property(card, "modulate:a", 0.0, 0.15)
 		t.tween_callback(card.queue_free)
 		Sfx.play("card_slide", -8)
 	else:
-		if _rows[w[0]].size() >= WSRules.MAX_ON_HOLDER:
-			if not _solo():
-				_layout_cards(true)
-				return
-			w[0] = 1 - w[0]
-		_rows[w[0]].insert(mini(w[1], _rows[w[0]].size()), id)
+		var target: Array = _rows[w[0]]
+		while target.size() < WSRules.MAX_ON_HOLDER:
+			target.append("")
+		var start: int = (w[1] / _per_row()) * _per_row()
+		var end := start + _per_row()
+		var empty := -1
+		if from == w[0] and source >= start and source < end:
+			empty = source
+		else:
+			for slot in range(w[1], end):
+				if target[slot] == "":
+					empty = slot
+					break
+		if empty < 0:
+			for slot in range(w[1] - 1, start - 1, -1):
+				if target[slot] == "":
+					empty = slot
+					break
+		if empty < 0:
+			_rows = old
+			_cancel_card(id, card)
+			return
+		while empty != w[1]:
+			var next: int = empty + (1 if empty < w[1] else -1)
+			target[empty] = target[next]
+			empty = next
+		target[w[1]] = id
+		_cards.erase(_card_key(from, id) if from >= 0 else id)
 		_cards[_card_key(w[0], id)] = card
 		_active_shelf = w[0]
 		Sfx.play("card_place", -6)
 	_push_rows()
 
 
+func _cancel_card(id: String, card: K12TableCard) -> void:
+	card.dragging = false
+	card.z_index = 0
+	if _cards.get(id) == card:
+		_cards.erase(id)
+		card.queue_free()
+	_layout_cards(true)
+	_refresh_chips()
+
+
 func _remove(id: String) -> void:
 	var key := ""
 	for sh in 2:
 		if _editable_shelf(sh) and _rows[sh].has(id):
-			_rows[sh].erase(id)
+			_rows[sh][_rows[sh].find(id)] = ""
 			key = _card_key(sh, id)
 	if _cards.has(key):
 		var c: K12TableCard = _cards[key]
@@ -727,6 +772,9 @@ func _remove(id: String) -> void:
 
 
 func _push_rows() -> void:
+	for row in _rows:
+		while not row.is_empty() and row.back() == "":
+			row.pop_back()
 	_layout_cards(true)
 	_refresh_chips()
 	_shelves.queue_redraw()
@@ -738,27 +786,26 @@ func _push_rows() -> void:
 
 ## Из колоды: начать перетаскивание новой карточки (короткий клик — в конец активной подставки).
 func _grab_from_deck(id: String) -> void:
-	if _own_has(id) or _cards.has(id) or not (_am_storyteller() and _v["phase"] == "play"):
+	if _own_has(id) or _cards.has(id) or get_tree().paused or not (_am_storyteller() and _v["phase"] == "play"):
 		return
-	var c := K12TableCard.new("ws_" + id, true, WSCardFace.new(id), WSCardFace.SIZE)
+	var c := WordCard.new("ws_" + id, true, WSCardFace.new(id), WSCardFace.SIZE)
 	c.draggable = true
 	_shelves.add_child(c)
-	c.place(_shelves.get_local_mouse_position())
-	c.dragging = true
-	c.z_index = 60
+	c.begin_from_catalog(get_global_mouse_position())
 	_cards[id] = c
 	_wire(c, id)
 	c.clicked.connect(func(_card):
 		# клик без перетаскивания — в конец активной подставки
 		var sh := _active_shelf if _solo() else _key()
-		if _solo() and _rows[sh].size() >= WSRules.MAX_ON_HOLDER:
+		if _solo() and _rows[sh].count("") == 0 and _rows[sh].size() >= WSRules.MAX_ON_HOLDER:
 			sh = 1 - sh
-		if not _own_has(id) and _rows[sh].size() < WSRules.MAX_ON_HOLDER:
-			_cards.erase(id)
-			_rows[sh].append(id)
-			_cards[_card_key(sh, id)] = c
-			Sfx.play("card_place", -6)
-			_push_rows(), CONNECT_ONE_SHOT)
+		var slot: int = _rows[sh].find("")
+		if slot < 0:
+			slot = _rows[sh].size()
+		if not _own_has(id) and slot < WSRules.MAX_ON_HOLDER:
+			_on_card_dropped(id, c, _slot(sh, slot))
+		else:
+			_cancel_card(id, c), CONNECT_ONE_SHOT)
 	Sfx.play("card_flip", -10)
 
 
@@ -818,10 +865,10 @@ func _update_bottom() -> void:
 			flow.add_theme_constant_override("v_separation", 4)
 			scroll.add_child(flow)
 			col.add_child(scroll)
-			for i in WSData.STORY[cat].size():
-				var id := "%s:%d" % [cat, i]
+			var order: Array = _v.get("catalog_order", {}).get(cat, [])
+			for id: String in order:
 				var b := Button.new()
-				b.text = WSData.STORY[cat][i]
+				b.text = WSRules.card_word(id)
 				b.add_theme_font_size_override("font_size", 13)
 				b.add_theme_font_override("font", HCStyle.font("bold"))
 				var sb := HCStyle.box(WSCardFace.COLORS[cat], 8, WSCardFace.EDGES[cat], 1)
@@ -960,6 +1007,8 @@ func _update_overlay() -> void:
 			var flow := HFlowContainer.new()
 			flow.add_theme_constant_override("h_separation", 4)
 			for id in rows[sh]:
+				if id == "":
+					continue
 				var f := WSCardFace.new(id)
 				f.custom_minimum_size = WSCardFace.SIZE * Vector2(0.85, 0.8)
 				f.size = f.custom_minimum_size

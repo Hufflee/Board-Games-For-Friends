@@ -8,11 +8,14 @@ extends RefCounted
 ## Режимы: teams — две команды и два рассказчика; solo — один рассказчик, остальные каждый за себя.
 
 const MAX_ON_HOLDER := 12
+const WORDS_PER_ROW := 3
 const LOG_SIZE := 40
 
 var players: Array = []  # [{name, team}]
 var mode := "teams"
 var names_on := true
+var catalog_mode := "basic"
+var catalog_order := {}  # категория → неизменные id, в порядке показа
 var scores: Array = []  # teams: [синие, оранжевые]; solo: по игрокам
 var won_cards: Array = []  # [{word, by}] — для итогов
 var storytellers: Array = []  # teams: [рассказчик синих, оранжевых]; solo: [рассказчик]
@@ -36,10 +39,16 @@ var phase := "setup"
 var rng := RandomNumberGenerator.new()
 
 
-func new_game(player_list: Array, solo: bool, card_count: int, intro: bool, with_names: bool, seed_value: int = 0) -> void:
+func new_game(player_list: Array, solo: bool, card_count: int, intro: bool, with_names: bool, seed_value: int = 0, catalog: String = "basic") -> void:
 	players = player_list.duplicate(true)
 	mode = "solo" if solo else "teams"
 	names_on = with_names and not intro
+	catalog_mode = "simplified" if catalog == "simplified" else "basic"
+	catalog_order = {}
+	for category in WSData.CATEGORIES:
+		catalog_order[category] = []
+		for i in WSData.STORY[category].size():
+			catalog_order[category].append("%s:%d" % [category, i])
 	if seed_value != 0:
 		rng.seed = seed_value
 	else:
@@ -132,6 +141,14 @@ func set_ready(seat: int) -> bool:
 		return false
 	ready[i] = true
 	if not ready.has(false):
+		if catalog_mode == "basic":
+			for category in WSData.CATEGORIES:
+				var ids: Array = catalog_order[category]
+				for j in range(ids.size() - 1, 0, -1):
+					var other := rng.randi_range(0, j)
+					var previous: String = ids[j]
+					ids[j] = ids[other]
+					ids[other] = previous
 		phase = "play"
 		flipped = true  # время на ход идёт сразу (переворачивать часы не нужно)
 	return true
@@ -152,10 +169,15 @@ func set_holders(seat: int, rows: Array) -> bool:
 			return false
 		var r := []
 		for id in row:
+			if id is String and id == "":
+				r.append("")
+				continue
 			if not valid_card(str(id)) or seen.has(str(id)):
 				return false
 			seen[str(id)] = true
 			r.append(str(id))
+		while not r.is_empty() and r.back() == "":
+			r.pop_back()
 		clean.append(r)
 	holders[_team_key(seat)] = clean
 	return true
@@ -175,7 +197,7 @@ static func card_word(id: String) -> String:
 
 
 func point(seat: int, id: String) -> bool:
-	if phase != "play" or not is_storyteller(seat):
+	if phase != "play" or not is_storyteller(seat) or not valid_card(id):
 		return false
 	var k := _team_key(seat)
 	var on: bool = holders[k][0].has(id) or holders[k][1].has(id)
@@ -200,7 +222,7 @@ func can_guess(seat: int) -> bool:
 	if phase != "play" or is_storyteller(seat):
 		return false
 	var k := _team_key(seat)
-	return not (holders[k][0].is_empty() and holders[k][1].is_empty())  # пока нет карточек — рано
+	return holders[k][0].any(func(id): return id != "") or holders[k][1].any(func(id): return id != "")
 
 
 func guess(seat: int, text: String) -> bool:
@@ -281,11 +303,13 @@ func get_view(seat: int, show_all: bool = false) -> Dictionary:
 	var hv := {}
 	for k in holders:
 		var visible: bool = show_all or k == my_key or phase in ["round_result", "game_over"]
-		hv[k] = holders[k].duplicate(true) if visible else [holders[k][0].map(func(_x): return "?"), holders[k][1].map(func(_x): return "?")]
+		hv[k] = holders[k].duplicate(true) if visible else [holders[k][0].map(func(id): return "" if id == "" else "?"), holders[k][1].map(func(id): return "" if id == "" else "?")]
 	return {
 		"you": seat,
 		"players": players.duplicate(true),
 		"mode": mode,
+		"catalog_mode": catalog_mode,
+		"catalog_order": catalog_order.duplicate(true),
 		"scores": scores.duplicate(),
 		"storytellers": storytellers.duplicate(),
 		"drawer": drawer(),

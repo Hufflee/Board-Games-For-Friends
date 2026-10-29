@@ -21,6 +21,7 @@ func frames(count: int = 5) -> void:
 		await process_frame
 
 func click(control: Control) -> void:
+	await load("res://tests/fixtures/top_bar_menu29.gd").reveal(control)
 	if control == null:
 		check(false, "Цель клика должна существовать")
 		return

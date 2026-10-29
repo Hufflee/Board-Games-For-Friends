@@ -27,8 +27,8 @@ const BOXED_ROWS := 3  # ячеек с коробками (в последней
 ## Какие коробки на какой полке (сверху вниз, слева направо).
 const SHELF_LAYOUT := [
 	["wavelength", "hues_and_cues", "dangerous_words", "king_of_12", "not_a_hat"],
-	["ready_set_bet", "tip_top_18", "gloom", "gloomier", "stillion"],
-	["word_slam", "brodilka", "phantom_ink", "four_souls", "the_gang"],
+	["ready_set_bet", "tip_top", "tip_top_18", "gloom", "gloomier", "stillion"],
+	["word_slam", "brodilka", "phantom_ink", "four_souls", "the_gang", "things_in_rings"],
 ]
 const SHELF_X := 0.25
 const PERUDO_SPACE := 0.17  # место под набор «Перудо» во второй ячейке
@@ -36,6 +36,13 @@ const PERUDO_SPACE := 0.17  # место под набор «Перудо» во
 const ShelfOrder := preload("res://hub/shelf_layout.gd")
 const BOX_HOLD := 0.45  # с: удержание на коробке — взять её и переставлять
 const DRAG_LIFT := 0.07  # м: взятая коробка выдвигается из шкафа к игроку
+const PublicRoom := preload("res://hub/public_room.gd")
+var remote_view := false
+var remote_follow := true
+var _local_room: Dictionary = {}
+var _remote_selected := ""
+var _remote_editor := false
+
 var _pressed_box: GameBox
 var _hold_time := 0.0
 var _drag_box: GameBox  # коробка в руке (перестановка)
@@ -73,7 +80,7 @@ var _editor_backup:Dictionary={}
 var _editor_preferences: Array = []
 var _editor_preference_geometry: Dictionary = {}
 var _editor_box_press := false
-var _figure_preview_x := 1.0
+var _drag_backup: Dictionary = {}
 var _editor_ui:Control
 var _edge_overlay:Control
 var _edge_drag:Dictionary={}
@@ -1103,10 +1110,6 @@ func _apply_shelf_state(state: Dictionary) -> void:
 		by_id[_shelf_id(box)] = box
 	_rows = []
 	for ids: Array in state.placements:
-		if ids.has("shelf_girl"):
-			ids = ids.duplicate()
-			ids.erase("shelf_girl")
-			ids.append("shelf_girl")
 		_rows.append(ids.map(func(id): return by_id[id]))
 	_rebuild_shelf_geometry()
 
@@ -1242,6 +1245,8 @@ func _make_shelf_placeholder(
 
 
 func _save_shelf() -> Error:
+	if remote_view:
+		return ERR_UNAUTHORIZED
 	# Автоматическое уплотнение не забывает исходные места даже после «Готово» и перезапуска.
 	_cabinet.layout_preferences = _editor_preferences.duplicate(true) if _editor_on else _shelf_ids()
 	_cabinet.layout_preference_cols = (
@@ -1325,6 +1330,8 @@ func _make_shelf_ui() -> void:
 
 
 func open_shelf_editor() -> void:
+	if remote_view:
+		return
 	if _editor_on:
 		return
 	_cancel_drag()
@@ -1371,6 +1378,8 @@ func finish_shelf_editor(save: bool) -> void:
 
 
 func _cycle_box_pose() -> void:
+	if remote_view:
+		return
 	if _selected_box == null or _selected_box.is_figurine() or _drag_box != null:
 		return
 	var id := _shelf_id(_selected_box)
@@ -1589,6 +1598,8 @@ func _box_at(screen_pos: Vector2) -> GameBox:
 
 
 func _input(event: InputEvent) -> void:
+	if remote_view:
+		return
 	if _editor_on:
 		if _editor_box_press and _pressed_box != null:
 			if event is InputEventMouseMotion:
@@ -1695,6 +1706,15 @@ func _pointer_clear() -> bool:
 	return control == null or control.mouse_filter == Control.MOUSE_FILTER_IGNORE
 
 func _unhandled_input(event: InputEvent) -> void:
+	if remote_view:
+		if not remote_follow and event is InputEventMouseButton and event.pressed:
+			if event.button_index == MOUSE_BUTTON_LEFT:
+				var box := _box_at(event.position)
+				if box != null and not box.is_figurine():
+					focus(box)
+			elif event.button_index == MOUSE_BUTTON_RIGHT:
+				release()
+		return
 	if _editor_on:
 		if event is InputEventMouseMotion:
 			_edge_hover = _edge_at(event.position)
@@ -1838,15 +1858,12 @@ func _reflow(animate: bool) -> void:
 
 ## Единая раскладка стопок для изображения, проверки вместимости и переноса.
 func _layout_row(row: Array, cell: int) -> Dictionary:
-	var positions: Dictionary = _cabinet.get("figure_positions", {"shelf_girl": float(_cabinet.get("figure_x", 1.0)), "shelf_andy": 0.65}).duplicate()
-	if _drag_box != null and _drag_box.is_figurine():
-		positions[_shelf_id(_drag_box)] = _figure_preview_x
 	return ShelfConfig.row_layout(
 		row.map(func(box): return _shelf_id(box)),
 		_shelf_sizes(),
 		_box_modes,
 		float(_row_info[cell].get("height", CELL_H)),
-		positions,
+		ShelfConfig.figure_ratios(_cabinet),
 		float(_row_info[cell].right) - float(_row_info[cell].left)
 	)
 
@@ -1916,7 +1933,21 @@ func _set_home(b: GameBox, home: Transform3D, animate: bool) -> void:
 
 ## Удержание сработало: коробка снимается с полки и едет за курсором.
 func _start_drag() -> void:
+	if remote_view:
+		return
 	var b := _pressed_box
+	_drag_backup = {
+		"config": _cabinet.duplicate(true), "placements": _shelf_ids(), "poses": _box_modes.duplicate(true)
+	}
+	# Только ручной жест переводит старые свободные места в общий порядок соседей.
+	if not bool(_cabinet.get("neighbor_order", false)):
+		var by_id: Dictionary = {}
+		for box: GameBox in boxes:
+			by_id[_shelf_id(box)] = box
+		for cell in _rows.size():
+			var ids := ShelfConfig.visible_order(_shelf_ids()[cell], _shelf_sizes(), _box_modes, _cabinet)
+			_rows[cell] = ids.map(func(id): return by_id[id])
+		_cabinet.neighbor_order = true
 	_drag_original_mode = int(_box_modes.get(_shelf_id(b), 1))
 	_hold_handled = true
 	_drag_from = Vector2i(-1, -1)
@@ -1930,7 +1961,6 @@ func _start_drag() -> void:
 		_pressed_box = null
 		return
 	_drag_box = b
-	_figure_preview_x = float(_cabinet.get("figure_positions", {}).get(_shelf_id(b), _cabinet.get("figure_x", 1.0)))
 	_selected_box = b
 	_drag_to = _drag_from
 	if _hover != null:
@@ -1981,20 +2011,6 @@ func _drag_update(screen: Vector2) -> void:
 			r = k
 	var row: Array = _rows[r]
 	var info: Dictionary = _row_info[r]
-	if _drag_box.is_figurine():
-		var width: float = float(info.right) - float(info.left)
-		_figure_preview_x = clampf(
-			(_drag_at.x - float(info.left) - ext.x * 0.5) / maxf(0.001, width - ext.x), 0.0, 1.0
-		)
-		var candidate: Array = row.duplicate()
-		candidate.append(_drag_box)
-		var arranged := _layout_row(candidate, r)
-		var fits: bool = float(arranged.width) <= width + 0.0005 and ext.y <= float(info.height) + 0.0005
-		_drag_to = Vector2i(r, row.size()) if fits else Vector2i(-1, -1)
-		_drag_at.x = float(info.left) + ext.x * 0.5 + _figure_preview_x * maxf(0.0, width - ext.x)
-		_reflow(true)
-		_drag_box.set_swap_highlight(true, fits)
-		return
 	var layout := _layout_row(row, r)
 	var index := ShelfOrder.pile_insert_index(
 		layout.piles, row.map(func(box): return _shelf_id(box)), _drag_at.x - float(info.left)
@@ -2033,14 +2049,18 @@ func _finish_drag(ok: bool) -> void:
 	if not ok or _drag_to.x < 0:
 		_box_modes[_shelf_id(b)] = _drag_original_mode
 	var to := _drag_to if ok and _drag_to.x >= 0 else _drag_from
-	var moved: bool = to != _drag_from or int(_box_modes.get(_shelf_id(b), 1)) != _drag_original_mode
-	if b.is_figurine() and ok and _drag_to.x >= 0:
-		var positions: Dictionary = _cabinet.get("figure_positions", {"shelf_girl": float(_cabinet.get("figure_x", 1.0)), "shelf_andy": 0.65}).duplicate()
-		moved = moved or not is_equal_approx(float(positions.get(_shelf_id(b), 1.0)), _figure_preview_x)
-		positions[_shelf_id(b)] = _figure_preview_x
-		_cabinet.figure_positions = positions
+	var moved: bool = (
+		to != _drag_from
+		or int(_box_modes.get(_shelf_id(b), 1)) != _drag_original_mode
+		or not bool(_drag_backup.get("config", {}).get("neighbor_order", false))
+	)
 	(_rows[to.x] as Array).insert(to.y, b)
+	var cancelled := not ok or _drag_to.x < 0
 	_drag_box = null
+	if cancelled:
+		_apply_shelf_state(_drag_backup)
+		moved = false
+	_drag_backup = {}
 	_drag_to = Vector2i(-1, -1)
 	_pressed_box = null
 	_hold_time = 0.0
@@ -2138,8 +2158,11 @@ func step(dir: int) -> void:
 
 func focus_id(game_id: String) -> void:
 	for b in boxes:
-		if b.game.get("id", "") == game_id:
+		if b.game.get("id", "") == game_id or b.game.get("variants", []).has(game_id):
+			if b.game.get("id", "") != game_id:
+				b.set_variant(HubGames.by_id(game_id))
 			focus(b)
+			return
 
 
 func _process(delta: float) -> void:
@@ -2203,3 +2226,78 @@ func _process(delta: float) -> void:
 		_sign.modulate = Color(HubStyle.PINK.r * 1.6, HubStyle.PINK.g * 1.6, HubStyle.PINK.b * 1.6) * f
 
 
+
+
+## Снимок всегда собственный, даже если на экране временно показан чужой шкаф.
+func public_snapshot() -> Dictionary:
+	if remote_view:
+		return _local_room.public.duplicate(true)
+	return PublicRoom.clean({
+		"config": _cabinet, "placements": _shelf_ids(), "poses": _box_modes,
+		"selected": str(focused.game.get("id", "")) if focused != null else "",
+		"editor": _editor_on
+	})
+
+
+func show_remote(snapshot: Dictionary, follow: bool = true) -> bool:
+	var clean := PublicRoom.clean(snapshot)
+	if clean.is_empty():
+		return false
+	var ids: Array = []
+	for row in clean.placements:
+		ids.append_array(row)
+	if boxes.any(func(box): return not ids.has(_shelf_id(box))) or ids.size() != boxes.size():
+		return false
+	if not remote_view:
+		if _editor_on:
+			finish_shelf_editor(false)
+		_cancel_drag()
+		var variants: Dictionary = {}
+		for box: GameBox in boxes:
+			variants[_shelf_id(box)] = box.game.duplicate(true)
+		_local_room = {
+			"variants": variants,
+			"public": public_snapshot(),
+			"state": {"config": _cabinet.duplicate(true), "placements": _shelf_ids(), "poses": _box_modes.duplicate(true)},
+			"preferences": _editor_preferences.duplicate(true),
+			"geometry": _editor_preference_geometry.duplicate(true), "camera": _cam_home
+		}
+		remote_view = true
+		panels.deselect()
+		panels.input_locked = true
+	remote_follow = follow
+	var state_changed: bool = _cabinet != clean.config or _shelf_ids() != clean.placements or _box_modes != clean.poses
+	if state_changed:
+		release()
+		_clear_shelf_selection()
+		_apply_shelf_state(clean)
+		_frame_shelf()
+	_remote_editor = clean.editor
+	if remote_follow and (state_changed or _remote_selected != clean.selected):
+		release()
+		if clean.selected != "":
+			focus_id(clean.selected)
+	_remote_selected = clean.selected
+	return true
+
+
+func return_home() -> void:
+	if not remote_view:
+		return
+	release()
+	_cancel_drag()
+	remote_view = false
+	panels.input_locked = false
+	for box: GameBox in boxes:
+		if box.game != _local_room.variants[_shelf_id(box)]:
+			box.set_variant(_local_room.variants[_shelf_id(box)])
+	_apply_shelf_state(_local_room.state)
+	_editor_preferences = _local_room.preferences.duplicate(true)
+	_editor_preference_geometry = _local_room.geometry.duplicate(true)
+	_cam_home = _local_room.camera
+	camera.transform = _cam_home
+	var selected: String = _local_room.public.selected
+	_local_room = {}
+	_remote_selected = ""
+	if selected != "":
+		focus_id(selected)

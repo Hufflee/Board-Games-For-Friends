@@ -19,7 +19,7 @@ func _ready() -> void:
 	var card := HCStyle.panel(26)
 	card.custom_minimum_size = Vector2(720, 0)
 	center.add_child(card)
-	_body = HCStyle.vbox(12)
+	_body = HCStyle.vbox(8)
 	card.add_child(_body)
 	var chat := K12ChatPanel.new()
 	chat.expanded = true
@@ -122,6 +122,15 @@ func _rebuild() -> void:
 			b.pressed.connect(func(): Net.set_setting("ws_mode", val))
 			r0.add_child(b)
 		_body.add_child(r0)
+		var catalog_row := HCStyle.hbox(8)
+		catalog_row.add_child(HCStyle.label("Слова:", HCStyle.BODY))
+		for opt in [["basic", "Базовый · перемешивать"], ["simplified", "Упрощённый · по порядку"]]:
+			var b := HCStyle.button(opt[1], HCStyle.CAP)
+			UISel.pick(b, s.get("ws_catalog", "basic") == opt[0])
+			var val: String = opt[0]
+			b.pressed.connect(func(): Net.set_setting("ws_catalog", val))
+			catalog_row.add_child(b)
+		_body.add_child(catalog_row)
 		var r1 := HCStyle.hbox(8)
 		r1.add_child(HCStyle.label("Карты:", HCStyle.BODY))
 		for opt in [["standard", "обычная игра"], ["intro", "вводная (10 простых)"]]:
@@ -147,6 +156,7 @@ func _rebuild() -> void:
 		r2.add_child(names)
 		_body.add_child(r2)
 	else:
+		_body.add_child(HCStyle.label("Слова: " + ("упрощённый · по порядку" if s.get("ws_catalog", "basic") == "simplified" else "базовый · перемешивать после «Слэм»"), HCStyle.CAP, HCStyle.MUTED))
 		_body.add_child(HCStyle.label("%s · %d карт · на ход %d с%s" % ["Один рассказчик" if solo else "Две команды", count, int(s.get("ws_time", 60)), " · с именами" if s.get("ws_names", true) else ""], HCStyle.BODY))
 
 	var start_row := HCStyle.hbox(12)

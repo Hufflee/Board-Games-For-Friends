@@ -74,18 +74,6 @@ func show_menu(message: String = "") -> void:
 		Net.host_offline("the_gang")
 		Net.set_bots(2))
 	col.add_child(local)
-	var lan := TGStyle.row()
-	var host := TGStyle.button("Создать LAN")
-	host.pressed.connect(func(): Net.host_enet(Net.PORT, "the_gang"))
-	lan.add_child(host)
-	var address := LineEdit.new()
-	address.placeholder_text = "IP хоста"
-	address.custom_minimum_size.x = 180
-	lan.add_child(address)
-	var join := TGStyle.button("Войти по IP")
-	join.pressed.connect(func(): Net.join_enet(address.text.strip_edges()))
-	lan.add_child(join)
-	col.add_child(lan)
 	var rules := TGStyle.button("Правила")
 	rules.pressed.connect(show_rules)
 	col.add_child(rules)

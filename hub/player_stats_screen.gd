@@ -88,16 +88,35 @@ func _coins() -> void:
 	var collection := HubStyle.vbox(8)
 	collection.name = "CoinsCollection"
 	_body.add_child(collection)
-	collection.add_child(_label("МОНЕТЫ", HubStyle.CYAN, 19))
+	var header := HubStyle.button("", 19)
+	header.name = "CoinsToggle"
+	header.toggle_mode = true
+	header.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	collection.add_child(header)
+	var contents := HubStyle.vbox(8)
+	contents.name = "CoinsContents"
+	contents.visible = false
+	collection.add_child(contents)
+	var owned := 0
+	var total := 0
 	for game: Dictionary in HubGames.LIST:
 		if not _filter.is_empty() and str(game.id) != _filter:
 			continue
 		var progress := coin_progress(str(game.id), Prefs.coin_secrets)
+		owned += progress.x
+		total += progress.y
 		var color := Color("8ee6a0") if progress.x == progress.y else HubStyle.YELLOW
 		var line := HubStyle.hbox(8)
-		collection.add_child(line)
+		contents.add_child(line)
 		line.add_child(HubStyle.label(str(game.title), 16, HubStyle.TEXT))
 		line.add_child(HubStyle.label("%d/%d" % [progress.x, progress.y], 16, color))
+	var title := "МОНЕТЫ · %d/%d" % [owned, total]
+	header.text = "▶ " + title
+	header.toggled.connect(
+		func(open: bool):
+			contents.visible = open
+			header.text = ("▼ " if open else "▶ ") + title
+	)
 
 
 func _rebuild() -> void:

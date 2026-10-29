@@ -10,6 +10,7 @@ func check(ok: bool, message: String) -> void:
 func settle() -> void:
 	await create_timer(0.2).timeout
 func click(control: Control) -> void:
+	await load("res://tests/fixtures/top_bar_menu29.gd").reveal(control)
 	var at := control.get_global_rect().get_center()
 	Input.warp_mouse(at)
 	var motion := InputEventMouseMotion.new()

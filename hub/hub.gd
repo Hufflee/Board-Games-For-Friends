@@ -17,14 +17,18 @@ var _status: Label
 var _code: LineEdit
 var _leaving := false
 var _selected := {}
+var _watch_peer := 0
+var _watch_follow := true
+var _publish_clock := 0.0
+
 
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE  # клики мимо панелей — в 3D-комнату
 	get_tree().root.theme = HubStyle.theme()
-	Sfx.start_music()
 	Sfx.set_playlist(MENU_MUSIC)  # синтвейв в духе неоновых 80-х
+	Sfx.start_music()
 	# отладочные аргументы ведут сразу в игру
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--"):
@@ -56,11 +60,13 @@ func _ready() -> void:
 	_card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_card)
+	Net.public_room_changed.connect(_on_public_room)
 	Net.lobby_changed.connect(_on_lobby)
 	Net.party_game_changed.connect(_on_party_game)
 	Net.session_closed.connect(_on_closed)
 	Net.status_changed.connect(_set_status)
 	_rebuild()
+	Net.publish_public_room(_room.public_snapshot())
 	# Хост мог уже выбрать следующую игру, пока клиент выходил из предыдущей сцены.
 	if Net.is_party() and not Net.party_game.is_empty():
 		_on_lobby.call_deferred()
@@ -71,6 +77,7 @@ func _rebuild() -> void:
 	if _leaving:
 		return
 	HubStyle.clear(_ui)
+	_watch_decor()
 	# заголовок
 	var head := HubStyle.vbox(0)
 	head.position = Vector2(26, 16)
@@ -178,6 +185,7 @@ func _show_card(g: Dictionary, animate: bool = true) -> void:
 		for id in variants:
 			var vg := HubGames.by_id(id)
 			var vb := HubStyle.button(str(vg.get("variant_label", vg.get("title", id))), 14)
+			vb.disabled = _watch_peer != 0 and _watch_follow
 			UISel.pick(vb, id == g["id"])
 			vb.pressed.connect(func():
 				_selected = vg
@@ -188,7 +196,9 @@ func _show_card(g: Dictionary, animate: bool = true) -> void:
 		v.add_child(vrow)
 	var in_party := Net.is_party() and not Net.lobby_view.is_empty()
 	var row := HubStyle.hbox(8)
-	if HubGames.is_release_soon(g):
+	if _watch_peer != 0:
+		row.add_child(HubStyle.label("Просмотр описания", 14, HubStyle.CYAN))
+	elif HubGames.is_release_soon(g):
 		var soon := HubStyle.primary("Скоро", 20, 160)
 		soon.disabled = true
 		soon.tooltip_text = "Игра ещё готовится и появится в одном из следующих обновлений"
@@ -216,6 +226,7 @@ func _show_card(g: Dictionary, animate: bool = true) -> void:
 		play.pressed.connect(func(): _open_scene(g, true))
 		row.add_child(play)
 	var back := HubStyle.button("Назад", 15)
+	back.disabled = _watch_peer != 0 and _watch_follow
 	back.pressed.connect(func():
 		_room.release()
 		_room.panels.deselect())
@@ -277,10 +288,32 @@ func _party_panel() -> Control:
 	p.add_child(v)
 	v.add_child(HubStyle.neon_label("PARTY", 18, HubStyle.CYAN))
 	var humans: Array = data["members"].filter(func(m): return m["kind"] != "bot")
+	if _watch_peer != 0:
+		var follow := CheckButton.new()
+		follow.name = "RoomFollow"
+		follow.text = "Отключить действия " + _watch_name()
+		follow.add_theme_font_size_override("font_size", 13)
+		follow.button_pressed = not _watch_follow
+		follow.toggled.connect(_toggle_watch_follow)
+		v.add_child(follow)
 	v.add_child(HubStyle.label("Участники (%d/%d)" % [humans.size(), Net.MAX_PLAYERS], 13, HubStyle.MUTED))
 	for m in humans:
 		var row := HubStyle.hbox(6)
 		row.add_child(PlayerTag.make(m, data["members"], 16, HubStyle.TEXT))
+		var peer := int(m.get("peer", 0))
+		if peer == multiplayer.get_unique_id() and _watch_peer != 0:
+			var home := _room_icon(true)
+			home.name = "RoomHome"
+			home.tooltip_text = "Вернуться в свою комнату"
+			home.pressed.connect(_watch_home)
+			row.add_child(home)
+		elif peer != multiplayer.get_unique_id() and peer != _watch_peer:
+			var eye := _room_icon(false)
+			eye.name = "RoomEye%d" % peer
+			eye.tooltip_text = "Посмотреть комнату: " + str(m.get("name", ""))
+			eye.disabled = not Net.public_rooms.has(peer)
+			eye.pressed.connect(_watch_room.bind(peer))
+			row.add_child(eye)
 		if m["kind"] == "host":
 			row.add_child(HubStyle.label("хост", 12, HubStyle.YELLOW))
 		v.add_child(row)
@@ -328,6 +361,7 @@ func _my_suggestion() -> String:
 
 
 func _on_closed(reason: String) -> void:
+	_watch_home(false)
 	_rebuild()
 	_set_status(reason)
 
@@ -338,6 +372,10 @@ func _set_status(text: String) -> void:
 
 
 func _on_lobby() -> void:
+	if _watch_peer != 0:
+		var present: bool = Net.is_party() and Net.lobby_view.get("members", []).any(func(m): return int(m.get("peer", 0)) == _watch_peer)
+		if not present:
+			_watch_home(false)
 	if Net.is_party() and Net.party_game != "":
 		_open_by_id(Net.party_game)
 	else:
@@ -387,3 +425,113 @@ func _on_transition_failed(message: String) -> void:
 		_leaving = false
 	_set_status(message)
 
+
+
+## Публикуем только собственный снимок; Net объединяет изменения и доставляет последний.
+func _process(delta: float) -> void:
+	if not is_instance_valid(_room) or _leaving:
+		return
+	_publish_clock += delta
+	if _publish_clock >= 0.2:
+		_publish_clock = 0.0
+		Net.publish_public_room(_room.public_snapshot())
+	if _watch_peer != 0 and not Net.is_party():
+		_watch_home()
+
+
+func _watch_name() -> String:
+	for member in Net.lobby_view.get("members", []):
+		if int(member.get("peer", 0)) == _watch_peer:
+			return str(member.get("name", "Участник"))
+	return "Участник"
+
+
+func _watch_decor() -> void:
+	if _watch_peer == 0:
+		return
+	var glow := Control.new()
+	glow.name = "RoomBorder"
+	glow.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	glow.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	glow.draw.connect(func():
+		var size := glow.size
+		for i in 20:
+			var alpha := 0.16 * (1.0 - float(i) / 20.0)
+			glow.draw_rect(Rect2(Vector2.ONE * i * 2, size - Vector2.ONE * i * 4), Color(0.2, 0.75, 1.0, alpha), false, 2.0)
+	)
+	_ui.add_child(glow)
+	var name_label := HubStyle.label(_watch_caption(), 20, HubStyle.CYAN, HORIZONTAL_ALIGNMENT_CENTER)
+	name_label.name = "RoomOwner"
+	name_label.position = Vector2(350, 76)
+	name_label.size = Vector2(580, 32)
+	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_ui.add_child(name_label)
+
+
+func _toggle_watch_follow(disabled: bool) -> void:
+	_watch_follow = not disabled
+	_room.remote_follow = _watch_follow
+	if not _selected.is_empty():
+		_show_card(_selected, false)
+	if _watch_follow:
+		_room._remote_selected = "__refresh__"
+		_on_public_room(_watch_peer)
+
+
+func _watch_room(peer: int) -> void:
+	if not Net.is_party() or not Net.public_rooms.has(peer):
+		return
+	_room._remote_selected = "__refresh__"
+	if _room.show_remote(Net.public_rooms[peer], true):
+		_watch_peer = peer
+		_watch_follow = true
+		_rebuild()
+
+
+func _watch_home(rebuild: bool = true) -> void:
+	_watch_peer = 0
+	_watch_follow = true
+	if is_instance_valid(_room):
+		_room.return_home()
+	if rebuild and is_instance_valid(_ui):
+		_rebuild()
+
+
+func _on_public_room(peer: int) -> void:
+	if is_instance_valid(_ui):
+		var eye := _ui.find_child("RoomEye%d" % peer, true, false) as Button
+		if is_instance_valid(eye):
+			eye.disabled = not Net.public_rooms.has(peer)
+			eye.queue_redraw()
+	if _watch_peer != 0 and (peer == _watch_peer or peer == 0):
+		if not Net.public_rooms.has(_watch_peer):
+			_watch_home()
+			return
+		if not _room.show_remote(Net.public_rooms[_watch_peer], _watch_follow):
+			_watch_home()
+		elif is_instance_valid(_ui):
+			var caption := _ui.find_child("RoomOwner", true, false) as Label
+			if caption != null:
+				caption.text = _watch_caption()
+
+
+## Единый одноцветный набор: глаз и домик рисуются линиями без зависимости от шрифта.
+func _room_icon(home: bool) -> Button:
+	var button := HubStyle.button("", 14)
+	button.custom_minimum_size = Vector2(32, 30)
+	button.draw.connect(func():
+		var center := button.size * 0.5
+		var color := HubStyle.CYAN if not button.disabled else HubStyle.MUTED
+		if home:
+			button.draw_polyline(PackedVector2Array([center + Vector2(-9, 0), center + Vector2(0, -8), center + Vector2(9, 0)]), color, 1.5, true)
+			button.draw_polyline(PackedVector2Array([center + Vector2(-6, -2), center + Vector2(-6, 8), center + Vector2(6, 8), center + Vector2(6, -2)]), color, 1.5, true)
+		else:
+			button.draw_arc(center + Vector2(0, 4), 10, PI * 1.16, PI * 1.84, 20, color, 1.5, true)
+			button.draw_arc(center + Vector2(0, -4), 10, PI * 0.16, PI * 0.84, 20, color, 1.5, true)
+			button.draw_circle(center, 3, color)
+	)
+	return button
+
+
+func _watch_caption() -> String:
+	return "Комната: " + _watch_name() + (" · редактирует шкаф" if _room._remote_editor else "")

@@ -5,7 +5,7 @@ signal finished
 
 
 
-const WORD:= "hufflesoft"
+const WORD:= "huffleslop"
 const FONT:= "res://hub/fonts/hufflesoft_Nunito-Black.ttf"
 const TEXT_PX:= 150
 const BLUE:= Color(0.22, 0.64, 0.89)

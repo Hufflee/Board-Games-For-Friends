@@ -224,6 +224,7 @@ func _sounds(prev: Dictionary) -> void:
 
 
 func _build_seats(prev: Dictionary) -> void:
+	var previous_hands: Array = prev.get("hands", [])
 	for c in _seats:
 		c.queue_free()
 	_seats.clear()
@@ -257,9 +258,11 @@ func _build_seats(prev: Dictionary) -> void:
 		for k in hand.size():
 			var cd: Dictionary = hand[k]
 			var old_g := int(cd.g)
-			if prev.get("phase", "") == "memorize" and _v.phase != "memorize":
-				if s < prev.hands.size() and k < prev.hands[s].size():
-					old_g = int(prev.hands[s][k].g)
+			var closing_memory: bool = prev.get("phase", "") == "memorize" and _v.phase != "memorize"
+			var ending: bool = _v.phase == "game_over" and prev.get("phase", "") != "game_over"
+			if closing_memory or ending:
+				if s < previous_hands.size() and k < previous_hands[s].size():
+					old_g = int(previous_hands[s][k].g)
 			var card := NHCard.new(old_g, int(cd["dir"]))
 			card.scale = Vector2.ONE * factor
 			card.pivot_offset = Vector2.ZERO

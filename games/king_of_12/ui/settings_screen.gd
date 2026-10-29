@@ -7,6 +7,8 @@ var make_panel: Callable  # () -> PanelContainer
 var make_title: Callable  # (text) -> Control
 var make_primary: Callable  # (text) -> Button — «Готово»
 var ink := Color(0, 0, 0, 0)  # цвет текста на панели (прозрачный — из темы)
+var _resolutions: OptionButton
+var _physical_resolution: Label
 
 
 func _ready() -> void:
@@ -98,11 +100,6 @@ func _ready() -> void:
 			"Чат и реплики", Prefs.chat_volume, 0.0, 1.0, 0.05, func(v): Prefs.set_value("chat_volume", v)
 		)
 	)
-	col.add_child(
-		_slider(
-			"Масштаб интерфейса", Prefs.ui_scale, 0.8, 1.4, 0.1, func(v): Prefs.set_value("ui_scale", v), true
-		)
-	)
 
 	var mute := CheckBox.new()
 	mute.text = "Выключить весь звук"
@@ -141,26 +138,19 @@ func _ready() -> void:
 				for c in wm.get_children():
 					if c is Button:
 						UISel.pick(c, modes[c.get_index() - 1][0] == v)
-				for c in rr.get_children():
-					if c is Button:
-						c.disabled = v != "windowed"
 		)
 		wm.add_child(b)
 	col.add_child(wm)
-	rr.add_child(_label("Размер окна:", K12UI.BODY))
-	for res in Prefs.RESOLUTIONS:
-		var b := _button(str(res).replace("x", "×"), K12UI.CAP)
-		UISel.pick(b, Prefs.resolution == res)
-		b.disabled = Prefs.window_mode != "windowed"
-		var rv: String = res
-		b.pressed.connect(
-			func():
-				Prefs.set_value("resolution", rv)
-				for c in rr.get_children():
-					if c is Button:
-						UISel.pick(c, Prefs.RESOLUTIONS[c.get_index() - 1] == rv)
-		)
-		rr.add_child(b)
+	rr.add_child(_label("Разрешение:", K12UI.BODY))
+	_resolutions = OptionButton.new()
+	_resolutions.add_theme_font_size_override("font_size", K12UI.CAP)
+	_resolutions.item_selected.connect(_select_resolution)
+	rr.add_child(_resolutions)
+	_physical_resolution = _label("", K12UI.CAP)
+	rr.add_child(_physical_resolution)
+	get_tree().root.size_changed.connect(_sync_resolution)
+	Prefs.changed.connect(_sync_resolution)
+	_sync_resolution.call_deferred()
 	col.add_child(rr)
 	# качество графики (главное меню и 3D-кубики)
 	var gq := K12UI.hbox(8)
@@ -245,6 +235,30 @@ func _ready() -> void:
 	close.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	close.pressed.connect(queue_free)
 	outer.add_child(close)
+
+
+func _select_resolution(index: int) -> void:
+	Prefs.set_value("resolution", str(_resolutions.get_item_metadata(index)))
+	_sync_resolution.call_deferred()
+
+
+## Фактический размер обновляется после смены режима и ручного resize.
+func _sync_resolution() -> void:
+	if not is_instance_valid(_resolutions):
+		return
+	var actual: Vector2i = Prefs.current_resolution()
+	var text := "%dx%d" % [actual.x, actual.y]
+	var options: Array = Prefs.RESOLUTIONS.duplicate()
+	if not options.has(text):
+		options.append(text)
+	_resolutions.clear()
+	for item: String in options:
+		_resolutions.add_item(item.replace("x", "×"))
+		_resolutions.set_item_metadata(_resolutions.item_count - 1, item)
+		if item == text:
+			_resolutions.select(_resolutions.item_count - 1)
+	var physical := DisplayServer.window_get_size()
+	_physical_resolution.text = "Окно: %d×%d" % [physical.x, physical.y]
 
 
 func _slider(title: String, value: float, lo: float, hi: float, step: float, on_change: Callable, apply_on_release: bool = false) -> VBoxContainer:

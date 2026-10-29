@@ -386,6 +386,10 @@ func _seat(peer: int, seat: int) -> void:
 ## Зритель не нажимает игровые кнопки (хост всё равно не примет его действия) — пропускаем только
 ## «служебные»: правила, настройки, выход, чат, окна подтверждения и управление видом.
 func _input(event: InputEvent) -> void:
+	# Escape проходит в GUI/модальное окно и только затем в TopBar.
+	# Остальные клавиши без разрешённого фокуса по-прежнему блокируются паузой.
+	if event is InputEventKey and event.keycode == KEY_ESCAPE and get_tree().get_first_node_in_group("top_bar") != null:
+		return
 	if _is_paused() and (event is InputEventMouse or event is InputEventKey):
 		var target := _root.get_viewport().gui_get_focus_owner() if event is InputEventKey else _root.get_viewport().gui_get_hovered_control()
 		var dragging_coin := event is InputEventMouse and is_instance_valid(_fidget) and bool(_fidget.get("_holding"))
@@ -416,7 +420,10 @@ func _pause_allowed(control: Control) -> bool:
 func _spectator_allowed(c: Control) -> bool:
 	var n: Node = c
 	while n != null:
-		if n == _root or n is K12ChatPanel or n is ThemeToggle:
+		# Локальный просмотр архива не отправляет игровые действия; метку ставит код UI.
+		if n is BaseButton and n.get_meta("spectator_read_only", false) == true:
+			return true
+		if n == _root or n is K12ChatPanel or n is ThemeToggle or n.has_meta("top_bar_escape"):
 			return true
 		if n is Control and (n as Control).theme_type_variation == "ConfirmPanel":
 			return true
