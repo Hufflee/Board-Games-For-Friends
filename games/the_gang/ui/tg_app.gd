@@ -52,16 +52,33 @@ func _set_screen(next: Control) -> void:
 func _centered() -> VBoxContainer:
 	var root_control := Control.new()
 	root_control.add_child(TGStyle.Background.new())
+	# Панель слева от кольца сейфа и правее угловых вееров: декор фона не перекрывается.
 	var center := CenterContainer.new()
-	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	center.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE)
+	center.offset_left = 112
+	center.offset_right = 112 + 576
 	root_control.add_child(center)
 	var panel := PanelContainer.new()
-	panel.custom_minimum_size.x = 640
+	panel.name = "LobbyPanel"
+	panel.custom_minimum_size.x = 576
+	panel.add_theme_stylebox_override("panel", _rounded_panel())
 	center.add_child(panel)
-	var col := TGStyle.column(16)
+	var col := TGStyle.column(12)
 	panel.add_child(col)
 	_set_screen(root_control)
 	return col
+
+## Панель лобби: крупное скругление и золотая обводка в тон коробке; сама не касается рамки фона.
+func _rounded_panel() -> StyleBoxFlat:
+	var sb := TGStyle.box(Color.TRANSPARENT, 24)
+	sb.set_corner_radius_all(18)
+	sb.border_color = Color(TGStyle.GOLD, 0.55)
+	sb.set_border_width_all(2)
+	sb.shadow_size = 12
+	sb.shadow_color = Color(0, 0, 0, 0.45)
+	sb.content_margin_top = 20
+	sb.content_margin_bottom = 20
+	return sb
 
 func show_menu(message: String = "") -> void:
 	var col := _centered()
@@ -120,13 +137,21 @@ func _rebuild_lobby() -> void:
 		remove.pressed.connect(func(): Net.set_bots(Net.bots - 1))
 		row.add_child(remove)
 		_lobby_body.add_child(row)
-		_lobby_body.add_child(TGStyle.label("На столе переключайте места: чужие карты открываются только после выбора места.", 16, TGStyle.MUTED))
+		var seats_hint := TGStyle.label("На столе переключайте места: чужие карты открываются только после выбора места.", 16, TGStyle.MUTED)
+		seats_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_lobby_body.add_child(seats_hint)
 	_lobby_body.add_child(TurnClock.settings_row(TGStyle.button, TGStyle.label))
 	var references := TGStyle.row()
 	for entry in [["Правила", show_rules], ["Комбинации", show_poker_reference], ["Настройки", show_settings]]:
 		var reference := TGStyle.button(entry[0])
 		reference.pressed.connect(entry[1])
 		references.add_child(reference)
+	var chat := TGStyle.button("Чат")
+	chat.pressed.connect(func():
+		var panel := K12ChatPanel.new()
+		panel.expanded = true
+		screen.add_child(panel))
+	references.add_child(chat)
 	_lobby_body.add_child(references)
 	if Net.is_host():
 		var start := TGStyle.primary("Начать ограбление")
@@ -139,12 +164,6 @@ func _rebuild_lobby() -> void:
 		_lobby_body.add_child(start)
 	else:
 		_lobby_body.add_child(TGStyle.label("Ждём старта от хоста…"))
-	var chat := TGStyle.button("Чат")
-	chat.pressed.connect(func():
-		var panel := K12ChatPanel.new()
-		panel.expanded = true
-		screen.add_child(panel))
-	_lobby_body.add_child(chat)
 	var back := TGStyle.button("← К выбору игры")
 	LeaveGuard.wire(back, "Выйти?", "Вы вернётесь к выбору игры.", back_to_hub)
 	_lobby_body.add_child(back)

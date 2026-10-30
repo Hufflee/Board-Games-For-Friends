@@ -25,6 +25,8 @@ var _shown := {}  # места, у которых номер уже открыт
 var _revealing := false  # идёт поочерёдное открытие номеров
 var _hidden_mistakes := 0  # ошибки, которые ещё не открыты (жетоны пока у единорога)
 var _answer_edit: LineEdit
+var _answer_seat := -1
+var _answer_round := -1
 var _overlay: Control
 var _overlay_key := ""
 var _auto_label: Label
@@ -84,6 +86,7 @@ func _ready() -> void:
 	add_child(plist)
 
 	_theme_panel = TTStyle.bubble(14)
+	_theme_panel.resized.connect(func(): _layout_cards.call_deferred())
 	add_child(_theme_panel)
 	_track = Control.new()
 	_track.draw.connect(_draw_track)
@@ -256,6 +259,7 @@ func _update_players() -> void:
 			UISel.pick(b, s == _as)
 			var ss: int = s
 			b.pressed.connect(func():
+				b.release_focus()
 				_as = ss
 				_right_key = ""
 				_on_state(_v))
@@ -287,6 +291,8 @@ func _update_theme() -> void:
 				rt.offset_top = 8
 				rt.mouse_filter = Control.MOUSE_FILTER_IGNORE
 				b.add_child(rt)
+				# Высота следует за переносами вопроса при смене ширины окна.
+				rt.resized.connect(func(): b.custom_minimum_size.y = maxf(70.0, rt.get_content_height() + 16.0))
 				var ii: int = i
 				b.pressed.connect(func(): _send("tt_theme", {"i": ii}))
 				col.add_child(b)
@@ -357,7 +363,8 @@ func _layout_cards() -> void:
 			loose.append(s)
 	loose.sort()
 	# неразложенные ответы — сеткой посередине
-	var area := Rect2(Vector2(308, 210), Vector2(size.x - 308 - 300, size.y - 210 - 190))
+	var answer_top := maxf(210.0, _theme_panel.position.y + _theme_panel.size.y + 16.0)
+	var area := Rect2(Vector2(308, answer_top), Vector2(size.x - 308 - 300, size.y - answer_top - 190))
 	var per_row := maxi(1, int(area.size.x / (TTAnswerFace.SIZE.x + 12)))
 	for i in loose.size():
 		var c: K12TableCard = _cards[loose[i]]
@@ -501,7 +508,7 @@ func _update_right() -> void:
 	var caret := 0
 	var owner := get_viewport().gui_get_focus_owner()
 	var continue_answer: bool = owner == null or owner == _answer_edit
-	if is_instance_valid(_answer_edit):
+	if is_instance_valid(_answer_edit) and _answer_seat == _seat() and _answer_round == _round:
 		draft = _answer_edit.text
 		caret = _answer_edit.caret_column
 	TTStyle.clear(_right)
@@ -524,8 +531,12 @@ func _update_right() -> void:
 				var col := TTStyle.vbox(6)
 				p.add_child(col)
 				col.add_child(TTStyle.label("Ваш ответ" + ((" (%s)" % _name(s)) if _hotseat() else ""), TTStyle.CAP, TTStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "bold"))
-				col.add_child(TTStyle.label("1 — от %s, 10 — до %s.\nНомер не называть!" % [_v["card"][_v["theme"]][1], _v["card"][_v["theme"]][2]], TTStyle.CAP, Color(TTStyle.INK, 0.7)))
+				var range_hint := TTStyle.label("1 — от %s, 10 — до %s.\nНомер не называть!" % [_v["card"][_v["theme"]][1], _v["card"][_v["theme"]][2]], TTStyle.CAP, Color(TTStyle.INK, 0.7))
+				range_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+				col.add_child(range_hint)
 				_answer_edit = LineEdit.new()
+				_answer_seat = s
+				_answer_round = _round
 				_answer_edit.keep_editing_on_text_submit = true
 				_answer_edit.max_length = TTRules.MAX_ANSWER
 				_answer_edit.placeholder_text = "Например: «Кубик льда»"

@@ -508,7 +508,8 @@ func _on_public_room(peer: int) -> void:
 			_watch_home()
 			return
 		if not _room.show_remote(Net.public_rooms[_watch_peer], _watch_follow):
-			_watch_home()
+			# Неполное/устаревшее обновление не прекращает наблюдение за участником.
+			return
 		elif is_instance_valid(_ui):
 			var caption := _ui.find_child("RoomOwner", true, false) as Label
 			if caption != null:

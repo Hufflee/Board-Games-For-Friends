@@ -10,8 +10,16 @@ func _ready() -> void:
 	for side: String in ["left", "right", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, 32)
 	add_child(margin)
-	body = Style.column(16)
-	margin.add_child(body)
+	# Лобби по центру экрана на любом разрешении, в бумажной панели стола.
+	var center := CenterContainer.new()
+	margin.add_child(center)
+	var panel := PanelContainer.new()
+	panel.name = "LobbyPanel"
+	panel.add_theme_stylebox_override("panel", Style.box(Color.TRANSPARENT, 32))
+	panel.custom_minimum_size.x = 720
+	center.add_child(panel)
+	body = Style.column(24)
+	panel.add_child(body)
 	Net.lobby_changed.connect(_rebuild)
 	_rebuild()
 	var chat := K12ChatPanel.new()
@@ -30,21 +38,20 @@ func _rebuild() -> void:
 	var names := PackedStringArray()
 	for person: Dictionary in people:
 		names.append(str(person.name))
-	body.add_child(Style.label("За столом: " + " · ".join(names)))
+	body.add_child(_group("За столом", Style.label(" · ".join(names))))
 	if host and Net.mode == "offline":
 		var row := Style.row()
 		for n: int in range(2, 7):
-			var count := Style.button("%d игроков" % n)
-			UISel.pick(count, people.size() == n)
+			var count := _option("%d" % n)
+			Style.pick(count, people.size() == n)
 			count.pressed.connect(func(): Net.set_bots(n - 1))
 			row.add_child(count)
-		body.add_child(row)
+		body.add_child(_group("Игроков", row))
 	var rings: Array = settings.get("tr_rings", ["Attribute", "Word", "Context"])
-	body.add_child(Style.label("Кольца · выберите от одного до трёх"))
 	var ring_row := Style.row()
 	for category: String in ["Attribute", "Word", "Context"]:
-		var b := Style.button(Style.category_name(category))
-		UISel.pick(b, category in rings)
+		var b := _option(Style.category_name(category))
+		Style.pick(b, category in rings)
 		b.disabled = not host
 		b.pressed.connect(func():
 			var selected: Array = rings.duplicate()
@@ -55,37 +62,59 @@ func _rebuild() -> void:
 				selected.append(category)
 			Net.set_setting("tr_rings", selected))
 		ring_row.add_child(b)
-	body.add_child(ring_row)
+	body.add_child(_group("Кольца · от одного до трёх", ring_row))
 	var role_row := Style.row()
-	role_row.add_child(Style.label("Знающий:"))
 	for seat: int in people.size():
-		var b := Style.button(str(people[seat].name))
-		UISel.pick(b, seat == int(settings.get("tr_knower", 0)))
+		var b := _option(str(people[seat].name))
+		Style.pick(b, seat == int(settings.get("tr_knower", 0)))
 		b.disabled = not host
 		b.pressed.connect(func(): Net.set_setting("tr_knower", seat))
 		role_row.add_child(b)
-	body.add_child(role_row)
+	body.add_child(_group("Знающий", role_row))
 	var cooperative := Style.button("Кооператив" if people.size() != 2 else "Вдвоём · кооператив автоматически")
 	cooperative.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	UISel.pick(cooperative, bool(settings.get("tr_coop", false)) or people.size() == 2)
+	Style.pick(cooperative, bool(settings.get("tr_coop", false)) or people.size() == 2)
 	cooperative.disabled = not host or people.size() == 2
 	cooperative.pressed.connect(func(): Net.set_setting("tr_coop", not bool(settings.get("tr_coop", false))))
 	body.add_child(cooperative)
 	body.add_child(Style.label("Никаких уровней сложности: знающий выберет 1 из 3 правил каждого кольца.", 16, Style.muted()))
 	var error := Style.label("", 16, Style.muted())
+	error.visible = false
+	body.add_child(error)
+	# Низ панели: тихий выход слева, единственная главная кнопка — справа, в конце пути взгляда.
+	var footer := Style.row(16)
+	var leave := Style.button("К выбору игры")
+	leave.theme_type_variation = "QuietButton"
+	LeaveGuard.hold(leave, app.back_to_hub, "Выйти?")  # без wire: отступ перед кнопкой у края панели не нужен
+	footer.add_child(leave)
+	var spacer := Control.new()
+	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	footer.add_child(spacer)
 	if host:
 		var start := Style.button("Начать партию")
-		start.custom_minimum_size.x = 400
-		start.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+		start.custom_minimum_size.x = 240
 		start.name = "StartGame"
 		start.theme_type_variation = "SelectedButton"
-		start.pressed.connect(func(): error.text = Net.start_game())
-		body.add_child(start)
+		start.pressed.connect(func():
+			error.text = Net.start_game()
+			error.visible = not error.text.is_empty())
+		footer.add_child(start)
 	else:
-		body.add_child(Style.label("Ждём хоста…"))
-	body.add_child(error)
-	var leave := Style.button("К выбору игры")
-	leave.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
-	LeaveGuard.wire(leave, "Выйти?", "Вернуться к выбору игры.", app.back_to_hub)
-	body.add_child(leave)
+		var waiting := Style.label("Ждём хоста…", 16, Style.muted())
+		waiting.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		footer.add_child(waiting)
+	body.add_child(footer)
 
+## Группа настроек: подпись раздела и содержимое под ней.
+func _group(title: String, content: Control) -> VBoxContainer:
+	var group := Style.column(8)
+	group.add_child(Style.section(title))
+	group.add_child(content)
+	return group
+
+## Однотипные варианты одной ширины — ряд выглядит ровно.
+func _option(text: String) -> Button:
+	var b := Style.button(text)
+	b.custom_minimum_size.x = 112
+	b.clip_text = true
+	return b

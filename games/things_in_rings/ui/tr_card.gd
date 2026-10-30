@@ -5,6 +5,7 @@ const Corners := preload("res://hub/card_corners.gdshader")
 var table: Control
 var card := -1
 var movable := false
+var judge_drag := false  # красная карта у знающего: перетащить в верную зону
 
 func _ready() -> void:
 	texture = Data.texture(card)
@@ -23,7 +24,7 @@ func _clicked(event: InputEvent) -> void:
 		table.select_card(card)
 
 func _get_drag_data(_at: Vector2) -> Variant:
-	if not movable:
+	if not movable and not judge_drag:
 		return null
 	var picture := TextureRect.new()
 	picture.texture = texture
@@ -32,4 +33,6 @@ func _get_drag_data(_at: Vector2) -> Variant:
 	picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	picture.custom_minimum_size = Vector2(88, 136)
 	set_drag_preview(picture)
+	if judge_drag:
+		return {"tr_judge": card, "revision": table.view.revision, "seat": table.view.you}
 	return {"tr_card": card, "revision": table.view.revision, "seat": table.view.you}

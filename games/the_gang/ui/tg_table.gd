@@ -25,9 +25,16 @@ var _preview: PanelContainer
 var _peek := false
 var _last_seat := -2
 var _last_heist := -1
+const FRAME := 28
+## Своя фишка-игрушка у карт: место переживает перестройку стола (ключ — партия/ограбление/раунд/номинал).
+var _toy: Control
+var _toy_key := ""
+var _toy_pos := Vector2(-1, -1)
 
 func _ready() -> void:
-	add_child(TGStyle.Background.new())
+	var background := TGStyle.Background.new()
+	background.decor = false
+	add_child(background)
 	_top = TopBar.make(self, "The Gang", TGStyle.button, null, TGStyle.INK, TGStyle.HEAD)
 	var rules := TGStyle.button("Правила", 14)
 	rules.name = "Rules"
@@ -43,15 +50,17 @@ func _ready() -> void:
 	var margin := MarginContainer.new()
 	margin.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	margin.add_theme_constant_override("margin_left", 16)
-	margin.add_theme_constant_override("margin_right", 16)
-	margin.add_theme_constant_override("margin_top", int(TopBar.HEIGHT) + 16)
-	margin.add_theme_constant_override("margin_bottom", 16)
+	# Панели внутри двойной рамки фона (линии на 10 и 20 px от края).
+	margin.add_theme_constant_override("margin_left", FRAME)
+	margin.add_theme_constant_override("margin_right", FRAME)
+	margin.add_theme_constant_override("margin_top", int(TopBar.HEIGHT) + 8)
+	margin.add_theme_constant_override("margin_bottom", FRAME)
 	add_child(margin)
 	var row := TGStyle.row(16)
 	margin.add_child(row)
 	var side := PanelContainer.new()
-	side.custom_minimum_size.x = 244
+	side.custom_minimum_size.x = 280
+	side.add_theme_stylebox_override("panel", TGStyle.box(Color.TRANSPARENT, 12))
 	row.add_child(side)
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -59,13 +68,10 @@ func _ready() -> void:
 	_players = TGStyle.column(4)
 	_players.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(_players)
-	var main_scroll := ScrollContainer.new()
-	main_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	main_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	row.add_child(main_scroll)
-	_main = TGStyle.column(12)
+	# Весь стол помещается на экране без прокрутки, в том числе при 10 игроках.
+	_main = TGStyle.column(10)
 	_main.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	main_scroll.add_child(_main)
+	row.add_child(_main)
 	_preview = PanelContainer.new()
 	_preview.z_index = 95
 	_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -96,6 +102,9 @@ func _rebuild() -> void:
 	if _view.is_empty():
 		return
 	_cancel_drag()
+	if is_instance_valid(_toy):
+		_toy_pos = _toy.position
+	_toy = null
 	for flip in _flips:
 		if is_instance_valid(flip):
 			flip.cancel()
@@ -115,17 +124,19 @@ func _rebuild() -> void:
 	var history: Array = _view.get("history", [])
 	var chips: Array = _view.get("chips", [])
 	for seat in players.size():
-		var player_row := TGStyle.column(2)
+		var player_row := TGStyle.row(4)
 		var title := TGStyle.button(("● " if seat == me else "") + str(players[seat].get("name", "Игрок")), 14)
 		title.name = "Seat%d" % seat
 		title.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		title.clip_text = true
 		title.add_theme_color_override("font_color", TGStyle.GOLD if seat == me else TGStyle.INK)
 		for state in ["normal", "hover", "pressed", "disabled", "focus"]:
 			title.add_theme_stylebox_override(state, TGStyle.box(TGStyle.PANEL, 1))
 		title.disabled = not bool(_view.get("hotseat", false))
 		title.pressed.connect(func(): Net.send_action("view_seat", {"seat": seat}))
 		player_row.add_child(title)
-		var chip_row := TGStyle.row(6)
+		var chip_row := TGStyle.row(4)
 		for index in 4:
 			var value := 0
 			if index < history.size() and history[index] is Array and seat < history[index].size():
@@ -133,10 +144,11 @@ func _rebuild() -> void:
 			if index == round_number - 1 and phase == "rank" and seat < chips.size():
 				value = int(chips[seat])
 			if index == round_number - 1 and phase == "rank" and value > 0 and seat != me:
-				chip_row.add_child(_chip(value, seat, 36))
+				chip_row.add_child(_chip(value, seat, 28))
 			else:
 				var marker := TGStyle.label("%d" % value if value > 0 else "·", 12, TGStyle.ROUND_COLORS[index])
-				marker.custom_minimum_size = Vector2(36, 24)
+				marker.custom_minimum_size = Vector2(28, 28)
+				marker.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 				marker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 				chip_row.add_child(marker)
 		player_row.add_child(chip_row)
@@ -146,6 +158,7 @@ func _rebuild() -> void:
 	status.add_child(TGStyle.heading("ТРЕВОГИ %d / 3" % int(_view.get("alarms", 0)), 24))
 	_main.add_child(status)
 	var board_panel := PanelContainer.new()
+	board_panel.add_theme_stylebox_override("panel", TGStyle.box(Color.TRANSPARENT, 12))
 	_main.add_child(board_panel)
 	var board := TGStyle.column(8)
 	board_panel.add_child(board)
@@ -165,11 +178,12 @@ func _take(value: int) -> void:
 	_send("take", {"value": value})
 
 func _build_rank(me: int, chips: Array, players: Array) -> void:
-	var note := TGStyle.label("Перетащите фишку к своим картам. 1 — слабейшая, %d — сильнейшая. Чужую можно забрать." % players.size(), 16, TGStyle.MUTED)
+	var note := TGStyle.label("Перетащите фишку к своим картам. 1 — слабейшая, %d — сильнейшая. Чужую можно забрать. Карты и комбинацию не называйте." % players.size(), 14, TGStyle.MUTED)
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_main.add_child(note)
 	var center_panel := PanelContainer.new()
 	center_panel.name = "ChipCenter"
+	center_panel.add_theme_stylebox_override("panel", TGStyle.box(Color.TRANSPARENT, 12))
 	_center_zone = center_panel
 	_main.add_child(center_panel)
 	var center := TGStyle.column(4)
@@ -184,25 +198,53 @@ func _build_rank(me: int, chips: Array, players: Array) -> void:
 			chip_row.add_child(_chip(value, -1, 52))
 	var hand_panel := PanelContainer.new()
 	hand_panel.name = "HandDropZone"
+	hand_panel.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	hand_panel.add_theme_stylebox_override("panel", TGStyle.box(Color.TRANSPARENT, 12))
 	_hand_zone = hand_panel
 	_main.add_child(hand_panel)
 	var hand := TGStyle.column(8)
 	hand_panel.add_child(hand)
-	var hand_header := TGStyle.row()
+	var hand_header := TGStyle.row(16)
 	hand.add_child(hand_header)
 	hand_header.add_child(TGStyle.heading("ВАШИ КАРТЫ" if me >= 0 else "РЕЖИМ ЗРИТЕЛЯ", 24))
-	hand.add_child(TGStyle.label("Потяните край карты, чтобы открыть или скрыть её", 14, TGStyle.MUTED))
+	var flip_hint := TGStyle.label("Потяните край карты, чтобы открыть или скрыть её", 14, TGStyle.MUTED)
+	flip_hint.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	hand_header.add_child(flip_hint)
 	var cards := TGStyle.row(12)
 	cards.alignment = BoxContainer.ALIGNMENT_CENTER
 	hand.add_child(cards)
 	var personal: Array = _view.get("hand", [])
 	for index in 2:
 		_add_personal(cards, int(personal[index]) if index < personal.size() and me >= 0 and not bool(_view.get("spectator", false)) else -1, index)
+	var play := Control.new()
+	play.name = "ChipPlay"
+	play.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hand_panel.add_child(play)
 	if me >= 0 and me < chips.size() and int(chips[me]) > 0:
-		cards.add_child(_chip(int(chips[me]), me, 64))
-	var tip := TGStyle.label("Не называйте карты и комбинацию: общение идёт через фишки.", 16, TGStyle.MUTED)
-	tip.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	hand.add_child(tip)
+		var own := _chip(int(chips[me]), me, 64)
+		own.toy = true
+		own.size = Vector2.ONE * 64
+		own.tooltip_text = "Свою фишку можно катать и подбрасывать. Перетащите в центр, чтобы вернуть"
+		own.released.connect(_toy_released)
+		play.add_child(own)
+		_toy = own
+		var key := str([_view.get("game_id", ""), _view.get("heist_no", 0), _view.get("round_no", 0), int(chips[me])])
+		if key != _toy_key:
+			_toy_key = key
+			_toy_pos = Vector2(-1, -1)
+		_place_toy.call_deferred(own, play)
+
+func _place_toy(own: Control, play: Control) -> void:
+	if not is_instance_valid(own):
+		return
+	if _toy_pos.x < 0.0:
+		_toy_pos = Vector2(play.size.x * 0.5 + 150.0, play.size.y * 0.5 - 4.0)
+	own.position = _toy_pos.clamp(Vector2.ZERO, (play.size - own.size).max(Vector2.ZERO))
+
+## Игрушку отпустили над центром — это прежнее действие «вернуть фишку».
+func _toy_released(at: Vector2) -> void:
+	if _can_play() and is_instance_valid(_center_zone) and _center_zone.get_global_rect().has_point(at):
+		_send("return")
 
 func _build_result(phase: String, players: Array) -> void:
 	var result: Dictionary = _view.get("result", {})
@@ -290,6 +332,8 @@ func _chip(value: int, holder: int, diameter: int) -> Control:
 
 
 func _chip_input(event: InputEvent, chip: Control, value: int, holder: int) -> void:
+	if chip.toy:
+		return
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed and _can_play():
 		_cancel_drag()
 		_drag_chip = chip

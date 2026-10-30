@@ -1,5 +1,5 @@
 extends Control
-## Приватный 2D стол: кольца, архив областей, человеческая проверка и горячие места.
+## Приватный 2D стол: кольца, человеческая проверка и горячие места.
 const Style := preload("res://games/things_in_rings/ui/tr_style.gd")
 const Data := preload("res://games/things_in_rings/logic/tr_data.gd")
 const Field := preload("res://games/things_in_rings/ui/tr_field.gd")
@@ -15,7 +15,7 @@ var _translation: Label
 var _selection: Label
 var _selected := -1
 var _mask := 0
-var _archive := 0
+var _fixing := false  # знающий нажал «Исправить область» и теперь выбирает зону
 var _field: Control
 var _hand_orders := {}
 var _preview_generation := 0
@@ -102,6 +102,7 @@ func _state(next: Dictionary) -> void:
 	_previous_faces = prior
 	view = next
 	_selected = -1
+	_fixing = false
 	_mask = int(view.get("pending", {}).get("proposed", 0))
 	clear_preview()
 	_rebuild()
@@ -131,26 +132,26 @@ func _rebuild() -> void:
 	var me: int = view.you
 	var active: int = view.actor
 	_top.info.text = "Круг %d · %s" % [view.round_no, "финал" if phase in ["postgame", "game_over"] else "знающий" if active == view.knower else "искатель"]
-	_left.add_child(Style.heading("ЗА СТОЛОМ"))
+	_left.add_child(Style.section("За столом"))
 	for seat: int in people.size():
 		var label := "%s · %d" % [people[seat].name, view.counts[seat]]
 		if seat == view.knower:
 			label += " · З"
 		var b := Style.button(label, 12)
 		b.name = "Seat%d" % seat
-		UISel.pick(b, seat == me)
+		Style.pick(b, seat == me)
 		b.disabled = not bool(view.get("hotseat", false))
 		b.pressed.connect(func(): Net.send_action("view_seat", {"seat": seat}))
 		_left.add_child(b)
 	_left.add_child(Style.label("З — знающий · карт: %d" % view.deck_left, 12, Style.muted()))
 	_left.add_child(Style.label("Передайте экран и нажмите своё имя." if view.get("hotseat", false) else "Ваши карты видны только вам.", 12, Style.muted()))
-	if phase != "choose_rules":
-		_build_archive()
-	_margin.add_theme_constant_override("margin_bottom", 16 if phase in ["choose_rules", "judge", "postgame", "game_over"] else 104)
+	_margin.add_theme_constant_override("margin_bottom", 16 if phase in ["choose_rules", "judge", "postgame", "game_over"] else 152)
 	var text := _phase_text()
 	if view.get("disconnected", []).has(active):
 		text = "Ожидаем возвращения: " + str(people[active].name)
-	var caption := Style.label(text)
+	# Заголовок экрана — чей ход и что делать; остальные подписи приглушены.
+	var caption := Style.heading(text)
+	caption.name = "PhaseCaption"
 	caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	caption.size.x = maxf(400.0, _main.size.x)
 	_main.add_child(caption)
@@ -169,20 +170,28 @@ func _rebuild() -> void:
 	if phase in ["postgame", "game_over"]:
 		_selection.text = "Нажмите закрытое условие, чтобы перевернуть." if me == view.knower else "Знающий открывает условия по одному."
 	_main.add_child(_selection)
-	if phase == "judge":
+	if phase == "judge" and me == int(view.knower):
 		var judge_row := Style.row()
 		var confirm := Style.button("Верно · оставить")
 		confirm.name = "JudgeConfirm"
 		confirm.theme_type_variation = "SelectedButton"
-		confirm.disabled = me != int(view.knower)
 		confirm.pressed.connect(func(): _send("judge", {"mask": int(view.pending.proposed)}))
 		judge_row.add_child(confirm)
 		_judge_reject = Style.button("Исправить область")
 		_judge_reject.name = "JudgeCorrect"
-		_judge_reject.disabled = me != int(view.knower) or _mask == int(view.pending.proposed)
-		_judge_reject.pressed.connect(func(): _send("judge", {"mask": _mask}))
+		_judge_reject.pressed.connect(_fix_pressed)
 		judge_row.add_child(_judge_reject)
 		_main.add_child(judge_row)
+		_selection.text = "Нажмите «Исправить область» и верную зону — или перетащите красную карту в верную зону."
+		# Подсказка — рядом с кнопками, а не отдельной строкой над ними.
+		_main.remove_child(_selection)
+		_selection.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		_selection.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_selection.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		_selection.custom_minimum_size.x = 160
+		judge_row.add_child(_selection)
+	elif phase == "judge":
+		_selection.text = "Знающий проверяет карту."
 	elif phase not in ["postgame", "game_over"]:
 		_build_hand()
 	var actions := Style.row()
@@ -203,7 +212,7 @@ func _rebuild() -> void:
 		for category: String in view.rings:
 			if view.secret_rules.has(category):
 				rules_row.add_child(_card(int(view.secret_rules[category]), Vector2(40, 60), false))
-		_left.add_child(Style.label("Правила · наведите для просмотра", 12, Style.muted()))
+		_left.add_child(Style.section("Правила · наведите"))
 		_left.add_child(rules_row)
 
 func _phase_text() -> String:
@@ -291,8 +300,9 @@ func _build_hand() -> void:
 	hand.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	hand.offset_left = 200
 	hand.offset_right = -224
-	hand.offset_top = -82
-	hand.offset_bottom = 50
+	# За границей остаётся только нижняя кромка, включая веер и тень.
+	hand.offset_top = -132
+	hand.offset_bottom = 0
 	for id: int in view.hand:
 		var card: K12TableCard = hand._cards[str(id)]
 		card.name = "Card%d" % id
@@ -320,40 +330,6 @@ func _card(id: int, dimensions: Vector2, movable: bool) -> Control:
 	card.size = dimensions
 	return card
 
-func _build_archive() -> void:
-	_left.add_child(Style.heading("АРХИВ ОБЛАСТЕЙ"))
-	var grid := GridContainer.new()
-	grid.columns = 2
-	grid.add_theme_constant_override("h_separation", 8)
-	grid.add_theme_constant_override("v_separation", 8)
-	_left.add_child(grid)
-	for mask: int in (1 << view.rings.size()):
-		var amount := 0
-		for entry: Dictionary in view.board:
-			if int(entry.mask) == mask:
-				amount += 1
-		var b := Style.button("%s · %d" % [_region_short(mask), amount], 12)
-		b.name = "Region%d" % mask
-		b.set_meta("spectator_read_only", true)  # Меняет только локально открытый архив.
-		UISel.pick(b, _archive == mask)
-		b.pressed.connect(func():
-			_archive = mask
-			_rebuild())
-		grid.add_child(b)
-	_left.add_child(Style.label(_region_name(_archive), 12, Style.muted()))
-	for entry: Dictionary in view.board:
-		if int(entry.mask) == _archive:
-			_left.add_child(_card(int(entry.card), Vector2(88, 132), false))
-
-func _region_short(mask: int) -> String:
-	if mask == 0:
-		return "Вне"
-	var letters := PackedStringArray()
-	for i: int in view.rings.size():
-		if mask & (1 << i):
-			letters.append(Style.category_name(str(view.rings[i])).left(1))
-	return "∩".join(letters)
-
 func _region_name(mask: int) -> String:
 	var labels := PackedStringArray()
 	for i: int in view.rings.size():
@@ -373,17 +349,38 @@ func drop_card(id: int, mask: int) -> void:
 	if can_place() and view.hand.has(id):
 		_send("place" if view.phase == "place" else "clue", {"card": id, "mask": mask})
 
+func can_judge() -> bool:
+	return str(view.get("phase", "")) == "judge" and int(view.get("you", -1)) == int(view.get("knower", -2))
+
+## Исправление в любом порядке: «кнопка → зона» отправляет сразу, «зона → кнопка» — по кнопке.
 func region_clicked(mask: int) -> void:
-	_mask = mask
-	if is_instance_valid(_judge_reject) and view.phase == "judge":
-		_judge_reject.disabled = view.you != view.knower or _mask == int(view.pending.proposed)
+	if view.phase == "judge":
+		if not can_judge():
+			return
+		_mask = mask
+		if _fixing:
+			_send("judge", {"mask": mask})
+			return
 	if is_instance_valid(_selection):
 		_selection.text = "Область: " + _region_name(mask)
 	if _selected >= 0 and can_place():
 		drop_card(_selected, mask)
-	elif view.phase != "judge":
-		_archive = mask
-		_rebuild()
+
+func _fix_pressed() -> void:
+	if not can_judge():
+		return
+	if _mask != int(view.pending.proposed):
+		_send("judge", {"mask": _mask})
+		return
+	_fixing = true
+	UISel.pick(_judge_reject, true)
+	if is_instance_valid(_selection):
+		_selection.text = "Нажмите верную область для красной карты."
+
+## Знающий перетащил красную карту в другую зону — это то же «исправить» (в ту же — «верно»).
+func judge_drop(mask: int) -> void:
+	if can_judge():
+		_send("judge", {"mask": mask})
 
 func preview_card(id: int) -> void:
 	_show_preview_now(id)
@@ -491,4 +488,3 @@ func _feedback(event: Dictionary) -> void:
 	fade.tween_interval(0.65)
 	fade.tween_property(layer, "modulate:a", 0.0, 0.35)
 	fade.tween_callback(layer.queue_free)
-

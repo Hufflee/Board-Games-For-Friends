@@ -30,7 +30,7 @@ func _geometry() -> void:
 			centers.append(middle + Vector2(0, radius * 0.57))
 	label_rects.clear()
 	for i: int in centers.size():
-		var width := Style.HEAD.get_string_size(Style.category_name(str(rings[i])), HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
+		var width := _label_font().get_string_size(Style.category_name(str(rings[i])), HORIZONTAL_ALIGNMENT_LEFT, -1, 16).x
 		var at := centers[i] + Vector2(-width * 0.5, -radius - 24)
 		if i == 2:
 			at.y = centers[i].y + radius + 8
@@ -54,7 +54,7 @@ func _schedule_layout() -> void:
 		_layout_cards.call_deferred()
 
 ## Для каждой области ищем непересекающиеся прямоугольники с девятью точками внутри.
-## Размер уменьшается до вмещения всех карт; архив слева сохраняет крупный доступ.
+## Размер уменьшается до вмещения всех карт. «Вне колец» — только слева от колец.
 func slots_for(mask: int, amount: int) -> Array[Rect2]:
 	_geometry()
 	var result: Array[Rect2] = []
@@ -65,10 +65,10 @@ func slots_for(mask: int, amount: int) -> Array[Rect2]:
 		result.clear()
 		var dimensions := Vector2(width, width * 1.527)
 		var step := dimensions + Vector2(4, 4)
-		var y := 16.0
+		var y := 28.0 if mask == 0 else 16.0  # «Вне колец» — сразу под подписью
 		while y + dimensions.y < size.y - 8:
 			var x := 8.0
-			while x + dimensions.x < size.x - 8:
+			while x + dimensions.x < (_outside_right() if mask == 0 else size.x - 8):
 				var rect := Rect2(Vector2(x, y), dimensions)
 				if _inside_region(rect, mask):
 					result.append(rect)
@@ -79,7 +79,16 @@ func slots_for(mask: int, amount: int) -> Array[Rect2]:
 		width *= 0.86
 	return result
 
+## Правая граница карт «Вне колец»: левый край самого левого кольца.
+func _outside_right() -> float:
+	var left := size.x
+	for center: Vector2 in centers:
+		left = minf(left, center.x - radius - 8.0)
+	return left
+
 func _inside_region(rect: Rect2, mask: int) -> bool:
+	if mask == 0 and rect.intersects(Rect2(8, 0, 96, 24)):
+		return false  # надпись «Вне колец»
 	for label_rect: Rect2 in label_rects:
 		if rect.intersects(label_rect.grow(4)):
 			return false
@@ -107,14 +116,24 @@ func _layout_cards() -> void:
 			var card: Control = table._card(int(entries[i].card), slots[i].size, false)
 			card.name = "PendingCard" if entries[i].get("pending", false) else "BoardCard%d" % entries[i].card
 			card.position = slots[i].position
+			card.judge_drag = entries[i].get("pending", false) and table.can_judge()
 			add_child(card)
 			if entries[i].get("pending", false):
-				var badge := Style.label("?", 16, Style.ink())
-				badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-				card.add_child(badge)
-				var pulse := card.create_tween().set_loops()
-				pulse.tween_property(card, "modulate:a", 0.55, 0.7)
-				pulse.tween_property(card, "modulate:a", 1.0, 0.7)
+				card.add_child(_pending_veil(slots[i].size))
+
+## Последняя выложенная карта (ждёт проверки) — полупрозрачное красное окошко поверх, по скруглению карты.
+func _pending_veil(card_size: Vector2) -> Panel:
+	var veil := Panel.new()
+	veil.name = "PendingVeil"
+	veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(Style.RINGS[2], 0.4)
+	sb.border_color = Style.RINGS[2]
+	sb.set_border_width_all(3)
+	sb.set_corner_radius_all(int(minf(card_size.x, card_size.y) * 0.045))
+	veil.add_theme_stylebox_override("panel", sb)
+	veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	return veil
 
 func _draw() -> void:
 	_geometry()
@@ -123,13 +142,22 @@ func _draw() -> void:
 		var color: Color = Style.RINGS[maxi(0, category)]
 		draw_circle(centers[i], radius, Color(color, 0.14))
 		draw_arc(centers[i], radius, 0, TAU, 128, color, 5, true)
-		draw_string(Style.HEAD, label_rects[i].position + Vector2(0, 16), Style.category_name(str(rings[i])), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Style.ink())
-	draw_string(Style.HEAD, Vector2(16, 16), "Вне колец", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Style.muted())
+		draw_string(_label_font(), label_rects[i].position + Vector2(0, 16), Style.category_name(str(rings[i])), HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Style.ink())
+	draw_string(_label_font(), Vector2(16, 16), "Вне колец", HORIZONTAL_ALIGNMENT_LEFT, -1, 16, Style.muted())
+
+## Подписи областей — основным шрифтом: декоративный остаётся только у заголовков.
+static func _label_font() -> Font:
+	return Style.weighted(Style.FONT, 800)
 
 func _can_drop_data(_at: Vector2, data: Variant) -> bool:
+	if data is Dictionary and data.has("tr_judge"):
+		return data.get("revision") == table.view.revision and table.can_judge()
 	return data is Dictionary and data.has("tr_card") and data.get("revision") == table.view.revision and data.get("seat") == table.view.you and table.can_place()
 
 func _drop_data(at: Vector2, data: Variant) -> void:
+	if data.has("tr_judge"):
+		table.judge_drop(mask_at(at))
+		return
 	table.drop_card(int(data.tr_card), mask_at(at))
 
 func _input_at(event: InputEvent) -> void:

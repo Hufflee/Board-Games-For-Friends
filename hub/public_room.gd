@@ -41,6 +41,28 @@ static func clean(value: Variant) -> Dictionary:
 		if not (number is float or number is int) or not is_finite(float(number)) or float(number) < 0 or float(number) > 1:
 			return {}
 		config.figure_positions[id] = float(number)
+	for field in ["figure_yaw", "figure_surfaces"]:
+		var entries: Variant = source.get(field, {})
+		if not entries is Dictionary or entries.size() > 2:
+			return {}
+		if not source.has(field):
+			continue
+		config[field] = {}
+		for id in entries:
+			if not id in ["shelf_girl", "shelf_andy"]:
+				return {}
+			var entry: Variant = entries[id]
+			if field == "figure_yaw":
+				if not (entry is float or entry is int) or not is_finite(float(entry)) or absf(float(entry)) > PI + 0.0001:
+					return {}
+				config[field][id] = float(entry)
+			else:
+				if not entry is Dictionary or entry.size() != 2 or not entry.get("surface", "") in ["tv", "cabinet"]:
+					return {}
+				var fraction: Variant = entry.get("x")
+				if not (fraction is float or fraction is int) or not is_finite(float(fraction)) or float(fraction) < 0 or float(fraction) > 1:
+					return {}
+				config[field][id] = {"surface": entry.surface, "x": float(fraction)}
 	var allowed: Array = ["shelf_girl", "shelf_andy"]
 	for game in preload("res://hub/games.gd").LIST:
 		allowed.append(str(game.id))

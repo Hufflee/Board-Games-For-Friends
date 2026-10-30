@@ -81,6 +81,8 @@ const TEXTURES := {
 	"tip_top_18_secret": [COINS + "tip_top_18_secret_front.png", COINS + "tip_top_18_secret_back.png"],
 	"not_a_hat": [COINS + "not_a_hat_front.png", COINS + "not_a_hat_back.png"],
 	"not_a_hat_secret": [COINS + "not_a_hat_secret_front.png", COINS + "not_a_hat_secret_back.png"],
+	"the_gang": [COINS + "the_gang_coin.png", COINS + "the_gang_coin.png"],  # рисована кодом: tools/coin_the_gang.py
+	"things_in_rings": [COINS + "things_in_rings_coin.png", COINS + "things_in_rings_coin.png"],  # tools/coin_things_in_rings.py
 }
 ## Области сторон на листах. Круглая отрисовка отсекает фон за ободком.
 const COIN_REGIONS := {
@@ -96,12 +98,14 @@ const COIN_REGIONS := {
 	"hues_and_cues_dark_secret": [Rect2(35, 25, 845, 845), Rect2(892, 25, 845, 845)],
 	"brodilka_secret": [Rect2(41, 32, 808, 809), Rect2(919, 32, 812, 807)],
 	"gloom_secret": [Rect2(8, 0, 870, 870), Rect2(895, 0, 870, 870)],
+	"the_gang": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"things_in_rings": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
 }
 ## Игры со своей монетой (кроме Перудо) и есть ли у неё вариант для тёмной темы.
 ## Порядок важен: tip_top_18 раньше tip_top.
 const GAME_COINS := [["phantom_ink", false], ["four_souls", false], ["stillion", false], ["tip_top_18", false], ["tip_top", false], ["king_of_12", false], ["dangerous_words", false],
 	["ready_set_bet", true], ["word_slam", true], ["wavelength", true], ["not_a_hat", false],
-	["hues_and_cues", true], ["brodilka", false], ["gloom", false]]
+	["hues_and_cues", true], ["brodilka", false], ["gloom", false], ["the_gang", false], ["things_in_rings", false]]
 static var _tex_cache := {}
 
 var _vel := Vector2.ZERO
@@ -430,6 +434,9 @@ func _process(delta: float) -> void:
 		if scr is Node and (scr as Node).get_parent() == par and (scr as Node).get_index() > get_index():
 			par.move_child(self, (scr as Node).get_index())
 		var z := 90 if bool(Net.view.get("game_paused", Net.paused)) else (0 if get_index() < par.get_child_count() - 1 else 50)
+		var victory_bar := get_tree().get_first_node_in_group("top_bar")
+		if victory_bar != null and bool(victory_bar.get("_victory_backdrop")):
+			z = maxi(z, int(victory_bar.z_index) + 1)  # гнездо на финале поднято до полосы — монетка над ним
 		if z_index != z:
 			z_index = z
 	if not _holding and _toss_t < 0.0 and _vel.length_squared() > 1.0 and _try_dock():
@@ -533,6 +540,10 @@ func _colors() -> Array:
 			return [Color("b8a2bd"), Color("59405e"), Color("d5bdd3")]
 		"stillion", "stillion_secret":
 			return [Color("b89a54"), Color("462e26"), Color("d2b478")]
+		"the_gang":
+			return [Color("b89a52"), Color("806834"), Color("d6be7a")]  # латунь сейфа
+		"things_in_rings":
+			return [Color("d6c6ac"), Color("322c37"), Color("f1e6d2")]  # бумага и чернила стола
 		"doubloon", "doubloon_gold":
 			return [Color("d9a43a"), Color("8a5a14"), Color("f6dc8a")]
 		"gold", "brodilka", "brodilka_secret":
@@ -562,7 +573,7 @@ func _draw() -> void:
 	draw_set_transform(c - Vector2(0, _lift * 10), 0.0, Vector2(maxf(face_w, 0.08) * scale_up, scale_up))
 	if TEXTURES.has(_style):
 		var tex := _tex(TEXTURES[_style][0 if heads else 1])
-		var edge_radius := R * 0.94 if _style in ["phantom_ink", "phantom_ink_secret", "four_souls", "four_souls_secret", "stillion", "stillion_secret", "gloom_secret", "hues_and_cues", "hues_and_cues_dark", "hues_and_cues_secret", "hues_and_cues_dark_secret"] else R
+		var edge_radius := R * 0.94 if _style in ["the_gang", "things_in_rings", "phantom_ink", "phantom_ink_secret", "four_souls", "four_souls_secret", "stillion", "stillion_secret", "gloom_secret", "hues_and_cues", "hues_and_cues_dark", "hues_and_cues_secret", "hues_and_cues_dark_secret"] else R
 		draw_circle(Vector2(0, 2.0), edge_radius, cols[1].darkened(0.4))  # ребро
 		if tex:
 			# «Дюжина короля» — та же монета, что в бродилке, но потемнее (под таверну)
@@ -602,7 +613,7 @@ func _draw() -> void:
 func _draw_coin_region(tex: Texture2D, region: Rect2, tint: Color) -> void:
 	# У Айзека и Стиллиона выступы выходят за круг ободка. Сохраняем
 	# исходную альфу и весь силуэт вместо круглой маски, срезавшей эти выступы.
-	if _style in ["phantom_ink", "phantom_ink_secret", "four_souls", "four_souls_secret", "stillion", "stillion_secret", "gloom_secret", "hues_and_cues", "hues_and_cues_dark", "hues_and_cues_secret", "hues_and_cues_dark_secret"]:
+	if _style in ["the_gang", "things_in_rings", "phantom_ink", "phantom_ink_secret", "four_souls", "four_souls_secret", "stillion", "stillion_secret", "gloom_secret", "hues_and_cues", "hues_and_cues_dark", "hues_and_cues_secret", "hues_and_cues_dark_secret"]:
 		draw_texture_rect_region(tex, Rect2(Vector2(-R, -R), Vector2.ONE * R * 2.0), region, tint)
 		return
 	var points := PackedVector2Array()

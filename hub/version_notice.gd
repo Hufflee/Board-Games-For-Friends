@@ -1,7 +1,7 @@
 extends Control
 ## Однократное представление новой игры после заставки, с личным флагом игры.
 const CACHE := "user://announcements.cfg"
-const GAME_ID := "things_in_rings"
+const GAME_ID := "poker"
 const AFTER_SPLASH_MS := 2000
 
 static func pending() -> bool:
@@ -72,7 +72,7 @@ func _ready() -> void:
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	title.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(title)
-	var name_label := HubStyle.neon_label("THINGS IN RINGS", 26, HubStyle.PINK)
+	var name_label := HubStyle.neon_label("ПОКЕР", 26, HubStyle.PINK)
 	name_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	name_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(name_label)

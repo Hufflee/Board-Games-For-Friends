@@ -4,6 +4,26 @@ extends RefCounted
 
 const LIST := [
 	{
+		"id": "poker",
+		"title": "Покер",
+		"players": "2–8 игроков",
+		"time": "30–60 минут",
+		"description": "Техасский холдем под неоновыми огнями! «Классика» — раздачи без конца, проиграл — садись заново. «Спортивный» — сессии по 14 раздач и очки за места. Играйте с друзьями или с ботами.",
+		"scene": "res://games/poker/ui/main.tscn",
+		"color": Color("ff3fa4"),
+		"thickness": 0.06,
+	},
+	{
+		"id": "khorom",
+		"title": "Хором!",
+		"players": "3–8 игроков",
+		"time": "20–30 минут",
+		"description": "Пишите ответы на тему и ищите совпадения! «Хором» — очки за одинаковые ответы, «Белая ворона» — за редкие, «Блиц» — шесть тем на скорость. Ответы открываются по очереди.",
+		"scene": "res://games/khorom/ui/main.tscn",
+		"color": Color("e0794f"),
+		"thickness": 0.06,
+	},
+	{
 		"id": "things_in_rings",
 		"title": "Things in Rings",
 		"players": "2–6 игроков",

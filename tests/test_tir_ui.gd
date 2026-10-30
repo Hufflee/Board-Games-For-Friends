@@ -92,9 +92,8 @@ func _run() -> void:
 	for child: Node in app.get_children():
 		if child.get_script() == load("res://hub/fidget.gd"):
 			fidget = child
-	check(fidget != null and fidget.get("_style") == "king_of_12", "Фактическая монета использует K12")
-	check(load("res://hub/art/coins/king_of_12_front.png") is Texture2D, "Спрайт K12 загружается")
-	check(fidget != null and fidget._tex("res://hub/art/coins/king_of_12_front.png") is Texture2D, "Реальный Fidget использует загруженный спрайт")
+	check(fidget != null and fidget.get("_style") == "things_in_rings", "Фактическая монета — своя монета Things in Rings")
+	check(fidget != null and fidget._tex("res://hub/art/coins/things_in_rings_coin.png") is Texture2D, "Реальный Fidget использует загруженный спрайт")
 	check(is_instance_valid(app.screen), "Приложение создало стол")
 	check(root.get_node("Sfx").get("_playlist") == app.MUSIC, "Приложение задаёт свой спокойный CC0 playlist")
 	for category: String in net.view.rings:
@@ -201,8 +200,7 @@ func _run() -> void:
 	var revision_before: int = net.tir.revision
 	net._apply_state(spectator)
 	await settle()
-	await click(app.screen.find_child("Region1", true, false))
-	check(app.screen.get("_archive") == 1 and net.tir.revision == revision_before, "Зритель открывает архив без игрового действия")
+	check(app.screen.find_child("Region1", true, false) == null, "Архива областей больше нет")
 	var blocked := Button.new()
 	blocked.text = "Запрещённое действие"
 	blocked.position = Vector2(500, 600)

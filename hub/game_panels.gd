@@ -19,7 +19,9 @@ var _editor_mat: ShaderMaterial
 
 const PANEL_H := 0.17  # высота стекла, м (ширина — по пропорциям постера)
 const CELL := Vector2(0.25, 0.17)  # шаг сетки (по самой широкой панели)
-const COLS := 3
+const COLS := 3  # наименьшее число столбцов; больше — если так окошки получаются крупнее
+const MAX_COLS := 6
+var _cols := COLS
 const GAP := Vector2(0.035, 0.05)
 const DIST := 1.25  # от камеры до плоскости панелей, м
 const CENTER := Vector2(0.49, -0.02)  # центр сетки относительно центра экрана, м: справа от шкафа, левый столбец чуть заходит на шкаф
@@ -393,25 +395,32 @@ func _layout() -> void:
 	var center := camera.global_position + fwd * DIST + up * 0.03
 	_anchor = Transform3D(Basis(right, up, -fwd), center)
 	var n := _items.size()
-	var rows := int(ceil(float(n) / COLS))
 	_layout_viewport = camera.get_viewport().get_visible_rect().size
-	var top_left := camera.project_position(_layout_viewport * Vector2(0.42, 0.14), DIST)
-	var bottom_right := camera.project_position(_layout_viewport * Vector2(0.94, 0.82), DIST)
+	var top_left := camera.project_position(_layout_viewport * Vector2(0.38, 0.13), DIST)
+	var bottom_right := camera.project_position(_layout_viewport * Vector2(0.96, 0.86), DIST)
 	var area_width := absf((bottom_right - top_left).dot(right))
 	var area_height := absf((bottom_right - top_left).dot(up))
-	var columns := mini(COLS, maxi(1, n))
-	var grid_width := columns * CELL.x + maxi(0, columns - 1) * GAP.x
-	var grid_height := maxi(1, rows) * PANEL_H + maxi(0, rows - 1) * GAP.y
-	_grid_scale = minf(1.0, minf(area_width / grid_width, area_height / grid_height))
+	# Динамическая сетка: из 3…6 столбцов берём ту, где окошки крупнее.
+	_grid_scale = 0.0
+	for option: int in range(COLS, MAX_COLS + 1):
+		var columns := mini(option, maxi(1, n))
+		var option_rows := int(ceil(float(n) / columns))
+		var grid_width := columns * CELL.x + maxi(0, columns - 1) * GAP.x
+		var grid_height := maxi(1, option_rows) * PANEL_H + maxi(0, option_rows - 1) * GAP.y
+		var option_scale := minf(1.0, minf(area_width / grid_width, area_height / grid_height))
+		if option_scale > _grid_scale + 0.001:
+			_grid_scale = option_scale
+			_cols = option
+	var rows := int(ceil(float(n) / _cols))
 	var grid_center := (top_left + bottom_right) * 0.5 - center
 	var center_x := grid_center.dot(right)
 	var center_y := grid_center.dot(up)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 12345  # раскладка одна и та же при каждом открытии
 	for i in n:
-		var r := i / COLS
-		var c := i % COLS
-		var in_row := mini(COLS, n - r * COLS)
+		var r := i / _cols
+		var c := i % _cols
+		var in_row := mini(_cols, n - r * _cols)
 		var x := (c - (in_row - 1) * 0.5) * (CELL.x + GAP.x) * _grid_scale + center_x
 		var y := ((rows - 1) * 0.5 - r) * (CELL.y + GAP.y) * _grid_scale + center_y
 		var z := rng.randf_range(-0.06, 0.06)
@@ -420,7 +429,8 @@ func _layout() -> void:
 		# и его поворот «съедается» перспективой), потом — симметрично к среднему столбцу
 		var face_yaw := atan2(-x, DIST - z)
 		var face_pitch := atan2(y, DIST - z)
-		var yaw := face_yaw - (x - center_x) * TURN + rng.randf_range(-0.04, 0.04)
+		# при большем числе столбцов крайние дальше от центра: поворот нормируем, чтобы не смотрели вбок
+		var yaw := face_yaw - (x - center_x) * TURN * float(COLS) / _cols + rng.randf_range(-0.04, 0.04)
 		var pitch := face_pitch + rng.randf_range(-0.04, 0.04)
 		var roll := rng.randf_range(-0.03, 0.03)
 		var b := Basis.from_euler(Vector3(pitch, yaw, roll))

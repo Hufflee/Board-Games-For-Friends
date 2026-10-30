@@ -45,7 +45,27 @@ static func theme() -> Theme:
 		t.set_stylebox(state, "SelectedButton", box(Color("4c9fc2"), 8))
 		t.set_color("font_" + state + "_color", "SelectedButton", Color("241e29"))
 	t.set_color("font_color", "SelectedButton", Color("241e29"))
+	# Выбранный вариант — тихая подложка в тон кольца, а не заливка главной кнопки.
+	t.set_type_variation("PickedButton", "Button")
+	var picked := box(paper().lerp(Color("4c9fc2"), 0.32), 8)
+	picked.border_color = Color("4c9fc2")
+	for state: String in ["normal", "hover", "pressed", "disabled", "focus"]:
+		t.set_stylebox(state, "PickedButton", picked)
+		t.set_color("font_" + state + "_color", "PickedButton", ink())
+	t.set_color("font_color", "PickedButton", ink())
 	return t
+
+## Выбор из нескольких вариантов: как UISel.pick, но выбранное — тихой подложкой (главная кнопка остаётся одна).
+static func pick(b: Button, on: bool) -> void:
+	UISel.pick(b, on)
+	if on:
+		b.theme_type_variation = "PickedButton"
+
+## Подпись раздела: основной шрифт, прописные, приглушённо — заголовок экрана остаётся один.
+static func section(text: String) -> Label:
+	var l := label(text.to_upper(), 12, muted())
+	l.add_theme_font_override("font", weighted(FONT, 800))
+	return l
 
 static func label(text: String, size: int = 16, color: Color = Color.TRANSPARENT) -> Label:
 	var l := Label.new()

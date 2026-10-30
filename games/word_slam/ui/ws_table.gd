@@ -227,9 +227,13 @@ func _on_state(v: Dictionary) -> void:
 		_pointer_n = -1
 		if _hotseat():
 			_as = v["storytellers"][0]
-		Sfx.play("card_flip", -6)
-		if phase == "word":
-			_show_roll(int(v["roll"]))
+		# Смена темы перезагружает сцену: уже показанный бросок этого раунда не повторяем.
+		var roll_key := "%s/%d" % [v.get("game_id", ""), _round]
+		if roll_key != _shown_roll:
+			Sfx.play("card_flip", -6)
+			if phase == "word":
+				_shown_roll = roll_key
+				_show_roll(int(v["roll"]))
 	if phase == "play" and prev_phase == "word":
 		Sfx.play("chips_big", -4)  # «ВОРД!» — «СЛЭМ!»
 	if v["guesses"].size() > prev_guesses:
@@ -343,6 +347,8 @@ func _update_feed() -> void:
 # --- Слово (у рассказчика) -----------------------------------------------------------
 
 var _rolling := false
+## Раунд, бросок которого уже показан; static переживает перезагрузку сцены при смене темы.
+static var _shown_roll := ""
 
 
 ## Показательный бросок кубика в начале раунда: кубик кувыркается в центре и выпадает номер слова.
@@ -730,9 +736,21 @@ func _on_card_dropped(id: String, card: K12TableCard, at: Vector2) -> void:
 					empty = slot
 					break
 		if empty < 0:
-			_rows = old
-			_cancel_card(id, card)
-			return
+			# Строка полна: вытесняем слова дальше по строкам, после четвёртой — по кругу сверху.
+			var count: int = WSRules.MAX_ON_HOLDER
+			for step in range(1, count):
+				var slot: int = (w[1] + step) % count
+				if target[slot] == "":
+					empty = slot
+					break
+			if empty < 0:
+				_rows = old
+				_cancel_card(id, card)
+				return
+			while empty != w[1]:
+				var prev: int = (empty - 1 + count) % count
+				target[empty] = target[prev]
+				empty = prev
 		while empty != w[1]:
 			var next: int = empty + (1 if empty < w[1] else -1)
 			target[empty] = target[next]
@@ -882,8 +900,11 @@ func _update_bottom() -> void:
 				b.add_theme_stylebox_override("hover", hsb)
 				b.add_theme_stylebox_override("pressed", hsb)
 				var dsb := sb.duplicate() as StyleBoxFlat
-				dsb.bg_color = Color(WSCardFace.COLORS[cat], 0.55 if HCStyle.dark else 0.35)  # на тёмном фоне бледная пастель сливалась
-				dsb.border_color = Color(0, 0, 0, 0)  # неактивное слово — без рамки (в тёмной теме рамка светилась)
+				# Непрозрачная смесь с фоном и без рамки: полупрозрачная заливка с невидимой рамкой
+				# давала на тёмном фоне светлые пиксели по сглаженному краю.
+				dsb.bg_color = HCStyle.SURFACE_2.lerp(WSCardFace.COLORS[cat], 0.55 if HCStyle.dark else 0.35)
+				dsb.bg_color.a = 1.0
+				dsb.set_border_width_all(0)
 				b.add_theme_stylebox_override("disabled", dsb)
 				b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 				# текст — тёмный, как на самих карточках, в любой теме (светлый на пастели в тёмной теме не читался)
@@ -1034,7 +1055,11 @@ func _process(_delta: float) -> void:
 		return
 	var phase: String = _v["phase"]
 	var total := float(_v.get("time_total", 60.0))
-	if phase == "play":
+	if phase == "play" and total <= 0.0:
+		_timer_label.text = "⏳ ∞"
+		_timer_bar.visible = false
+		_timer_label.add_theme_color_override("font_color", HCStyle.INK)
+	elif phase == "play":
 		var left := maxf(0.0, _time_left - (Time.get_ticks_msec() - _time_stamp) / 1000.0)
 		if ceili(left) != _last_tick:
 			_last_tick = ceili(left)

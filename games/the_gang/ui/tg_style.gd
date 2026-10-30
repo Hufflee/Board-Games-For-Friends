@@ -17,7 +17,7 @@ static func box(color: Color = Color.TRANSPARENT, padding: int = 16) -> StyleBox
 	sb.bg_color = PANEL if color == Color.TRANSPARENT else color
 	sb.border_color = Color(GOLD, 0.38)
 	sb.set_border_width_all(1)
-	sb.set_corner_radius_all(3)
+	sb.set_corner_radius_all(10)  # мягкие углы, как у фишек и карт
 	sb.content_margin_left = padding
 	sb.content_margin_right = padding
 	sb.content_margin_top = padding
@@ -99,6 +99,8 @@ static func clear(node: Node) -> void:
 		child.queue_free()
 
 class Background extends Control:
+	## false — на столе: кольца сейфа и веера целиком ушли бы под панели, рисуем только рамку.
+	var decor := true
 	func _ready() -> void:
 		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -108,6 +110,8 @@ class Background extends Control:
 		for i in range(1, 3):
 			var inset := float(i) * 10.0
 			draw_rect(Rect2(Vector2(inset, inset), size - Vector2.ONE * inset * 2.0), Color(TGStyle.GOLD, 0.35), false, 1.0)
+		if not decor:
+			return
 		# Угловые веера и кольца сейфа повторяют геометрию обложки.
 		for corner: Vector2 in [Vector2(20, 20), Vector2(size.x - 20, 20), Vector2(20, size.y - 20), size - Vector2(20, 20)]:
 			var direction := (size * 0.5 - corner).normalized()

@@ -143,8 +143,10 @@ func _rebuild() -> void:
 		_body.add_child(r1)
 		var r2 := HCStyle.hbox(8)
 		r2.add_child(HCStyle.label("Время на ход:", HCStyle.BODY))
-		for sec in [30, 60, 90, 120]:
-			var b := HCStyle.button("%d с" % sec, HCStyle.CAP)
+		for sec in [30, 60, 90, 120, 0]:
+			var b := HCStyle.button("%d с" % sec if sec > 0 else "∞", HCStyle.CAP)
+			if sec == 0:
+				b.tooltip_text = "Бесконечность: ход не заканчивается сам"
 			UISel.pick(b, int(s.get("ws_time", 60)) == sec)
 			var ss: int = sec
 			b.pressed.connect(func(): Net.set_setting("ws_time", ss))
@@ -157,7 +159,8 @@ func _rebuild() -> void:
 		_body.add_child(r2)
 	else:
 		_body.add_child(HCStyle.label("Слова: " + ("упрощённый · по порядку" if s.get("ws_catalog", "basic") == "simplified" else "базовый · перемешивать после «Слэм»"), HCStyle.CAP, HCStyle.MUTED))
-		_body.add_child(HCStyle.label("%s · %d карт · на ход %d с%s" % ["Один рассказчик" if solo else "Две команды", count, int(s.get("ws_time", 60)), " · с именами" if s.get("ws_names", true) else ""], HCStyle.BODY))
+		var turn := "без ограничения времени" if int(s.get("ws_time", 60)) <= 0 else "на ход %d с" % int(s.get("ws_time", 60))
+		_body.add_child(HCStyle.label("%s · %d карт · %s%s" % ["Один рассказчик" if solo else "Две команды", count, turn, " · с именами" if s.get("ws_names", true) else ""], HCStyle.BODY))
 
 	var start_row := HCStyle.hbox(12)
 	if host:

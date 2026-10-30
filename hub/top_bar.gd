@@ -21,6 +21,10 @@ var coin_dock: Control  # место для монетки-антистресс�
 var coin_center := false  # гнездо монетки — по центру полосы (в некоторых играх), а не за часами
 var coin_at := Callable()  # своё место гнезда: -> Vector2 (центр в экранных координатах), напр. под панелью игры
 var _victory_screen: Control
+var _table_panel: StyleBox
+var _victory_panel: StyleBoxFlat
+var _victory_backdrop := false
+var _table_text := Color.WHITE
 var _clock: TurnClock
 var _left: VBoxContainer
 
@@ -52,6 +56,7 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 	t._menu_open = _saved_menu_open
 	t._menu_amount = 1.0 if t._menu_open else 0.0
 	t._make_button = make_button
+	t._table_text = text
 	if bar == null:
 		var sb := StyleBoxFlat.new()
 		sb.bg_color = Color(0, 0, 0, 0.0)
@@ -61,6 +66,11 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 		sb.content_margin_bottom = 6
 		bar = sb
 	t.add_theme_stylebox_override("panel", bar)
+	t._table_panel = bar
+	t._victory_panel = StyleBoxFlat.new()
+	t._victory_panel.bg_color = Color.TRANSPARENT
+	for edge: int in [SIDE_LEFT, SIDE_TOP, SIDE_RIGHT, SIDE_BOTTOM]:
+		t._victory_panel.set_content_margin(edge, bar.get_content_margin(edge))
 	t.place()
 	t.mouse_filter = Control.MOUSE_FILTER_STOP
 	t.z_as_relative = false
@@ -174,6 +184,7 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 	parent.add_child(t)
 	var victory := load("res://hub/victory_screen.gd").new() as Control
 	victory.table = parent
+	victory.top_bar = t
 	victory.make_button = make_button
 	victory.game = "gloomier" if Net.party_game == "gloom" and str(Net.settings.get("gl_sets", "base")) == "gm" else Net.party_game
 	var entry := HubGames.by_id(Net.party_game)
@@ -181,6 +192,18 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 	parent.add_child(victory)
 	t._victory_screen = victory
 	return t
+
+## Во время финала фон общий на весь экран; настоящие часы, кнопки и гнездо остаются сверху.
+func set_victory_backdrop(active: bool, ink := Color("f9edd8")) -> void:
+	if _victory_backdrop == active:
+		return
+	_victory_backdrop = active
+	add_theme_stylebox_override("panel", _victory_panel if active else _table_panel)
+	coin_dock.z_index = z_index if active else 0
+	var text := ink if active else _table_text
+	title.add_theme_color_override("font_color", Color(text, 0.8))
+	info.add_theme_color_override("font_color", text)
+	_esc_btn.set_ink(text)
 
 
 ## Прижать полосу к верху экрана.

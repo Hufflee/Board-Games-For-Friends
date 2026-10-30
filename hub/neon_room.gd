@@ -26,8 +26,8 @@ const SHELF_SCALE := 0.95  # шкаф вместе с коробками кру�
 const BOXED_ROWS := 3  # ячеек с коробками (в последней — ещё «Перудо»), ниже — «Coming soon»
 ## Какие коробки на какой полке (сверху вниз, слева направо).
 const SHELF_LAYOUT := [
-	["wavelength", "hues_and_cues", "dangerous_words", "king_of_12", "not_a_hat"],
-	["ready_set_bet", "tip_top", "tip_top_18", "gloom", "gloomier", "stillion"],
+	["wavelength", "hues_and_cues", "dangerous_words", "king_of_12", "not_a_hat", "khorom"],
+	["ready_set_bet", "tip_top", "tip_top_18", "gloom", "gloomier", "stillion", "poker"],
 	["word_slam", "brodilka", "phantom_ink", "four_souls", "the_gang", "things_in_rings"],
 ]
 const SHELF_X := 0.25
@@ -92,6 +92,13 @@ var _hold_handled := false
 var _press_selected := false
 var _press_screen:=Vector2.ZERO
 var _drag_original_mode:=1
+var _drag_surface: Dictionary = {}
+## Раскладка всех ящиков с переносимой коробкой, если её вставка сдвигает лишнее цепочкой в соседние.
+var _drag_cascade: Array = []
+## Время на табло видеомагнитофона: каждый клик — следующее «красивое» время.
+const VCR_TIMES: Array[String] = ["0:00", "1:11", "2:22", "2:23", "2:28", "3:22", "3:33", "4:30", "4:44", "5:55"]
+var _vcr_clock: Label3D
+var _vcr_time := 0
 var _env: Environment
 var _key: SpotLight3D
 var _extra_lights: Array = []  # второстепенные лампы — выключаются на низком качестве  # шкаф и коробки — общий масштаб SHELF_SCALE  # контровой — сзади-справа, очерчивает кромки
@@ -826,6 +833,8 @@ func _tv_corner(tv_x: float) -> void:
 		"0:00", Vector3(tv_x + 0.2, 0.395, z + 0.171), 24, Color("40ff70"), "pixel", 0.0009
 	)
 	led.modulate = Color(0.5, 2.0, 0.7)
+	_vcr_clock = led
+	_add_room_prop("vcr", Vector3(tv_x + 0.05, 0.38, z + 0.02), Vector3(0.42, 0.09, 0.3))
 	_soft(
 		Vector3(0.3, 0.07, 0.22),
 		Vector3(tv_x - 0.15, 0.1, z + 0.05),
@@ -1078,7 +1087,45 @@ func _box_extent(box: GameBox) -> Vector3:
 
 
 func _box_basis(box: GameBox) -> Basis:
+	if box.is_figurine():
+		return Basis(Vector3.UP, float(_cabinet.get("figure_yaw", {}).get(_shelf_id(box), 0.0)))
 	return ShelfConfig.item_basis(_shelf_id(box), int(_box_modes.get(_shelf_id(box), 1)))
+
+
+## Радиус охватывает фигурку при любом развороте: углы не заходят на куб или лампу.
+func _figure_radius(box: GameBox) -> float:
+	return Vector2(box.size.x, box.size.z).length() * 0.5
+
+
+func _figure_surface_span(box: GameBox, surface: String) -> Array[Vector3]:
+	var radius := _figure_radius(box)
+	if surface == "tv":
+		# Левая часть верха телевизора свободна от лавовой лампы справа.
+		var inv := _shelf_root.global_transform.affine_inverse()
+		return [inv * Vector3(1.30 + radius * SHELF_SCALE, 1.095 + box.size.y * SHELF_SCALE * 0.5, BACK + 0.39),
+			inv * Vector3(1.68 - radius * SHELF_SCALE, 1.095 + box.size.y * SHELF_SCALE * 0.5, BACK + 0.39)]
+	var full_width: float = int(_cabinet.cols) * float(_cabinet.width) + (int(_cabinet.cols) + 1) * BOARD
+	var top: float = 0.06 + int(_cabinet.rows) * float(_cabinet.height) + (int(_cabinet.rows) + 1) * BOARD
+	return [Vector3(SHELF_X - full_width * 0.5 + radius + 0.008, top + box.size.y * 0.5, BACK + 0.21),
+		Vector3(SHELF_X + full_width * 0.5 - 0.07 - 0.055 / SHELF_SCALE - radius - 0.008, top + box.size.y * 0.5, BACK + 0.21)]
+
+
+func _figure_surface_position(box: GameBox, surface: String, fraction: float) -> Vector3:
+	var span := _figure_surface_span(box, surface)
+	return span[0].lerp(span[1], clampf(fraction, 0.0, 1.0))
+
+
+func _rotate_figure(direction: int) -> void:
+	if remote_view or _selected_box == null or not _selected_box.is_figurine():
+		return
+	if not _cabinet.has("figure_yaw"):
+		_cabinet.figure_yaw = {}
+	var id := _shelf_id(_selected_box)
+	_cabinet.figure_yaw[id] = wrapf(float(_cabinet.figure_yaw.get(id, 0.0)) + direction * PI / 12.0, -PI, PI)
+	_reflow(false)
+	if not _editor_on:
+		_save_shelf()
+	shelf_hint.emit("Колесо мыши ↕, Q, E — повернуть · удерживайте фигурку снова для переноса")
 
 
 func _init_custom_shelf() -> void:
@@ -1295,6 +1342,15 @@ func _frame_shelf() -> void:
 	var height: float = (
 		(int(_cabinet.rows) * float(_cabinet.height) + (int(_cabinet.rows) + 1) * BOARD) * SHELF_SCALE
 	)
+	var extra_x := 0.0
+	var extra_y := 0.0
+	for anchor: Dictionary in _cabinet.get("figure_surfaces", {}).values():
+		if anchor.surface == "tv":
+			extra_x = 1.35
+		else:
+			extra_y = 0.38
+	width += extra_x
+	height += extra_y
 	var aspect: float = (
 		get_viewport().get_visible_rect().size.x / maxf(1, get_viewport().get_visible_rect().size.y)
 	)
@@ -1307,7 +1363,7 @@ func _frame_shelf() -> void:
 		)
 	)
 	var aim: Vector3 = (
-		_shelf_root.global_transform * Vector3(SHELF_X, 0.06 + height / (2 * SHELF_SCALE), BACK + 0.18)
+		_shelf_root.global_transform * Vector3(SHELF_X + extra_x * 0.5, 0.06 + height / (2 * SHELF_SCALE), BACK + 0.18)
 	)
 	var shift: float = width * 0.16 if _editor_on else 0.0
 	camera.global_position = aim + Vector3(shift, 0.03, distance)
@@ -1583,6 +1639,10 @@ func _use_room_prop(kind: String) -> void:
 			material.albedo_color = tint
 			material.emission = tint
 		shelf_hint.emit("Лавовая лампа · новый цвет")
+	elif kind == "vcr" and is_instance_valid(_vcr_clock):
+		_vcr_time = (_vcr_time + 1) % VCR_TIMES.size()
+		_vcr_clock.text = VCR_TIMES[_vcr_time]
+		shelf_hint.emit("Видеомагнитофон · " + VCR_TIMES[_vcr_time])
 	Sfx.play("click", -12)
 
 
@@ -1600,6 +1660,22 @@ func _box_at(screen_pos: Vector2) -> GameBox:
 func _input(event: InputEvent) -> void:
 	if remote_view:
 		return
+	if _selected_box != null and _selected_box.is_figurine() and _drag_box == null:
+		var direction := 0
+		if event is InputEventMouseButton and event.pressed:
+			if event.button_index == MOUSE_BUTTON_WHEEL_UP:
+				direction = -1
+			elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
+				direction = 1
+		elif event is InputEventKey and event.pressed:
+			if event.keycode == KEY_Q:
+				direction = -1
+			elif event.keycode == KEY_E:
+				direction = 1
+		if direction != 0:
+			_rotate_figure(direction)
+			get_viewport().set_input_as_handled()
+			return
 	if _editor_on:
 		if _editor_box_press and _pressed_box != null:
 			if event is InputEventMouseMotion:
@@ -1840,12 +1916,13 @@ func _prepare_layout() -> void:
 func _reflow(animate: bool) -> void:
 	for r in _rows.size():
 		var info: Dictionary = _row_info[r]
-		var row: Array = _rows[r].duplicate()
+		var cascade := _drag_box != null and not _drag_cascade.is_empty()
+		var row: Array = (_drag_cascade[r] if cascade else _rows[r]).duplicate()
 		if _shelf_placeholders.has(r):
 			(_shelf_placeholders[r] as Node3D).visible = (
 				row.is_empty() and not (_drag_box != null and _drag_to.x == r)
 			)
-		if _drag_box != null and _drag_to.x == r:
+		if _drag_box != null and _drag_to.x == r and not cascade:
 			row.insert(_drag_to.y, _drag_box)
 		var layout := _layout_row(row, r)
 		for b: GameBox in row:
@@ -1853,6 +1930,11 @@ func _reflow(animate: bool) -> void:
 				continue
 			var home: Transform3D = layout.boxes[_shelf_id(b)]
 			home.origin += Vector3(float(info.left), float(info.floor), float(info.back))
+			if b.is_figurine():
+				home.basis = _box_basis(b)
+				var anchor: Dictionary = _cabinet.get("figure_surfaces", {}).get(_shelf_id(b), {})
+				if not anchor.is_empty():
+					home.origin = _figure_surface_position(b, str(anchor.surface), float(anchor.x))
 			_set_home(b, home, animate)
 
 
@@ -1877,6 +1959,9 @@ func _select_shelf_box(box: GameBox) -> void:
 	box.set_swap_highlight(true)
 	_hover = null
 	_update_pose_button()
+	if box.is_figurine():
+		shelf_hint.emit("Колесо мыши ↕, Q, E — повернуть · удерживайте фигурку снова для переноса")
+		return
 	(
 		shelf_hint
 		. emit(
@@ -1936,6 +2021,7 @@ func _start_drag() -> void:
 	if remote_view:
 		return
 	var b := _pressed_box
+	_drag_surface = {}
 	_drag_backup = {
 		"config": _cabinet.duplicate(true), "placements": _shelf_ids(), "poses": _box_modes.duplicate(true)
 	}
@@ -1951,6 +2037,7 @@ func _start_drag() -> void:
 	_drag_original_mode = int(_box_modes.get(_shelf_id(b), 1))
 	_hold_handled = true
 	_drag_from = Vector2i(-1, -1)
+	_drag_cascade = []
 	for r in _rows.size():
 		var i: int = (_rows[r] as Array).find(b)
 		if i >= 0:
@@ -1979,6 +2066,40 @@ func _start_drag() -> void:
 
 ## Курсор двигается с коробкой: какая полка ближе и между какими коробками она встанет.
 func _drag_update(screen: Vector2) -> void:
+	_drag_surface = {}
+	if _drag_box.is_figurine():
+		for surface: String in ["tv", "cabinet"]:
+			var span := _figure_surface_span(_drag_box, surface)
+			if span[1].x < span[0].x:
+				continue
+			var a := camera.unproject_position(_shelf_root.to_global(span[0]))
+			var b := camera.unproject_position(_shelf_root.to_global(span[1]))
+			var delta := b - a
+			var fraction := clampf((screen - a).dot(delta) / maxf(delta.length_squared(), 0.001), 0.0, 1.0)
+			if screen.distance_to(a.lerp(b, fraction)) < 42.0:
+				# Доля на экране искажена перспективой: место берём по лучу в плоскости поверхности.
+				var inv_root := _shelf_root.global_transform.affine_inverse()
+				var ray_o := inv_root * camera.project_ray_origin(screen)
+				var ray_d := inv_root.basis * camera.project_ray_normal(screen)
+				if absf(ray_d.z) > 0.0001 and span[1].x - span[0].x > 0.0001:
+					var hit := ray_o + ray_d * ((span[0].z - ray_o.z) / ray_d.z)
+					fraction = clampf((hit.x - span[0].x) / (span[1].x - span[0].x), 0.0, 1.0)
+				var point := _figure_surface_position(_drag_box, surface, fraction)
+				var clear := true
+				for other: GameBox in boxes:
+					if other == _drag_box or not other.is_figurine():
+						continue
+					var anchor: Dictionary = _cabinet.get("figure_surfaces", {}).get(_shelf_id(other), {})
+					if anchor.get("surface", "") == surface:
+						clear = clear and absf(other.home.origin.x - point.x) >= _figure_radius(other) + _figure_radius(_drag_box) + 0.008
+				if clear:
+					_drag_surface = {"surface": surface, "x": fraction}
+					_drag_at = point
+					_drag_to = _drag_from
+					_drag_cascade = []
+					_reflow(true)
+					_drag_box.set_swap_highlight(true, true)
+					return
 	var inv := _shelf_root.global_transform.affine_inverse()
 	var o := inv * camera.project_ray_origin(screen)
 	var d := inv.basis * camera.project_ray_normal(screen)
@@ -2026,10 +2147,19 @@ func _drag_update(screen: Vector2) -> void:
 		and occupied.y <= float(info.get("height", CELL_H)) + 0.0005
 		and occupied.z <= CELL_D + 0.0005
 	)
+	var cascade: Array = []
+	if (
+		not fits
+		and occupied.y <= float(info.get("height", CELL_H)) + 0.0005
+		and occupied.z <= CELL_D + 0.0005
+	):
+		cascade = _cascade_rows(r, index)
+		fits = not cascade.is_empty()
 	var to := Vector2i(r, index) if fits else Vector2i(-1, -1)
-	if to == _drag_to:
+	if to == _drag_to and cascade == _drag_cascade:
 		return
 	_drag_to = to
+	_drag_cascade = cascade
 	_reflow(true)
 	_drag_box.set_swap_highlight(true, fits)
 	Input.set_default_cursor_shape(Input.CURSOR_DRAG if fits else Input.CURSOR_FORBIDDEN)
@@ -2043,6 +2173,53 @@ func _drag_update(screen: Vector2) -> void:
 	Sfx.play("hover", -16, 0.1, 0.05)
 
 
+## Ящик переполнен: лишние предметы по цепочке уходят в соседние ящики (сначала вперёд, затем назад).
+## Переносимая коробка и стаканчики Перудо остаются на месте; пусто — места во всём шкафу не хватает.
+func _cascade_rows(cell: int, index: int) -> Array:
+	for direction: int in [1, -1]:
+		var trial: Array = []
+		for row: Array in _rows:
+			trial.append(row.duplicate())
+		(trial[cell] as Array).insert(index, _drag_box)
+		var at := cell
+		var ok := true
+		while _row_overflows(trial[at], at):
+			var next := at + direction
+			if next < 0 or next >= trial.size():
+				ok = false
+				break
+			var row: Array = trial[at]
+			var pick := -1
+			var order: Array = range(row.size() - 1, -1, -1) if direction > 0 else range(row.size())
+			for k: int in order:
+				var item: GameBox = row[k]
+				if item != _drag_box and not item.is_cups():
+					pick = k
+					break
+			if pick < 0:
+				ok = false
+				break
+			var moved: GameBox = row[pick]
+			var height := ShelfConfig.item_occupied(_shelf_id(moved), moved.size, int(_box_modes.get(_shelf_id(moved), 1))).y
+			if height > float(_row_info[next].get("height", CELL_H)) + 0.0005:
+				ok = false
+				break
+			row.remove_at(pick)
+			if direction > 0:
+				(trial[next] as Array).insert(0, moved)
+			else:
+				(trial[next] as Array).append(moved)
+			at = next
+		if ok:
+			return trial
+	return []
+
+
+func _row_overflows(row: Array, cell: int) -> bool:
+	var info: Dictionary = _row_info[cell]
+	return float(_layout_row(row, cell).width) > float(info.right) - float(info.left) + 0.0005
+
+
 ## Отпустили: коробка встаёт в щель (или возвращается, если поставить некуда / отпустили над интерфейсом).
 func _finish_drag(ok: bool) -> void:
 	var b := _drag_box
@@ -2054,9 +2231,25 @@ func _finish_drag(ok: bool) -> void:
 		or int(_box_modes.get(_shelf_id(b), 1)) != _drag_original_mode
 		or not bool(_drag_backup.get("config", {}).get("neighbor_order", false))
 	)
-	(_rows[to.x] as Array).insert(to.y, b)
+	if ok and _drag_to.x >= 0 and b.is_figurine():
+		if not _cabinet.has("figure_surfaces"):
+			_cabinet.figure_surfaces = {}
+		var id := _shelf_id(b)
+		var old_anchor: Dictionary = _cabinet.figure_surfaces.get(id, {})
+		moved = moved or old_anchor != _drag_surface
+		if _drag_surface.is_empty():
+			_cabinet.figure_surfaces.erase(id)
+		else:
+			_cabinet.figure_surfaces[id] = _drag_surface.duplicate()
 	var cancelled := not ok or _drag_to.x < 0
+	if not cancelled and not _drag_cascade.is_empty():
+		_rows = _drag_cascade.duplicate()
+		moved = true
+	else:
+		(_rows[to.x] as Array).insert(to.y, b)
+	_drag_cascade = []
 	_drag_box = null
+	_drag_surface = {}
 	if cancelled:
 		_apply_shelf_state(_drag_backup)
 		moved = false
@@ -2070,6 +2263,8 @@ func _finish_drag(ok: bool) -> void:
 	b.set_swap_highlight(false)
 	_clear_shelf_selection()
 	_reflow(true)
+	if moved and b.is_figurine():
+		_frame_shelf()
 	Sfx.play("card_place", -8)
 	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 	var hint := HINT
@@ -2200,6 +2395,8 @@ func _process(delta: float) -> void:
 			clampf(_drag_at.y, lo, hi),
 			drag_z
 		)
+		if not _drag_surface.is_empty():
+			want = _drag_at
 		_drag_box.transform = _drag_box.transform.interpolate_with(
 			Transform3D(_box_basis(_drag_box), want), 1.0 - exp(-delta * 18.0)
 		)
@@ -2232,8 +2429,12 @@ func _process(delta: float) -> void:
 func public_snapshot() -> Dictionary:
 	if remote_view:
 		return _local_room.public.duplicate(true)
+	# Взятый предмет временно отсутствует в _rows; публикуем последнее целое состояние.
+	var state: Dictionary = _drag_backup if _drag_box != null else {
+		"config": _cabinet, "placements": _shelf_ids(), "poses": _box_modes
+	}
 	return PublicRoom.clean({
-		"config": _cabinet, "placements": _shelf_ids(), "poses": _box_modes,
+		"config": state.config, "placements": state.placements, "poses": state.poses,
 		"selected": str(focused.game.get("id", "")) if focused != null else "",
 		"editor": _editor_on
 	})
@@ -2268,10 +2469,19 @@ func show_remote(snapshot: Dictionary, follow: bool = true) -> bool:
 	remote_follow = follow
 	var state_changed: bool = _cabinet != clean.config or _shelf_ids() != clean.placements or _box_modes != clean.poses
 	if state_changed:
+		var local_selected: String = _shelf_id(focused) if focused != null else ""
+		var saved_camera := camera.transform
+		var saved_home := _cam_home
 		release()
 		_clear_shelf_selection()
 		_apply_shelf_state(clean)
-		_frame_shelf()
+		if remote_follow:
+			_frame_shelf()
+		else:
+			camera.transform = saved_camera
+			_cam_home = saved_home
+			if local_selected != "":
+				focus_id(local_selected)
 	_remote_editor = clean.editor
 	if remote_follow and (state_changed or _remote_selected != clean.selected):
 		release()
