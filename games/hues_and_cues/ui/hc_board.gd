@@ -136,9 +136,12 @@ static func filtered_color(color: Color, channel: int) -> Color:
 		return color
 	if channel == 3:
 		var value := color.r * 0.2126 + color.g * 0.7152 + color.b * 0.0722
-		return color.lerp(Color(value, value, value, color.a), 0.8)
+		return color.lerp(Color(value, value, value, color.a), minf(0.8 * 1.15, 1.0))  # ч/б сильнее на 15%
 	var tint: Color = [Color("3b62ff"), Color("39ed64"), Color("ff404b")][clampi(channel, 0, 2)]
-	return color.lerp(tint, 0.567 * 0.9)
+	var strength := 0.567 * 0.9
+	if channel != 1:  # синий и красный сильнее на 15%, зелёный прежний
+		strength = minf(strength * 1.15, 1.0)
+	return color.lerp(tint, strength)
 
 
 ## Клетки неподвижны: по кольцам «перепрыгивают» только оттенки, с разгоном и торможением.

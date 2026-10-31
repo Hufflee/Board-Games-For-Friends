@@ -36,7 +36,7 @@ func run() -> void:
 	check(r.bid.is_empty() and r.bids.is_empty() and r.reveal.is_empty() and not r.can_calza(3), "Настоящий новый раунд очищает ставки/вскрытие/права calza")
 	for seat in 4:
 		r.shake(seat)
-	check(not r.place_bid(1, 1, 1) and r.place_bid(1, 1, 3), "В Палифико первый1 запрещён, обычный3 разрешён")
+	check(r.can_bid(1, 1) and r.place_bid(1, 1, 3), "В Палифико первой ставкой можно и единицы, и обычный номинал")
 	check(not r.can_bid(2, 1) and not r.can_bid(2, 4) and r.can_bid(2, 3), "Палифико удерживает первый обычный номинал")
 	# Заданные грани явно fixture: все единицы, кроме одной тройки; проверяется отключение wild.
 	r.dice = [[3,1,1,1,1], [1], [1,1,1,1], [1,1,1,1]]

@@ -16,6 +16,7 @@ const SOUNDS := {
 	"shuffle": ["card-shuffle"],
 	"game_start": ["cards-pack-open-1"],
 	"hufflesoft": ["res://hub/audio/hufflesoft_chime.wav"],
+	"your_turn": ["res://hub/audio/your_turn.wav"],  # начался мой ход (tools/sfx_your_turn.py)
 	"chip": ["chip-lay-1", "chip-lay-2", "chip-lay-3"],
 	"chips_soft": ["chips-collide-1", "chips-collide-2"],
 	"chips_win": ["chips-stack-1", "chips-stack-2"],
@@ -225,7 +226,7 @@ func victory() -> void:
 	_victory_gid = gid
 	if _victory == null:
 		_victory = AudioStreamPlayer.new()
-		_victory.bus = "Music"
+		_victory.bus = "SFX"  # звук победы — «звук», а не «музыка»: слышен и при выключенной музыке
 		add_child(_victory)
 	# Локальная копия: loop не изменяет закешированный ресурс для других плееров.
 	var stream := load(DIR + VICTORY).duplicate() as AudioStreamMP3

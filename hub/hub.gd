@@ -71,6 +71,7 @@ func _ready() -> void:
 	if Net.is_party() and not Net.party_game.is_empty():
 		_on_lobby.call_deferred()
 	load("res://hub/version_notice.gd").schedule(self)
+	Updater.confirm_boot()  # дошли до хаба — пробные патчи/новая база прижились
 
 
 func _rebuild() -> void:
@@ -131,7 +132,10 @@ func _rebuild() -> void:
 	ver.offset_bottom = -12
 	ver.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_ui.add_child(ver)
-	_status = HubStyle.label("", 14, HubStyle.YELLOW)
+	# автообновление — плашка над версией, видна только когда есть обновление
+	if Updater.enabled:
+		_ui.add_child(load("res://hub/update/update_panel.gd").new())
+	_status =HubStyle.label("", 14, HubStyle.YELLOW)
 	_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_status.custom_minimum_size.x = 280
 	_status.position = Vector2(24, 660)
@@ -527,9 +531,7 @@ func _room_icon(home: bool) -> Button:
 			button.draw_polyline(PackedVector2Array([center + Vector2(-9, 0), center + Vector2(0, -8), center + Vector2(9, 0)]), color, 1.5, true)
 			button.draw_polyline(PackedVector2Array([center + Vector2(-6, -2), center + Vector2(-6, 8), center + Vector2(6, 8), center + Vector2(6, -2)]), color, 1.5, true)
 		else:
-			button.draw_arc(center + Vector2(0, 4), 10, PI * 1.16, PI * 1.84, 20, color, 1.5, true)
-			button.draw_arc(center + Vector2(0, -4), 10, PI * 0.16, PI * 0.84, 20, color, 1.5, true)
-			button.draw_circle(center, 3, color)
+			EyeIcon.draw(button, center, color)
 	)
 	return button
 

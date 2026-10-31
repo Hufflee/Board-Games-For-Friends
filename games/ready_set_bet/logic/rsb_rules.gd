@@ -505,3 +505,19 @@ func add_player(p: Dictionary) -> bool:
 	late_used.append(false)
 	snake_gain.append(0)
 	return true
+
+
+# --- Панель хоста (необязательные методы, вызывает Net на хосте) ---------------------------
+
+## Деньги места.
+func host_stats(seat: int) -> Array:
+	if seat < 0 or seat >= players.size() or phase == "game_over":
+		return []
+	return [{"key": "money", "label": "Деньги, $", "value": int(money[seat]), "min": 0, "max": 9999}]
+
+
+func host_set_stat(seat: int, key: String, value: int) -> bool:
+	if key != "money" or host_stats(seat).is_empty():
+		return false
+	money[seat] = clampi(value, 0, 9999)
+	return true

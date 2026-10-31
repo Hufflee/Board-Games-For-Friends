@@ -83,6 +83,15 @@ const TEXTURES := {
 	"not_a_hat_secret": [COINS + "not_a_hat_secret_front.png", COINS + "not_a_hat_secret_back.png"],
 	"the_gang": [COINS + "the_gang_coin.png", COINS + "the_gang_coin.png"],  # рисована кодом: tools/coin_the_gang.py
 	"things_in_rings": [COINS + "things_in_rings_coin.png", COINS + "things_in_rings_coin.png"],  # tools/coin_things_in_rings.py
+	"things_in_rings_secret": [COINS + "things_in_rings_secret_coin.png", COINS + "things_in_rings_secret_coin.png"],  # tools/coin_things_in_rings_secret.py
+	# «Покер» — только тёмный неон (светлой темы нет): tools/coin_poker.py
+	"poker": [COINS + "poker_coin.png", COINS + "poker_coin.png"],
+	"poker_secret": [COINS + "poker_secret_coin.png", COINS + "poker_secret_coin.png"],
+	# «Хором!» — светлая и тёмная тема: tools/coin_khorom.py
+	"khorom": [COINS + "khorom_coin.png", COINS + "khorom_coin.png"],
+	"khorom_secret": [COINS + "khorom_secret_coin.png", COINS + "khorom_secret_coin.png"],
+	"khorom_dark": [COINS + "khorom_dark_coin.png", COINS + "khorom_dark_coin.png"],
+	"khorom_dark_secret": [COINS + "khorom_dark_secret_coin.png", COINS + "khorom_dark_secret_coin.png"],
 }
 ## Области сторон на листах. Круглая отрисовка отсекает фон за ободком.
 const COIN_REGIONS := {
@@ -100,12 +109,25 @@ const COIN_REGIONS := {
 	"gloom_secret": [Rect2(8, 0, 870, 870), Rect2(895, 0, 870, 870)],
 	"the_gang": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
 	"things_in_rings": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"things_in_rings_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"poker": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"poker_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"khorom": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"khorom_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"khorom_dark": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"khorom_dark_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
 }
+## Листы, где монета нарисована целиком (с гуртом и выступами): рисуем по альфе листа, без круглой маски.
+const FULL_ART := ["the_gang", "things_in_rings", "things_in_rings_secret", "poker", "poker_secret",
+	"khorom", "khorom_secret", "khorom_dark", "khorom_dark_secret", "phantom_ink", "phantom_ink_secret",
+	"four_souls", "four_souls_secret", "stillion", "stillion_secret", "gloom_secret",
+	"hues_and_cues", "hues_and_cues_dark", "hues_and_cues_secret", "hues_and_cues_dark_secret"]
 ## Игры со своей монетой (кроме Перудо) и есть ли у неё вариант для тёмной темы.
 ## Порядок важен: tip_top_18 раньше tip_top.
 const GAME_COINS := [["phantom_ink", false], ["four_souls", false], ["stillion", false], ["tip_top_18", false], ["tip_top", false], ["king_of_12", false], ["dangerous_words", false],
 	["ready_set_bet", true], ["word_slam", true], ["wavelength", true], ["not_a_hat", false],
-	["hues_and_cues", true], ["brodilka", false], ["gloom", false], ["the_gang", false], ["things_in_rings", false]]
+	["hues_and_cues", true], ["brodilka", false], ["gloom", false], ["the_gang", false], ["things_in_rings", false],
+	["poker", false], ["khorom", true]]
 static var _tex_cache := {}
 
 var _vel := Vector2.ZERO
@@ -544,6 +566,16 @@ func _colors() -> Array:
 			return [Color("b89a52"), Color("806834"), Color("d6be7a")]  # латунь сейфа
 		"things_in_rings":
 			return [Color("d6c6ac"), Color("322c37"), Color("f1e6d2")]  # бумага и чернила стола
+		"things_in_rings_secret":
+			return [Color("e2ba5c"), Color("322c37"), Color("f6de96")]  # золотой выпуск
+		"poker":
+			return [Color("3e1e6a"), Color("1f0f35"), Color("ec56a8")]  # фиолетовое сукно, неон
+		"poker_secret":
+			return [Color("ecbe56"), Color("8a5a14"), Color("fae296")]  # джекпот
+		"khorom", "khorom_dark":
+			return [Color("607abe"), Color("2f2b33"), Color("fbf6ec")]  # обложка тетради
+		"khorom_secret", "khorom_dark_secret":
+			return [Color("deb65c"), Color("2f2b33"), Color("fbf6ec")]  # наградная наклейка
 		"doubloon", "doubloon_gold":
 			return [Color("d9a43a"), Color("8a5a14"), Color("f6dc8a")]
 		"gold", "brodilka", "brodilka_secret":
@@ -573,7 +605,7 @@ func _draw() -> void:
 	draw_set_transform(c - Vector2(0, _lift * 10), 0.0, Vector2(maxf(face_w, 0.08) * scale_up, scale_up))
 	if TEXTURES.has(_style):
 		var tex := _tex(TEXTURES[_style][0 if heads else 1])
-		var edge_radius := R * 0.94 if _style in ["the_gang", "things_in_rings", "phantom_ink", "phantom_ink_secret", "four_souls", "four_souls_secret", "stillion", "stillion_secret", "gloom_secret", "hues_and_cues", "hues_and_cues_dark", "hues_and_cues_secret", "hues_and_cues_dark_secret"] else R
+		var edge_radius := R * 0.94 if _style in FULL_ART else R
 		draw_circle(Vector2(0, 2.0), edge_radius, cols[1].darkened(0.4))  # ребро
 		if tex:
 			# «Дюжина короля» — та же монета, что в бродилке, но потемнее (под таверну)
@@ -613,7 +645,7 @@ func _draw() -> void:
 func _draw_coin_region(tex: Texture2D, region: Rect2, tint: Color) -> void:
 	# У Айзека и Стиллиона выступы выходят за круг ободка. Сохраняем
 	# исходную альфу и весь силуэт вместо круглой маски, срезавшей эти выступы.
-	if _style in ["the_gang", "things_in_rings", "phantom_ink", "phantom_ink_secret", "four_souls", "four_souls_secret", "stillion", "stillion_secret", "gloom_secret", "hues_and_cues", "hues_and_cues_dark", "hues_and_cues_secret", "hues_and_cues_dark_secret"]:
+	if _style in FULL_ART:
 		draw_texture_rect_region(tex, Rect2(Vector2(-R, -R), Vector2.ONE * R * 2.0), region, tint)
 		return
 	var points := PackedVector2Array()

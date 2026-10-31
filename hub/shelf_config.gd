@@ -14,6 +14,9 @@ const MIN_WIDTH := 0.20
 # левая — правее скейтборда. Верх вместе с кубом остаётся ниже потолка комнаты.
 const MAX_WIDTH := 1.8
 const MAX_HEIGHT := 2.4
+## Фигурка по умолчанию стоит на телевизоре слева (доля ширины свободного верха ТВ).
+## Новым игрокам — сразу, в старом сохранении — один раз (метка fig_tv_31).
+const DEFAULT_FIGURE_SURFACES := {"shelf_girl": {"surface": "tv", "x": 0.15}}
 
 
 static func pose_basis(mode: int) -> Basis:
@@ -421,7 +424,8 @@ static func load_state(
 	var rows := default_rows
 	var poses: Dictionary = {}
 	var loaded := file.load(path) == OK
-	if not loaded and path == FILE:
+	var fresh := not loaded and path == FILE  # у игрока ещё нет своей расстановки
+	if fresh:
 		loaded = file.load(DEFAULT_FILE) == OK
 	if loaded and int(file.get_value("cabinet", "version", 0)) == 1:
 		var geometry: Variant = file.get_value("cabinet", "geometry", {})
@@ -431,6 +435,16 @@ static func load_state(
 			config = geometry
 			rows = stored_rows
 			poses = stored_poses
+	# Владелец 31.10: фигурку — к телевизору. Один раз переносим и в уже сохранённой расстановке
+	# (метка fig_tv_31 в geometry); дальше игрок ставит её куда хочет.
+	if path == FILE and not bool(config.get("fig_tv_31", false)):
+		config = config.duplicate(true)
+		var surfaces: Dictionary = (config.get("figure_surfaces", {}) as Dictionary).duplicate(true)
+		for id: String in DEFAULT_FIGURE_SURFACES:
+			if sizes.has(id):
+				surfaces[id] = (DEFAULT_FIGURE_SURFACES[id] as Dictionary).duplicate()
+		config.figure_surfaces = surfaces
+		config.fig_tv_31 = true
 	if sizes.has("perudo") and not rows.any(func(row): return row.has("perudo")):
 		rows = rows.duplicate(true)
 		var cup_cell: int = clampi(int(config.get("cups", 2)), 0, int(config.rows) * int(config.cols) - 1)

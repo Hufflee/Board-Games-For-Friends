@@ -215,3 +215,59 @@ func add_player(p: Dictionary) -> bool:
 	hands.append(h)
 	penalties.append([])
 	return true
+
+
+# --- Панель хоста (необязательные методы, вызывает Net на хосте) ---------------------------
+
+## Штрафные карты места (до MAX_PENALTY − 1: проигрыш наступает только по правилам).
+func host_stats(seat: int) -> Array:
+	if seat < 0 or seat >= players.size() or phase == "game_over":
+		return []
+	return [{"key": "penalties", "label": "Штрафные карты", "value": penalties[seat].size(), "min": 0, "max": MAX_PENALTY - 1}]
+
+
+func host_set_stat(seat: int, key: String, value: int) -> bool:
+	if key != "penalties" or host_stats(seat).is_empty():
+		return false
+	var v := clampi(value, 0, MAX_PENALTY - 1)
+	var list: Array = penalties[seat]
+	while list.size() > v:
+		list.pop_back()
+	while list.size() < v:
+		list.append(rng.randi_range(0, NHData.GIFTS.size() - 1))
+	return true
+
+
+## Подарок из магазина в столбик места (сверху, «новым»). Видимая верхняя карта магазина — следующая.
+func host_give_card(seat: int) -> Variant:
+	if seat < 0 or seat >= hands.size() or phase == "game_over":
+		return null
+	if shop.is_empty():
+		_fill_shop()
+	var c: Dictionary = shop.pop_back()
+	hands[seat].append(c)
+	return c
+
+
+func host_hand(seat: int) -> Array:
+	if seat < 0 or seat >= hands.size():
+		return []
+	return (hands[seat] as Array).duplicate(true)
+
+
+## Забрать подарок из столбика под низ магазина. Последний подарок не забираем: его надо будет дарить.
+func host_take_card(seat: int, prefer: Array) -> Variant:
+	if seat < 0 or seat >= hands.size() or phase == "game_over" or hands[seat].size() <= 1:
+		return null
+	var hand: Array = hands[seat]
+	var idx := -1
+	for i in range(prefer.size() - 1, -1, -1):
+		idx = hand.find(prefer[i])
+		if idx >= 0:
+			break
+	if idx < 0:
+		idx = rng.randi_range(0, hand.size() - 1)
+	var c: Variant = hand[idx]
+	hand.remove_at(idx)
+	shop.insert(0, c)
+	return c

@@ -6,6 +6,7 @@ var table: Control
 var card := -1
 var movable := false
 var judge_drag := false  # красная карта у знающего: перетащить в верную зону
+var blind_owner := -1  # Blind Mind: чья это скрытая карточка (знающий переносит её в верную зону)
 
 func _ready() -> void:
 	texture = Data.texture(card)
@@ -20,11 +21,15 @@ func _ready() -> void:
 	gui_input.connect(_clicked)
 
 func _clicked(event: InputEvent) -> void:
+	if blind_owner >= 0 and table.can_blind_move() and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
+		table.select_blind(blind_owner)
+		return
 	if movable and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and event.pressed:
 		table.select_card(card)
 
 func _get_drag_data(_at: Vector2) -> Variant:
-	if not movable and not judge_drag:
+	var blind_drag: bool = blind_owner >= 0 and table.can_blind_move()
+	if not movable and not judge_drag and not blind_drag:
 		return null
 	var picture := TextureRect.new()
 	picture.texture = texture
@@ -33,6 +38,8 @@ func _get_drag_data(_at: Vector2) -> Variant:
 	picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	picture.custom_minimum_size = Vector2(88, 136)
 	set_drag_preview(picture)
+	if blind_drag:
+		return {"tr_blind": blind_owner, "revision": table.view.revision, "seat": table.view.you}
 	if judge_drag:
 		return {"tr_judge": card, "revision": table.view.revision, "seat": table.view.you}
 	return {"tr_card": card, "revision": table.view.revision, "seat": table.view.you}

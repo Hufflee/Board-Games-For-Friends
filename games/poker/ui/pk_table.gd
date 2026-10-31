@@ -2,6 +2,10 @@ extends Control
 ## «Покер»: стол. Неоновый овал с сукном, места по кругу (я — снизу), общие карты и банк в центре,
 ## ставки — кучами фишек-спрайтов перед местами (чем больше ставка, тем выше куча, до «горы»).
 ## Слева — сессия/итоги и журнал, снизу — панель ставки: поле ввода, ползунок, 2×/3×/4×, ва-банк.
+## Свои карты лежат рубашкой: потянуть край — подсмотреть (только у себя на экране). После раздачи
+## потянуть край — открыть карту всем (действие "show"). Общие карты выплывают рубашкой от «дилера»
+## (край стола, где нет мест) и переворачиваются по одной. Выигрыш — фишки слетаются к победителю,
+## его стек растёт плавно. Только тёмная тема.
 const Style := preload("res://games/poker/ui/pk_style.gd")
 const LEFT_W := 216.0
 const GAP := 16.0
@@ -11,6 +15,10 @@ const SMALL_CARD := Vector2(44, 61)
 const SHOW_CARD := Vector2(58, 80)
 const BOARD_CARD := Vector2(70, 97)
 const MY_CARD := Vector2(84, 116)
+const DEAL_TIME := 0.45  # карта стола едет от дилера
+const DEAL_GAP := 0.12  # следующая карта — с задержкой
+const FLIP_TIME := 0.32  # переворот одной карты стола
+const WIN_COUNT := 1.4  # стек победителя дорастает за столько секунд
 var app: Node
 var view: Dictionary = {}
 var _top: TopBar
@@ -30,9 +38,21 @@ var _raise_button: Button
 var _raise_value := 0
 var _center := Vector2.ZERO
 var _radii := Vector2(300, 160)
-var _time_left := 0.0
 var _timer_bar: Control
-var _dark := false
+var _board_layer: Control  # общие карты живут между пересборками (идёт анимация раздачи)
+var _board_nodes: Array[TextureRect] = []
+var _board_hand := -1
+var _mine_layer: Control  # свои карты — тоже: пересборка не должна обрывать вытягивание края
+var _mine_key := ""
+var _mine_flips: Array[Node] = []
+var _mine_faces: Array[bool] = [false, false]  # подсмотренные (локально) карты
+var _seen_open := {}  # "место_карта" → уже видели открытой (новые открываем переворотом)
+var _fx: Control  # летящие фишки и «+N»
+var _disp: Array[float] = []  # показанный стек (плавно догоняет настоящий)
+var _disp_from: Array[float] = []
+var _disp_t := 1.0  # 0..1 — ход анимации стека
+var _stack_labels: Array = []  # [Label, место, вид] — обновляются во время анимации
+var _prev: Dictionary = {}  # прошлое состояние (для анимаций перехода)
 var _last_revision := -1
 var _last_board := 0
 var _last_phase := ""
@@ -40,20 +60,17 @@ var _finish: Button
 
 
 func _ready() -> void:
-	_dark = Prefs.dark_theme()
 	_top = TopBar.make(self, "Покер", Style.button, null, Style.ink(), Style.HEAD)
 	for item: Array in [["Правила", app.show_rules], ["Настройки", app.show_settings]]:
 		var b := Style.button(item[0], 16)
 		b.pressed.connect(item[1])
 		_top.actions.add_child(b)
-	_top.actions.add_child(ThemeToggle.make(Style.button, 16))
 	if Net.is_host():
 		_finish = Style.button("Завершить", 16)
 		_finish.name = "FinishGame"
 		_finish.tooltip_text = "Закончить партию: побеждает лучший итог"
 		_finish.pressed.connect(func(): LeaveGuard.ask(self, "Завершить игру?", "Партия закончится, победит лучший итог по фишкам.", "Завершить", func(): Net.send_action("finish", {}), "Играть дальше"))
 		_top.actions.add_child(_finish)
-	Prefs.changed.connect(_theme_changed)
 	var leave := Style.button("Выйти", 16)
 	LeaveGuard.wire(leave, "Выйти?", "Вернуться к выбору игры.", app.back_to_hub)
 	_top.actions.add_child(leave)
@@ -66,6 +83,14 @@ func _ready() -> void:
 	_cards_layer.name = "Cards"
 	_cards_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_cards_layer)
+	_board_layer = Control.new()
+	_board_layer.name = "Board"
+	_board_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_board_layer)
+	_mine_layer = Control.new()
+	_mine_layer.name = "MyCards"
+	_mine_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	add_child(_mine_layer)
 	_piles = Control.new()
 	_piles.name = "Piles"
 	_piles.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -75,6 +100,11 @@ func _ready() -> void:
 	_seats_layer.name = "Seats"
 	_seats_layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_seats_layer)
+	_fx = Control.new()
+	_fx.name = "Fx"
+	_fx.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fx.z_index = 40
+	add_child(_fx)
 	var side_panel := PanelContainer.new()
 	side_panel.name = "SidePanel"
 	side_panel.add_theme_stylebox_override("panel", Style.box(Color.TRANSPARENT, 14, 14))
@@ -121,15 +151,6 @@ func _ready() -> void:
 		_state(Net.view)
 
 
-func _theme_changed() -> void:
-	if _dark == Prefs.dark_theme():
-		return
-	_dark = Prefs.dark_theme()
-	get_tree().root.theme = Style.theme()
-	app.theme = get_tree().root.theme
-	app.show_table()
-
-
 func _me() -> int:
 	return int(view.get("you", -1))
 
@@ -139,8 +160,9 @@ func _state(next: Dictionary) -> void:
 		return
 	var old_board := _last_board
 	var old_phase := _last_phase
+	_prev = view
 	view = next
-	_time_left = float(view.get("time_left", 0.0))
+	_sync_disp()
 	_last_board = view.board.size()
 	_last_phase = str(view.phase)
 	if int(view.get("revision", 0)) != _last_revision:
@@ -155,7 +177,7 @@ func _sounds(old_board: int, old_phase: String) -> void:
 	if phase == "showdown" and old_phase == "hand":
 		Sfx.play("chips_win", -4)
 	elif view.board.size() > old_board:
-		Sfx.play("card_flip", -6)
+		pass  # звук — на каждом перевороте карты стола
 	elif phase == "hand" and old_phase != "hand":
 		Sfx.play("card_shove", -6)
 	elif phase == "hand":
@@ -166,8 +188,13 @@ func _process(delta: float) -> void:
 	if view.is_empty():
 		return
 	if str(view.phase) == "hand" and int(view.to_act) >= 0:
-		_time_left = maxf(0.0, _time_left - delta)
 		_timer_bar.queue_redraw()
+	if _disp_t < 1.0:
+		_disp_t = minf(1.0, _disp_t + delta / WIN_COUNT)
+		var k := ease(_disp_t, -2.0)
+		for seat: int in _disp.size():
+			_disp[seat] = lerpf(_disp_from[seat], float(view.stacks[seat]), k)
+		_update_stack_labels()
 	var text := ""
 	match str(view.mode):
 		"sport":
@@ -263,15 +290,7 @@ func _draw_piles() -> void:
 		var bet: int = int(view.bets[seat])
 		if phase == "hand" and bet > 0:
 			_pile(_bet_pos(seat), bet, big, 0.45, str(bet), Style.felt_ink())
-	# итог раздачи: выигрыш кучей у победителя
-	if phase == "showdown" and not view.result.is_empty():
-		var won := {}
-		for p: Dictionary in view.result.get("pots", []):
-			var winners: Array = p.winners
-			for seat: int in winners:
-				won[seat] = int(won.get(seat, 0)) + int(p.amount) / winners.size()
-		for seat: int in won:
-			_pile(_bet_pos(seat), int(won[seat]), big, 0.6, "+%d" % int(won[seat]), Style.GOLD)
+	# выигрыш не лежит кучей: фишки слетаются к победителю (_fly_win)
 	# кнопка дилера и блайнды
 	if phase in ["hand", "showdown"]:
 		_disc(_marker_pos(int(view.button)), "D", Color("f7f1ff"), Color("2a1840"))
@@ -339,6 +358,7 @@ func _disc(at: Vector2, text: String, fill: Color, ink: Color) -> void:
 
 func _build_seats() -> void:
 	Style.clear(_seats_layer)
+	_stack_labels = _stack_labels.filter(func(e: Array) -> bool: return str(e[2]) != "seat")
 	var phase := str(view.phase)
 	var me := _me()
 	for seat: int in view.players.size():
@@ -363,9 +383,11 @@ func _build_seats() -> void:
 		var nick := Style.label(str(person.name), 16, Style.felt_ink())
 		nick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		nick.clip_text = true
+		TurnNameGlow.apply(nick, turn)
 		head.add_child(nick)
-		var chips := Style.heading(str(stack), 16, Style.GOLD)
+		var chips := Style.heading(str(roundi(_disp[seat])), 16, Style.GOLD)
 		chips.name = "Stack"
+		_stack_labels.append([chips, seat, "seat"])
 		head.add_child(chips)
 		col.add_child(head)
 		var note := str(view.last_action[seat])
@@ -378,14 +400,21 @@ func _build_seats() -> void:
 		sub.clip_text = true
 		col.add_child(sub)
 		_seats_layer.add_child(plate)
+		if seat == me and phase == "showdown" and (view.hole[seat] as Array).size() == 2:
+			_add_eye(plate)
 
 
+## Полоска времени под ником — по тем же часам, что в верхней полосе (TurnClock), а не своим счётом.
 func _draw_timer() -> void:
-	if view.is_empty() or str(view.phase) != "hand" or int(view.to_act) < 0:
+	if view.is_empty() or str(view.phase) != "hand" or int(view.to_act) < 0 or not bool(view.get("clock", false)):
+		return  # без ограничения или ходит бот (его время не ограничено)
+	var left := TurnClock.seconds_left()
+	var total := float(view.get("turn_total", 0))
+	if left < 0.0 or total <= 0.0:
 		return
 	var seat: int = int(view.to_act)
 	var p := _seat_pos(seat) + Vector2(-SEAT.x * 0.5 + 10, SEAT.y * 0.5 + 4)
-	var k := clampf(_time_left / float(view.get("turn_time", 30.0)), 0.0, 1.0)
+	var k := clampf(left / total, 0.0, 1.0)
 	_timer_bar.draw_rect(Rect2(p, Vector2(SEAT.x - 20, 4)), Color(0, 0, 0, 0.35))
 	_timer_bar.draw_rect(Rect2(p, Vector2((SEAT.x - 20) * k, 4)), Style.PINK if k > 0.25 else Style.BAD)
 
@@ -397,27 +426,15 @@ func _build_cards() -> void:
 	Style.clear(_cards_layer)
 	var me := _me()
 	var showdown := str(view.phase) == "showdown"
-	# общие карты
-	var rect := _board_rect()
-	for i: int in view.board.size():
-		_card(int(view.board[i]), Rect2(rect.position + Vector2(i * (BOARD_CARD.x + 8), 0), BOARD_CARD), "Board%d" % i)
-	# карты мест
+	_sync_board()
+	_sync_mine()
+	# чужие карты: рубашкой; открытые владельцем на вскрытии — крупнее, новые переворачиваются
 	for seat: int in view.players.size():
 		var cards: Array = view.hole[seat]
-		if cards.is_empty():
+		if cards.is_empty() or seat == me:
 			continue
 		var p := _seat_pos(seat)
-		if seat == me:
-			# свои карты — веером над табличкой (соседние места при 6–8 игроках стоят вплотную справа и слева)
-			var w := MY_CARD.x * 2 - 22
-			var base := Vector2(p.x - w * 0.5, p.y - SEAT.y * 0.5 - MY_CARD.y + 18)
-			for k: int in cards.size():
-				var card := _card(int(cards[k]), Rect2(base + Vector2(k * (MY_CARD.x - 22), 0), MY_CARD), "Mine%d" % k)
-				card.rotation = deg_to_rad(-5 + k * 10)
-				if bool(view.folded[seat]):
-					card.modulate = Color(1, 1, 1, 0.45)
-			continue
-		var revealed := int(cards[0]) >= 0
+		var revealed := int(cards[0]) >= 0 or int(cards[1]) >= 0
 		var sz := SHOW_CARD if revealed and showdown else SMALL_CARD
 		# карты не там, где куча ставки (она — по пути к центру): у верхних мест — справа от таблички,
 		# у боковых и нижних — над табличкой
@@ -427,12 +444,18 @@ func _build_cards() -> void:
 			anchor = Vector2(p.x + SEAT.x * 0.5 + sz.x + 2, p.y)
 		for k: int in cards.size():
 			var pos := anchor + Vector2(-sz.x + k * (sz.x - 14) + 6, -sz.y * 0.5)
-			var card := _card(int(cards[k]), Rect2(pos, sz), "Hole%d_%d" % [seat, k])
+			var id := int(cards[k])
+			var key := "%d_%d_%d" % [int(view.hand_no), seat, k]
+			var fresh := id >= 0 and not _seen_open.has(key)
+			var card := _card(-1 if fresh else id, Rect2(pos, sz), "Hole%d_%d" % [seat, k], _cards_layer)
 			card.rotation = deg_to_rad(-6 + k * 12)
+			if fresh:
+				_seen_open[key] = true
+				_flip_open(card, id, 0.0)
 
 
-## Карта на столе; открытая — с крупным просмотром при наведении.
-func _card(id: int, rect: Rect2, node_name: String) -> TextureRect:
+## Карта на столе; открытая — с крупным просмотром при наведении. Углы скруглены.
+func _card(id: int, rect: Rect2, node_name: String, layer: Control) -> TextureRect:
 	var card := TextureRect.new()
 	card.name = node_name
 	card.texture = Style.card_texture(id)
@@ -441,12 +464,290 @@ func _card(id: int, rect: Rect2, node_name: String) -> TextureRect:
 	card.position = rect.position
 	card.size = rect.size
 	card.pivot_offset = rect.size * 0.5
-	card.mouse_filter = Control.MOUSE_FILTER_PASS if id >= 0 else Control.MOUSE_FILTER_IGNORE
-	if id >= 0:
-		card.mouse_entered.connect(func(): _show_preview(card))
-		card.mouse_exited.connect(_preview.hide)
-	_cards_layer.add_child(card)
+	card.mouse_filter = Control.MOUSE_FILTER_PASS
+	card.set_meta("id", id)
+	Style.round_card(card)
+	card.mouse_entered.connect(func():
+		if int(card.get_meta("id", -1)) >= 0 and card.scale.x > 0.95:
+			_show_preview(card))
+	card.mouse_exited.connect(_preview.hide)
+	layer.add_child(card)
 	return card
+
+
+## Переворот на лицо: сжать по ширине → сменить картинку → развернуть.
+func _flip_open(card: TextureRect, id: int, delay: float) -> Tween:
+	var tw := card.create_tween()
+	tw.tween_interval(maxf(0.0, delay))
+	tw.tween_property(card, "scale:x", 0.0, FLIP_TIME * 0.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN)
+	tw.tween_callback(func():
+		card.texture = Style.card_texture(id)
+		card.set_meta("id", id)
+		Sfx.play("card_flip", -6))
+	tw.tween_property(card, "scale:x", 1.0, FLIP_TIME * 0.5).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_OUT)
+	return tw
+
+
+# ---------------------------------------------------------------- общие карты: раздача от дилера
+
+
+func _board_slot(i: int) -> Vector2:
+	return _board_rect().position + Vector2(i * (BOARD_CARD.x + 8), 0)
+
+
+## Откуда «дилер» выдаёт карты: край стола посередине между соседними местами, ближе к верху —
+## там, где нет ничьей таблички (иначе похоже, что раздаёт игрок).
+func _dealer_pos() -> Vector2:
+	var n: int = maxi(1, view.players.size())
+	var best := -PI * 0.5
+	var best_y := INF
+	for k: int in n:
+		var a := PI * 0.5 + TAU * (k + 0.5) / n
+		if sin(a) < best_y - 0.001:
+			best_y = sin(a)
+			best = a
+	return _center + Vector2(cos(best) * (_radii.x + 16.0), sin(best) * (_radii.y + 16.0))
+
+
+## Общие карты не пересобираются на каждое состояние: новые выплывают рубашкой от дилера,
+## потом переворачиваются по одной. Новая раздача — стол очищается.
+func _sync_board() -> void:
+	var board: Array = view.board
+	var hand := int(view.hand_no)
+	if hand != _board_hand or board.size() < _board_nodes.size():
+		for node: TextureRect in _board_nodes:
+			node.queue_free()
+		_board_nodes.clear()
+		# сели за стол посреди раздачи — карты уже лежат, без анимации
+		var instant := _board_hand == -1 and not board.is_empty()
+		_board_hand = hand
+		if instant:
+			for i: int in board.size():
+				_board_nodes.append(_card(int(board[i]), Rect2(_board_slot(i), BOARD_CARD), "Board%d" % i, _board_layer))
+			return
+	for i: int in _board_nodes.size():
+		var node := _board_nodes[i]
+		if not bool(node.get_meta("moving", false)):
+			node.position = _board_slot(i)
+	var first := _board_nodes.size()
+	var count := board.size() - first
+	if count <= 0:
+		return
+	var from := _dealer_pos() - BOARD_CARD * 0.5
+	Sfx.play("card_shove", -6)
+	for j: int in count:
+		var i := first + j
+		var card := _card(-1, Rect2(from, BOARD_CARD), "Board%d" % i, _board_layer)
+		card.set_meta("moving", true)
+		card.rotation = deg_to_rad(randf_range(-25.0, 25.0))
+		card.scale = Vector2(0.7, 0.7)
+		card.modulate.a = 0.0
+		_board_nodes.append(card)
+		var delay := j * DEAL_GAP
+		var tw := card.create_tween().set_parallel(true)
+		tw.tween_property(card, "modulate:a", 1.0, 0.15).set_delay(delay)
+		tw.tween_property(card, "position", _board_slot(i), DEAL_TIME).set_delay(delay).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tw.tween_property(card, "rotation", 0.0, DEAL_TIME).set_delay(delay).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
+		tw.tween_property(card, "scale", Vector2.ONE, DEAL_TIME).set_delay(delay)
+		# все доехали — переворачиваем по одной, слева направо
+		var flip_at := (count - 1) * DEAL_GAP + DEAL_TIME + 0.1 + j * (FLIP_TIME + 0.08)
+		var id := int(board[i])
+		tw.chain().tween_callback(func():
+			card.position = _board_slot(i)
+			card.set_meta("moving", false)
+			_flip_open(card, id, flip_at - delay - DEAL_TIME))
+
+
+# ---------------------------------------------------------------- свои карты
+
+
+## Свои карты — рубашкой; потянуть край — подсмотреть (видно только мне), и во время раздачи, и после.
+## Показать руку всем — глазик у таблички после раздачи (_add_eye); показанные карты открыты и не закрываются.
+func _sync_mine() -> void:
+	var me := _me()
+	var cards: Array = view.hole[me] if me >= 0 else []
+	var showdown := str(view.phase) == "showdown"
+	var opens: Array = view.get("open", [])
+	var open: Array = opens[me] if me >= 0 and me < opens.size() else [false, false]
+	var key := "" if cards.is_empty() else "%d:%s" % [int(view.hand_no), str(cards)]
+	if key != _mine_key:
+		_mine_key = key
+		for f: Node in _mine_flips:
+			if is_instance_valid(f):
+				f.cancel()
+		_mine_flips.clear()
+		Style.clear(_mine_layer)
+		_mine_faces = [false, false]  # новая раздача — снова рубашкой
+		for k: int in cards.size():
+			_add_mine(int(cards[k]), k, bool(open[k]))
+	# показанные всем карты — лицом вверх (переворотом, если были закрыты)
+	for k: int in mini(_mine_flips.size(), open.size()):
+		var flip: Node = _mine_flips[k]
+		if bool(open[k]) and not bool(flip.face_up) and not bool(flip.busy):
+			flip.flip_to(true)
+	# раскладка: веером над табличкой (соседние места при 6–8 игроках стоят вплотную справа и слева)
+	if cards.is_empty():
+		return
+	var p := _seat_pos(me)
+	var w := MY_CARD.x * 2 - 22
+	var base := Vector2(p.x - w * 0.5, p.y - SEAT.y * 0.5 - MY_CARD.y + 18)
+	for k: int in mini(_mine_layer.get_child_count(), _mine_flips.size()):
+		var card := _mine_layer.get_child(k) as Control
+		var flip: Node = _mine_flips[k]
+		if bool(flip.busy) or bool(flip.dragging):
+			continue
+		card.position = base + Vector2(k * (MY_CARD.x - 22), 0)
+		card.rotation = deg_to_rad(-5 + k * 10)
+		card.modulate = Color(1, 1, 1, 0.45) if bool(view.folded[me]) and not showdown else Color.WHITE
+
+
+func _add_mine(id: int, index: int, up: bool) -> void:
+	var card := _card(id, Rect2(Vector2.ZERO, MY_CARD), "Mine%d" % index, _mine_layer)
+	card.mouse_filter = Control.MOUSE_FILTER_STOP
+	card.tooltip_text = "Потяните край карты, чтобы подсмотреть (видно только вам)"
+	var show_side := func(face: bool):
+		card.texture = Style.card_texture(id if face else -1)
+		card.set_meta("id", id if face else -1)
+		_preview.hide()
+	var flip: Node = CardFlip.attach(card, show_side, up, true)
+	# показанную всем карту обратно не закрыть
+	flip.can_interact = func() -> bool: return not _shown_mine(index)
+	flip.flipped.connect(func(face: bool): _mine_faces[index] = face)
+	_mine_flips.append(flip)
+
+
+func _shown_mine(index: int) -> bool:
+	var opens: Array = view.get("open", [])
+	var me := _me()
+	return me >= 0 and me < opens.size() and bool(opens[me][index])
+
+
+## Глазик слева от моей таблички после раздачи: нажать — показать руку всем (действие "show", обе карты).
+## Значок — тот же, что «Посмотреть комнату» в хабе (EyeIcon).
+func _add_eye(plate: Control) -> void:
+	var shown := _shown_mine(0) and _shown_mine(1)
+	var eye := Style.button("", 16)
+	eye.name = "ShowHand"
+	eye.custom_minimum_size = Vector2(44, 40)
+	eye.size = eye.custom_minimum_size
+	eye.position = plate.position + Vector2(-eye.size.x - 10, (SEAT.y - eye.size.y) * 0.5)
+	eye.tooltip_text = "Карты показаны всем" if shown else "Показать свои карты всем"
+	eye.disabled = shown
+	eye.draw.connect(func():
+		EyeIcon.draw(eye, eye.size * 0.5, Style.GOLD if shown else Style.CYAN, 1.25, 2.0))
+	eye.pressed.connect(func():
+		Sfx.play("card_flip", -6)
+		Net.send_action("show", {"card": -1}))
+	_seats_layer.add_child(eye)
+	if not shown:
+		# мягко пульсирует, пока раздача не закончилась: можно показать
+		var tw := eye.create_tween().set_loops()
+		tw.tween_property(eye, "modulate", Color(1.25, 1.25, 1.25), 0.6).set_trans(Tween.TRANS_SINE)
+		tw.tween_property(eye, "modulate", Color.WHITE, 0.6).set_trans(Tween.TRANS_SINE)
+
+
+# ---------------------------------------------------------------- стеки и выигрыш
+
+
+## Показанные стеки: на вскрытии стек победителя растёт плавно, а фишки слетаются к нему.
+func _sync_disp() -> void:
+	var n: int = view.stacks.size()
+	if _disp.size() != n:
+		_disp.clear()
+		for seat: int in n:
+			_disp.append(float(view.stacks[seat]))
+		_disp_from = _disp.duplicate()
+		_disp_t = 1.0
+		return
+	var win := str(view.phase) == "showdown" and not _prev.is_empty() and str(_prev.get("phase", "")) == "hand"
+	if win:
+		_disp_from = _disp.duplicate()
+		_disp_t = 0.0
+		_fly_win.call_deferred()
+	elif _disp_t >= 1.0:
+		for seat: int in n:
+			_disp[seat] = float(view.stacks[seat])
+
+
+func _update_stack_labels() -> void:
+	for entry: Array in _stack_labels:
+		var label: Label = entry[0]
+		if not is_instance_valid(label):
+			continue
+		var seat: int = entry[1]
+		if seat >= _disp.size():
+			continue
+		var shown := roundi(_disp[seat])
+		match str(entry[2]):
+			"seat", "side":
+				label.text = str(shown)
+			"profit":
+				# прибыль = стек − (стартовые + докупки); пока стек растёт, растёт и она
+				var profit: int = int(view.profits[seat]) - (int(view.stacks[seat]) - shown)
+				label.text = "(%+d)" % profit
+				label.add_theme_color_override("font_color", Style.GOOD if profit > 0 else Style.BAD if profit < 0 else Style.muted())
+
+
+## Фишки банка и ставивших мест слетаются к победителям; над победителем всплывает «+N».
+func _fly_win() -> void:
+	var won := {}
+	for p: Dictionary in view.result.get("pots", []):
+		var winners: Array = p.winners
+		for seat: int in winners:
+			won[seat] = int(won.get(seat, 0)) + int(p.amount) / winners.size()
+	if won.is_empty():
+		return
+	var pot_at := _center + Vector2(0, -BOARD_CARD.y * 0.5 - 50)
+	var sources: Array[Vector2] = [pot_at]
+	var totals: Array = _prev.get("totals", [])
+	for seat: int in totals.size():
+		if int(totals[seat]) > 0:
+			sources.append(_seat_pos(seat))
+	for seat: int in won:
+		var target := _seat_pos(seat)
+		var n := 0
+		for from: Vector2 in sources:
+			for c: int in (6 if from == pot_at else 3):
+				_fly_chip(from, target, n * 0.04)
+				n += 1
+		var plus := Style.heading("+%d" % int(won[seat]), 28, Style.GOLD)
+		plus.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_fx.add_child(plus)
+		plus.reset_size()
+		plus.position = target + Vector2(-plus.size.x * 0.5, -SEAT.y * 0.5 - plus.size.y - 4)
+		plus.modulate.a = 0.0
+		var pt := plus.create_tween()
+		pt.tween_interval(0.5)
+		pt.tween_property(plus, "modulate:a", 1.0, 0.25)
+		pt.parallel().tween_property(plus, "position:y", plus.position.y - 18, WIN_COUNT).set_trans(Tween.TRANS_SINE)
+		pt.tween_property(plus, "modulate:a", 0.0, 0.5).set_delay(0.6)
+		pt.tween_callback(plus.queue_free)
+
+
+## Одна фишка: дугой от места/банка к победителю, с вращением.
+func _fly_chip(from: Vector2, target: Vector2, delay: float) -> void:
+	var chip := TextureRect.new()
+	chip.texture = Style.PILES[0]
+	chip.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	chip.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	chip.size = Vector2(30, 30)
+	chip.pivot_offset = chip.size * 0.5
+	chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var start := from + Vector2(randf_range(-22, 22), randf_range(-14, 14)) - chip.size * 0.5
+	var end := target + Vector2(randf_range(-30, 30), randf_range(-12, 12)) - chip.size * 0.5
+	var lift := Vector2(0, -randf_range(40, 90))
+	chip.position = start
+	chip.modulate.a = 0.0
+	_fx.add_child(chip)
+	var tw := chip.create_tween()
+	tw.tween_interval(delay)
+	tw.tween_property(chip, "modulate:a", 1.0, 0.05)
+	tw.tween_method(func(t: float):
+		chip.position = start.lerp(end, t) + lift * 4.0 * t * (1.0 - t)
+		chip.rotation = t * TAU, 0.0, 1.0, 0.7).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+	tw.tween_callback(func(): Sfx.play("chip", -14))
+	tw.tween_property(chip, "modulate:a", 0.0, 0.12)
+	tw.tween_callback(chip.queue_free)
 
 
 func _show_preview(card: TextureRect) -> void:
@@ -464,6 +765,7 @@ func _show_preview(card: TextureRect) -> void:
 
 func _build_side() -> void:
 	Style.clear(_side)
+	_stack_labels = _stack_labels.filter(func(e: Array) -> bool: return str(e[2]) == "seat")
 	var people: Array = view.players
 	var sport := str(view.mode) == "sport"
 	if sport:
@@ -471,7 +773,7 @@ func _build_side() -> void:
 		_side.add_child(Style.label("Победа — %d очков" % int(view.target), 12, Style.muted()))
 	else:
 		_side.add_child(Style.section("Классика · раздача %d" % int(view.hand_no)))
-		_side.add_child(Style.label("Итог = стек − докупки", 12, Style.muted()))
+		_side.add_child(Style.label("Фишки (± от начальных, с докупками)", 12, Style.muted()))
 	var order := range(people.size())
 	if sport:
 		order.sort_custom(func(a: int, b: int) -> bool: return int(view.scores[a]) > int(view.scores[b]))
@@ -487,9 +789,13 @@ func _build_side() -> void:
 			line.add_child(Style.heading("%d" % int(view.scores[seat]), 16, Style.gold_ink()))
 			line.add_child(Style.label("/%d" % int(view.target), 12, Style.muted()))
 		else:
-			var profit: int = int(view.profits[seat])
-			var value := Style.heading("%+d" % profit, 16, Style.GOOD if profit > 0 else Style.BAD if profit < 0 else Style.muted())
+			# главное — фишки в стеке, в скобках — плюс/минус от начального (с докупками)
+			var value := Style.heading(str(roundi(_disp[seat])), 16, Style.gold_ink())
 			line.add_child(value)
+			var delta := Style.label("", 12)
+			line.add_child(delta)
+			_stack_labels.append([value, seat, "side"])
+			_stack_labels.append([delta, seat, "profit"])
 			if int(view.rebuys[seat]) > 0:
 				line.add_child(Style.label("×%d" % (int(view.rebuys[seat]) + 1), 12, Style.muted()))
 		_side.add_child(line)
@@ -500,6 +806,7 @@ func _build_side() -> void:
 		entry.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		entry.custom_minimum_size.x = LEFT_W - 28
 		_log.add_child(entry)
+	_update_stack_labels()
 
 
 # ---------------------------------------------------------------- панель ставки

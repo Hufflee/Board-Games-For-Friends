@@ -249,6 +249,9 @@ func _update_players() -> void:
 		var row := TTStyle.hbox(6)
 		var tag := PlayerTag.make_seat(_v["players"], s, _me, 15, TTStyle.INK, "  ★" if s == int(_v["captain"]) else "")
 		tag.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		var tphase: String = _v["phase"]
+		var waiting_me: bool = s != int(_v["captain"]) and not (_v["answered"] as Array).has(s)
+		TurnNameGlow.apply(tag, (waiting_me if tphase == "answer" else s == int(_v["captain"])) and not tphase in ["round_result", "game_over"])
 		row.add_child(tag)
 		var st := ""
 		if _v["phase"] == "answer":

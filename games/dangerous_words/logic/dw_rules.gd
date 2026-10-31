@@ -634,3 +634,23 @@ func add_player(p: Dictionary) -> bool:
 ## Командная игра: в какие команды зритель может войти сам (прогресс общий — он не начинает с нуля).
 func teams_for_join() -> Array:
 	return [0, 1] if can_add_player() else []
+
+
+# --- Панель хоста (необязательные методы, вызывает Net на хосте) ---------------------------
+
+## Новые секретные слова обеим командам — только пока ловушки ещё пишутся и никто не нажал «Готово».
+## Предложенные ловушки были против старых слов — списки очищаются.
+func host_new_theme() -> bool:
+	if phase != "traps" or ready[0] or ready[1]:
+		return false
+	for t in 2:
+		var old: String = secret[t]
+		for _try in 4:
+			secret[t] = _draw_word()
+			if secret[t] != old:
+				break
+	traps = [[], []]
+	cands = [[], []]
+	horror_cand = [-1, -1]
+	ready_votes = [[], []]
+	return true

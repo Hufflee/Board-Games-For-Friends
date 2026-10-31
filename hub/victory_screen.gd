@@ -92,7 +92,7 @@ func _button(text: String, id: String) -> Button:
 	button.name = id
 	button.custom_minimum_size.y = 44
 	button.focus_mode = Control.FOCUS_NONE
-	var dark := Prefs.dark_theme() or game == "the_gang"
+	var dark := _dark()
 	var primary := id == "VictoryLobby"
 	var fill := accent.lightened(0.25) if primary else accent.darkened(0.76) if dark else accent.lightened(0.82)
 	var ink := Color("211d18") if primary or not dark else Color("f5eddc")
@@ -194,8 +194,15 @@ func _avatar_texture(texture: Texture2D) -> Texture2D:
 			return cropped
 	return texture
 
+## Фон этих игр тёмный в любой теме (таверна, ночь, готика…): надписи финала — светлые.
+const DARK_BACKDROPS := ["the_gang", "king_of_12", "perudo", "dangerous_words", "gloom", "gloomier",
+	"four_souls", "phantom_ink", "tip_top_18", "brodilka", "poker"]
+
+func _dark() -> bool:
+	return Prefs.dark_theme() or game in DARK_BACKDROPS
+
 func _top_ink() -> Color:
-	return Color("f9edd8") if Prefs.dark_theme() or game == "the_gang" else Color("312d29")
+	return Color("f9edd8") if _dark() else Color("312d29")
 
 func _add_person(seat: int, winner: bool) -> void:
 	var card := Control.new()
@@ -401,7 +408,7 @@ func _layout() -> void:
 		nick.position = Vector2(0, avatar.position.y + side + 6)
 		nick.size = Vector2(card.size.x, 46 if winner else 38)
 		if not winner:
-			nick.add_theme_color_override("font_color", Color("b4b2ad") if Prefs.dark_theme() or game == "the_gang" else Color("3c3831"))
+			nick.add_theme_color_override("font_color", Color("b4b2ad") if _dark() else Color("3c3831"))
 		card.queue_redraw()
 	_buttons.reset_size()
 	_buttons.position = Vector2((size.x - _buttons.size.x) * 0.5, size.y - 64)
@@ -474,7 +481,7 @@ func _game_backdrop() -> Control:
 	return null
 
 func _draw_backdrop() -> void:
-	var dark := Prefs.dark_theme() or game == "the_gang"
+	var dark := Prefs.dark_theme()
 	var bg := Color("141a22") if dark else Color("e8e3da")
 	bg = bg.lerp(accent, 0.08)
 	if game == "things_in_rings":
@@ -487,7 +494,7 @@ func _draw_backdrop() -> void:
 		_backdrop.draw_rect(Rect2(Vector2.ZERO, _backdrop.size), bg)
 
 func _draw_surface() -> void:
-	var dark := Prefs.dark_theme() or game == "the_gang"
+	var dark := _dark()
 	if not outcome.get("winners", []).is_empty():
 		var points := star_polygon()
 		_surface.draw_colored_polygon(points, accent.darkened(0.28))

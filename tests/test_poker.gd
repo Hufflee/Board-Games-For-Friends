@@ -145,6 +145,21 @@ func _showdown_split() -> void:
 	r2._showdown()
 	check(r2.stacks[0] == 300 and r2.stacks[1] == 100, "старшая рука забирает банк")
 	check(str(r2.result.hands[0]) == "Пара", "название комбинации на вскрытии")
+	# карты на вскрытии открываются только по желанию владельца, по одной
+	var v: Dictionary = r2.get_view(0)
+	check(int(v.hole[1][0]) == -1 and int(v.hole[1][1]) == -1, "чужие карты на вскрытии закрыты, пока их не открыли")
+	check(int(v.hole[0][0]) == 12, "свои карты видны себе")
+	check(not r2.action(0, "show", {"card": 2}), "нет такой карты")
+	check(r2.action(1, "show", {"card": 0}), "игрок открывает карту")
+	check(not r2.action(1, "show", {"card": 0}), "второй раз ту же не открыть")
+	v = r2.get_view(0)
+	check(int(v.hole[1][0]) == 0 and int(v.hole[1][1]) == -1, "открылась только выбранная карта")
+	check(bool(v.open[1][0]) and not bool(v.open[1][1]), "открытые карты отмечены")
+	check(str(r2.last_action[1]) == "Проиграл", "рука проигравшего не называется")
+	check(r2.action(0, "show", {"card": -1}), "глазик: показать обе карты")
+	v = r2.get_view(1)
+	check(int(v.hole[0][0]) == 12 and int(v.hole[0][1]) == 25, "обе карты видны другим")
+	check(not r2.action(0, "show", {"card": -1}), "повторно показывать нечего")
 
 
 func _places() -> void:

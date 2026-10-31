@@ -312,3 +312,34 @@ func get_view(seat: int) -> Dictionary:
 		"turn": turn(), "blitz_row": blitz_row, "round_no": round_no, "total_rounds": total_rounds,
 		"time_left": time_left, "timer": timer, "books": books, "scores": scores,
 		"winners": winners.duplicate(), "revision": revision}
+
+
+# --- Панель хоста (необязательные методы, вызывает Net на хосте) ---------------------------
+
+## Очки прошлых раундов (текущий раунд считается по отметкам и прибавится сверху).
+func host_stats(seat: int) -> Array:
+	if seat < 0 or seat >= players.size() or phase == "game_over":
+		return []
+	return [{"key": "banked", "label": "Очки прошлых раундов", "value": int(banked[seat]), "min": 0, "max": 999}]
+
+
+func host_set_stat(seat: int, key: String, value: int) -> bool:
+	if key != "banked" or host_stats(seat).is_empty():
+		return false
+	banked[seat] = clampi(value, 0, 999)
+	revision += 1
+	return true
+
+
+## Новая тема раунда (в блице — новые 6 тем) — только пока идёт письмо; написанные ответы стираются.
+func host_new_theme() -> bool:
+	if phase != "write":
+		return false
+	topics = _draw(KHData.BLITZ, _used_blitz, SLOTS) if kind == "blitz" else _draw(KHData.TOPICS, _used_topics, 1)
+	for seat: int in players.size():
+		for row: int in SLOTS:
+			answers[seat][row] = ""
+		ready[seat] = false
+	time_left = (BLITZ_TIME if kind == "blitz" else float(timer)) if timer > 0 else 0.0
+	revision += 1
+	return true

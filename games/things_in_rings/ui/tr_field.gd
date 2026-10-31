@@ -106,8 +106,15 @@ func _layout_cards() -> void:
 	for mask: int in 1 << rings.size():
 		var entries: Array = []
 		for entry: Dictionary in table.view.get("board", []):
-			if int(entry.mask) == mask:
+			# Blind Mind: открытые в конце хода карточки появляются по очереди (анимация стола).
+			if int(entry.mask) == mask and not table.reveal_hidden.has(int(entry.card)):
 				entries.append(entry)
+		# Blind Mind: скрытые карточки хода — знающему все (где они сейчас), искателю только своя.
+		var blind: Dictionary = table.view.get("blind", {})
+		for owner: int in blind:
+			var hidden: Dictionary = blind[owner]
+			if int(hidden.actual) == mask:
+				entries.append({"card": hidden.card, "blind": owner, "proposed": hidden.proposed})
 		var pending: Dictionary = table.view.get("pending", {})
 		if not pending.is_empty() and int(pending.get("proposed", -1)) == mask:
 			entries.append({"card": pending.card, "pending": true})
@@ -120,20 +127,50 @@ func _layout_cards() -> void:
 			add_child(card)
 			if entries[i].get("pending", false):
 				card.add_child(_pending_veil(slots[i].size))
+			elif entries[i].has("blind"):
+				var owner: int = entries[i].blind
+				card.name = "BlindCard%d" % entries[i].card
+				card.blind_owner = owner
+				card.tooltip_text = table.blind_tip(owner, int(entries[i].proposed))
+				# Знающему — красное «на проверке» (выбранная — ярче); искателю — тихая метка «скрыта».
+				var knower_side: bool = table.can_blind_move()
+				var tint: Color = Style.RINGS[2] if knower_side else Style.ink()
+				card.add_child(_pending_veil(slots[i].size, tint, 0.55 if knower_side and table.blind_selected == owner else (0.3 if knower_side else 0.18)))
+				if not knower_side:
+					card.add_child(_hidden_badge())
 
 ## Последняя выложенная карта (ждёт проверки) — полупрозрачное красное окошко поверх, по скруглению карты.
-func _pending_veil(card_size: Vector2) -> Panel:
+func _pending_veil(card_size: Vector2, tint: Color = Style.RINGS[2], alpha: float = 0.4) -> Panel:
 	var veil := Panel.new()
 	veil.name = "PendingVeil"
 	veil.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color(Style.RINGS[2], 0.4)
-	sb.border_color = Style.RINGS[2]
+	sb.bg_color = Color(tint, alpha)
+	sb.border_color = tint
 	sb.set_border_width_all(3)
 	sb.set_corner_radius_all(int(minf(card_size.x, card_size.y) * 0.045))
 	veil.add_theme_stylebox_override("panel", sb)
 	veil.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	return veil
+
+## Метка на своей скрытой карточке искателя: «скрыта» на тёмной подложке у нижнего края.
+func _hidden_badge() -> PanelContainer:
+	var badge := PanelContainer.new()
+	badge.name = "HiddenBadge"
+	badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(Style.ink(), 0.82)
+	sb.set_corner_radius_all(6)
+	sb.content_margin_left = 6
+	sb.content_margin_right = 6
+	badge.add_theme_stylebox_override("panel", sb)
+	var text := Style.label("скрыта", 12, Style.paper())
+	text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	badge.add_child(text)
+	badge.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM, Control.PRESET_MODE_MINSIZE, 6)
+	badge.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	badge.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	return badge
 
 func _draw() -> void:
 	_geometry()
@@ -150,11 +187,16 @@ static func _label_font() -> Font:
 	return Style.weighted(Style.FONT, 800)
 
 func _can_drop_data(_at: Vector2, data: Variant) -> bool:
+	if data is Dictionary and data.has("tr_blind"):
+		return table.can_blind_move()
 	if data is Dictionary and data.has("tr_judge"):
 		return data.get("revision") == table.view.revision and table.can_judge()
 	return data is Dictionary and data.has("tr_card") and data.get("revision") == table.view.revision and data.get("seat") == table.view.you and table.can_place()
 
 func _drop_data(at: Vector2, data: Variant) -> void:
+	if data.has("tr_blind"):
+		table.blind_move(int(data.tr_blind), mask_at(at))
+		return
 	if data.has("tr_judge"):
 		table.judge_drop(mask_at(at))
 		return

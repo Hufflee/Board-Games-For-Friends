@@ -244,7 +244,9 @@ func _draw_teams() -> void:
 				torch.custom_minimum_size = Vector2(44, 20)
 				torch.tooltip_text = "Объясняет в этом раунде"
 				row.add_child(torch)
-			row.add_child(PlayerTag.make_seat(_v["players"], s, _me, 16, DWStyle.TEXT if s != _me or _test() else DWStyle.PUMPKIN))
+			var ptag := PlayerTag.make_seat(_v["players"], s, _me, 16, DWStyle.TEXT if s != _me or _test() else DWStyle.PUMPKIN)
+			TurnNameGlow.apply(ptag, s == _v["explainers"][t] and _v["turn_team"] == t and _v["phase"] != "game_over")
+			row.add_child(ptag)
 			v.add_child(row)
 		var st := ""
 		match _v["phase"]:

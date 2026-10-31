@@ -64,7 +64,7 @@ var lobby_id := 0
 var members := {}  # peer_id -> {name}
 var join_order: Array[int] = []
 var bots := 0
-var settings := {"pk_mode": "classic", "kh_rounds": 6, "kh_timer": 90, "tr_rings": ["Attribute", "Word", "Context"], "tr_knower": 0, "tr_coop": false, "deck_mode": "first", "manual": [], "promo": "", "tournament": true, "reveal_speed": "normal", "perudo_dice": 5, "perudo_maputo": true, "wl_mode": "teams", "wl_local_teams": [], "dw_rooms": "3-7", "dw_monster": "random", "dw_hard": false, "dw_curses": true, "dw_time": 60, "hc_laps": 0, "hc_free": false, "hc_mode": "classic", "rsb_speed": "normal", "ws_mode": "teams", "ws_catalog": "basic", "ws_cards": "standard", "ws_names": true, "ws_time": 60, "turn_time": 60, "tt_expert": false, "pi_roles": [], "fs_dlc": false, "st_bots": false, "st_lives": 3, "st_meter": 20, "st_casual": false}
+var settings := {"pk_mode": "classic", "kh_rounds": 6, "kh_timer": 90, "tr_rings": ["Attribute", "Word", "Context"], "tr_knower": 0, "tr_coop": false, "tr_mode": "classic", "tr_timer": 0, "tr_want": [], "deck_mode": "first", "manual": [], "promo": "", "tournament": true, "reveal_speed": "normal", "perudo_dice": 5, "perudo_maputo": true, "wl_mode": "teams", "wl_local_teams": [], "dw_rooms": "3-7", "dw_monster": "random", "dw_hard": false, "dw_curses": true, "dw_time": 60, "hc_laps": 0, "hc_free": false, "hc_mode": "classic", "rsb_speed": "normal", "ws_mode": "teams", "ws_catalog": "basic", "ws_cards": "standard", "ws_names": true, "ws_time": 60, "turn_time": 60, "tt_expert": false, "pi_roles": [], "fs_dlc": false, "st_bots": false, "st_lives": 3, "st_meter": 20, "st_casual": false}
 var disconnected := {}  # место -> имя вылетевшего игрока (может вернуться)
 var chat_log: Array = []
 var last_join := {}  # куда подключались в последний раз — для «Вернуться в партию»
@@ -101,6 +101,7 @@ var _st_verdict: Array = []  # вердикт, пришедший на пауз�
 var _st_deck: Array = []  # колода вопросов на всю сессию лобби: не повторяются, пока хост не выйдет к выбору игры
 var player_stats := PlayerStatsStore.new()
 var _match_metrics := MatchMetrics.new()
+var host_tools: HostTools = preload("res://games/king_of_12/net/host_tools.gd").new(self)  # панель хоста: отмена/повтор, таймер, правка игроков
 var phantom: PIRules = null
 var pi_view_seat := 0  # личный экран в локальной партии
 var brod: BRRules = null  # «Большая бродилка»
@@ -897,7 +898,7 @@ func start_game() -> String:
 		auto_advance_time = 0.0
 	elif party_game == "poker":
 		pkr = load("res://games/poker/logic/pk_rules.gd").new()
-		var pk_error: String = pkr.new_game(players, {"mode": str(settings.get("pk_mode", "classic"))})
+		var pk_error: String = pkr.new_game(players, {"mode": str(settings.get("pk_mode", "classic")), "turn_time": float(settings.get("turn_time", 30))})
 		if not pk_error.is_empty():
 			pkr = null
 			return pk_error
@@ -914,7 +915,8 @@ func start_game() -> String:
 		tir = load("res://games/things_in_rings/logic/tr_rules.gd").new()
 		var error: String = tir.new_game(players, data.things(), data.rule_pools(), {
 			"rings": settings.get("tr_rings", ["Attribute", "Word", "Context"]),
-			"knower": int(settings.get("tr_knower", 0)), "coop": bool(settings.get("tr_coop", false))})
+			"knower": int(settings.get("tr_knower", 0)), "coop": bool(settings.get("tr_coop", false)),
+			"mode": str(settings.get("tr_mode", "classic")), "volunteers": _tr_volunteer_seats()})
 		if not error.is_empty():
 			tir = null
 			return error
@@ -1139,6 +1141,7 @@ func _handle_action(peer: int, kind: String, arg) -> void:
 	var seat := seat_peers.find(peer)
 	if seat < 0 or paused:
 		return
+	host_tools.before_action(kind)
 	if pkr != null:
 		if pkr.action(seat, kind, arg, peer == 1):
 			_push_state()
@@ -1314,6 +1317,7 @@ func _process(delta: float) -> void:
 			_push_state()
 		return
 	if tir != null:
+		_tr_process(delta)
 		return
 	if gang != null:
 		_tg_process(delta)
@@ -1402,6 +1406,7 @@ func _push_state() -> void:
 	if rules == null and perudo == null and wavelength == null and dwords == null and hues == null and rsb == null and wslam == null and tiptop == null and nothat == null and gloom == null and brod == null and phantom == null and fours == null and stillion == null and gang == null and tir == null and khr == null and pkr == null:
 		return
 	_match_metrics.observe(game_id,party_game,_game_obj(),seat_peers)
+	host_tools.committed()
 	var phase: String
 	if pkr != null:
 		phase = pkr.phase
@@ -1487,6 +1492,7 @@ func _seat_view(s: int, names: Array, left: float, show_all: bool) -> Dictionary
 	elif tir != null:
 		v = tir.get_view(tr_view_seat if show_all else s)
 		v["hotseat"] = show_all
+		v["clock"] = tir.phase in ["place", "blind"]
 		v["disconnected"] = disconnected.keys()
 	elif gang != null:
 		v = gang.get_view(tg_view_seat if show_all else s)
@@ -1538,6 +1544,11 @@ func _seat_view(s: int, names: Array, left: float, show_all: bool) -> Dictionary
 	var tl := turn_limit()
 	v["turn_total"] = 0 if tl == INF else int(tl)
 	v["turn_left"] = 0 if tl == INF else maxi(0, int(ceil(tl - _phase_time)))
+	if pkr != null:  # покер считает время хода сам — часы в верхней полосе берут его
+		v["turn_total"] = int(pkr.turn_time)
+		v["turn_left"] = maxf(0.0, pkr.time_left)  # дробное: часы и полоска не уходят на долю секунды
+		# ботов время хода не ограничивает (хост его не считает) — часы только у людей
+		v["clock"] = pkr.phase == "hand" and pkr.to_act >= 0 and pkr.turn_time > 0.0 and not bool(pkr.players[pkr.to_act].get("bot", false))
 	return v
 
 
@@ -1788,9 +1799,66 @@ func _perudo_process(delta: float) -> void:
 # «Длина волны» на хосте
 # =============================================================================
 
+## Things in Rings: «Хочу быть ведущим». Свой переключатель — у каждого; хост переключает и местных игроков.
+## Хранится в settings.tr_want ключами "p<peer>" / "l<номер местного>", чтобы видели все в лобби.
+func tr_toggle_want(local_i: int = -1) -> void:
+	if is_host():
+		_tr_toggle_want("l%d" % local_i if local_i >= 0 else "p1")
+	else:
+		_rpc_tr_want.rpc_id(1)
+
+
+@rpc("any_peer", "reliable")
+func _rpc_tr_want() -> void:
+	if is_host():
+		_tr_toggle_want("p%d" % multiplayer.get_remote_sender_id())
+
+
+func _tr_toggle_want(key: String) -> void:
+	if in_game or (key.begins_with("p") and not members.has(int(key.substr(1)))):
+		return
+	var wants: Array = settings.get("tr_want", []).duplicate()
+	if wants.has(key):
+		wants.erase(key)
+	else:
+		wants.append(key)
+	settings["tr_want"] = wants
+	_broadcast_lobby()
+
+
+## Места добровольцев в порядке рассадки start_game: участники по join_order, затем местные.
+func _tr_volunteer_seats() -> Array:
+	var wants: Array = settings.get("tr_want", [])
+	var out := []
+	for i in join_order.size():
+		if wants.has("p%d" % int(join_order[i])):
+			out.append(i)
+	for i in maxi(0, bots):
+		if wants.has("l%d" % i):
+			out.append(join_order.size() + i)
+	return out
+
+
+## Хост: часы хода Things in Rings. Время вышло — правила сами решают (пропуск / закрыть приём карточек).
+func _tr_process(delta: float) -> void:
+	var key := "tr/%s/%d/%d" % [tir.phase, tir.current, tir.turn_no]
+	if key != _last_phase:
+		_last_phase = key
+		_phase_time = 0.0
+		_stamp_turn = true
+	_phase_time += delta
+	if _phase_time >= turn_limit() and tir.timeout():
+		tir.revision += 1
+		_push_state()
+
+
 ## Время на ход из настроек комнаты (0 — без ограничения).
 func turn_limit() -> float:
-	if tir != null or khr != null or pkr != null:
+	if tir != null:
+		# Things in Rings: своё время на ход искателя (0 — без ограничения), проверка знающего не ограничена.
+		var tr_time := int(settings.get("tr_timer", 0))
+		return INF if tr_time <= 0 or tir.phase not in ["place", "blind"] else float(tr_time)
+	if khr != null or pkr != null:
 		return INF
 	if stillion != null:
 		return INF  # время задаёт фитиль пушки
@@ -2857,6 +2925,7 @@ func end_game() -> void:
 
 
 func _finish_session() -> void:
+	host_tools.reset()
 	tir = null
 	tr_view_seat = 0
 	khr = null

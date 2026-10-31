@@ -1,5 +1,5 @@
 extends Button
-## Постоянная клавиша Esc: контраст определяется реальным цветом текста стола.
+## Постоянная клавиша меню (нарисована Tab, работают и Tab, и Esc): контраст — от цвета текста стола.
 var ink := Color(0.68, 0.69, 0.71)
 
 
@@ -11,7 +11,7 @@ func set_ink(table_ink: Color) -> void:
 
 
 func _init() -> void:
-	custom_minimum_size = Vector2(36, 36)
+	custom_minimum_size = Vector2(58, 36)  # Tab длиннее Esc
 	focus_mode = Control.FOCUS_NONE
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	modulate.a = 0.2
@@ -42,6 +42,15 @@ func _draw() -> void:
 	draw_line(Vector2(size.x - 3, size.y - 7), face_rect.end - Vector2(1, 2), ink, 2, true)
 	var font := get_theme_font("font")
 	var font_size := 11
-	var label_size := font.get_string_size("Esc", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
-	var baseline := face_rect.get_center() + Vector2(-label_size.x * 0.5, (font.get_ascent(font_size) - font.get_descent(font_size)) * 0.5)
-	draw_string(font, baseline, "Esc", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, ink)
+	var label_size := font.get_string_size("Tab", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size)
+	# как на настоящей клавише: «Tab» слева, стрелка «⇥» справа
+	var arrow_w := 12.0
+	var gap := 5.0
+	var left := face_rect.get_center().x - (label_size.x + gap + arrow_w) * 0.5
+	var baseline := Vector2(left, face_rect.get_center().y + (font.get_ascent(font_size) - font.get_descent(font_size)) * 0.5)
+	draw_string(font, baseline, "Tab", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, ink)
+	var ay := face_rect.get_center().y
+	var ax := left + label_size.x + gap
+	draw_line(Vector2(ax, ay), Vector2(ax + arrow_w - 2, ay), ink, 1.5, true)
+	draw_polyline(PackedVector2Array([Vector2(ax + arrow_w - 6, ay - 3.5), Vector2(ax + arrow_w - 2, ay), Vector2(ax + arrow_w - 6, ay + 3.5)]), ink, 1.5, true)
+	draw_line(Vector2(ax + arrow_w, ay - 4.5), Vector2(ax + arrow_w, ay + 4.5), ink, 1.5, true)

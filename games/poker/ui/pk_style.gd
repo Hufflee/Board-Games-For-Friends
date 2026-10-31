@@ -1,7 +1,7 @@
 extends RefCounted
 ## «Покер»: мини-дизайн-система — неоновый Лас-Вегас. Тёмная фиолетовая комната, сукно с неоновой каймой
 ## (розовый + голубой), золото — только для главного действия. Шрифты: Russo One — заголовки, Exo 2 — текст.
-## Размеры текста: 28 / 16 / 12. Светлая тема — «дневной зал»: сиреневые стены, стол тот же.
+## Размеры текста: 28 / 16 / 12. Только тёмная тема (светлая убрана по решению владельца, 31.10).
 
 const HEAD := preload("res://hub/art/fonts/RussoOne-Regular.ttf")
 const FONT := preload("res://hub/art/fonts/Exo2-Variable.ttf")
@@ -16,8 +16,9 @@ const RAIL := Color("1f0f35")
 const CARD_SIZE := Vector2(420, 582)
 
 
+## Покер всегда тёмный: общий переключатель темы на него не действует.
 static func dark() -> bool:
-	return Prefs.dark_theme()
+	return true
 
 
 ## Фон комнаты.
@@ -194,6 +195,16 @@ static func clear(node: Node) -> void:
 	for child: Node in node.get_children():
 		node.remove_child(child)
 		child.queue_free()
+
+
+## Скруглённые углы карт (общий шейдер): у текстур карт углы прямые.
+const CORNERS := preload("res://hub/card_corners.gdshader")
+
+
+static func round_card(card: CanvasItem) -> void:
+	var m := ShaderMaterial.new()
+	m.shader = CORNERS
+	card.material = m
 
 
 static func card_texture(id: int) -> Texture2D:

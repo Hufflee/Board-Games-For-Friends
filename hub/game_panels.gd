@@ -732,6 +732,8 @@ func _process(delta: float) -> void:
 	var vp := get_viewport()
 	var mp := vp.get_mouse_position()
 	var m := mp / Vector2(vp.get_visible_rect().size) - Vector2(0.5, 0.5)
+	if not Prefs.parallax:
+		m = Vector2.ZERO
 	var k := 1.0 - exp(-delta * 7.0)
 	var fwd := -camera.global_transform.basis.z
 	var right := camera.global_transform.basis.x

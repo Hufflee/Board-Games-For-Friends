@@ -773,6 +773,7 @@ func _update_players() -> void:
 		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var nm := BRStyle.label(str(p["name"]), BRStyle.CAP if compact else BRStyle.BODY, BRStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "bold")
 		nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TurnNameGlow.apply(nm, cur)
 		if compact:
 			nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			nm.clip_text = true

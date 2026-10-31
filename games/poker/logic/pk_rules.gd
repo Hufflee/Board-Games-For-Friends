@@ -9,8 +9,8 @@ const BB := 2
 const START := 100 * BB  # все начинают со 100 BB
 const SESSION_HANDS := 14
 const TURN_TIME := 30.0
-const SHOW_TIME := 5.0  # вскрытие на столе, потом следующая раздача
-const FOLD_SHOW_TIME := 2.5
+const SHOW_TIME := 8.0  # вскрытие: игроки по желанию открывают карты, потом следующая раздача
+const FOLD_SHOW_TIME := 4.0
 const SESSION_TIME := 12.0  # итоги сессии, потом следующая
 const Bot := preload("res://games/poker/logic/pk_bot.gd")
 const STREETS := ["preflop", "flop", "turn", "river"]
@@ -42,10 +42,12 @@ var places: Array = []  # места прошлой сессии: [{seat, place,
 var bust_order: Array = []  # вылетевшие в сессии: [[seat, раздача, стек перед ней]]
 var hand_start_stacks: Array = []
 var rebuys: Array = []
+var shown: Array = []  # открытые на вскрытии карты: [[bool, bool], …] — игрок открывает сам
 var result: Dictionary = {}  # итог раздачи: {pots: [{amount, winners}], hands: {seat: name}, fold_win}
 var winners: Array = []
 var log: Array = []
 var time_left := 0.0
+var turn_time := TURN_TIME  # время на ход из настроек лобби; 0 — без ограничения
 var _bot_wait := 0.0
 var revision := 0
 var rng := RandomNumberGenerator.new()
@@ -56,6 +58,7 @@ func new_game(seats: Array, options: Dictionary = {}) -> String:
 		return "Нужно от 2 до 8 игроков."
 	players = seats.duplicate(true)
 	mode = "sport" if str(options.get("mode", "classic")) == "sport" else "classic"
+	turn_time = float(options.get("turn_time", TURN_TIME))
 	if options.has("seed"):
 		rng.seed = int(options.seed)
 	else:
@@ -126,6 +129,9 @@ func _start_hand() -> void:
 	hand_start_stacks = stacks.duplicate()
 	board.clear()
 	result = {}
+	shown = []
+	for i: int in players.size():
+		shown.append([false, false])
 	hole = _filled([])
 	bets = _filled(0)
 	totals = _filled(0)
@@ -160,7 +166,7 @@ func _start_hand() -> void:
 			hole[seat] = hole[seat] + [deck.pop_back()]
 	_note("Раздача %d · кнопка у %s" % [hand_no, players[button].name])
 	to_act = _next_to_act(bb_seat)
-	time_left = TURN_TIME
+	time_left = turn_time
 	_bot_wait = _bot_delay()
 	revision += 1
 	if to_act < 0:
@@ -302,7 +308,7 @@ func _after_action(seat: int) -> void:
 		_award_uncontested(alive[0])
 		return
 	to_act = _next_to_act(seat)
-	time_left = TURN_TIME
+	time_left = turn_time
 	_bot_wait = _bot_delay()
 	if to_act < 0:
 		_finish_street()
@@ -331,7 +337,7 @@ func _finish_street() -> void:
 		if in_hand(seat) and not all_in(seat):
 			last_action[seat] = ""
 	to_act = _next_to_act(button)
-	time_left = TURN_TIME
+	time_left = turn_time
 	_bot_wait = _bot_delay()
 	revision += 1
 	if to_act < 0:
@@ -356,7 +362,7 @@ func _showdown() -> void:
 			evals[seat] = best
 			hands[seat] = str(best.get("name", ""))
 	var pots := side_pots()
-	var shown := []
+	var pots_out := []
 	for p: Dictionary in pots:
 		var best_seats := []
 		var best_eval: Dictionary = {}
@@ -375,21 +381,26 @@ func _showdown() -> void:
 		var odd := int(p.amount) % best_seats.size()
 		for k: int in best_seats.size():
 			stacks[best_seats[k]] = int(stacks[best_seats[k]]) + share + (1 if k < odd else 0)
-		shown.append({"amount": p.amount, "winners": best_seats})
+		pots_out.append({"amount": p.amount, "winners": best_seats})
 		var names := PackedStringArray()
 		for seat: int in best_seats:
 			names.append(str(players[seat].name))
-		var pot_name := "Банк" if shown.size() == 1 else "Побочный банк"
+		var pot_name := "Банк" if pots_out.size() == 1 else "Побочный банк"
 		_note("%s %d: %s (%s)" % [pot_name, int(p.amount), ", ".join(names), hands[best_seats[0]]])
 	for seat: int in players.size():
 		if in_hand(seat):
 			var won := 0
-			for p: Dictionary in shown:
+			for p: Dictionary in pots_out:
 				if p.winners.has(seat):
 					won += int(p.amount) / p.winners.size()
-			last_action[seat] = ("Выиграл · " if won > 0 else "") + str(hands[seat])
-	result = {"pots": shown, "hands": hands, "fold_win": false}
+			# рука проигравшего не называется: он сам решает, открывать ли карты
+			last_action[seat] = "Выиграл · %s" % hands[seat] if won > 0 else "Проиграл"
+	result = {"pots": pots_out, "hands": hands, "fold_win": false}
 	_close_hand(SHOW_TIME)
+	for seat: int in players.size():  # бот-победитель показывает руку сам
+		if bool(players[seat].get("bot", false)) and str(last_action[seat]).begins_with("Выиграл"):
+			show_card(seat, 0)
+			show_card(seat, 1)
 
 
 ## Банк и побочные банки по вкладам: [{amount, eligible}].
@@ -561,6 +572,8 @@ func tick(delta: float) -> bool:
 					_bot_move(to_act)
 					return true
 				return false
+			if turn_time <= 0.0:
+				return false  # время на ход не ограничено
 			time_left -= delta
 			if time_left <= 0.0:
 				var seat := to_act
@@ -611,6 +624,8 @@ func action(seat: int, kind: String, payload: Variant, host_authorized: bool = f
 			return all_in_action(seat)
 		"rebuy":
 			return _rebuy(seat)
+		"show":
+			return show_card(seat, int(data.get("card", -1)))
 		"next":
 			if host_authorized and phase == "session_end":
 				_next_session()
@@ -631,12 +646,37 @@ static func card_name(id: int) -> String:
 	return RANKS[id % 13] + SUITS[int(id / 13)]
 
 
-## Вид для места seat: свои карты, чужие — только на вскрытии.
+## Открыть свою карту всем — только после раздачи (вскрытие или победа без вскрытия).
+## card -1 — обе сразу (глазик у таблички).
+func show_card(seat: int, card: int) -> bool:
+	if card == -1:
+		var a := show_card(seat, 0)
+		var b := show_card(seat, 1)
+		return a or b
+	if phase != "showdown" or seat < 0 or seat >= players.size() or card < 0 or card > 1:
+		return false
+	if (hole[seat] as Array).size() != 2 or seat >= shown.size() or bool(shown[seat][card]):
+		return false
+	shown[seat][card] = true
+	revision += 1
+	return true
+
+
+## Вид для места seat: свои карты; чужие — рубашкой, пока владелец сам не откроет их на вскрытии.
+## open — какие карты места открыты всем (свои тоже: своя закрытая карта видна только мне).
 func get_view(seat: int) -> Dictionary:
 	var shown_holes := []
+	var open := []
 	for other: int in players.size():
-		var visible: bool = other == seat or (phase == "showdown" and result.has("hands") and result.hands.has(other))
-		shown_holes.append(hole[other].duplicate() if visible else ([-1, -1] if not hole[other].is_empty() and in_hand(other) else []))
+		var flags: Array = shown[other] if other < shown.size() else [false, false]
+		open.append(flags.duplicate())
+		var cards: Array = hole[other]
+		if other == seat:
+			shown_holes.append(cards.duplicate())
+		elif cards.is_empty() or (not in_hand(other) and not (bool(flags[0]) or bool(flags[1]))):
+			shown_holes.append([])
+		else:
+			shown_holes.append([int(cards[0]) if bool(flags[0]) else -1, int(cards[1]) if bool(flags[1]) else -1])
 	var me := {}
 	if seat >= 0 and seat < players.size():
 		me = {
@@ -653,10 +693,43 @@ func get_view(seat: int) -> Dictionary:
 	return {
 		"players": players.duplicate(true), "you": seat, "mode": mode, "phase": phase, "street": street,
 		"stacks": stacks.duplicate(), "bets": bets.duplicate(), "totals": totals.duplicate(), "folded": folded.duplicate(),
-		"hole": shown_holes, "board": board.duplicate(), "pot": pot(), "button": button, "sb": sb_seat, "bb": bb_seat,
+		"hole": shown_holes, "open": open, "board": board.duplicate(), "pot": pot(), "button": button, "sb": sb_seat, "bb": bb_seat,
 		"to_act": to_act, "current_bet": current_bet, "last_action": last_action.duplicate(), "me": me,
 		"hand_no": hand_no, "session_hands": SESSION_HANDS, "session_no": session_no, "scores": scores.duplicate(),
 		"target": target(), "places": places.duplicate(true), "rebuys": rebuys.duplicate(), "profits": profits,
 		"result": result.duplicate(true), "winners": winners.duplicate(), "log": log.duplicate(),
-		"time_left": time_left, "turn_time": TURN_TIME, "big_blind": BB, "revision": revision,
+		"time_left": time_left, "turn_time": turn_time, "big_blind": BB, "revision": revision,
 	}
+
+
+# --- Панель хоста (необязательные методы, вызывает Net на хосте) ---------------------------
+
+## Числовые параметры места, которые хост может поправить: фишки, в спорте — победные очки.
+func host_stats(seat: int) -> Array:
+	if seat < 0 or seat >= players.size() or phase == "game_over":
+		return []
+	# тот, кто сейчас ходит, не может остаться совсем без фишек посреди своего хода
+	var low := 1 if phase == "hand" and seat == to_act else 0
+	var out := [{"key": "stacks", "label": "Фишки", "value": int(stacks[seat]), "min": low, "max": 100000}]
+	if mode == "sport":
+		out.append({"key": "scores", "label": "Победные очки", "value": int(scores[seat]), "min": 0, "max": target() * 2})
+	return out
+
+
+## Применить правку хоста (значение подрезается до границ). Сумма фишек за столом может меняться.
+func host_set_stat(seat: int, key: String, value: int) -> bool:
+	for stat: Dictionary in host_stats(seat):
+		if str(stat.key) != key:
+			continue
+		var v := clampi(value, int(stat.min), int(stat.max))
+		if key == "stacks":
+			stacks[seat] = v
+			_note("Хост меняет фишки: %s — %d" % [players[seat].name, v])
+			if phase == "waiting" and active_seats().size() >= 2:
+				_start_hand()
+		else:
+			scores[seat] = v
+			_note("Хост меняет очки: %s — %d" % [players[seat].name, v])
+		revision += 1
+		return true
+	return false

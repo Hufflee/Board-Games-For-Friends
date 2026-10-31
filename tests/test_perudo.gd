@@ -103,6 +103,7 @@ func test_maputo() -> void:
 	for k in 3:
 		r.shake(k)
 	r.dice[0] = [3]
+	check(r.can_bid(1, 1), "Палифико: первая ставка раунда может быть на единицы")
 	check(r.place_bid(0, 1, 3), "ставка в Палифико")
 	check(not r.can_bid(2, 4), "в Палифико номинал не меняется")
 	check(r.can_bid(2, 3), "в Палифико только больше костей того же номинала")
@@ -113,6 +114,26 @@ func test_maputo() -> void:
 	check(r.reveal["loser"] == 2, "ставка сыграла — проиграл сказавший «не верю»")
 	r.advance()
 	check(not r.maputo, "следующий раунд — обычный")
+	for k in 3:
+		r.shake(k)
+	check(not r.can_bid(1, 1), "в обычном раунде первая ставка на единицы запрещена")
+	# Палифико, открытый единицами: дальше — только больше единиц, и считаются только единицы
+	var rp := make()
+	rp.maputo = true
+	rp.dice = [[1], [1, 4, 4, 5, 6], [2, 3, 3, 5, 6]]
+	check(rp.place_bid(0, 1, 1), "Палифико: движок принимает первую ставку на единицы")
+	check(not rp.can_bid(2, 4) and rp.can_bid(2, 1), "после единиц в Палифико номинал тот же — только больше единиц")
+	rp.place_bid(1, 2, 1)
+	rp.challenge(2)
+	check(rp.reveal["count"] == 2 and rp.reveal["loser"] == 2, "две единицы на столе — ставка сыграла")
+	# бот не ломается на первом ходе Палифико, в том числе при всех единицах
+	for seed in 30:
+		var rb := make()
+		rb.rng.seed = seed + 1
+		rb.maputo = true
+		rb.dice[0] = [1]
+		rb.counts[0] = 1
+		check(PerudoBot.act(rb, 0) and rb.bids.size() == 1, "бот делает первую ставку Палифико")
 	var r2 := make()
 	r2.place_bid(0, 3, 4)
 	check(not r2.can_bid(4, 5), "повысил номинал — количество не растёт")

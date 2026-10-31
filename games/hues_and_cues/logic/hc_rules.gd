@@ -416,3 +416,40 @@ func spectator_seat() -> int:
 		if s != giver:
 			return s
 	return 0
+
+
+# --- Панель хоста (необязательные методы, вызывает Net на хосте) ---------------------------
+
+## Очки места (в кооперативе — общий счёт у всех).
+func host_stats(seat: int) -> Array:
+	if seat < 0 or seat >= players.size() or phase == "game_over":
+		return []
+	var label := "Общий счёт" if coop else "Очки"
+	return [{"key": "scores", "label": label, "value": int(scores[seat]), "min": 0, "max": 999}]
+
+
+func host_set_stat(seat: int, key: String, value: int) -> bool:
+	if key != "scores" or host_stats(seat).is_empty():
+		return false
+	var v := clampi(value, 0, 999)
+	if coop:
+		for s in players.size():
+			scores[s] = v
+	else:
+		scores[seat] = v
+	return true
+
+
+## Новая карта цветов для ведущего — пока он не дал первую подсказку (цель выбирается заново).
+func host_new_theme() -> bool:
+	if not phase in ["prepare", "pick", "cue1"]:
+		return false
+	var old := card.duplicate()
+	for _try in 8:
+		card = HCData.draw_card(rng)
+		if card != old:
+			break
+	target = -1
+	if phase == "cue1":
+		phase = "pick"
+	return true

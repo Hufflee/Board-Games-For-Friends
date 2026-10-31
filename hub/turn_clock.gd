@@ -3,7 +3,7 @@ extends PanelContainer
 ## Часы хода: «⏱ 23 с», пока идёт ход с ограничением времени (настройка комнаты «Время на ход»).
 ## По истечении хост делает ход за задумавшегося игрока. Здесь же — строка настройки для лобби.
 
-const OPTIONS := [0, 30, 60, 90, 120]
+const OPTIONS := [0, 15, 20, 30, 60, 90, 120]
 ## Фазы, в которых тикают часы хода.
 const PHASES := ["roll", "select", "sorcerer", "oracle", "pick_under", "bid", "card", "clue", "guess", "side", "pick", "cue1", "cue2", "guess1", "guess2", "vip", "theme", "answer", "order", "give", "respond"]
 
@@ -60,14 +60,25 @@ func _on_state(v: Dictionary) -> void:
 	if on:
 		if not is_same(v, _seen_view):
 			_seen_view = v
-			_seen_deadline = Time.get_ticks_msec() + int(v.get("turn_left", 0)) * 1000
+			_seen_deadline = Time.get_ticks_msec() + int(float(v.get("turn_left", 0)) * 1000.0)  # покер шлёт дробное
 		_deadline = _seen_deadline
 
 
-func _process(_delta: float) -> void:
+## Сколько секунд хода осталось — те же часы, что в верхней полосе (для полосок у ника и т.п.).
+## Нет часов или ход без ограничения — -1.
+static func seconds_left() -> float:
+	if _seen_view.is_empty() or int(_seen_view.get("turn_total", 0)) <= 0:
+		return -1.0
+	return maxf(0.0, (_seen_deadline - Time.get_ticks_msec()) / 1000.0)
+
+
+func _process(delta: float) -> void:
 	if not visible:
 		return
 	if _paused:
+		# на паузе хост не считает время хода — и часы стоят (иначе после паузы врут)
+		_seen_deadline += int(delta * 1000.0)
+		_deadline = _seen_deadline
 		_label.text = "пауза"
 		_label.add_theme_color_override("font_color", Color.WHITE)
 		_sb.bg_color = BG_PAUSE

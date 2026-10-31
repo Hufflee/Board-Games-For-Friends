@@ -102,6 +102,8 @@ func run() -> void:
 	model.place_bid(1, 5, 4)
 	model.turn = 0
 	await apply_view()
+	check(table._face == 4 and table._qty == 6, "Ход перешёл: выбран номинал прошлой ставки (4) и минимум 6")
+	check(table.find_child("BidFace4", true, false).button_pressed, "Кнопка номинала прошлой ставки нажата")
 	table._face = 4
 	table._qty = 8
 	table._update_panel()
@@ -120,7 +122,7 @@ func run() -> void:
 	model.dice[0] = [1]
 	model.round_no += 1
 	await apply_view()
-	check(table.find_child("BidFace1", true, false).disabled and not table.find_child("BidFace2", true, false).disabled, "Палифико с однойединицей оставляетпервыйход")
+	check(not table.find_child("BidFace1", true, false).disabled and not table.find_child("BidFace2", true, false).disabled, "Палифико: первым ходом доступны и единицы")
 	model = make()
 	model.place_bid(0, 3, 2)
 	await apply_view(2)
@@ -146,6 +148,9 @@ func run() -> void:
 	await frames()
 	await click(table.find_child("Calza", true, false))
 	check(model.phase == "reveal" and model.reveal.challenger == 2 and model.reveal.calza, "Настоящийклик внеочереди дошёл доNet")
+	check(table._revealing, "Вскрытие после Calza запустило анимацию подсчёта")
+	await click(table)
+	check(table._revealing, "Повторный клик сразу после Calza не съедает анимацию вскрытия")
 	table.queue_free()
 	app.queue_free()
 	await frames()

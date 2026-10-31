@@ -298,6 +298,7 @@ func _update_players() -> void:
 		var nm := PlayerTag.make_seat(_v["players"], s, _me, 15, HCStyle.INK, " (вы)" if s == _me and not _hotseat() else "")
 		nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		nm.clip_text = true
+		TurnNameGlow.apply(nm, active)
 		nv.add_child(nm)
 		var sub := ""
 		if s == int(_v["giver"]):

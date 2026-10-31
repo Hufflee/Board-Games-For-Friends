@@ -308,3 +308,50 @@ func spectator_seat() -> int:
 ## Командная игра: в какие команды зритель может войти сам (прогресс общий — он не начинает с нуля).
 func teams_for_join() -> Array:
 	return [0] if coop else [0, 1] if can_add_player() else []
+
+
+# --- Панель хоста (необязательные методы, вызывает Net на хосте) ---------------------------
+
+## Очки команды игрока (в кооперативе — общий счёт и оставшиеся карточки).
+func host_stats(seat: int) -> Array:
+	if seat < 0 or seat >= players.size() or phase == "game_over":
+		return []
+	if coop:
+		return [
+			{"key": "score", "label": "Общий счёт", "value": int(scores[0]), "min": 0, "max": 99},
+			{"key": "cards_left", "label": "Карточек осталось", "value": cards_left, "min": 1, "max": 20},
+		]
+	var t := int(players[seat]["team"])
+	var label := "Очки команды %d (общие на команду)" % (t + 1)
+	return [{"key": "score", "label": label, "value": int(scores[t]), "min": 0, "max": 99}]
+
+
+func host_set_stat(seat: int, key: String, value: int) -> bool:
+	for stat: Dictionary in host_stats(seat):
+		if str(stat.key) != key:
+			continue
+		var v := clampi(value, int(stat.min), int(stat.max))
+		if key == "cards_left":
+			cards_left = v
+		elif coop:
+			scores[0] = v
+		else:
+			scores[int(players[seat]["team"])] = v
+		return true
+	return false
+
+
+## Новая карточка и новая цель — только пока телепат не дал подсказку.
+func host_new_theme() -> bool:
+	if not phase in ["card", "clue"]:
+		return false
+	if deck.is_empty():
+		deck = range(WLCards.card_count())
+		_shuffle(deck)
+	card = WLCards.card(deck.pop_back())
+	side = -1
+	target = rng.randf_range(3.0, 97.0)
+	dial = 50.0
+	clue = ""
+	phase = "card"
+	return true

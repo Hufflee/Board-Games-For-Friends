@@ -151,6 +151,7 @@ func _rebuild() -> void:
 		names.alignment = BoxContainer.ALIGNMENT_CENTER
 		var nick := Style.label(str(people[seat].name), 16, Style.ACCENT if seat == turn and phase == "reveal" else Color.TRANSPARENT)
 		nick.clip_text = true
+		TurnNameGlow.apply(nick, seat == turn and phase == "reveal")
 		names.add_child(nick)
 		if marks != "":
 			var sub := Style.label(marks, 12, Style.muted())

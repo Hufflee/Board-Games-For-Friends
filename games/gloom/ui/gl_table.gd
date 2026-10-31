@@ -412,7 +412,9 @@ func _family_box(s: int, w: float, mine: bool) -> Control:
 	p.add_child(col)
 	var head := GLStyle.hbox(8)
 	var you := " (вы)" if mine and not _hotseat() else ""
-	head.add_child(PlayerTag.make_seat(_v["players"], s, int(_v["you"]), GLStyle.CAP, GLStyle.BONE, you))
+	var ptag := PlayerTag.make_seat(_v["players"], s, int(_v["you"]), GLStyle.CAP, GLStyle.BONE, you)
+	TurnNameGlow.apply(ptag, active)
+	head.add_child(ptag)
 	var fl := GLStyle.label(
 		"· " + _family_name(s),
 		GLStyle.CAP,

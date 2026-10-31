@@ -394,3 +394,29 @@ func _event(kind: String, seat: int, extra: Dictionary) -> void:
 
 func _bump() -> void:
 	revision += 1
+
+
+# --- Панель хоста (необязательные методы, вызывает Net на хосте) ---------------------------
+
+## Жизни живого игрока (выбывшего не воскрешаем: очередь пушки уже без него).
+func host_stats(seat: int) -> Array:
+	if seat < 0 or seat >= players.size() or phase == "game_over" or not players[seat].alive:
+		return []
+	return [{"key": "lives", "label": "Жизни", "value": int(players[seat].lives), "min": 1, "max": maxi(max_lives, 9)}]
+
+
+func host_set_stat(seat: int, key: String, value: int) -> bool:
+	for stat: Dictionary in host_stats(seat):
+		if str(stat.key) == key:
+			players[seat].lives = clampi(value, int(stat.min), int(stat.max))
+			_bump()
+			return true
+	return false
+
+
+## Новый вопрос тому же игроку под прицелом (не во время проверки ответа и выстрела).
+func host_new_theme() -> bool:
+	if not phase in ["new_q", "aim", "fuse"]:
+		return false
+	_new_question(target)
+	return true

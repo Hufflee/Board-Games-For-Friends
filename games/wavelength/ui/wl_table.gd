@@ -213,7 +213,9 @@ func _update_teams() -> void:
 					sfx += " (телепат)"
 				if s == _me and not _hotseat():
 					sfx += " — вы"
-				ml.add_child(PlayerTag.make_seat(_v["players"], s, _me, 13, HCStyle.INK, sfx))
+				var ptag := PlayerTag.make_seat(_v["players"], s, _me, 13, HCStyle.INK, sfx)
+				TurnNameGlow.apply(ptag, s == int(_v["psychic"]))
+				ml.add_child(ptag)
 		v.add_child(ml)
 		_teams_box.add_child(p)
 	if _v["tiebreak"]:

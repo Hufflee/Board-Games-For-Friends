@@ -34,6 +34,8 @@ func _process(delta: float) -> void:
 		return
 	var m := get_viewport().get_mouse_position()
 	var want := ((m / vs) * 2.0 - Vector2.ONE).clamp(-Vector2.ONE, Vector2.ONE)
+	if not Prefs.parallax:
+		want = Vector2.ZERO
 	var k := 1.0 - exp(-delta * 4.0)
 	var nxt := _par.lerp(want, k)
 	if nxt.distance_to(_par) > 0.0005:

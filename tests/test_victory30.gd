@@ -112,7 +112,8 @@ func _run() -> void:
 			var alpha_avatar: TextureRect = screen._cards[0].get_node("Avatar")
 			var inside := image.get_pixelv(alpha_avatar.global_position + Vector2.ONE * 4)
 			check(alpha_avatar.texture is AtlasTexture and inside.g > 0.8 and inside.b > 0.8, "Исходные альфа-углы не оставляют зазор внутри маски слота")
-			check(bar.title.get_theme_color("font_color").get_luminance() > 0.5 if game == "the_gang" or theme == "dark" else bar.title.get_theme_color("font_color").get_luminance() < 0.5, "Название контрастно новому фону")
+			# У Перудо и The Gang фон финала тёмный в любой теме (таверна, ночь) — надписи светлые.
+			check(bar.title.get_theme_color("font_color").get_luminance() > 0.5, "Название контрастно новому фону")
 			# Ядовитая подложка выявляет прозрачные участки поверх старого стола.
 			var poison := ColorRect.new()
 			poison.color = Color.MAGENTA

@@ -57,7 +57,7 @@ static func clean(value: Variant) -> Dictionary:
 					return {}
 				config[field][id] = float(entry)
 			else:
-				if not entry is Dictionary or entry.size() != 2 or not entry.get("surface", "") in ["tv", "cabinet"]:
+				if not entry is Dictionary or entry.size() != 2 or not entry.get("surface", "") in ["tv", "stand_left", "stand_right", "cabinet"]:
 					return {}
 				var fraction: Variant = entry.get("x")
 				if not (fraction is float or fraction is int) or not is_finite(float(fraction)) or float(fraction) < 0 or float(fraction) > 1:

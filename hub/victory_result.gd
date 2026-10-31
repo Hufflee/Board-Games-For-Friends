@@ -64,10 +64,13 @@ static func resolve(game: String, view: Dictionary) -> Dictionary:
 		"poker":
 			winners = view.get("winners", []).duplicate()
 			var scores: Array = view.get("scores", [])
-			if str(view.get("mode", "classic")) == "sport" and not winners.is_empty():
-				result.summary = "Победные очки: %d из %d" % [int(scores[winners[0]]), int(view.get("target", 0))]
-			elif not winners.is_empty():
-				result.summary = "Итог: %+d фишек" % int(view.get("profits", [0])[winners[0]])
+			var profits: Array = view.get("profits", [])
+			# Неполный view не должен ронять sync() финала каждый кадр: без данных — без подписи.
+			var best := int(winners[0]) if not winners.is_empty() else -1
+			if str(view.get("mode", "classic")) == "sport" and best >= 0 and best < scores.size():
+				result.summary = "Победные очки: %d из %d" % [int(scores[best]), int(view.get("target", 0))]
+			elif best >= 0 and best < profits.size():
+				result.summary = "Итог: %+d фишек" % int(profits[best])
 		"gloom", "gloomier", "not_a_hat", "ready_set_bet", "hues_and_cues", "khorom":
 			winners = view.get("winners", []).duplicate()
 			result.team = game == "hues_and_cues" and bool(view.get("coop", false))

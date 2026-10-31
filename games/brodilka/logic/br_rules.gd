@@ -1182,3 +1182,58 @@ func get_view(seat: int) -> Dictionary:
 		used = used.duplicate(), log = log.duplicate(true), clock = phase != "game_over",
 		decks = [deck_gb.size(), deck_shop.size(), deck_tadam.size()],
 	}
+
+
+# --- Панель хоста (необязательные методы, вызывает Net на хосте) ---------------------------
+
+## Монеты места.
+func host_stats(seat: int) -> Array:
+	if seat < 0 or seat >= player_count() or phase == "game_over":
+		return []
+	return [{"key": "coins", "label": "Монеты", "value": coins[seat], "min": 0, "max": 999}]
+
+
+func host_set_stat(seat: int, key: String, value: int) -> bool:
+	if key != "coins" or host_stats(seat).is_empty():
+		return false
+	coins[seat] = clampi(value, 0, 999)
+	_log(seat, "хост ставит монеты: %d" % coins[seat])
+	return true
+
+
+## Карта Лавки из колоды (если в руке есть место). Возвращает индекс BRData.SHOP или null.
+func host_give_card(seat: int) -> Variant:
+	if seat < 0 or seat >= player_count() or phase == "game_over" or shop[seat].size() >= shop_max(seat):
+		return null
+	var card := _draw(deck_shop, disc_shop)
+	if card < 0:
+		return null
+	shop[seat].append(card)
+	_log(seat, "получает от хоста карту Лавки")
+	return card
+
+
+## Копия карт Лавки места.
+func host_hand(seat: int) -> Array:
+	if seat < 0 or seat >= shop.size():
+		return []
+	return (shop[seat] as Array).duplicate()
+
+
+## Забрать карту Лавки (из prefer — последнюю такую, иначе случайную) под низ колоды.
+func host_take_card(seat: int, prefer: Array) -> Variant:
+	if seat < 0 or seat >= player_count() or phase == "game_over" or shop[seat].is_empty():
+		return null
+	var hand: Array = shop[seat]
+	var idx := -1
+	for i in range(prefer.size() - 1, -1, -1):
+		idx = hand.find(prefer[i])
+		if idx >= 0:
+			break
+	if idx < 0:
+		idx = rng.randi_range(0, hand.size() - 1)
+	var card: int = hand[idx]
+	hand.remove_at(idx)
+	deck_shop.insert(0, card)
+	_log(seat, "хост забирает карту Лавки")
+	return card

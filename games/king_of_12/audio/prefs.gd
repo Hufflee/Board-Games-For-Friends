@@ -1,5 +1,5 @@
 extends Node
-## Автозагрузка Prefs: настройки игрока (громкость, экран) и локальная статистика партий.
+## Автозагрузка Prefs: настройки игрока (громкость, экран, масштаб) и локальная статистика партий.
 
 signal changed
 
@@ -16,7 +16,10 @@ var window_mode := "windowed"
 var resolution := "1280x720"  # размер окна в оконном режиме
 const RESOLUTIONS := ["1280x720", "1600x900", "1920x1080", "2560x1440"]
 var _applied_res := ""  # какой размер окна уже ставили — чтобы не сбрасывать окно, растянутое мышью
-var ui_scale := 1.0
+var ui_scale := 1.0  # масштаб интерфейса (content_scale_factor окна)
+const UI_SCALE_MIN := 0.8
+const UI_SCALE_MAX := 1.4
+var parallax := true  # двигающийся за мышью задний фон во всех играх и в хабе
 var _render_resolution := ""  # только явно выбранная растровая поверхность fullscreen
 var tutorial_seen := false
 var graphics := 2  # качество графики: 0 — низкое, 1 — среднее, 2 — высокое
@@ -40,6 +43,7 @@ var _recorded := {}  # ключи уже записанных розыгрыше
 
 
 func _ready() -> void:
+	UIAccentFX.watch_panels(get_tree())  # свечение края панелей у курсора — во всех играх
 	for bus in ["Music", "SFX"]:
 		if AudioServer.get_bus_index(bus) < 0:
 			AudioServer.add_bus()
@@ -52,7 +56,8 @@ func _ready() -> void:
 		music_volume = cfg.get_value("audio", "music", music_volume)
 		sfx_volume = cfg.get_value("audio", "sfx", sfx_volume)
 		fullscreen = cfg.get_value("video", "fullscreen", fullscreen)
-		ui_scale = 1.0  # устаревший масштаб больше не влияет на интерфейс
+		ui_scale = clampf(float(cfg.get_value("video", "ui_scale", ui_scale)), UI_SCALE_MIN, UI_SCALE_MAX)
+		parallax = cfg.get_value("video", "parallax", parallax)
 		tutorial_seen = cfg.get_value("game", "tutorial_seen", tutorial_seen)
 		graphics = cfg.get_value("video", "graphics", graphics)
 		show_fps = cfg.get_value("video", "show_fps", show_fps)
@@ -82,8 +87,9 @@ func apply() -> void:
 	_apply_audio()
 	if not DisplayServer.get_name().begins_with("headless"):
 		_apply_window()
-	ui_scale = 1.0
-	get_tree().root.content_scale_factor = 1.0
+	ui_scale = clampf(ui_scale, UI_SCALE_MIN, UI_SCALE_MAX)
+	if not is_equal_approx(get_tree().root.content_scale_factor, ui_scale):
+		get_tree().root.content_scale_factor = ui_scale
 	# графика: вертикальная синхронизация, потолок кадров (видеокарта не греется зря), масштаб 3D-сцены со сглаживанием FSR
 	var vs := DisplayServer.VSYNC_ENABLED if vsync else DisplayServer.VSYNC_DISABLED
 	if DisplayServer.window_get_vsync_mode() != vs:
@@ -184,6 +190,7 @@ func save() -> void:
 	cfg.set_value("game", "coin_secrets", coin_secrets)
 	cfg.set_value("video", "fullscreen", fullscreen)
 	cfg.set_value("video", "ui_scale", ui_scale)
+	cfg.set_value("video", "parallax", parallax)
 	cfg.set_value("game", "tutorial_seen", tutorial_seen)
 	cfg.set_value("video", "graphics", graphics)
 	cfg.set_value("video", "show_fps", show_fps)

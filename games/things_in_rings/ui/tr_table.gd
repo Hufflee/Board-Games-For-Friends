@@ -26,6 +26,10 @@ var _postgame_seen := false
 var _dark := false
 var _previous_faces: Array = []
 var _rule_flips: Array[Node] = []
+## Blind Mind: карточки открытого хода, которые ещё «не долетели» (поле их пока не рисует).
+var reveal_hidden := {}
+## Blind Mind: карточка, выбранная знающим кликом (потом клик по области переносит её).
+var blind_selected := -1
 const Flip := preload("res://hub/card_flip.gd")
 
 func _ready() -> void:
@@ -103,11 +107,14 @@ func _state(next: Dictionary) -> void:
 	view = next
 	_selected = -1
 	_fixing = false
+	if not view.get("blind", {}).has(blind_selected):
+		blind_selected = -1
 	_mask = int(view.get("pending", {}).get("proposed", 0))
 	clear_preview()
 	_rebuild()
 	_margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_feedback(view.get("feedback", {}))
+	_start_reveal(view.get("last_reveal", {}))
 
 func _send(kind: String, payload: Dictionary = {}) -> void:
 	payload["revision"] = int(view.get("revision", -1))
@@ -131,19 +138,38 @@ func _rebuild() -> void:
 	var phase: String = view.phase
 	var me: int = view.you
 	var active: int = view.actor
-	_top.info.text = "Круг %d · %s" % [view.round_no, "финал" if phase in ["postgame", "game_over"] else "знающий" if active == view.knower else "искатель"]
+	var blind_mode: bool = str(view.get("mode", "classic")) == "blind"
+	var stage := "финал" if phase in ["postgame", "game_over"] else ("все искатели" if phase == "blind" else ("знающий" if active == view.knower else "искатель"))
+	_top.info.text = "Круг %d · %s%s" % [view.round_no, "Blind Mind · " if blind_mode else "", stage]
+	var waiting: Array = view.get("blind_waiting", [])
+	var placed: Array = view.get("blind_placed", [])
 	_left.add_child(Style.section("За столом"))
 	for seat: int in people.size():
 		var label := "%s · %d" % [people[seat].name, view.counts[seat]]
 		if seat == view.knower:
 			label += " · З"
+		if placed.has(seat):
+			label += " · ✓"  # Blind Mind: карточка поставлена (какая — тайна до конца хода)
 		var b := Style.button(label, 12)
 		b.name = "Seat%d" % seat
 		Style.pick(b, seat == me)
 		b.disabled = not bool(view.get("hotseat", false))
 		b.pressed.connect(func(): Net.send_action("view_seat", {"seat": seat}))
 		_left.add_child(b)
-	_left.add_child(Style.label("З — знающий · карт: %d" % view.deck_left, 12, Style.muted()))
+		# Зелёный ореол — у того, кто ходит; в Blind Mind — у всех, от кого ещё ждём карточку.
+		# Ореол рисуется позади своего родителя, поэтому ник — отдельной надписью поверх заливки кнопки.
+		var nick := Style.label(b.text, 12)
+		nick.name = "Nick"
+		nick.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		nick.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		nick.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		nick.clip_text = true
+		b.text = ""
+		b.tooltip_text = nick.text
+		b.add_child(nick)
+		nick.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		TurnNameGlow.apply(nick, waiting.has(seat) if phase == "blind" else seat == active and phase not in ["postgame", "game_over"])
+	_left.add_child(Style.label("З — знающий%s · карт: %d" % [" · ✓ — поставил" if blind_mode else "", view.deck_left], 12, Style.muted()))
 	_left.add_child(Style.label("Передайте экран и нажмите своё имя." if view.get("hotseat", false) else "Ваши карты видны только вам.", 12, Style.muted()))
 	_margin.add_theme_constant_override("margin_bottom", 16 if phase in ["choose_rules", "judge", "postgame", "game_over"] else 152)
 	var text := _phase_text()
@@ -167,6 +193,8 @@ func _rebuild() -> void:
 		field.custom_minimum_size.y = 240
 	_field = field
 	_selection = Style.label("Перетащите вещь в кольца или выберите карту и нажмите область.", 12, Style.muted())
+	if phase in ["blind", "blind_check"]:
+		_selection.text = _blind_hint()
 	if phase in ["postgame", "game_over"]:
 		_selection.text = "Нажмите закрытое условие, чтобы перевернуть." if me == view.knower else "Знающий открывает условия по одному."
 	_main.add_child(_selection)
@@ -192,6 +220,24 @@ func _rebuild() -> void:
 		judge_row.add_child(_selection)
 	elif phase == "judge":
 		_selection.text = "Знающий проверяет карту."
+	elif phase in ["blind", "blind_check"] and me == int(view.knower):
+		var done_row := Style.row()
+		var done := Style.button("Завершить проверку")
+		done.name = "BlindDone"
+		done.theme_type_variation = "SelectedButton"
+		done.disabled = phase != "blind_check"
+		done.modulate.a = 1.0 if phase == "blind_check" else 0.5  # пока ждём искателей — приглушена
+		done.tooltip_text = "Доступно, когда все искатели поставят карточки (или выйдет время)."
+		done.pressed.connect(func(): _send("blind_done"))
+		done_row.add_child(done)
+		_main.remove_child(_selection)
+		_selection.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		_selection.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		_selection.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		done_row.add_child(_selection)
+		_main.add_child(done_row)
+		if not view.hand.is_empty():
+			_build_hand()
 	elif phase not in ["postgame", "game_over"]:
 		_build_hand()
 	var actions := Style.row()
@@ -230,6 +276,15 @@ func _phase_text() -> String:
 			return "%s: выберите правильную область и подтвердите" % actor_name
 		"place":
 			return "%s: поместите вещь. После верного ответа играйте снова." % actor_name
+		"blind":
+			var me: int = view.you
+			if me == int(view.knower):
+				return "Переносите карточки в верные области · ждём: %s" % _names(view.get("blind_waiting", []))
+			if view.get("blind_waiting", []).has(me):
+				return "Blind Mind: поставьте одну вещь — её увидит только знающий"
+			return "Карточки ставятся вслепую · ждём: %s" % _names(view.get("blind_waiting", []))
+		"blind_check":
+			return "Все поставили — проверьте области и завершите ход" if int(view.you) == int(view.knower) else "Знающий проверяет карточки — скоро открытие"
 	return "Знающий переворачивает условия по одному. Хост открывает экран победы, когда все готовы."
 
 func _build_choices() -> void:
@@ -338,6 +393,8 @@ func _region_name(mask: int) -> String:
 	return "Вне всех колец" if mask == 0 else " ∩ ".join(labels)
 
 func can_place() -> bool:
+	if str(view.get("phase", "")) == "blind":
+		return view.get("blind_waiting", []).has(int(view.get("you", -1)))
 	return int(view.get("you", -1)) == int(view.get("actor", -2)) and str(view.get("phase", "")) in ["place", "setup_clues", "knower_clue"]
 
 func select_card(id: int) -> void:
@@ -347,13 +404,17 @@ func select_card(id: int) -> void:
 
 func drop_card(id: int, mask: int) -> void:
 	if can_place() and view.hand.has(id):
-		_send("place" if view.phase == "place" else "clue", {"card": id, "mask": mask})
+		var kind := "blind_place" if view.phase == "blind" else ("place" if view.phase == "place" else "clue")
+		_send(kind, {"card": id, "mask": mask})
 
 func can_judge() -> bool:
 	return str(view.get("phase", "")) == "judge" and int(view.get("you", -1)) == int(view.get("knower", -2))
 
 ## Исправление в любом порядке: «кнопка → зона» отправляет сразу, «зона → кнопка» — по кнопке.
 func region_clicked(mask: int) -> void:
+	if blind_selected >= 0 and can_blind_move():
+		blind_move(blind_selected, mask)
+		return
 	if view.phase == "judge":
 		if not can_judge():
 			return
@@ -462,7 +523,10 @@ func _feedback(event: Dictionary) -> void:
 	if app.feedback_seen.has(key):
 		return
 	app.feedback_seen[key] = true
-	var correct := bool(event.get("correct", false))
+	_flash(bool(event.get("correct", false)))
+
+## Вспышка рамки и звук ответа: верно — зелёная, ошибка — красная.
+func _flash(correct: bool) -> void:
 	var layer := Control.new()
 	layer.name = "AnswerFeedback"
 	layer.z_index = 120
@@ -488,3 +552,115 @@ func _feedback(event: Dictionary) -> void:
 	fade.tween_interval(0.65)
 	fade.tween_property(layer, "modulate:a", 0.0, 0.35)
 	fade.tween_callback(layer.queue_free)
+
+# =============================================================================
+# Blind Mind: одновременные слепые ходы и открытие карточек в конце хода
+# =============================================================================
+
+func _names(seats: Array) -> String:
+	var out := PackedStringArray()
+	for seat: int in seats:
+		out.append(str(view.players[seat].name))
+	return ", ".join(out) if not out.is_empty() else "—"
+
+func _blind_hint() -> String:
+	var me: int = view.you
+	if me == int(view.knower):
+		return "Перетащите карточку (или нажмите её и область) в верную область. Игроки увидят переносы только в конце хода."
+	if view.get("blind", {}).has(me):
+		return "Ваша карточка поставлена и скрыта от остальных. Куда её перенёс знающий — покажем в конце хода."
+	if view.get("blind_waiting", []).has(me):
+		return "Перетащите вещь в кольца или выберите карту и нажмите область. Поставить можно одну."
+	return "Чужие карточки скрыты до конца хода."
+
+func can_blind_move() -> bool:
+	return str(view.get("phase", "")) in ["blind", "blind_check"] and int(view.get("you", -1)) == int(view.get("knower", -2))
+
+## Знающий выбрал карточку кликом — следующий клик по области переносит её.
+func select_blind(owner: int) -> void:
+	blind_selected = owner
+	if is_instance_valid(_field):
+		_field._schedule_layout()
+	if is_instance_valid(_selection):
+		_selection.text = "%s · нажмите верную область" % str(view.players[owner].name)
+
+func blind_move(owner: int, mask: int) -> void:
+	if can_blind_move():
+		blind_selected = -1
+		_send("blind_move", {"owner": owner, "mask": mask})
+
+func blind_tip(owner: int, proposed: int) -> String:
+	if not can_blind_move():
+		return "Ваша карточка · скрыта до конца хода"
+	return "%s · поставил: %s" % [str(view.players[owner].name), _region_name(proposed)]
+
+## Новый открытый ход (id ещё не видели в этой партии) — карточки появляются по одной.
+func _start_reveal(event: Dictionary) -> void:
+	if event.is_empty() or event.get("items", []).is_empty():
+		return
+	var key := str(["reveal", view.get("game_id", ""), event.get("id", -1)])
+	if app.feedback_seen.has(key):
+		return
+	app.feedback_seen[key] = true
+	for item: Dictionary in event.items:
+		reveal_hidden[int(item.card)] = true
+	if is_instance_valid(_field):
+		_field._schedule_layout()
+	_run_reveal(event.items.duplicate(true))
+
+func _run_reveal(items: Array) -> void:
+	await get_tree().create_timer(0.4).timeout
+	for item: Dictionary in items:
+		if not is_inside_tree():
+			return
+		await _reveal_one(item)
+		await get_tree().create_timer(0.7).timeout
+	reveal_hidden.clear()
+	if is_instance_valid(_field):
+		_field._schedule_layout()
+
+## Одна карточка: появляется там, куда её поставил игрок, и перелетает в итоговую область.
+func _reveal_one(item: Dictionary) -> void:
+	var id: int = item.card
+	var field: Control = _field
+	if not is_instance_valid(field):
+		reveal_hidden.erase(id)
+		return
+	# Откуда: свободное место в области, которую выбрал игрок (так, как её видел он).
+	var occupied := 0
+	for entry: Dictionary in view.get("board", []):
+		if int(entry.mask) == int(item.proposed) and not reveal_hidden.has(int(entry.card)):
+			occupied += 1
+	var from_slots: Array[Rect2] = field.slots_for(int(item.proposed), occupied + 1)
+	reveal_hidden.erase(id)
+	field._layout_cards()
+	var landed: Control = field.get_node_or_null("BoardCard%d" % id)
+	if from_slots.is_empty() or landed == null:
+		_flash(bool(item.correct))
+		return
+	var start: Rect2 = from_slots.back()
+	landed.modulate.a = 0.0
+	var flyer: Control = _card(id, start.size, false)
+	flyer.name = "RevealFlyer"
+	flyer.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	flyer.position = start.position
+	flyer.modulate.a = 0.0
+	field.add_child(flyer)
+	var tag := Style.label(str(view.players[int(item.seat)].name), 12)
+	tag.name = "RevealTag"
+	tag.add_theme_color_override("font_outline_color", Style.paper())
+	tag.add_theme_constant_override("outline_size", 6)
+	tag.position = Vector2(0, -20)
+	flyer.add_child(tag)
+	var moved: bool = int(item.actual) != int(item.proposed)
+	var tween := flyer.create_tween()
+	tween.tween_property(flyer, "modulate:a", 1.0, 0.25)
+	tween.tween_interval(0.45 if moved else 0.2)
+	tween.tween_property(flyer, "position", landed.position, 0.55 if moved else 0.25).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	tween.parallel().tween_property(flyer, "size", landed.size, 0.55 if moved else 0.25)
+	await get_tree().create_timer(0.9 if moved else 0.5).timeout
+	_flash(bool(item.correct))
+	if is_instance_valid(landed):
+		landed.modulate.a = 1.0
+	if is_instance_valid(flyer):
+		flyer.queue_free()

@@ -210,3 +210,29 @@ func _showdown() -> void:
 		phase = "game_over"
 		won = vaults >= 3
 		log.append("Банда победила!" if won else "Три тревоги. Ограбления закончены.")
+
+
+# --- Панель хоста (необязательные методы, вызывает Net на хосте) ---------------------------
+
+## Общие для банды сейфы и тревоги (3 любых — конец игры, поэтому до 2).
+func host_stats(seat: int) -> Array:
+	if seat < 0 or seat >= players.size() or phase == "game_over":
+		return []
+	return [
+		{"key": "vaults", "label": "Вскрытые сейфы (общие)", "value": vaults, "min": 0, "max": 2},
+		{"key": "alarms", "label": "Тревоги (общие)", "value": alarms, "min": 0, "max": 2},
+	]
+
+
+func host_set_stat(seat: int, key: String, value: int) -> bool:
+	if host_stats(seat).is_empty():
+		return false
+	match key:
+		"vaults":
+			vaults = clampi(value, 0, 2)
+		"alarms":
+			alarms = clampi(value, 0, 2)
+		_:
+			return false
+	revision += 1
+	return true

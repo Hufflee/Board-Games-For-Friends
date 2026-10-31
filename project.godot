@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="Настольные игры с друзьями"
-config/version="0.8.8"
+config/version="0.8.9"
 run/main_scene="res://hub/boot/boot.tscn"
 config/features=PackedStringArray("4.7", "Forward Plus")
 run/flush_stdout_on_print=true
@@ -20,6 +20,7 @@ config/icon="res://icon.svg"
 
 [autoload]
 
+Updater="*res://hub/update/updater.gd"
 Diag="*res://hub/diagnostics.gd"
 Prefs="*res://games/king_of_12/audio/prefs.gd"
 Net="*res://games/king_of_12/net/net.gd"

@@ -23,7 +23,7 @@ func _init() -> void:
 	for special in [false, true]:
 		for total in range(1, 31):
 			for face in range(1, 7):
-				check(PerudoRules.check_bid({}, [], special, total, 1, face) == (face != 1), "Первая ставка, включая одну кость/Палифико")
+				check(PerudoRules.check_bid({}, [], special, total, 1, face) == (face != 1 or special), "Первая ставка: единицы запрещены, кроме Палифико")
 	for prev in range(1, 12):
 		var old := {"q": prev, "face": 1, "seat": 0}
 		for face in range(2, 7):
@@ -64,7 +64,7 @@ func _init() -> void:
 	r.maputo = true
 	r.counts = [1, 0, 0, 0]
 	r.dice = [[1], [], [], []]
-	check(not r.can_bid(1, 1) and r.can_bid(1, 2), "При единственнойединице остаётся перваяставка на2")
+	check(r.can_bid(1, 1) and r.can_bid(1, 2), "В Палифико первая ставка может быть и на единицы")
 	check(PerudoBot.act(r, 0), "Бот не застревает на первомходе Палифико")
 	r = make()
 	r.maputo = true

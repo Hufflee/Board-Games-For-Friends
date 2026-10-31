@@ -237,7 +237,9 @@ func _build_seats(prev: Dictionary) -> void:
 		var tag := PanelContainer.new()
 		tag.add_theme_stylebox_override("panel", NHStyle.box(NHStyle.ACCENT if active else NHStyle.PAPER, 10, NHStyle.INK, 3, 0.25))
 		var trow := NHStyle.hbox(6)
-		trow.add_child(PlayerTag.make_seat(_v["players"], s, _me, NHStyle.CAP, NHStyle.INK, " (вы)" if s == _me and not _hotseat() else ""))
+		var ptag := PlayerTag.make_seat(_v["players"], s, _me, NHStyle.CAP, NHStyle.INK, " (вы)" if s == _me and not _hotseat() else "")
+		TurnNameGlow.apply(ptag, active)
+		trow.add_child(ptag)
 		var pen: int = (_v["penalties"][s] as Array).size()
 		var pl := NHStyle.label("✖" .repeat(pen) + "·".repeat(maxi(0, int(_v["max_penalty"]) - pen)), NHStyle.CAP, NHStyle.BAD if pen > 0 else NHStyle.MUTED, HORIZONTAL_ALIGNMENT_LEFT, true)
 		pl.tooltip_text = "Штрафы: %d из %d" % [pen, int(_v["max_penalty"])]

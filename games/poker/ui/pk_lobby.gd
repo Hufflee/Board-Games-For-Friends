@@ -65,6 +65,7 @@ func _rebuild() -> void:
 	var hint_label := Style.label(hint, 16, Style.muted())
 	hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.add_child(hint_label)
+	body.add_child(TurnClock.settings_row(func(t, z): return Style.button(t, z), func(t, z): return Style.label(t, z)))
 	var error := Style.label("", 16, Style.BAD)
 	error.visible = false
 	body.add_child(error)

@@ -16,6 +16,13 @@ var shakeable := false:
 		mouse_default_cursor_shape = Control.CURSOR_DRAG if v else Control.CURSOR_ARROW
 		queue_redraw()
 var lifted := false
+## Стакан того, кто сейчас ставит: под ним пульсирует золотой отсвет на сукне.
+var turn_glow := false:
+	set(v):
+		if turn_glow == v:
+			return
+		turn_glow = v
+		queue_redraw()
 ## Цвет кожи стакана (как у 3D-стаканчиков в шкафу на стартовом экране).
 var color := Color("5a2e16"):
 	set(v):
@@ -52,6 +59,11 @@ func _draw() -> void:
 	var h := size.y
 	# тень на столе
 	draw_set_transform(Vector2(w / 2.0, h - 2), 0, Vector2(1, 0.28))
+	if turn_glow and not lifted:
+		# ходящий: мягкий золотой отсвет вокруг стакана (несколько колец — без шейдеров)
+		var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 260.0)
+		for i in 4:
+			draw_circle(Vector2.ZERO, w * (0.95 - i * 0.12), Color(1.0, 0.8, 0.3, (0.07 + 0.05 * pulse) * (i + 1) / 2.0))
 	draw_circle(Vector2.ZERO, w * 0.5, Color(0, 0, 0, 0.35))
 	draw_set_transform(Vector2.ZERO, 0, Vector2.ONE)
 	# тело стакана: сужается кверху (стакан стоит дном вверх)
@@ -175,5 +187,5 @@ func lift(up: bool) -> void:
 
 
 func _process(_d: float) -> void:
-	if shakeable:
+	if shakeable or turn_glow:
 		queue_redraw()

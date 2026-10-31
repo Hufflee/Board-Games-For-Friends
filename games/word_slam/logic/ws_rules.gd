@@ -373,3 +373,48 @@ func spectator_seat() -> int:
 ## Командная игра: в какие команды зритель может войти сам (прогресс общий — он не начинает с нуля).
 func teams_for_join() -> Array:
 	return ([] if mode == "solo" else [0, 1]) if can_add_player() else []
+
+
+# --- Панель хоста (необязательные методы, вызывает Net на хосте) ---------------------------
+
+## Очки: в командах — счёт команды игрока, в solo — личные.
+func host_stats(seat: int) -> Array:
+	if seat < 0 or seat >= players.size() or phase == "game_over":
+		return []
+	if mode == "solo":
+		return [{"key": "scores", "label": "Очки", "value": int(scores[seat]), "min": 0, "max": 99}]
+	var t := team_of(seat)
+	var label := "Очки команды (%s)" % ("синие" if t == 0 else "оранжевые")
+	return [{"key": "scores", "label": label, "value": int(scores[t]), "min": 0, "max": 99}]
+
+
+func host_set_stat(seat: int, key: String, value: int) -> bool:
+	if key != "scores" or host_stats(seat).is_empty():
+		return false
+	scores[seat if mode == "solo" else team_of(seat)] = clampi(value, 0, 99)
+	return true
+
+
+## Новая карта и слово раунда. Во время объяснения подставки очищаются, рассказчики снова жмут «Готово».
+## Старая карта уходит под низ колоды — длина партии не меняется.
+func host_new_theme() -> bool:
+	if not phase in ["word", "play"]:
+		return false
+	var old := card
+	if deck.is_empty():
+		card = WSData.build_deck(rng, 1, false)[0]
+	else:
+		card = deck.pop_back()
+		deck.insert(0, old)
+	_roll()
+	ready = []
+	for s in storytellers:
+		ready.append(false)
+	holders = {}
+	pointer = {}
+	for t in (1 if mode == "solo" else 2):
+		holders[t] = [[], []]
+	flipped = false
+	guesses = []
+	phase = "word"
+	return true

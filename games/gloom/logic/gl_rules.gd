@@ -1767,3 +1767,46 @@ func add_player(p: Dictionary) -> bool:
 	_draw(s, HAND)
 	_log("%s присоединяется: %s" % [_pname(s), GLData.FAMILIES[f]["name"]], s)
 	return true
+
+
+# --- Панель хоста (необязательные методы, вызывает Net на хосте) ---------------------------
+
+## Карта из колоды в руку места (колода пуста — замешивается сброс). null — карт нет.
+func host_give_card(seat: int) -> Variant:
+	if seat < 0 or seat >= hands.size() or phase == "game_over":
+		return null
+	if deck.is_empty():
+		if discard.is_empty():
+			return null
+		deck = discard.duplicate()
+		discard = []
+		_shuffle(deck)
+	var c: Variant = deck.pop_back()
+	hands[seat].append(c)
+	_log("Хост даёт карту из колоды.", seat)
+	return c
+
+
+func host_hand(seat: int) -> Array:
+	if seat < 0 or seat >= hands.size():
+		return []
+	return (hands[seat] as Array).duplicate()
+
+
+## Забрать карту из руки (из prefer — последнюю такую, иначе случайную) под низ колоды.
+func host_take_card(seat: int, prefer: Array) -> Variant:
+	if seat < 0 or seat >= hands.size() or phase == "game_over" or hands[seat].is_empty():
+		return null
+	var hand: Array = hands[seat]
+	var idx := -1
+	for i in range(prefer.size() - 1, -1, -1):
+		idx = hand.find(prefer[i])
+		if idx >= 0:
+			break
+	if idx < 0:
+		idx = rng.randi_range(0, hand.size() - 1)
+	var c: Variant = hand[idx]
+	hand.remove_at(idx)
+	deck.insert(0, c)
+	_log("Хост забирает карту из руки.", seat)
+	return c

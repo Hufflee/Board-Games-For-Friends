@@ -152,6 +152,21 @@ func _ready() -> void:
 	Prefs.changed.connect(_sync_resolution)
 	_sync_resolution.call_deferred()
 	col.add_child(rr)
+	# масштаб применяется по отпусканию ползунка: иначе окно настроек «уезжает» из-под мыши
+	col.add_child(
+		_slider(
+			"Масштаб интерфейса", Prefs.ui_scale, Prefs.UI_SCALE_MIN, Prefs.UI_SCALE_MAX, 0.05,
+			func(v): Prefs.set_value("ui_scale", v), true
+		)
+	)
+	var par := CheckBox.new()
+	par.text = "Двигающийся фон (параллакс)"
+	par.tooltip_text = "Задний фон в играх и комната в главном меню слегка сдвигаются за мышью"
+	par.add_theme_font_size_override("font_size", 17)
+	_ink(par)
+	par.button_pressed = Prefs.parallax
+	par.toggled.connect(func(on): Prefs.set_value("parallax", on))
+	col.add_child(par)
 	# качество графики (главное меню и 3D-кубики)
 	var gq := K12UI.hbox(8)
 	gq.add_child(_label("Качество графики:", K12UI.BODY))

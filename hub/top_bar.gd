@@ -1,7 +1,7 @@
 class_name TopBar
 extends PanelContainer
 ## Общая верхняя полоса стола: слева мелкое название игры и часы, под ними ход/раунд, по центру гнездо монетки, справа — общие кнопки
-## Клавиша Esc выдвигает прежний ряд действий из-за верхнего края; слева всё видно постоянно.
+## Клавиши Tab и Esc выдвигают прежний ряд действий из-за верхнего края; слева всё видно постоянно.
 ## Всё общее живёт здесь, а стол игры начинается ниже (HEIGHT) — ничего не залезает на поле.
 ## Чат раскрывается выпадающей панелью справа под полосой. Пока полоса на экране, PauseLayer
 ## свои кнопки не показывает (группа "top_bar").
@@ -34,6 +34,7 @@ var _pause_btn: Button
 var _pause_icon: PlayPauseIcon
 var _spec_btn: Button
 var _invite_btn: Button
+var _host_btn: Button
 var _esc_btn: Button
 var _drawer: HBoxContainer
 var _menu_open := false
@@ -118,7 +119,7 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 	t._esc_btn = load("res://hub/escape_key.gd").new()
 	t._esc_btn.set_ink(text)
 	t._esc_btn.name = "EscapeMenu"
-	t._esc_btn.tooltip_text = "Показать или скрыть меню (Escape)"
+	t._esc_btn.tooltip_text = "Показать или скрыть меню (Tab или Esc)"
 	t._esc_btn.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	t._esc_btn.set_meta("top_bar_escape", true)
 	t._esc_btn.pressed.connect(t.toggle_menu)
@@ -151,6 +152,10 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 		var to_play := not Net.paused
 		pic.morph(to_play, func(): Net.set_paused(to_play)))
 	right.add_child(t._pause_btn)
+	t._host_btn = t._btn("Панель хоста", "Отмена ходов, таймер, правка игроков (только хост)")
+	t._host_btn.name = "HostPanel"
+	t._host_btn.pressed.connect(HostPanel.toggle)
+	right.add_child(t._host_btn)
 	var sep := VSeparator.new()
 	sep.modulate = Color(text, 0.3)
 	right.add_child(sep)
@@ -191,7 +196,44 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 	victory.accent = entry.get("color", Color("b99346"))
 	parent.add_child(victory)
 	t._victory_screen = victory
+	t._ensure_chat_bubbles.call_deferred(parent)
+	parent.add_child(TurnEdgeGlow.new())
 	return t
+
+
+## Окошко с сообщением чата над столом. Старые игры вешают своё (в своём стиле) или показывают
+## реплики на табличках игроков; новым играм его не хватало — ставим общее нейтральное.
+const OWN_CHAT_POPUPS := ["king_of_12", "perudo", "dangerous_words"]
+
+func _ensure_chat_bubbles(parent: Control) -> void:
+	if not is_instance_valid(parent) or Net.party_game in OWN_CHAT_POPUPS:
+		return
+	for child: Node in parent.get_children():
+		if child is ChatBubbles:
+			return
+	var bubbles := ChatBubbles.attach(parent, _make_chat_bubble, Vector2(-300, HEIGHT + 64))
+	bubbles.z_as_relative = false
+	bubbles.z_index = 92
+
+
+func _make_chat_bubble(text: String) -> Control:
+	var l := Label.new()
+	l.text = text
+	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	l.custom_minimum_size.x = 260
+	l.add_theme_font_size_override("font_size", 15)
+	l.add_theme_color_override("font_color", Color("f3eee6"))
+	var box := StyleBoxFlat.new()
+	box.bg_color = Color(0.09, 0.09, 0.11, 0.9)
+	box.set_corner_radius_all(12)
+	box.set_content_margin_all(12)
+	box.border_color = Color(1, 1, 1, 0.12)
+	box.set_border_width_all(1)
+	box.shadow_color = Color(0, 0, 0, 0.3)
+	box.shadow_size = 8
+	box.shadow_offset = Vector2(0, 3)
+	l.add_theme_stylebox_override("normal", box)
+	return l
 
 ## Во время финала фон общий на весь экран; настоящие часы, кнопки и гнездо остаются сверху.
 func set_victory_backdrop(active: bool, ink := Color("f9edd8")) -> void:
@@ -279,6 +321,7 @@ func _process(_d: float) -> void:
 	var playing := Net.in_session() and not Net.view.is_empty()
 	var spectator := bool(Net.view.get("spectator", false))
 	_pause_btn.visible = playing and Net.is_host()
+	_host_btn.visible = playing and Net.is_host() and not spectator
 	_pause_icon.sync_state(Net.paused)
 	_pause_btn.text = "Продолжить" if Net.paused else "Пауза"
 	_invite_btn.visible = Net.is_party()
@@ -362,6 +405,16 @@ func _has_modal(node: Node) -> bool:
 		if _has_modal(child):
 			return true
 	return false
+
+
+## Tab ловим до GUI: иначе его съедает переход фокуса между кнопками (ui_focus_next) и до
+## _unhandled_input он не доходит. В многострочном поле Tab остаётся полю.
+func _input(event: InputEvent) -> void:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_TAB:
+		if get_viewport().gui_get_focus_owner() is TextEdit or _has_modal(get_tree().current_scene):
+			return
+		toggle_menu()
+		get_viewport().set_input_as_handled()
 
 
 func _unhandled_input(event: InputEvent) -> void:

@@ -323,3 +323,39 @@ func add_player(p: Dictionary) -> bool:
 		return false
 	players.append(p.duplicate())
 	return true
+
+
+# --- Панель хоста (необязательные методы, вызывает Net на хосте) ---------------------------
+
+## Общие жетоны команды: единороги (остальные — какашки, всего жетонов не меняется).
+func host_stats(seat: int) -> Array:
+	if seat < 0 or seat >= players.size() or phase == "game_over":
+		return []
+	var total := unicorns + poops
+	return [{"key": "unicorns", "label": "Единороги (общие; остальные — какашки)", "value": unicorns, "min": 1, "max": total}]
+
+
+func host_set_stat(seat: int, key: String, value: int) -> bool:
+	if key != "unicorns" or host_stats(seat).is_empty():
+		return false
+	var total := unicorns + poops
+	unicorns = clampi(value, 1, total)
+	poops = total - unicorns
+	return true
+
+
+## Новая карточка тем — пока капитан выбирает тему или ещё никто не написал ответ.
+func host_new_theme() -> bool:
+	if not (phase == "theme" or (phase == "answer" and answers.is_empty())):
+		return false
+	var fresh: Array = TTData.deck(adult, rng)
+	var pick: Array = fresh[0]
+	for c in fresh:
+		if not deck.has(c):
+			pick = c
+			break
+	deck[(round_no - 1) % deck.size()] = pick
+	card = pick
+	theme = -1
+	phase = "theme"
+	return true

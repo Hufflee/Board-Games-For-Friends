@@ -2,6 +2,9 @@ class_name UIAccentFX
 extends Node2D
 ## Ненавязчивые акценты: периодический диагональный блик главных кнопок и свечение рамки у курсора.
 ## Node2D не участвует в раскладке Container. Декоративный ColorRect пропускает мышь и фокус.
+## Свечение рамки — у всех панелей во всех играх: watch_panels() (зовёт автозагрузка Prefs) вешает его
+## на каждую PanelContainer/Panel. Не светятся кнопки, карты, верхняя полоса, мелкие плашки и
+## полноэкранные подложки; отключить у панели — set_meta("no_border_glow", true).
 
 const FX_SHADER := preload("res://hub/ui_accent_fx.gdshader")
 enum Mode { SHEEN, BORDER }
@@ -10,7 +13,12 @@ var _host: Control
 var _surface: ColorRect
 var _material: ShaderMaterial
 var _glow_color := Color("93a8d8")
+var _auto_color := false  # цвет свечения — от рамки/фона самой панели
 var _opacity := 0.0
+
+const MIN_SIZE := Vector2(120, 60)  # меньше — плашка/бейдж, не панель
+## Внутри них панели не светятся: карты, верхняя полоса, часы хода.
+const SKIP_SCRIPTS := ["res://games/king_of_12/ui/card_view.gd", "res://hub/top_bar.gd", "res://hub/turn_clock.gd"]
 
 
 static func sheen(button: Button) -> void:
@@ -18,7 +26,7 @@ static func sheen(button: Button) -> void:
 		return
 	var fx: Node2D = load("res://hub/ui_accent_fx.gd").new()
 	fx.name = "PrimarySheen"
-	button.add_child(fx)
+	button.add_child(fx, false, Node.INTERNAL_MODE_FRONT)
 
 
 static func border(panel: Control, color: Color) -> void:
@@ -28,7 +36,32 @@ static func border(panel: Control, color: Color) -> void:
 	fx.name = "BorderGlow"
 	fx._mode = Mode.BORDER
 	fx._glow_color = color
-	panel.add_child(fx)
+	panel.add_child(fx, false, Node.INTERNAL_MODE_FRONT)  # внутренний: его не снимут очистки детей панели
+
+
+## Один раз при запуске: свечение края у каждой новой панели.
+static func watch_panels(tree: SceneTree) -> void:
+	tree.node_added.connect(func(n: Node) -> void:
+		if n is PanelContainer or n.get_class() == "Panel":
+			_auto_border.call_deferred(n))
+
+
+static func _auto_border(n: Variant) -> void:  # без типа: узел мог быть удалён до вызова
+	if not is_instance_valid(n) or not (n as Node).is_inside_tree() or (n as Node).has_node("BorderGlow"):
+		return
+	var a: Node = n
+	while a != null:
+		if a is BaseButton or a.has_meta("no_border_glow"):
+			return
+		var sc: Script = a.get_script()
+		if sc != null and sc.resource_path in SKIP_SCRIPTS:
+			return
+		a = a.get_parent()
+	var fx: Node2D = load("res://hub/ui_accent_fx.gd").new()
+	fx.name = "BorderGlow"
+	fx._mode = Mode.BORDER
+	fx._auto_color = true
+	n.add_child(fx, false, Node.INTERNAL_MODE_FRONT)
 
 
 func _ready() -> void:
@@ -58,15 +91,39 @@ func _ready() -> void:
 	_sync.call_deferred()
 
 
-## HCStyle используется также «Длиной волны»: свечение рамок нужно только этим двум играм.
-func _modern_game() -> bool:
-	if not is_inside_tree():
+## Светится только заметная панель: не мелкая, не во весь экран и с видимым фоном или рамкой.
+## Стиль проверяется по свойствам (bg_color, border_color): так подходят и свои StyleBox игр (STInkBox).
+func _panel_ok(box: StyleBox) -> bool:
+	var sz := _host.size
+	if sz.x < MIN_SIZE.x or sz.y < MIN_SIZE.y:
 		return false
-	var scene := get_tree().current_scene
-	if scene:
-		var path := scene.scene_file_path
-		return "/hues_and_cues/" in path or "/word_slam/" in path
-	return false
+	var vs := get_viewport_rect().size
+	if sz.x >= vs.x * 0.9 and sz.y >= vs.y * 0.8:
+		return false
+	if box is StyleBoxTexture:
+		return true
+	if box == null or box is StyleBoxEmpty or not ("bg_color" in box):
+		return false
+	var bg: Color = box.get("bg_color")
+	var line: Color = box.get("border_color") if "border_color" in box else Color.TRANSPARENT
+	return bg.a >= 0.3 or (line.a >= 0.3 and _border_w(box) > 0)
+
+
+static func _border_w(box: StyleBox) -> int:
+	return int(box.get("border_width_top")) if "border_width_top" in box else 0
+
+
+## Цвет свечения по самой панели: заметная светлая рамка — её цвет, иначе от фона
+## (на светлом фоне — сумеречно-синий, на тёмном — светло-голубой).
+static func _color_for(box: StyleBox) -> Color:
+	if box != null and "bg_color" in box:
+		var line: Color = box.get("border_color") if "border_color" in box else Color.TRANSPARENT
+		if line.a >= 0.45 and _border_w(box) > 0 and line.get_luminance() > 0.12:
+			line.a = 1.0
+			return line.lightened(0.2)
+		if (box.get("bg_color") as Color).get_luminance() > 0.55:
+			return Color("6f86c4")
+	return Color("93a8d8")
 
 
 func _sync() -> void:
@@ -79,12 +136,13 @@ func _sync() -> void:
 		allowed = allowed and not button.disabled and not button.is_pressed()
 		box = button.get_theme_stylebox("normal")
 	else:
-		allowed = allowed and _modern_game()
 		box = _host.get_theme_stylebox("panel")
-	var corners := Vector4.ZERO
-	if box is StyleBoxFlat:
-		var flat := box as StyleBoxFlat
-		corners = Vector4(flat.corner_radius_top_left, flat.corner_radius_top_right, flat.corner_radius_bottom_right, flat.corner_radius_bottom_left)
+		allowed = allowed and _panel_ok(box)
+		if _auto_color:
+			_material.set_shader_parameter("glow_color", _color_for(box))
+	var corners := Vector4.ONE * 6.0 if box is StyleBoxTexture else Vector4.ZERO
+	if box != null and "corner_radius_top_left" in box:
+		corners = Vector4(box.get("corner_radius_top_left"), box.get("corner_radius_top_right"), box.get("corner_radius_bottom_right"), box.get("corner_radius_bottom_left"))
 	var padding := 5.0 if _mode == Mode.BORDER else 0.0
 	_surface.position = Vector2.ONE * -padding
 	_surface.size = _host.size + Vector2.ONE * padding * 2.0

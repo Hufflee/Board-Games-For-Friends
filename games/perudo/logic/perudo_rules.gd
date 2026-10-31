@@ -165,7 +165,9 @@ static func check_bid(bid: Dictionary, _bids: Array, maputo: bool, total: int, q
 	if face < 1 or face > FACES or q < 1 or q > total:
 		return false
 	if bid.is_empty():
-		return face != 1  # Первый номинал свободен, но единицы первым ходом запрещены.
+		# Первый номинал свободен, но единицы первым ходом запрещены — кроме Палифико:
+		# там единицы не джокеры, и открыть раунд можно и на них.
+		return face != 1 or maputo
 	var pq: int = bid["q"]
 	var pf: int = bid["face"]
 	if maputo:
@@ -346,3 +348,29 @@ func get_view(seat: int) -> Dictionary:
 		"log": log.duplicate(true),
 		"winner": winner,
 	}
+
+
+# --- Панель хоста (необязательные методы, вызывает Net на хосте) ---------------------------
+
+## Число костей у игрока в игре (выбывшего не возвращаем). Во время вскрытия не меняем.
+func host_stats(seat: int) -> Array:
+	if seat < 0 or seat >= player_count() or not alive(seat) or phase in ["reveal", "game_over"]:
+		return []
+	return [{"key": "dice", "label": "Кости", "value": counts[seat], "min": 1, "max": 10}]
+
+
+## В раунде кости места добрасываются или убираются сразу (у игрока в стакане), иначе — с нового раунда.
+func host_set_stat(seat: int, key: String, value: int) -> bool:
+	if key != "dice" or host_stats(seat).is_empty():
+		return false
+	var v := clampi(value, 1, 10)
+	counts[seat] = v
+	if phase in ["roll", "bid"]:
+		var cup: Array = dice[seat]
+		while cup.size() > v:
+			cup.remove_at(rng.randi_range(0, cup.size() - 1))
+		while cup.size() < v:
+			cup.append(rng.randi_range(1, FACES))
+		cup.sort()
+	_log(seat, "Хост меняет число костей: %d" % v)
+	return true

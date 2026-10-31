@@ -514,7 +514,7 @@ func _furniture() -> void:
 	var shade := _cyl(0.04, 0.1, 0.12, Vector3(-1.78, 0.86, BACK + 0.24), _mat(Color("c8c8d8"), 0.3, Color("ffe8b0"), 0.6))
 	shade.rotation_degrees.z = -25
 	_extra_lights.append(_omni(Vector3(-1.72, 0.78, BACK + 0.3), Color("ffd29a"), 0.7, 1.4))
-	_tv_corner(1.6)
+	_tv_corner(TV_X)
 	# скейтборд у стены
 	var deck := Node3D.new()
 	deck.position = Vector3(-1.05, 0.4, BACK + 0.1)
@@ -1097,8 +1097,26 @@ func _figure_radius(box: GameBox) -> float:
 	return Vector2(box.size.x, box.size.z).length() * 0.5
 
 
+## Места для фигурок вне шкафа: верх телевизора и тумба по бокам от него, верх шкафа.
+const FIGURE_SURFACES := ["tv", "stand_left", "stand_right", "cabinet"]
+const TV_X := 1.6  # телевизор и тумба (_tv_corner)
+const STAND_TOP := 0.6325  # верх тумбы под телевизором
+const STAND_HALF := 0.43  # полуширина крышки тумбы
+const TV_HALF := 0.3  # полуширина корпуса телевизора
+
+
 func _figure_surface_span(box: GameBox, surface: String) -> Array[Vector3]:
 	var radius := _figure_radius(box)
+	if surface in ["stand_left", "stand_right"]:
+		# тумба рядом с телевизором: полоска между краем крышки и корпусом; по диагонали
+		# фигурка не влезает — берём её круглую подставку (0.06)
+		var inv := _shelf_root.global_transform.affine_inverse()
+		var r := 0.06 * SHELF_SCALE + 0.004
+		var y := STAND_TOP + box.size.y * SHELF_SCALE * 0.5
+		var z := BACK + 0.44
+		if surface == "stand_left":
+			return [inv * Vector3(TV_X - STAND_HALF + r, y, z), inv * Vector3(TV_X - TV_HALF - r, y, z)]
+		return [inv * Vector3(TV_X + TV_HALF + r, y, z), inv * Vector3(TV_X + STAND_HALF - r, y, z)]
 	if surface == "tv":
 		# Левая часть верха телевизора свободна от лавовой лампы справа.
 		var inv := _shelf_root.global_transform.affine_inverse()
@@ -1342,15 +1360,7 @@ func _frame_shelf() -> void:
 	var height: float = (
 		(int(_cabinet.rows) * float(_cabinet.height) + (int(_cabinet.rows) + 1) * BOARD) * SHELF_SCALE
 	)
-	var extra_x := 0.0
-	var extra_y := 0.0
-	for anchor: Dictionary in _cabinet.get("figure_surfaces", {}).values():
-		if anchor.surface == "tv":
-			extra_x = 1.35
-		else:
-			extra_y = 0.38
-	width += extra_x
-	height += extra_y
+	# Кадр зависит только от шкафа: куда поставили фигурку (ТВ, верх шкафа, ячейка), камеру не двигает.
 	var aspect: float = (
 		get_viewport().get_visible_rect().size.x / maxf(1, get_viewport().get_visible_rect().size.y)
 	)
@@ -1363,7 +1373,7 @@ func _frame_shelf() -> void:
 		)
 	)
 	var aim: Vector3 = (
-		_shelf_root.global_transform * Vector3(SHELF_X + extra_x * 0.5, 0.06 + height / (2 * SHELF_SCALE), BACK + 0.18)
+		_shelf_root.global_transform * Vector3(SHELF_X, 0.06 + height / (2 * SHELF_SCALE), BACK + 0.18)
 	)
 	var shift: float = width * 0.16 if _editor_on else 0.0
 	camera.global_position = aim + Vector3(shift, 0.03, distance)
@@ -2061,6 +2071,16 @@ func _start_drag() -> void:
 	Input.set_default_cursor_shape(Input.CURSOR_DRAG)
 	shelf_hint.emit("Ведите коробку вдоль полок — соседние раздвинутся. Отпустите, чтобы поставить")
 	_drag_update(get_viewport().get_mouse_position())
+	if b.is_figurine():
+		shelf_hint.emit("Ведите фигурку: шкаф, верх шкафа, телевизор или тумба рядом с ним. Отпустите, чтобы поставить")
+		# фигурку вне шкафа взяли, но ещё не повели — остаётся на своём месте, а не прыгает в шкаф
+		var anchor: Dictionary = _cabinet.get("figure_surfaces", {}).get(_shelf_id(b), {})
+		if _drag_surface.is_empty() and not anchor.is_empty():
+			_drag_surface = anchor.duplicate()
+			_drag_at = b.home.origin
+			_drag_to = _drag_from
+			_drag_cascade = []
+			_reflow(true)
 	_update_pose_button()
 
 
@@ -2068,7 +2088,7 @@ func _start_drag() -> void:
 func _drag_update(screen: Vector2) -> void:
 	_drag_surface = {}
 	if _drag_box.is_figurine():
-		for surface: String in ["tv", "cabinet"]:
+		for surface: String in FIGURE_SURFACES:
 			var span := _figure_surface_span(_drag_box, surface)
 			if span[1].x < span[0].x:
 				continue
@@ -2076,7 +2096,9 @@ func _drag_update(screen: Vector2) -> void:
 			var b := camera.unproject_position(_shelf_root.to_global(span[1]))
 			var delta := b - a
 			var fraction := clampf((screen - a).dot(delta) / maxf(delta.length_squared(), 0.001), 0.0, 1.0)
-			if screen.distance_to(a.lerp(b, fraction)) < 42.0:
+			# попадание — по всей высоте фигурки на экране (держат и за голову, и за подставку)
+			var half_h := a.distance_to(camera.unproject_position(_shelf_root.to_global(span[0] + Vector3(0, _drag_box.size.y * 0.5, 0))))
+			if screen.distance_to(a.lerp(b, fraction)) < maxf(42.0, half_h + 16.0):
 				# Доля на экране искажена перспективой: место берём по лучу в плоскости поверхности.
 				var inv_root := _shelf_root.global_transform.affine_inverse()
 				var ray_o := inv_root * camera.project_ray_origin(screen)
@@ -2263,8 +2285,6 @@ func _finish_drag(ok: bool) -> void:
 	b.set_swap_highlight(false)
 	_clear_shelf_selection()
 	_reflow(true)
-	if moved and b.is_figurine():
-		_frame_shelf()
 	Sfx.play("card_place", -8)
 	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 	var hint := HINT
@@ -2404,6 +2424,8 @@ func _process(delta: float) -> void:
 	# лёгкое «дыхание» камеры и параллакс от мыши
 	var vp := get_viewport()
 	var m := vp.get_mouse_position() / Vector2(vp.get_visible_rect().size) - Vector2(0.5, 0.5)
+	if not Prefs.parallax:
+		m = Vector2.ZERO  # параллакс выключен в настройках
 	var sway := Vector3(sin(_t * 0.35) * 0.008, sin(_t * 0.5) * 0.006, 0)
 	var target := _cam_home
 	target.origin += sway

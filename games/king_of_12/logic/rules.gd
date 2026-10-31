@@ -749,3 +749,70 @@ func get_view(seat: int) -> Dictionary:
 		"trick_no": trick_no,
 		"winner": winner,
 	}
+
+
+# --- Панель хоста (необязательные методы, вызывает Net на хосте) ---------------------------
+# Общей колоды нет: у каждого своя рука из всех карт, сыгранные лежат в его сбросе (discards).
+# «Дать карту» — вернуть из сброса в руку, «забрать» — переложить из руки в сброс.
+
+## Очки раунда (сумма жетонов 1 и 2 ПО) — только у участвующих мест.
+func host_stats(seat: int) -> Array:
+	if seat < 0 or seat >= player_count() or not active[seat] or phase == "game_over":
+		return []
+	return [{"key": "points", "label": "Очки раунда (жетоны ПО)", "value": points(seat), "min": 0, "max": WIN_POINTS}]
+
+
+## Жетоны пересобираются: сколько можно двоек и, если нечётно, одна единица.
+func host_set_stat(seat: int, key: String, value: int) -> bool:
+	if key != "points" or host_stats(seat).is_empty():
+		return false
+	var v := clampi(value, 0, WIN_POINTS)
+	var list := []
+	for _i in v / 2:
+		list.append(2)
+	if v % 2 == 1:
+		list.append(1)
+	tokens[seat] = list
+	return true
+
+
+func _host_cards_ok(seat: int) -> bool:
+	return seat >= 0 and seat < player_count() and active[seat] and phase in ["roll", "select"]
+
+
+## Последняя сыгранная карта места возвращается из его сброса в руку.
+func host_give_card(seat: int) -> Variant:
+	if not _host_cards_ok(seat) or discards[seat].is_empty():
+		return null
+	var c: String = discards[seat].pop_back()
+	hands[seat].append(c)
+	return c
+
+
+func host_hand(seat: int) -> Array:
+	if seat < 0 or seat >= hands.size():
+		return []
+	return (hands[seat] as Array).duplicate()
+
+
+## Карта из руки уходит в сброс места (выбранную на этот розыгрыш не трогаем; в руке остаётся ≥ 2,
+## иначе раунд закончился бы сам).
+func host_take_card(seat: int, prefer: Array) -> Variant:
+	if not _host_cards_ok(seat) or hands[seat].size() <= 2:
+		return null
+	var pool := []
+	for c in hands[seat]:
+		if c != selected[seat]:
+			pool.append(c)
+	if pool.is_empty():
+		return null
+	var pick: Variant = null
+	for i in range(prefer.size() - 1, -1, -1):
+		if pool.has(prefer[i]):
+			pick = prefer[i]
+			break
+	if pick == null:
+		pick = pool[rng.randi_range(0, pool.size() - 1)]
+	hands[seat].erase(pick)
+	discards[seat].append(pick)
+	return pick

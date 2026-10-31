@@ -34,10 +34,17 @@ var _next_btn_row: HBoxContainer
 var _auto_label: Label
 var _auto_deadline := 0
 
+var _bid_key := ""  # последняя ставка, по которой уже подставлен номинал в панель
+var _visual_round := ""  # раунд, для которого стол уже «расставлен» (стаканы опущены, ряды пусты)
+var _turn_sb: StyleBoxFlat  # рамка места ходящего — её свечение пульсирует
+
 var _revealing := false
 var _queued := {}
-var _revealed_round := -1
+var _revealed_key := ""  # [game_id, round_no] уже показанного вскрытия
 var _reveal_tween: Tween
+var _reveal_t0 := 0  # когда началось вскрытие (клик-пропуск — не сразу)
+var _result_shown := false
+const REVEAL_SKIP_GRACE_MS := 1500  # первые 1.5 с клик не пропускает вскрытие (двойной клик по «Дудо!» и т.п.)
 var _shaken_seen: Array = []
 var _roll_label: Label  # «Трясите стаканы!» → «Отпускайте!» через секунду тряски
 var _celebrated := false
@@ -175,9 +182,11 @@ func _plate_rect(seat: int) -> Rect2:
 func _layout() -> void:
 	if _n == 0:
 		return
+	var turn := _turn_seat()
 	for s in _n:
 		var r := _plate_rect(s)
-		_plates[s].position = r.position
+		# табличка ходящего чуть приподнята — размер тот же, соседи не сдвигаются
+		_plates[s].position = r.position - Vector2(0, 6 if s == turn else 0)
 		_plates[s].size = r.size
 		var cup: PerudoCup = _cups[s]
 		cup.position = _cup_pos(s) - Vector2(cup.size.x / 2.0, cup.size.y - 6) + (Vector2(0, -cup.size.y * 0.9) if cup.lifted else Vector2.ZERO)
@@ -239,13 +248,24 @@ func _apply(v: Dictionary) -> void:
 	_auto_deadline = Time.get_ticks_msec() + int(v.get("auto_in", 0)) * 1000
 	if _cups.size() != _n:
 		_build()
+	# Ход перешёл: в панели сразу номинал предыдущей ставки и минимальное количество для него.
+	var bid_key := str([v.get("game_id", ""), v["round_no"], v["bids"].size()])
+	if bid_key != _bid_key:
+		_bid_key = bid_key
+		if not v["bid"].is_empty():
+			_face = int(v["bid"]["face"])
+			_qty = maxi(_min_q(_face), 1)
 	var phase: String = v["phase"]
-	if phase in ["reveal", "game_over"] and _revealed_round != int(v["round_no"]) and not v["reveal"].is_empty():
+	var reveal_key := str([v.get("game_id", ""), v["round_no"]])
+	if phase in ["reveal", "game_over"] and _revealed_key != reveal_key and not v["reveal"].is_empty():
 		_start_reveal()
 		return
 	_bid_box.visible = phase in ["roll", "bid"]
 	_history.visible = phase in ["roll", "bid"]
-	if phase == "roll":
+	# Новый раунд — стаканы опустить, кости вскрытия убрать. По номеру раунда, а не по фазе roll:
+	# пока шла анимация вскрытия, view «roll» мог смениться на «bid» и не дойти до стола.
+	if phase in ["roll", "bid"] and _visual_round != reveal_key:
+		_visual_round = reveal_key
 		_new_round_visuals()
 		_banner.text = ""
 	_update_cups()
@@ -311,6 +331,7 @@ func _update_cups() -> void:
 		if s != _me:
 			cup.rattle(phase == "roll" and not shaken and bool(_v.get("shaking", [])[s] if s < _v.get("shaking", []).size() else false))
 		cup.shakeable = phase == "roll" and s == _me and not shaken and _v["counts"][s] > 0
+		cup.turn_glow = s == _turn_seat()
 	# свои кости — после того как потряс стакан
 	K12UI.clear(_my_dice)
 	var mine: Array = _v["dice"][_me]
@@ -329,6 +350,7 @@ func _update_plates() -> void:
 	_top.info.text = "Раунд %d · Костей на столе: %d" % [_v["round_no"], _v["total"]] + ("  ·  ПАЛИФИКО" if _v["maputo"] else "")
 	if _v["phase"] == "seating":
 		_top.info.text = "Рассадка · игроков: %d" % _n
+	_turn_sb = null
 	for s in _n:
 		var p: PanelContainer = _plates[s]
 		K12UI.clear(p)
@@ -336,10 +358,17 @@ func _update_plates() -> void:
 		p.add_child(col)
 		var head := K12UI.hbox(6)
 		head.add_child(K12Plate.Avatar.make(Net.avatar(int(_v["players"][s].get("steam_id", 0))), _v["players"][s]["name"]))
+		var turn_now: bool = phase == "bid" and _v["turn"] == s
 		var nm := PlayerTag.make_seat(_v["players"], s, _me, 16, K12UI.GOLD if s == _me else K12UI.CREAM, "  (вы)" if s == _me else "", false)
-		nm.clip_text = true
-		nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		# короткий ник не растягиваем на всю табличку — зелёный ореол ходящего ляжет вокруг самого ника
+		var avail := _plate_rect(s).size.x - 36.0 - 6.0 - 20.0
+		nm.clip_text = false
+		var fits := nm.get_combined_minimum_size().x <= avail
+		nm.clip_text = not fits
+		nm.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN if fits else Control.SIZE_EXPAND_FILL
+		nm.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		head.add_child(nm)
+		TurnNameGlow.apply(nm, turn_now)
 		col.add_child(head)
 		var dice_row := K12UI.hbox(2)
 		for i in int(_v["counts"][s]):
@@ -361,8 +390,14 @@ func _update_plates() -> void:
 			st = "бот · " + st if st != "" else "бот"
 		col.add_child(K12UI.label(st, K12UI.CAP, color))
 		p.modulate = Color(1, 1, 1, 0.45) if _v["counts"][s] == 0 else Color.WHITE
-		var turn_now: bool = phase == "bid" and _v["turn"] == s
-		p.add_theme_stylebox_override("panel", K12UI.box(Color(0.12, 0.08, 0.03, 0.92) if turn_now else Color(0.07, 0.05, 0.03, 0.88), 6, K12UI.GOLD if turn_now else Color.TRANSPARENT, 2 if turn_now else 0))
+		# место ходящего: тёплая заливка, толстая золотая рамка и пульсирующее золотое свечение (_process);
+		# поля внутри те же, что у остальных, — раскладка не прыгает
+		var sb := K12UI.box(Color(0.16, 0.105, 0.035, 0.95) if turn_now else Color(0.07, 0.05, 0.03, 0.88), 6, K12UI.GOLD if turn_now else Color(K12UI.GOLD, 0.0), 3)
+		if turn_now:
+			sb.shadow_color = Color(K12UI.GOLD, 0.5)
+			sb.shadow_size = 12
+			_turn_sb = sb
+		p.add_theme_stylebox_override("panel", sb)
 
 
 ## Ставка в центре: «Имя: N × [кость]», и история ставок раунда.
@@ -527,10 +562,16 @@ func _update_panel() -> void:
 
 func _start_reveal() -> void:
 	_revealing = true
-	_revealed_round = int(_v["round_no"])
+	_revealed_key = str([_v.get("game_id", ""), _v["round_no"]])
+	_reveal_t0 = Time.get_ticks_msec()
+	_result_shown = false
+	if _reveal_tween and _reveal_tween.is_valid():
+		_reveal_tween.kill()
 	_bid_box.visible = false  # во время вскрытия ставка — в надписи по центру
 	_history.visible = false
 	var rv: Dictionary = _v["reveal"]
+	for cup in _cups:
+		(cup as PerudoCup).turn_glow = false
 	_update_plates()
 	_update_center()
 	K12UI.clear(_panel)
@@ -575,15 +616,21 @@ func _reveal_show_dice() -> void:
 	Sfx.play("die_shake", -4)
 	for s in _n:
 		if rv["dice"][s].size() > 0:
-			_cups[s].lift(true)
 			var row: HBoxContainer = _rows[s]
 			K12UI.clear(row)
 			for d in rv["dice"][s]:
 				row.add_child(PerudoDie.new(d, 30 if s != _me else 34, _seat_color(s)))
 	_layout()
+	# стаканы поднимаем после раскладки — иначе _layout сразу ставит их наверх и подъёма не видно
+	for s in _n:
+		if rv["dice"][s].size() > 0:
+			_cups[s].lift(true)
 
 
 func _reveal_result() -> void:
+	if _result_shown:
+		return  # пропуск кликом после итога — без второй улетающей кости и звуков
+	_result_shown = true
 	var rv: Dictionary = _v["reveal"]
 	var bid: Dictionary = rv["bid"]
 	var ok: bool = rv["count"] >= bid["q"]
@@ -662,6 +709,11 @@ func _update_panel_reveal_done() -> void:
 
 
 func _process(_d: float) -> void:
+	if _turn_sb:
+		# свечение места ходящего «дышит» — видно краем глаза, размеры таблички не меняются
+		var k := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 300.0)
+		_turn_sb.shadow_size = 8 + int(k * 10.0)
+		_turn_sb.shadow_color = Color(K12UI.GOLD, 0.35 + 0.3 * k)
 	if is_instance_valid(_roll_label) and _me < _cups.size():
 		var cup: PerudoCup = _cups[_me]
 		var ready := cup.is_holding() and Time.get_ticks_msec() - cup.hold_ms >= 1000
@@ -671,9 +723,21 @@ func _process(_d: float) -> void:
 
 
 func _input(event: InputEvent) -> void:
+	# Пропуск вскрытия кликом — только осознанный: не в первые секунды (иначе второй клик
+	# «Дудо!»/«Калзак!» или случайный клик по столу съедал весь подсчёт) и не двойным кликом.
 	if _revealing and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-		if _reveal_tween:
-			_reveal_tween.kill()
+		if event.double_click or Time.get_ticks_msec() - _reveal_t0 < REVEAL_SKIP_GRACE_MS:
+			return
+		_skip_reveal()
+
+
+## Сразу к итогу вскрытия: все кости подняты, совпавшие подсвечены, счёт полный.
+func _skip_reveal() -> void:
+	if not _revealing:
+		return
+	if _reveal_tween:
+		_reveal_tween.kill()
+	if not _result_shown:
 		_reveal_show_dice()
 		var rv: Dictionary = _v["reveal"]
 		for s in _n:
@@ -682,7 +746,7 @@ func _input(event: InputEvent) -> void:
 				if idx < row.get_child_count():
 					(row.get_child(idx) as PerudoDie).highlight = Color(K12UI.GOLD, 0.95)
 		_reveal_result()
-		_finish_reveal()
+	_finish_reveal()
 
 
 func _show_banner(text: String, color: Color) -> void:
@@ -841,6 +905,13 @@ func _seat_color(seat: int) -> Color:
 	if seat < 0 or seat >= players.size():
 		return PerudoCup.seat_color(seat)
 	return Net.color_of(int(players[seat].get("color", 0)))
+
+
+## Чей ход сейчас (только в фазе ставок), иначе -1.
+func _turn_seat() -> int:
+	if _v.is_empty() or _v.get("phase", "") != "bid":
+		return -1
+	return int(_v.get("turn", -1))
 
 
 ## Права действий отделены от очереди хода: calza разрешена вне очереди, ставки/дудо — нет.

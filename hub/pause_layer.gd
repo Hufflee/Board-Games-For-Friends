@@ -386,9 +386,9 @@ func _seat(peer: int, seat: int) -> void:
 ## Зритель не нажимает игровые кнопки (хост всё равно не примет его действия) — пропускаем только
 ## «служебные»: правила, настройки, выход, чат, окна подтверждения и управление видом.
 func _input(event: InputEvent) -> void:
-	# Escape проходит в GUI/модальное окно и только затем в TopBar.
+	# Escape и Tab проходят в GUI/модальное окно и только затем в TopBar.
 	# Остальные клавиши без разрешённого фокуса по-прежнему блокируются паузой.
-	if event is InputEventKey and event.keycode == KEY_ESCAPE and get_tree().get_first_node_in_group("top_bar") != null:
+	if event is InputEventKey and event.keycode in [KEY_ESCAPE, KEY_TAB] and get_tree().get_first_node_in_group("top_bar") != null:
 		return
 	if _is_paused() and (event is InputEventMouse or event is InputEventKey):
 		var target := _root.get_viewport().gui_get_focus_owner() if event is InputEventKey else _root.get_viewport().gui_get_hovered_control()
@@ -410,6 +410,10 @@ func _pause_allowed(control: Control) -> bool:
 	var scene := get_tree().current_scene
 	while node != null and node != scene:
 		if node == _root or node == _fidget or node is TopBar or node is K12ChatPanel:
+			return true
+		# служебные окна поверх всего (приглашение в Steam, панель хоста) живут в своих CanvasLayer
+		# вне сцены игры: раньше на паузе они не получали ни клики, ни прокрутку
+		if (node is CanvasLayer and node.get_parent() == get_tree().root) or node.is_in_group("pause_allowed"):
 			return true
 		if node is Control and node.get_parent() == scene and (node as Control).z_index >= 100:
 			return true

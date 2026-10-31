@@ -313,6 +313,7 @@ func _update_side() -> void:
 			var nm := PlayerTag.make_seat(_v["players"], s, _me, 14, HCStyle.INK if st else HCStyle.MUTED, (" ✎" if st else "") + (" (вы)" if s == _me and not _hotseat() else ""))
 			nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			nm.clip_text = true
+			TurnNameGlow.apply(nm, st)
 			row.add_child(nm)
 			if _solo():
 				row.add_child(HCStyle.label(str(_v["scores"][s]), HCStyle.BODY, HCStyle.INK, HORIZONTAL_ALIGNMENT_RIGHT, "title"))
