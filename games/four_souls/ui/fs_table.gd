@@ -18,29 +18,11 @@ var _play_zone: PanelContainer
 var _play_note: Label
 var _drag_entry: Dictionary = {}
 static var _hand_orders: Dictionary = {}
-const EXTRA_OPS := [
-	["expand_monsters", "Расширить ячейки монстров"],
-	["destroy_soul", "Уничтожить карту души по индексу"],
-	["pay_coins", "Заплатить монеты за способность (с учётом скидки)"],
-	["deactivate", "Деактивировать предмет"],
-	["item_to_soul", "Превратить невечный предмет в душу"],
-	["give_loot", "Передать свою карту лута выбранному игроку"],
-	["discard_loot", "Сбросить свою карту лута"],
-	["expand_shop", "Расширить магазин"],
-	["temporary_monster_dc", "Защита монстра до конца хода ±"],
-	["set_roll", "Установить результат ожидающего броска"],
-	["reveal_hand", "Посмотреть руку выбранного игрока"],
-	["swap_items", "Обменяться невечными предметами"],
-	["discard_monster", "Сбросить неатакуемого сейчас монстра"],
-	["discard_shop", "Сбросить и заменить предмет магазина"],
-	["extra_turn", "Дополнительный ход выбранному игроку"],
-	["self_underdeck", "Эту карту лута — под низ колоды"],
-	["give_item", "Передать свой предмет выбранному игроку"],
-	["peek_hand", "Посмотреть руку выбранного игрока"],
-	["peek_hands", "Посмотреть руки всех игроков"],
-	["prevent_damage", "Предотвратить следующий урон в этом ходу"]
-]
-const OPS := [["coins","Монеты ±"],["loot","Взять лут"],["treasure","Получить сокровища"],["damage","Нанести урон игроку"],["heal","Восстановить здоровье"],["souls","Души ±"],["steal_soul","Украсть карту души"],["attach_curse","Передать проклятие"],["attack","Сила атаки ±"],["temporary_attack","Атака до конца хода ±"],["extra_attack","Дополнительные атаки"],["extra_buy","Дополнительные покупки"],["extra_loot","Дополнительный розыгрыш лута"],["max_hp","Максимум здоровья ±"],["roll","Изменить бросок ±"],["reroll","Перебросить кубик"],["cancel","Отменить карту в стеке"],["cancel_attack","Отменить атаку"],["prevent_death","Предотвратить смерть"],["destroy","Уничтожить предмет"],["steal","Украсть предмет"],["recharge","Перезарядить предмет"],["ready_character","Перезарядить персонажа"],["counter","Счётчики предмета ±"],["monster_damage","Урон монстру"],["monster_hp","Здоровье монстра ±"],["peek_loot","Посмотреть верх лута"],["peek_treasure","Посмотреть верх сокровищ"],["peek_monster","Посмотреть верх монстров"]]
+## Операции панели эффекта — общий список с сервером (fs_ops.gd): [op, подпись, поля].
+const Ops := preload("res://games/four_souls/logic/fs_ops.gd")
+const Support := preload("res://games/four_souls/logic/fs_support.gd")
+const OPS: Array = Ops.MAIN
+const EXTRA_OPS: Array = Ops.EXTRA
 func _ready() -> void:
 	add_child(FSStyle.Backdrop.new())
 	_top = TopBar.make(
@@ -144,8 +126,9 @@ func _throw_die(_velocity: Vector2) -> void:
 func _send(kind: String, arg = null) -> void:
 	if is_instance_valid(_popup): _popup.queue_free(); _popup = null
 	Net.send_action(kind,arg)
-func _note(parent: Control,text: String, size_value: int = FSStyle.CAP) -> void:
+func _note(parent: Control,text: String, size_value: int = FSStyle.CAP) -> Label:
 	var label := FSStyle.label(text,size_value); label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; parent.add_child(label)
+	return label
 func _button(parent: Control,text: String,kind: String,arg = null,primary: bool = false) -> Button:
 	var b := FSStyle.primary(text) if primary else FSStyle.button(text,FSStyle.CAP)
 	b.pressed.connect(func(): _send(kind,arg)); parent.add_child(b); return b
@@ -730,6 +713,10 @@ func _effect_controls(col: Control) -> void:
 	if _v.resolving.has("reroll_request"):
 		_note(col, "Вы управляете исходным броском. Перебросьте кубик мышью; затем эффект вернётся владельцу карты.")
 		return
+	# Что движок делает сам, а что — руками (card_support.json).
+	var support_status := Support.status(int(_v.resolving.card))
+	if support_status != "auto":
+		_note(col, ("Частично автоматически. " if support_status == "partial" else "Вручную. ") + Support.hint(int(_v.resolving.card)))
 	if _v.resolving.kind == "monster_trigger":
 		_note(col, "Выполните условие по тексту монстра вручную. Уже учтённые ауры и боевые эффекты повторять не нужно.")
 	var target := OptionButton.new()
@@ -747,16 +734,25 @@ func _effect_controls(col: Control) -> void:
 		_note(col,"Это проклятие: выберите игрока, передайте ему карту и завершите эффект.")
 	col.add_child(op)
 	var amount := SpinBox.new(); amount.min_value = -99; amount.max_value = 99; amount.value = 1; col.add_child(amount)
-	_note(col,"Номер предмета / монстра / карты руки / души слева направо; передача — свой предмет")
+	var index_note := _note(col, "")
 	var index := SpinBox.new(); index.min_value = 1; index.max_value = 99; index.value = 1; col.add_child(index)
 	var other_index := SpinBox.new()
 	other_index.min_value = 1
 	other_index.max_value = 99
 	other_index.value = 1
 	other_index.tooltip_text = "Номер предмета выбранного игрока при обмене"
-	other_index.visible = false
 	col.add_child(other_index)
-	op.item_selected.connect(func(selected: int): other_index.visible = operations[selected][0] == "swap_items")
+	# Поля операции — из общего описания fs_ops.gd: лишние скрыты.
+	var show_fields := func(selected: int) -> void:
+		var fields: Dictionary = operations[selected][2]
+		target.visible = bool(fields.get("target", false))
+		amount.visible = bool(fields.get("amount", false))
+		index.visible = fields.has("item")
+		index_note.visible = fields.has("item")
+		index_note.text = "Номер %s слева направо" % str(fields.get("item", ""))
+		other_index.visible = bool(fields.get("other", false))
+	op.item_selected.connect(show_fields)
+	show_fields.call(maxi(0, op.selected))
 	var apply := FSStyle.button("Применить",FSStyle.CAP)
 	apply.pressed.connect(func(): _send("effect",{"target":target.selected,"op":operations[op.selected][0],"amount":int(amount.value),"item":int(index.value)-1,"other_item":int(other_index.value)-1})); col.add_child(apply)
 	var needs_roll: bool = bool(_v.resolving.get("requires_reward_roll", false)) and not _v.resolving.has("reward_roll")

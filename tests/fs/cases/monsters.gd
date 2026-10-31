@@ -1,0 +1,32 @@
+extends RefCounted
+## Монстры и награды: ранее исправленные находки аудита 25–26.10 в виде кейсов.
+
+const CASES := [
+	{"name": "Тряпочник: 6 на броске награды → наверх колоды, добор сразу выкладывает его снова", "card": 358,
+	 "setup": {"current": 0, "monsters": {0: [358, {"hp": 1, "dc": 1}]}},
+	 "do": [["roll", 6], ["ok", 0, "attack", {"slot": 0}], ["ok", 0, "roll"], ["close"], ["expect", "phase", "effect"],
+		["no", 0, "effect_done"], ["roll", 6], ["ok", 0, "effect_roll"], ["ok", 0, "effect_roll"], ["ok", 0, "effect_done"]],
+	 "expect": {"zone.358": "monster:1", "monsters.1.hp": 2}},
+	{"name": "Тряпочник: 3 на броске награды → в сброс", "card": 358,
+	 "setup": {"current": 0, "monsters": {0: [358, {"hp": 1, "dc": 1}]}},
+	 "do": [["roll", 6], ["ok", 0, "attack", {"slot": 0}], ["ok", 0, "roll"], ["close"],
+		["roll", 3], ["ok", 0, "effect_roll"], ["ok", 0, "effect_roll"], ["ok", 0, "effect_done"]],
+	 "expect": {"zone.358": "discard:monster"}},
+	{"name": "Гордыня: атака открывает выбор цели сброса", "card": 396,
+	 "setup": {"current": 0, "monsters": {0: 396}},
+	 "do": [["ok", 0, "attack", {"slot": 0}], ["close"]],
+	 "expect": {"phase": "discard_target"}},
+	{"name": "Проклятая опухоль: четвёрка ранит всех", "card": 376,
+	 "setup": {"current": 0, "character": {0: 821, 1: 821}, "monsters": {0: [344, {"dc": 1, "hp": 3}], 1: 376}},
+	 "do": [["roll", 4], ["ok", 0, "attack", {"slot": 0}], ["ok", 0, "roll"], ["close"]],
+	 "expect": {"hp.0": 1, "hp.1": 1, "monsters.0.hp": 2}},
+	{"name": "Проклятие маленьких рук: в конце хода рука до 2", "card": 729,
+	 "setup": {"current": 0, "hand": {0: [478, 479, 480, 481]}, "curses": {0: [729]}},
+	 "do": [["ok", 0, "end"], ["close"]],
+	 "expect": {"phase": "discard", "_discard_limit": 2}},
+	{"name": "Босс: «+души» забирает карту награды в души", "card": 344,
+	 "setup": {"current": 0, "monsters": {0: [344, {"hp": 1, "dc": 1}]}},
+	 "do": [["roll", 6], ["ok", 0, "attack", {"slot": 0}], ["ok", 0, "roll"], ["close"],
+		["effect", 0, "souls", {"amount": 1}], ["no", 0, "effect", {"op": "souls", "amount": 1}], ["ok", 0, "effect_done"]],
+	 "expect": {"souls.0": 1, "zone.344": "soul:0"}},
+]

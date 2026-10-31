@@ -6,7 +6,7 @@ from collections import Counter
 import json
 
 ROOT = Path(__file__).resolve().parents[1]
-DOCS = ROOT / "docs"
+DOCS = ROOT / "docs" / "fs_archive"
 BUILD = ROOT / "build/fs_passive_audit"
 
 

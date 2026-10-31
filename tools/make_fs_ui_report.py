@@ -100,6 +100,6 @@ elif args.run != "resumed26":
                 verifications.append("- " + str(finding["id"]) + ": " + finding.get("verification", "см. REVIEW_QUEUE.md"))
         if verifications:
             text += "\nИсправлено после прогона; исторические результаты строк не изменены:\n\n" + "\n".join(verifications) + "\n"
-target = ROOT / "docs" / args.output
+target = ROOT / "docs" / "fs_archive" / args.output
 target.write_text(text, encoding="utf-8")
 print(target, "rows", len(rows), "passed", passed, "finished", finished)

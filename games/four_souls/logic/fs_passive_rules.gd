@@ -52,7 +52,11 @@ const EVENTS := ["coins", "attack_roll", "roll", "monster_death", "turn_end", "d
 ## Защита относится к монстрам в ход владельца; бросок и промах — к самому владельцу.
 const ATTACK_MODIFIERS := {
 	34: {"monster_evasion": -1, "miss_faces": [1, 6]},
-	36: {"roll_bonus": 1, "ordinals": [1, 3, 5]}
+	36: {"roll_bonus": 1, "ordinals": [1, 3, 5]},
+	118: {"monster_evasion": 1},
+	127: {"monster_evasion": 1},
+	143: {"monster_evasion": 1},
+	194: {"monster_evasion": 1}
 }
 
 static func attack_modifiers(entries: Array, ordinal: int) -> Dictionary:
@@ -76,7 +80,8 @@ static func attack_hits(value: int, evasion: int, modifiers: Dictionary) -> bool
 
 static func monster_evasion(base: int, entries: Array) -> int:
 	var modifiers: Dictionary = attack_modifiers(entries, 0)
-	return clampi(base + int(modifiers.monster_evasion), 1, 6)
+	# Броски ограничены 1–6, защита — только снизу: защиту 7+ без модификатора броска не пробить.
+	return maxi(1, base + int(modifiers.monster_evasion))
 
 ## Неизвестное или некорректное условие закрывает привязку, а не расширяет её.
 static func matches(binding: Dictionary, owner: int, current: int, event: String, data: Dictionary) -> bool:

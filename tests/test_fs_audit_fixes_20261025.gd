@@ -57,9 +57,10 @@ func _run() -> void:
 	effect(g, "extra_turn", recipient, 2)
 	g.action(owner, "effect_done")
 	check(g.current == recipient, "Ручной дополнительный ход может принадлежать другому игроку")
-	g.action(recipient, "end")
+	# 31.10: после lifecycle 27.10 пассивы конца хода идут через окно ответов — закрываем его.
+	g.action(recipient, "end"); g._finish_responses()
 	check(g.current == recipient, "Два дополнительных хода выполняются подряд")
-	g.action(recipient, "end")
+	g.action(recipient, "end"); g._finish_responses()
 	check(g.current == (owner + 1) % 3, "После чужих дополнительных ходов сохранено место обычной очереди")
 
 	g = make()
@@ -156,11 +157,11 @@ func _run() -> void:
 	g.items[owner].append(item(849, true))
 	g.items[owner][2].tapped = true
 	var hand_before: int = g.hands[owner].size()
-	g.action(owner, "end")
+	g.action(owner, "end"); g._finish_responses()
 	check(g.phase == "discard" and g.get_view(owner).discard_limit == hand_before - 1, "Хвост требует сброс даже при руке меньше десяти")
 	g.action(owner, "discard", {"card": g.hands[owner][0]})
 	check(g.current != owner and not g.items[owner][2].tapped, "Сброс завершает ход и перезаряжает Святой покров")
-	g.action(g.current, "end")
+	g.action(g.current, "end"); g._finish_responses()
 	check(g.hands[owner].size() == hand_before + 1, "После сброса Хвост даёт два лута в начале нового хода")
 
 	g = make()
@@ -199,7 +200,8 @@ func _test_death_response(mantle: bool) -> void:
 	if mantle:
 		check(g.current != owner and g.battle == -1 and g.stack.is_empty(), "Святой покров отменяет неразрешённое и завершает ход")
 	else:
-		check(g.current == owner and g.phase == "priority", "Обычное лечение сохраняет бой и отложенный бросок")
+		# 31.10: подтверждённая смерть снимает бой (решение coal_battle_end 26.10); спасённый не платит штраф.
+		check(g.current == owner and g.battle == -1 and g.phase == "turn", "Обычное лечение спасает, бой уже снят подтверждённой смертью")
 
 func _test_manual_monster() -> void:
 	var g := make()

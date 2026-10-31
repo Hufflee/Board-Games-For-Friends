@@ -31,8 +31,14 @@ func _initialize() -> void:
 	check(g.roll_no == 1 and g.items[0][0].counters == 1, "Один результат броска и одно срабатывание")
 	g = pending()
 	g.stack.append({"kind": "loot", "card": 515, "owner": 0})
-	check(not g.get_view(1).effect_pending, "Чужой ручной ответ исключает быстрый возврат")
-	check(not g.action(1, "effect", {"op": "coins", "amount": 6}), "Нельзя пропустить чужой ручной ответ ради награды")
+	# 31.10 (FS_BUGS, фаззер): чужой ручной ответ не блокирует, а разрешается вложенно — иначе зависание.
+	var money_before: int = g.coins[1]
+	check(g.action(1, "effect", {"op": "coins", "amount": 6}), "Жест владельца закрывает ответы")
+	check(g.phase == "effect" and int(g.resolving.card) == 515 and int(g.resolving.owner) == 0, "Чужой ручной ответ разрешается первым, вложенно")
+	check(g.coins[1] == money_before, "Операция владельца награды не применена к чужому ответу")
+	check(g.action(0, "effect_done"), "Ответ завершён его владельцем")
+	# Урон Бомбанытика довёл ответившего до 0: сначала его смерть, затем маркер возвращает награду.
+	check(g.stack.back().kind == "death" and g.stack.any(func(e): return e.kind == "resume_effect" and int(e.previous.effect.card) == 387), "Смерть ответившего раньше, награда ждёт под маркером")
 	g = pending()
 	g.current = 0
 	g.next_action = {"seat": 0, "kind": "roll", "arg": null}

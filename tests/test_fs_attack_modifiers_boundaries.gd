@@ -19,7 +19,8 @@ func copies_and_view() -> void:
 	g = arena([34, 34], 0, 0, 1)
 	check(g._monster_evasion(g.monsters[0]) == 1 and g.get_view(0).monsters[0].dc == 1,
 		"Нижняя граница эффективной защиты1 в бою и виде")
-	check(ModifierRules.monster_evasion(8, []) == 6, "Верхняя граница эффективной защиты6")
+	# 31.10: броски ограничены 1–6, защита — только снизу (защиту 7+ без модификатора броска не пробить).
+	check(ModifierRules.monster_evasion(8, []) == 8, "Защита выше6 не обрезается")
 	g = arena([34, 34])
 	g.curses[0].append(705)
 	check(g._monster_evasion(g.monsters[0]) == 3 and g.get_view(0).monsters[0].dc == 3,

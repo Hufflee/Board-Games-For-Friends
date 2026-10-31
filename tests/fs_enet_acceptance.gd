@@ -97,6 +97,8 @@ func prepare_passive_fixture(stage: String) -> void:
 		g.paused_effects = [{"effect": {"kind": "item", "card": 165, "owner": 1},
 			"resume": "turn", "peek": {}, "roller": 1}]
 		g._after_stack = "effect"
+		# Бросок ручного эффекта всегда снимает его в paused_effects: resolving пуст (31.10, вложенные эффекты).
+		g.resolving = {}
 	elif stage == "manual_resume":
 		g.current = 1
 		g.phase = "effect"

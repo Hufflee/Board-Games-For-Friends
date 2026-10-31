@@ -45,6 +45,8 @@ godot --headless --path . --script res://tests/test_perudo.gd
 godot --headless --path . res://tools/_fuzz/compile.tscn
 # фазз-партия: env GAME, SCENE, BOTS, SPEED, MS, DARK=1, RESTART=1
 godot --path . res://tools/_fuzz/fuzz.tscn
+# Four Souls: единый раннер (группы core,cards,regress,fuzz,legacy,ui,long; --filter, --trace N, --games N)
+godot --headless --audio-driver Dummy --path . --script res://tests/fs/run.gd -- --group core,cards,regress
 ```
 Тесты — простые `extends SceneTree` с `check(cond, msg)`, без фреймворка. Правила king_of_12 — `tests/test_rules.gd`.
 - **Звук на тестах выключен.** При любых проверках (тесты, compile, фазз, скриншоты, runtime-сценарии), кроме проверок самого звука, игра не должна шуметь: запускать Godot с `--audio-driver Dummy` (headless и так без звука). Настройки звука игрока (`Prefs`) для этого не трогать.

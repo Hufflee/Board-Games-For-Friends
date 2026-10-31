@@ -216,6 +216,8 @@ try:
             check(snapshot("client")["view"]["players"][1]["hand_count"] == 2, "Хост не выбирает карту клиента для Толстяка")
             send("client", "forced_discard", {"item":1})
             wait_for(lambda: snapshot("host")["view"]["phase"] == "effect")
+            # Снимок клиента обновляется кадром позже хоста — ждём его, а не читаем сразу (31.10).
+            wait_for(lambda: snapshot("client")["view"]["phase"] == "effect")
             check(snapshot("client")["view"]["hand"] == [478], "Толстяк сохранил выбор карты и исходный эффект клиента")
 finally:
     for role, process, log in processes:

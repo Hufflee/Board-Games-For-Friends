@@ -5,6 +5,7 @@ const SimpleRules := preload("res://games/four_souls/logic/fs_passive_rules.gd")
 const ATTACK := {16: 1, 28: 1, 41: 1, 108: 1, 124: 3, 143: 2, 230: 1, 234: 1, 254: 1, 471: 1, 652: 1}
 const HEALTH := {39: 1, 79: 1, 88: 2, 112: 1, 147: 2, 174: 1, 249: 1}
 const AUTOMATIC_OPS := {
+	503: ["heal", "extra_attack"],
 	34: ["temporary_monster_dc"], 36: ["roll"],
 	18: ["attack", "temporary_attack"],
 	24: ["extra_attack"], 25: ["extra_attack"], 26: ["extra_attack"], 42: ["counter"],
@@ -54,6 +55,8 @@ static func event_ops(game: RefCounted, owner: int, item: Dictionary, event: Str
 					result.append(operation("loot", 4))
 				if next == 6:
 					result.append(operation("treasure", 2))
+			if LOOT_SEARCH.has(id):
+				result.append({"op": "loot_from_discard", "amount": 1, "keys": LOOT_SEARCH[id]})
 			if id == 90:
 				var most := 0
 				for souls: int in game.souls:
@@ -69,6 +72,10 @@ static func event_ops(game: RefCounted, owner: int, item: Dictionary, event: Str
 				result.append(operation("coins", 6))
 			if (id == 240 and game.hands[owner].size() >= 8) or (id == 250 and game.hands[owner].is_empty()) or (id == 58 and game.hands[owner].size() < int(item.counters)):
 				result.append(operation("loot", 2))
+		"monster_death":
+			if id == 503 and owner == game.current and int(data.get("seat", -1)) == owner and int(game._turn_kills) == 1:
+				result.append(operation("heal"))
+				result.append(operation("extra_attack"))
 		"damage":
 			if id == 177 and owner == int(data.seat):
 				result.append(operation("counter", int(data.amount)))
@@ -76,6 +83,42 @@ static func event_ops(game: RefCounted, owner: int, item: Dictionary, event: Str
 			if id == 137 and owner != int(data.seat):
 				result.append({"op": "give_coin", "from": int(data.seat), "amount": 1})
 	return result
+
+## Проклятия текущего игрока: обязательные срабатывания начала/конца его хода (через стек).
+const CURSE_EVENTS := {
+	707: {"turn_start": [{"op": "damage", "amount": 1}]},
+	709: {"turn_end": [{"op": "coins", "amount": -4}]},
+	724: {"turn_end": [{"op": "tap_all", "amount": 1}]},
+	708: {"turn_end": [{"op": "discard_loot", "amount": 2}]},
+}
+## «Найти карты с … в названии»: при получении — из 10 верхних карт лута, в начале хода — одну из сброса.
+const LOOT_SEARCH := {49: ["bomb", "goldbomb", "megabomb"], 67: ["pills"]}
+
+static func curse_ops(game: RefCounted, owner: int, id: int, event: String) -> Array:
+	var result: Array = CURSE_EVENTS.get(id, {}).get(event, []).duplicate(true)
+	if id == 736 and event == "turn_end":
+		var souls: int = int(game.souls[owner])
+		if souls > 0:
+			result.append({"op": "discard_loot", "amount": souls})
+			result.append(operation("coins", -souls))
+	return result
+
+## Обязательные срабатывания комнат (DLC): [[место, операции], ...].
+static func room_ops(game: RefCounted, room_id: int, event: String, data: Dictionary) -> Array:
+	var out: Array = []
+	match room_id:
+		777:
+			if event == "death":
+				for seat in game.players.size():
+					if seat != int(data.get("seat", -1)) and not game.dead[seat]:
+						out.append([seat, [operation("loot")]])
+		802:
+			if event == "turn_end":
+				out.append([game.current, [operation("tap_character")]])
+		816:
+			if event == "turn_end" and not game.bought and not game.hands[game.current].is_empty():
+				out.append([game.current, [{"op": "discard_loot", "amount": game.hands[game.current].size()}]])
+	return out
 
 static func character_health(id: int) -> int:
 	return 1 if id in [848, 866, 884] else (3 if id == 908 else 2)
