@@ -70,6 +70,7 @@ func _rebuild() -> void:
 		var privacy := PIStyle.label("Передавайте экран по очереди. Пока дух смотрит предмет, медиумы должны отвернуться.", PIStyle.CAP)
 		privacy.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_body.add_child(privacy)
+	_body.add_child(SeatShuffle.settings_row(func(t, _z): return PIStyle.button(t, PIStyle.CAP), func(t, _z): return PIStyle.label(t, PIStyle.CAP)))
 	if Net.is_host():
 		var start := PIStyle.primary("Начать сеанс")
 		start.pressed.connect(func(): _error.text = Net.start_game())

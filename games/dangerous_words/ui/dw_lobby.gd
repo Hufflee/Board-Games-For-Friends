@@ -89,6 +89,7 @@ func _rebuild() -> void:
 		free.add_child(PlayerTag.make(m, members, 15, DWStyle.MUTED, " — без команды"))
 	cols.add_child(free)
 	_body.add_child(cols)
+	_body.add_child(SeatShuffle.settings_row(func(t, _z): return DWStyle.button(t, DWStyle.CAP), func(t, _z): return DWStyle.label(t, DWStyle.BODY)))
 
 	# настройки
 	var opts := DWStyle.panel()

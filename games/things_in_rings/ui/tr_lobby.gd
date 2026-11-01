@@ -140,6 +140,7 @@ func _rebuild() -> void:
 		t.pressed.connect(func(): Net.set_setting("tr_timer", seconds))
 		extra.add_child(t)
 	body.add_child(_group("Ещё", extra))
+	body.add_child(_group("Порядок мест", SeatShuffle.settings_row(func(t, _z): return Style.button(t), func(t, _z): return Style.label(t, 16, Style.muted()))))
 	var error := Style.label("", 16, Style.muted())
 	error.visible = false
 	body.add_child(error)

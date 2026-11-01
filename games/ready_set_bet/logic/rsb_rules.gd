@@ -19,6 +19,7 @@ var props: Array = []  # 5 пари текущего забега (индекс�
 var exotics: Array = []  # открытые экзотические финиши (индексы RSBData.EXOTICS)
 
 var race_no := 0
+const MAX_TIEBREAK_RACES := 10  # доп. забеги при ничьей (номер забега > RSBData.RACES)
 var phase := "setup"
 var pos: Array = []
 var prev_horse := -1
@@ -410,8 +411,11 @@ func advance() -> void:
 		for s in players.size():
 			if money[s] == best:
 				winners.append(s)
-		phase = "game_over"
-		return
+		# Ничья по деньгам — доп. забег до единственного победителя (страховка — MAX_TIEBREAK_RACES).
+		if winners.size() == 1 or race_no >= RSBData.RACES + MAX_TIEBREAK_RACES:
+			phase = "game_over"
+			return
+		winners = []
 	for s in players.size():
 		vip_hand[s] = []
 		for k in 2:
@@ -467,6 +471,7 @@ func get_view(seat: int, show_all: bool = false) -> Dictionary:
 		"props": props.duplicate(),
 		"exotics": exotics.duplicate(),
 		"race_no": race_no,
+		"tiebreak": race_no > RSBData.RACES,
 		"phase": phase,
 		"pos": pos.duplicate(),
 		"last_roll": last_roll.duplicate(),

@@ -28,7 +28,9 @@ var side := -1  # выбранная телепатом пара
 var target := 50.0  # центр цветной зоны (0…100)
 var dial := 50.0  # стрелка
 var clue := ""
-var lr := ""  # выбор другой команды: "left" / "right"
+var lr := ""  # выбор другой команды: "left" / "right" (итог голосования)
+var lr_votes := {}  # голоса другой команды: место → "left" / "right"; итог — большинством
+var lr_order: Array = []  # места в порядке последнего голоса (при равенстве решает тот, кто проголосовал раньше)
 var phase := "setup"
 var result := {}
 var turn_no := 0
@@ -82,6 +84,8 @@ func _start_turn() -> void:
 	dial = 50.0
 	clue = ""
 	lr = ""
+	lr_votes = {}
+	lr_order = []
 	result = {}
 	phase = "card"
 
@@ -120,13 +124,50 @@ func lock_dial(seat: int) -> bool:
 		_score()
 	else:
 		phase = "side"
+		if lr_voters().is_empty():
+			force_lr()  # голосовать некому (за другую команду только боты)
 	return true
 
 
+## Голос игрока другой команды «левее/правее». Голос можно поменять, пока не проголосовали все;
+## последний голос закрывает голосование — итог большинством.
 func choose_lr(seat: int, choice: String) -> bool:
-	if phase != "side" or players[seat]["team"] == active_team or not choice in ["left", "right"]:
+	if phase != "side" or seat < 0 or seat >= players.size() or players[seat]["team"] == active_team or not choice in ["left", "right"]:
 		return false
-	lr = choice
+	lr_votes[seat] = choice
+	lr_order.erase(seat)
+	lr_order.append(seat)
+	var voters := lr_voters()
+	if voters.all(func(v: int) -> bool: return lr_votes.has(v)):
+		force_lr()
+	return true
+
+
+## Кто голосует: игроки другой команды, кроме ботов (бот — за отключившегося; ждать его нельзя).
+func lr_voters() -> Array:
+	return team_members(1 - active_team).filter(func(v: int) -> bool: return not bool(players[v].get("bot", false)))
+
+
+## Закрыть голосование по поданным голосам (все проголосовали, время вышло или один экран на всех).
+## Большинство; поровну — решает голос, поданный раньше; голосов нет — случайно.
+func force_lr() -> bool:
+	if phase != "side":
+		return false
+	var left := 0
+	var right := 0
+	for v: int in lr_votes:
+		if lr_votes[v] == "left":
+			left += 1
+		else:
+			right += 1
+	if left > right:
+		lr = "left"
+	elif right > left:
+		lr = "right"
+	elif not lr_order.is_empty():
+		lr = str(lr_votes[lr_order[0]])
+	else:
+		lr = ["left", "right"][rng.randi_range(0, 1)]
 	_score()
 	return true
 
@@ -262,6 +303,8 @@ func get_view(seat: int, show_all: bool = false) -> Dictionary:
 		"dial": dial,
 		"clue": clue,
 		"lr": lr,
+		"lr_votes": lr_votes.duplicate(),
+		"lr_voters": lr_voters() if phase == "side" else [],
 		"phase": phase,
 		"result": result.duplicate(),
 		"turn_no": turn_no,

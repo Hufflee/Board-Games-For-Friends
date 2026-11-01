@@ -9,6 +9,7 @@ var phase := "turn"
 var current := 0
 var priority := 0
 var passes := 0
+var turn_serial := 0  # номер хода с начала партии (для часов окна чужих карт)
 var next_action: Dictionary = {}
 var stats_rolls: Array = []
 var stats_risks: Array = []

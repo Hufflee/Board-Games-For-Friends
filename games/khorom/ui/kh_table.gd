@@ -180,7 +180,7 @@ func _rebuild() -> void:
 		var hint := Style.label("Один компьютер: передайте экран и нажмите своё имя.", 12, Style.muted())
 		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_left.add_child(hint)
-	_left.add_child(Style.section("Раунд %d из %d" % [int(view.round_no) + 1, int(view.total_rounds)]))
+	_left.add_child(Style.section("Доп. раунд · ничья" if bool(view.get("tiebreak", false)) else "Раунд %d из %d" % [int(view.round_no) + 1, int(view.total_rounds)]))
 	var rule := Style.label(str(KHData.KIND_HINTS.get(str(view.kind), "")), 12, Style.muted())
 	rule.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_left.add_child(rule)
@@ -271,7 +271,7 @@ func _phase_text() -> String:
 func _process(delta: float) -> void:
 	if view.is_empty():
 		return
-	var text := "Итоги партии" if str(view.phase) == "game_over" else "Раунд %d/%d · %s" % [int(view.round_no) + 1, int(view.total_rounds), view.kind_name]
+	var text := "Итоги партии" if str(view.phase) == "game_over" else ("Доп. раунд · %s" % view.kind_name if bool(view.get("tiebreak", false)) else "Раунд %d/%d · %s" % [int(view.round_no) + 1, int(view.total_rounds), view.kind_name])
 	if str(view.phase) == "write" and _time_left > 0.0:
 		_time_left = maxf(0.0, _time_left - delta)
 		text += " · %d:%02d" % [int(_time_left) / 60, int(_time_left) % 60]

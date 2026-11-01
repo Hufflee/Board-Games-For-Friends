@@ -1,0 +1,171 @@
+{
+  "format": 1,
+  "id": "проверка_ставки",
+  "game_version": 1,
+  "meta": {
+    "title": "Проверка ставки",
+    "players": [
+      2,
+      8
+    ],
+    "time": "5 минут",
+    "description": "Пример редактора",
+    "phase_titles": {
+      "setup": "Подготовка",
+      "turn": "Ход игрока",
+      "game_over": "Итоги"
+    },
+    "action_titles": {
+      "draw": "Взять карту",
+      "raise": "Поднять ставку",
+      "challenge": "Проверить",
+      "higher": "Больше",
+      "lower": "Меньше"
+    }
+  },
+  "elements": {
+    "decks": []
+  },
+  "layout": {
+    "screens": [
+      {
+        "id": "main",
+        "items": [
+          {
+            "kind": "dice_tray",
+            "id": "dice",
+            "title": "Кубики игроков"
+          }
+        ]
+      }
+    ]
+  },
+  "rules": {
+    "phases": [
+      "setup",
+      "turn"
+    ],
+    "turns": "round",
+    "vars": [
+      {
+        "id": "bid",
+        "scope": "shared",
+        "type": "number",
+        "init": 0,
+        "title": "Ставка"
+      },
+      {
+        "id": "bidder",
+        "scope": "shared",
+        "type": "number",
+        "init": 0,
+        "title": "Ставил"
+      }
+    ],
+    "chains": [
+      {
+        "event": {
+          "type": "start"
+        },
+        "blocks": [
+          {
+            "op": "each_player",
+            "body": [
+              {
+                "op": "roll",
+                "count": 2,
+                "visible": "owner"
+              }
+            ]
+          },
+          {
+            "op": "phase",
+            "phase": "turn"
+          }
+        ]
+      },
+      {
+        "event": {
+          "type": "button",
+          "id": "raise",
+          "phase": "turn",
+          "by": "current"
+        },
+        "blocks": [
+          {
+            "op": "set",
+            "var": "bidder",
+            "value": {
+              "op": "actor"
+            }
+          },
+          {
+            "op": "change",
+            "var": "bid",
+            "value": 1
+          },
+          {
+            "op": "next"
+          }
+        ],
+        "guard": {
+          "op": "lt",
+          "a": {
+            "op": "var",
+            "id": "bid"
+          },
+          "b": 12
+        }
+      },
+      {
+        "event": {
+          "type": "button",
+          "id": "challenge",
+          "phase": "turn",
+          "by": "current"
+        },
+        "blocks": [
+          {
+            "op": "if",
+            "condition": {
+              "op": "lt",
+              "a": {
+                "op": "dice_count",
+                "face": 3
+              },
+              "b": {
+                "op": "var",
+                "id": "bid"
+              }
+            },
+            "then": [
+              {
+                "op": "win",
+                "player": {
+                  "op": "actor"
+                }
+              }
+            ],
+            "else": [
+              {
+                "op": "win",
+                "player": {
+                  "op": "var",
+                  "id": "bidder"
+                }
+              }
+            ]
+          }
+        ],
+        "guard": {
+          "op": "gt",
+          "a": {
+            "op": "var",
+            "id": "bid"
+          },
+          "b": 0
+        }
+      }
+    ]
+  }
+}

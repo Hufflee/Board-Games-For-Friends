@@ -2,6 +2,8 @@ extends RefCounted
 ## Преобразование публичных итогов всех игр в места победителей. Без изменения правил и Net.
 
 static func resolve(game: String, view: Dictionary) -> Dictionary:
+	if game.begins_with("custom:"):
+		game = "cg"
 	var result := {"finished": false, "winners": [], "others": [], "title": "Партия завершена", "team": false, "leader": -1, "summary": ""}
 	if str(view.get("phase", "")) != "game_over":
 		return result
@@ -10,13 +12,15 @@ static func resolve(game: String, view: Dictionary) -> Dictionary:
 	var winners: Array = []
 	var teams: Array = []
 	match game:
-		"the_gang", "tip_top", "tip_top_18":
+		"the_mind", "the_gang", "tip_top", "tip_top_18":
 			result.team = true
 			if bool(view.get("won", false)):
 				winners = range(players.size())
 			else:
 				result.title = "Попробуем ещё раз!"
-			if game == "the_gang":
+			if game == "the_mind":
+				result.summary = "Уровень %d / %d · жизней: %d" % [int(view.get("level", 1)), int(view.get("target", 12)), int(view.get("lives", 0))]
+			elif game == "the_gang":
 				result.summary = "Сейфов вскрыто: %d из 3 · тревог: %d из 3" % [int(view.get("vaults", 0)), int(view.get("alarms", 0))]
 			else:
 				result.summary = "Единорогов осталось: %d · какашек: %d" % [int(view.get("unicorns", 0)), int(view.get("poops", 0))]
@@ -71,7 +75,7 @@ static func resolve(game: String, view: Dictionary) -> Dictionary:
 				result.summary = "Победные очки: %d из %d" % [int(scores[best]), int(view.get("target", 0))]
 			elif best >= 0 and best < profits.size():
 				result.summary = "Итог: %+d фишек" % int(profits[best])
-		"gloom", "gloomier", "not_a_hat", "ready_set_bet", "hues_and_cues", "khorom":
+		"cg", "gloom", "gloomier", "not_a_hat", "ready_set_bet", "hues_and_cues", "khorom":
 			winners = view.get("winners", []).duplicate()
 			result.team = game == "hues_and_cues" and bool(view.get("coop", false))
 			if result.team:
@@ -92,6 +96,6 @@ static func resolve(game: String, view: Dictionary) -> Dictionary:
 			result.others.append(seat)
 	if not result.winners.is_empty():
 		result.title = "Командная победа!" if result.team else "Победа!" if result.winners.size() == 1 else "Общая победа!"
-	elif not bool(view.get("coop", false)) and not game in ["the_gang", "tip_top", "tip_top_18"]:
+	elif not bool(view.get("coop", false)) and not game in ["the_mind", "the_gang", "tip_top", "tip_top_18"]:
 		result.title = "Партия завершена · без победителя"
 	return result

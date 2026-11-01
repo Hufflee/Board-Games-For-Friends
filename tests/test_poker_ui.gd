@@ -1,6 +1,6 @@
 extends SceneTree
 ## «Покер»: интерфейс на 1280×720 с ботами. Лобби, мой ход (панель ставки: поле, ползунок, 2×/3×/4×),
-## гора фишек от крупной ставки, вскрытие, итоги спортивной сессии. Кадры — build/shots/poker_*.png.
+## гора фишек от крупной ставки, премувы в чужой ход, вскрытие, итоги спортивной сессии с бонусом «все фишки». Кадры — build/shots/poker_*.png.
 ## Запуск: godot --path . --audio-driver Dummy --script res://tests/test_poker_ui.gd   (PK_THEME=light|dark)
 var checks := 0
 var errors := 0
@@ -65,6 +65,7 @@ func _run() -> void:
 	current_scene = app
 	await settle(10)
 	check(app.screen.find_child("LobbyPanel", true, false) != null, "лобби открыто")
+	check(app.screen.find_child("TargetAuto", true, false) != null and app.screen.find_child("OpenCards", true, false) != null, "в лобби — цель очков и «Открытые карты»")
 	await shot("lobby")
 	print("START: ", net.start_game())
 	await settle(10)
@@ -98,6 +99,30 @@ func _run() -> void:
 	net.pkr.bets[2] = 0
 	net.pkr.stacks[2] += 150
 	net.pkr.totals[2] -= 150
+	net._push_state()
+	await settle(2)
+	# премув в чужой ход: «Колл любую» — сработает сам, когда дойдёт ход
+	if net.pkr.phase == "hand" and net.pkr.to_act != 0 and not net.pkr.folded[0]:
+		var pre: Button = find("Pre_call")
+		check(pre != null and find("Pre_check_fold") != null, "премувы видны в чужой ход")
+		if pre != null:
+			pre.pressed.emit()
+			await settle(2)
+			check((find("Pre_call") as Button).button_pressed, "премув отмечен")
+			await shot("premove")
+			var me_name := str(net.pkr.players[0].name)
+			var log_from: int = net.pkr.log.size()
+			var acted := false
+			for _i: int in 400:
+				for line: String in net.pkr.log.slice(log_from):
+					if line.begins_with(me_name + ": колл") or line.begins_with(me_name + ": чек"):
+						acted = true
+				if acted or net.pkr.phase != "hand" or net.pkr.folded[0]:
+					break
+				net.pkr.tick(0.5)
+				net._push_state()
+				await process_frame
+			check(acted or net.pkr.phase != "hand", "премув сработал в свой ход (журнал: %s)" % str(net.pkr.log.slice(-3)))
 	# вскрытие: доигрываем раздачу ботами до showdown
 	for _i: int in 400:
 		if net.pkr.phase == "showdown":
@@ -111,12 +136,19 @@ func _run() -> void:
 	check(net.pkr.phase == "showdown", "раздача закончилась")
 	await shot("showdown")
 	# итоги сессии
-	net.pkr.hand_no = 14
+	net.pkr.hand_no = 12
+	# все фишки у меня — бонус +1 в итогах сессии
+	var all_chips := 0
+	for seat: int in net.pkr.players.size():
+		all_chips += int(net.pkr.stacks[seat])
+		net.pkr.stacks[seat] = 0
+	net.pkr.stacks[0] = all_chips
 	net.pkr.time_left = 0.0
 	net.pkr.tick(0.1)
 	net._push_state()
 	await settle(6)
-	check(net.pkr.phase == "session_end", "после 14-й раздачи — итоги сессии")
+	check(net.pkr.phase == "session_end", "после 12-й раздачи — итоги сессии")
+	check(find("Bonus0") != null, "в итогах — отметка бонуса «все фишки»")
 	check(find("SessionOverlay") != null and (find("SessionOverlay") as Control).visible, "окно итогов сессии")
 	await shot("session")
 	print("ИТОГ: проверок %d, ошибок %d" % [checks, errors])

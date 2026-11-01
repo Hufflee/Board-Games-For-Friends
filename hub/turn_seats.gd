@@ -139,6 +139,17 @@ static func acting(game: String, view: Dictionary) -> Array:
 		"stillion":
 			if phase == "fuse":
 				out = _seat(view.get("target", -1))
+		"the_mind":
+			var members: Array = view.get("players", [])
+			var ready: Array = view.get("ready", [])
+			var votes: Array = view.get("votes", [])
+			for s in members.size():
+				if phase == "play" and int(members[s].get("count", 0)) > 0:
+					out.append(s)
+				elif phase == "focus" and s < ready.size() and not bool(ready[s]):
+					out.append(s)
+				elif phase == "vote" and s < votes.size() and not bool(votes[s]):
+					out.append(s)
 		"the_gang":
 			if phase == "rank":
 				var chips: Array = view.get("chips", [])

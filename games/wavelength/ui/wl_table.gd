@@ -138,8 +138,9 @@ func _update_info() -> void:
 		return
 	var who := ""
 	if _v.has("psychic") and not _v.get("coop", false):
-		who = TEAM_NAMES[int(_v.get("active_team", 0))]
-	var names := {"card": "выбор карточки", "clue": "подсказка", "guess": "угадывание", "reveal": "итог"}
+		# в фазе «левее/правее» голосует другая команда — её и называем
+		who = TEAM_NAMES[int(_v.get("active_team", 0)) if ph != "side" else 1 - int(_v.get("active_team", 0))]
+	var names := {"card": "выбор карточки", "clue": "подсказка", "guess": "угадывание", "side": "левее или правее?", "reveal": "итог"}
 	var p: String = names.get(ph, ph)
 	_top.info.text = ("%s: %s" % [who.get_slice(" ", 0), p]) if who != "" else p.capitalize()
 
@@ -376,17 +377,25 @@ func _update_panel() -> void:
 		"side":
 			if _am_other():
 				col.add_child(_hint("Команда «%s»: центр зоны левее или правее стрелки? Верно — +1 очко." % _team_name(1 - int(_v["active_team"]))))
+				# голосование: каждый в команде голосует, итог — большинством (поровну — кто раньше)
+				var votes: Dictionary = _v.get("lr_votes", {})
+				var mine := str(votes.get(_me, votes.get(str(_me), "")))
 				var row := HCStyle.hbox(14)
 				row.alignment = BoxContainer.ALIGNMENT_CENTER
-				var left := HCStyle.button("← Левее", HCStyle.BODY, 180)
-				left.pressed.connect(func(): Net.send_action("wl_lr", "left"))
-				row.add_child(left)
-				var right := HCStyle.button("Правее →", HCStyle.BODY, 180)
-				right.pressed.connect(func(): Net.send_action("wl_lr", "right"))
-				row.add_child(right)
+				for choice: Array in [["left", "← Левее"], ["right", "Правее →"]]:
+					var b := HCStyle.button("%s · %d" % [choice[1], _lr_count(choice[0])], HCStyle.BODY, 180)
+					b.name = "Vote_" + str(choice[0])
+					UISel.pick(b, mine == choice[0])
+					b.tooltip_text = "Ваш голос — можно передумать, пока голосуют остальные"
+					b.pressed.connect(func():
+						Sfx.play("chip")
+						Net.send_action("wl_lr", choice[0]))
+					row.add_child(b)
 				col.add_child(row)
+				if not _hotseat():
+					col.add_child(_hint(_lr_waiting()))
 			else:
-				col.add_child(_hint("Другая команда угадывает: левее или правее…"))
+				col.add_child(_hint("Команда «%s» голосует: левее или правее… %s" % [_team_name(1 - int(_v["active_team"])), _lr_waiting()]))
 		"reveal":
 			col.add_child(_hint(_result_text()))
 			var row := HCStyle.hbox(10)
@@ -421,6 +430,26 @@ func _update_panel() -> void:
 				LeaveGuard.wire(leave, "Покинуть пати?", "Вы выйдете из игры и из пати.", func(): app.leave_party())
 				row.add_child(leave)
 			col.add_child(row)
+
+
+## Сколько голосов за «левее»/«правее».
+func _lr_count(choice: String) -> int:
+	var n := 0
+	for v in _v.get("lr_votes", {}).values():
+		if str(v) == choice:
+			n += 1
+	return n
+
+
+## «Проголосовали 2 из 3 · ждём: Маша» — кто ещё не выбрал.
+func _lr_waiting() -> String:
+	var votes: Dictionary = _v.get("lr_votes", {})
+	var voters: Array = _v.get("lr_voters", [])
+	var left := PackedStringArray()
+	for seat in voters:
+		if not votes.has(int(seat)) and not votes.has(str(seat)):
+			left.append(str(_v["players"][int(seat)]["name"]))
+	return "Проголосовали %d из %d%s" % [voters.size() - left.size(), voters.size(), " · ждём: " + ", ".join(left) if not left.is_empty() else ""]
 
 
 func _team_name(t: int) -> String:

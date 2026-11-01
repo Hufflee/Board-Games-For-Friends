@@ -4,9 +4,59 @@ extends "res://games/four_souls/logic/fs_effects.gd"
 ## стек, бой, смерть и ресурсы; текст сложной карты выполняют люди через открытый журнал.
 ## Фасад: action()/get_view()/clone()/legal_actions(). Цепочка модулей (снизу вверх):
 ## fs_state → fs_stack → fs_combat → fs_turn → fs_effects → fs_rules. Поведение не менялось при делении 31.10.
+## Время (tick с хоста): окно ответов закрывается само через RESPONSE_WINDOW — урон, лечение и смерть
+## применяются без ожидания следующего действия; свои карты в чужой ход — только первые OFF_TURN_WINDOW с.
+
+const RESPONSE_WINDOW := 5.0  # тихое окно ответов (никто не добавил карту) — стек разрешается сам
+const OFF_TURN_WINDOW := 10.0  # в чужой ход лут и предметы — только в первые столько секунд хода
+const OFF_TURN_KINDS := ["loot", "activate"]  # «разыграть свою карту» вне своего хода
+var turn_elapsed := 0.0  # секунд с начала текущего хода (считает хост в tick)
+var _quiet := 0.0
+var _quiet_revision := -1
+var _turn_seen := -1  # номер хода, к которому относится turn_elapsed
+
+
+## Хост: шаг времени. true — состояние изменилось (окно ответов закрылось само).
+func tick(delta: float) -> bool:
+	if _turn_seen != turn_serial:
+		_turn_seen = turn_serial
+		turn_elapsed = 0.0
+	turn_elapsed += delta
+	if phase != "priority" or stack.is_empty() or _after_stack == "starting_continue":
+		_quiet = 0.0
+		_quiet_revision = revision
+		return false
+	if revision != _quiet_revision:
+		_quiet_revision = revision  # кто-то ответил — окно снова открыто полностью
+		_quiet = 0.0
+		return false
+	_quiet += delta
+	if _quiet < RESPONSE_WINDOW:
+		return false
+	_quiet = 0.0
+	var before := [phase, stack.size(), resolving.size()]
+	_finish_responses()
+	if before == [phase, stack.size(), resolving.size()]:
+		return false
+	revision += 1
+	_quiet_revision = revision
+	return true
+
+
+## Можно ли месту разыграть свою карту сейчас: в свой ход — всегда, в чужой — первые 10 с хода.
+func off_turn_open(seat: int) -> bool:
+	return seat == current or _turn_time() <= OFF_TURN_WINDOW
+
+
+## Секунд с начала хода; ход только что сменился, а tick ещё не шёл — ноль.
+func _turn_time() -> float:
+	return turn_elapsed if _turn_seen == turn_serial else 0.0
+
 
 func action(seat: int, kind: String, arg = null) -> bool:
 	if seat < 0 or seat >= players.size() or phase == "game_over": return false
+	if kind in OFF_TURN_KINDS and not off_turn_open(seat):
+		return false
 	# Следующая операция того же ручного эффекта сначала разрешает его пассивы.
 	# Чужой ручной ответ не пропускаем: маршрут открыт только для стека пассивов.
 	if _pending_manual_passives() and kind in ["effect", "effect_done", "effect_roll", "place_bloat"]:
@@ -355,6 +405,7 @@ func _curse_of_loss(seat: int) -> void:
 
 func get_view(seat: int, _show_all: bool = false) -> Dictionary:
 	var public := []
+	var off_turn_left := maxf(0.0, OFF_TURN_WINDOW - _turn_time())
 	for i in players.size():
 		public.append({"name":players[i].name,"char":chars[i],"items":items[i].duplicate(true),"hp":hp[i],"max_hp":max_hp[i],"attack":attack[i],"coins":coins[i],"souls":souls[i],"hand_count":hands[i].size(),"souls_cards":soul_cards[i].duplicate(true),"curses":curses[i].duplicate(),"ready":character_ready[i],"dead":dead[i]})
 		for owner in players.size():
@@ -384,4 +435,4 @@ func get_view(seat: int, _show_all: bool = false) -> Dictionary:
 		entry.at = int(entry.at) + _monster_aura("deathshead") + (1 if room == 818 else 0)
 		if curses[current].has(737):
 			entry.at += 1
-	return {"players":public,"seat":seat,"discard_choice":discard_choice.duplicate(true),"battle_player":battle_player,"required_player_attacks":_required_player_remaining(),"player_attack_targets":_player_attack_targets(),"forced_deck_attacks":_forced_deck_remaining(),"spawn_slots":_peep_spawn_slots(),"effect_pending":_pending_manual_passives(),"starting_pending":phase=="priority" and _after_stack=="starting_continue","starting_options":_starting_choices[0].cards.duplicate() if phase=="starting_item" and not _starting_choices.is_empty() and seat==actor() else [],"phase":phase,"current":current,"actor":actor(),"round_no":round_no,"dlc":dlc,"hand":hands[seat].duplicate() if seat >= 0 and seat < players.size() else [],"monsters":visible_monsters,"shop":shop.duplicate(),"shop_price":_purchase_cost(seat if seat >= 0 else current,0),"discard_treasure":int(discards.treasure.back()) if seat >= 0 and _item_count(seat,473)>0 and not discards.treasure.is_empty() else -1,"room":room,"bonuses":bonuses.duplicate(),"bonus_targets":bonus_targets,"bonus_progress":bonus_progress.duplicate(),"claimed":claimed.duplicate(),"stack":visible_stack,"resolving":resolving.duplicate(),"battle":battle,"roll_no":roll_no,"last_roll":last_roll,"log":log.duplicate(),"winner":winner,"free_loot":free_loot,"bought":bought,"attacked":attacked,"counts":counts,"bank":bank,"revision":revision,"peek":peek.duplicate(true) if int(peek.get("owner",-2)) == seat else {},"death_actor":int(_death_queue[0]) if not _death_queue.is_empty() else -1,"discard_limit":_discard_limit}
+	return {"players":public,"seat":seat,"discard_choice":discard_choice.duplicate(true),"battle_player":battle_player,"required_player_attacks":_required_player_remaining(),"player_attack_targets":_player_attack_targets(),"forced_deck_attacks":_forced_deck_remaining(),"spawn_slots":_peep_spawn_slots(),"effect_pending":_pending_manual_passives(),"starting_pending":phase=="priority" and _after_stack=="starting_continue","starting_options":_starting_choices[0].cards.duplicate() if phase=="starting_item" and not _starting_choices.is_empty() and seat==actor() else [],"phase":phase,"current":current,"actor":actor(),"round_no":round_no,"dlc":dlc,"hand":hands[seat].duplicate() if seat >= 0 and seat < players.size() else [],"monsters":visible_monsters,"shop":shop.duplicate(),"shop_price":_purchase_cost(seat if seat >= 0 else current,0),"discard_treasure":int(discards.treasure.back()) if seat >= 0 and _item_count(seat,473)>0 and not discards.treasure.is_empty() else -1,"room":room,"bonuses":bonuses.duplicate(),"bonus_targets":bonus_targets,"bonus_progress":bonus_progress.duplicate(),"claimed":claimed.duplicate(),"stack":visible_stack,"resolving":resolving.duplicate(),"battle":battle,"roll_no":roll_no,"last_roll":last_roll,"log":log.duplicate(),"winner":winner,"free_loot":free_loot,"bought":bought,"attacked":attacked,"counts":counts,"bank":bank,"revision":revision,"peek":peek.duplicate(true) if int(peek.get("owner",-2)) == seat else {},"death_actor":int(_death_queue[0]) if not _death_queue.is_empty() else -1,"discard_limit":_discard_limit,"off_turn_left":off_turn_left,"response_window":RESPONSE_WINDOW}

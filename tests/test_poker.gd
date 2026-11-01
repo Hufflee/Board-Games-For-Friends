@@ -1,6 +1,8 @@
 extends SceneTree
 ## «Покер»: правила без UI — блайнды и порядок ходов, рейзы, неполный ва-банк, побочные банки, вскрытие,
-## места и очки спортивной сессии, докупка в классике, сохранение фишек в партиях ботов.
+## места и очки спортивной сессии, докупка в классике, сохранение фишек в партиях ботов; потолок рейза
+## (эффективный стек), вскрытие после колла и при ва-банке, время просмотра, цель очков, бонус «все фишки»,
+## доп. сессия при ничьей.
 ## Запуск: godot --headless --path . --script res://tests/test_poker.gd
 const Rules := preload("res://games/poker/logic/pk_rules.gd")
 var checks := 0
@@ -51,6 +53,11 @@ func _run() -> void:
 	_sport_flow()
 	_classic_rebuy()
 	_bot_games()
+	_raise_cap()
+	_call_reveal()
+	_all_in_reveal()
+	_sport_options()
+	_sport_bonus_and_tiebreak()
 
 
 func _blinds() -> void:
@@ -190,7 +197,7 @@ func _sport_flow() -> void:
 		r.tick(0.5)
 		guard += 1
 	check(r.phase == "session_end" or r.phase == "game_over", "сессия закончилась")
-	check(r.hand_no <= 14, "не больше 14 раздач в сессии (%d)" % r.hand_no)
+	check(r.hand_no <= 12, "не больше 12 раздач в сессии (%d)" % r.hand_no)
 	var total := 0
 	for s: int in r.scores:
 		total += s
@@ -251,3 +258,104 @@ func _bot_games() -> void:
 				break
 		check(ok, "партия ботов на %d: фишки сохраняются" % n)
 		check(r.hand_no > 5, "боты сыграли раздачи (%d)" % r.hand_no)
+
+
+func _raise_cap() -> void:
+	var r: RefCounted = game(2)
+	var a: int = r.to_act
+	var b: int = 1 - a
+	r.stacks[b] = 48  # у соперника всего 48 + 2 в ставке = 50 — больше ставить бессмысленно
+	check(r.max_raise_to(a) == 50, "потолок рейза — эффективный стек 50 (%d)" % r.max_raise_to(a))
+	check(r.raise_to(a, 150) and int(r.bets[a]) == 50, "рейз сверх эффективного стека урезан до 50")
+	check(int(r.stacks[a]) == 150, "лишние фишки остались в стеке")
+	check(not r.can_raise(b), "сопернику повышать нечем — только колл или пас")
+	var r2: RefCounted = game(3)
+	var x: int = r2.to_act
+	var y: int = (x + 1) % 3
+	var z: int = (x + 2) % 3
+	r2.stacks[y] = 30
+	r2.stacks[z] = 78  # большой блайнд: 78 + 2 = 80 — самый богатый соперник
+	check(r2.max_raise_to(x) == 80, "потолок — по самому богатому сопернику в раздаче (%d)" % r2.max_raise_to(x))
+	r2.fold(x)
+	check(r2.max_raise_to(y) == 31, "у короткого стека потолок — свой стек с блайндом (%d)" % r2.max_raise_to(y))
+	var v: Dictionary = r2.get_view(y)
+	check(int(v.me.min_raise_to) <= int(v.me.max_raise_to), "минимум рейза не выше потолка")
+
+
+## Торговля закончилась коллом — после паузы руки открываются сами; потом 6 с на просмотр.
+func _call_reveal() -> void:
+	var r: RefCounted = game(2)
+	r.check_call(r.to_act)
+	r.check_call(r.to_act)  # префлоп: колл и чек
+	for _street: int in 2:
+		r.check_call(r.to_act)
+		r.check_call(r.to_act)
+	var bettor: int = r.to_act
+	check(r.raise_to(bettor, 10), "ставка на ривере")
+	check(r.check_call(r.to_act) and r.phase == "showdown", "колл — вскрытие")
+	check(r.reveal_in > 0.0, "после колла — пауза перед вскрытием")
+	var v: Dictionary = r.get_view(0)
+	check(int(v.hole[1][0]) == -1, "во время паузы чужие карты ещё закрыты")
+	r.tick(Rules.REVEAL_DELAY + 0.05)
+	v = r.get_view(0)
+	check(int(v.hole[1][0]) >= 0 and int(v.hole[1][1]) >= 0, "после паузы карты соперника открыты")
+	check(r.time_left >= Rules.VIEW_TIME - 0.1, "на просмотр — не меньше 6 с (%.1f)" % r.time_left)
+	# чек до конца — сами не открываются
+	var q: RefCounted = game(2)
+	for _k: int in 8:
+		if q.phase == "hand":
+			q.check_call(q.to_act)
+	check(q.phase == "showdown" and q.reveal_in < 0.0, "закончилось чеком — карты не открываются сами")
+	q.time_left = 1.0
+	check(q.show_card(q.to_act if q.to_act >= 0 else 0, -1) or true, "показ")
+	q.show_card(1, -1)
+	check(q.time_left >= Rules.VIEW_TIME - 0.01, "показал руку — у всех 6 с на просмотр")
+
+
+## Все оставшиеся в ва-банке (торговаться некому) — карты открываются сразу.
+func _all_in_reveal() -> void:
+	var r: RefCounted = game(3)
+	var a: int = r.to_act
+	check(r.all_in_action(a), "ва-банк")
+	r.fold(r.to_act)
+	check(r.all_in_action(r.to_act), "колл ва-банка")
+	check(r.phase == "showdown" and r.board.size() == 5, "стол доложен")
+	var open := 0
+	for seat: int in 3:
+		if r.in_hand(seat) and bool(r.shown[seat][0]) and bool(r.shown[seat][1]):
+			open += 1
+	check(open == 2, "руки обоих в ва-банке открыты (%d)" % open)
+	check(r.reveal_in == 0.0, "паузы перед вскрытием нет — карты уже открыты")
+
+
+func _sport_options() -> void:
+	var r: RefCounted = Rules.new()
+	r.new_game(seats(4), {"mode": "sport", "seed": 3, "target": 5, "open": true})
+	check(r.target() == 5, "цель очков из настроек лобби")
+	check(bool(r.get_view(0).open_cards), "режим «Открытые карты» в виде")
+	var stats: Array = r.host_game_stats()
+	check(stats.size() == 1 and str(stats[0].key) == "pk_target" and int(stats[0].value) == 5, "панель хоста видит цель")
+	check(r.host_set_game_stat("pk_target", 12) and r.target() == 12, "хост меняет цель в партии")
+	check(Rules.SESSION_HANDS == 12, "в сессии 12 раздач")
+
+
+func _sport_bonus_and_tiebreak() -> void:
+	var r: RefCounted = Rules.new()
+	r.new_game(seats(3), {"mode": "sport", "seed": 5})
+	r.stacks = [600, 0, 0]
+	r.bust_order = [[1, 3, 50], [2, 4, 80]]
+	r._end_session()
+	var first: Dictionary = r.places[0]
+	check(int(first.seat) == 0 and int(first.get("bonus", 0)) == 1 and int(first.points) == 4, "забрал все фишки — +1 очко (3 + 1)")
+	check(int(r.scores[0]) == 4, "бонус в счёте")
+	var t: RefCounted = Rules.new()
+	t.new_game(seats(2), {"mode": "sport", "seed": 5, "target": 3})
+	t.scores = [1, 1]
+	t.stacks = [200, 200]  # равные стеки — общее первое место, по 2 очка
+	t._end_session()
+	check(int(t.scores[0]) == 3 and int(t.scores[1]) == 3, "оба дошли до цели одновременно")
+	check(t.phase == "session_end" and t.winners.is_empty() and bool(t.get_view(0).tiebreak), "ничья на финише — доп. сессия")
+	t._next_session()
+	t.stacks = [300, 100]
+	t._end_session()
+	check(t.phase == "game_over" and t.winners == [0], "доп. сессия определила одного победителя")

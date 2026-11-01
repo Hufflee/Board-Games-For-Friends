@@ -124,6 +124,7 @@ func _rebuild() -> void:
 		_body.add_child(HCStyle.label("Каждый ведёт: %s%s" % [lt, " · ведущий выбирает любой цвет" if s.get("hc_free", false) else ""], HCStyle.BODY))
 
 	_body.add_child(TurnClock.settings_row(func(t, z): return HCStyle.button(t, z), func(t, z): return HCStyle.label(t, z)))
+	_body.add_child(SeatShuffle.settings_row(func(t, z): return HCStyle.button(t, z), func(t, z): return HCStyle.label(t, z)))
 	var start_row := HCStyle.hbox(12)
 	if host:
 		var start := HCStyle.primary("Начать игру", HCStyle.BODY, 220)

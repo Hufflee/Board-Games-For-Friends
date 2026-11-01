@@ -131,6 +131,7 @@ func _rebuild() -> void:
 	else:
 		_body.add_child(HCStyle.label("Режим: " + ("кооператив" if coop else "две команды"), HCStyle.BODY))
 	_body.add_child(TurnClock.settings_row(func(t, z): return HCStyle.button(t, z), func(t, z): return HCStyle.label(t, z)))
+	_body.add_child(SeatShuffle.settings_row(func(t, z): return HCStyle.button(t, z), func(t, z): return HCStyle.label(t, z)))
 
 	var start_row := HCStyle.hbox(12)
 	if host:

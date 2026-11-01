@@ -139,6 +139,19 @@ func _layout_cards() -> void:
 				if not knower_side:
 					card.add_child(_hidden_badge())
 
+## Blind Mind: знающий выбрал карточку — ярче её окошко, остальные как были. Поле не пересобирается
+## (иначе карточка под мышью исчезнет и перетаскивание не начнётся).
+func highlight_blind(owner: int) -> void:
+	for card: Node in get_children():
+		if not "blind_owner" in card or int(card.blind_owner) < 0:
+			continue
+		var veil := card.get_node_or_null("PendingVeil") as Panel
+		if veil == null:
+			continue
+		var sb := veil.get_theme_stylebox("panel") as StyleBoxFlat
+		sb.bg_color.a = 0.55 if int(card.blind_owner) == owner else 0.3
+
+
 ## Последняя выложенная карта (ждёт проверки) — полупрозрачное красное окошко поверх, по скруглению карты.
 func _pending_veil(card_size: Vector2, tint: Color = Style.RINGS[2], alpha: float = 0.4) -> Panel:
 	var veil := Panel.new()

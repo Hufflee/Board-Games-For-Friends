@@ -9,6 +9,7 @@ func _init() -> void:
 	test_points()
 	test_turn_flow()
 	test_side_guess()
+	test_lr_vote()
 	test_catchup()
 	test_win_and_tiebreak()
 	test_coop()
@@ -40,8 +41,8 @@ func turn(r: WLRules, dial: float, lr: String = "left", target: float = 50.0) ->
 	check(r.move_dial(guesser, dial), "стрелка сдвинута")
 	check(r.lock_dial(guesser), "команда решила")
 	if not r.coop:
-		var other: int = r.team_members(1 - r.active_team)[0]
-		check(r.choose_lr(other, lr), "левее/правее")
+		for other: int in r.team_members(1 - r.active_team):
+			check(r.choose_lr(other, lr), "левее/правее")
 
 
 func test_points() -> void:
@@ -75,6 +76,48 @@ func test_side_guess() -> void:
 	var r2 := make()
 	turn(r2, 50.0, "left", 50.0)
 	check(r2.result["points"] == 4 and r2.result["other_points"] == 0, "в центр — другая команда ничего не получает")
+
+
+## Голосование другой команды: голос можно сменить, итог — большинством, поровну — кто раньше.
+func test_lr_vote() -> void:
+	var players := [{"name": "А", "team": 0}, {"name": "Б", "team": 0}, {"name": "В", "team": 1}, {"name": "Г", "team": 1}, {"name": "Д", "team": 1}]
+	var r := WLRules.new()
+	r.new_game(players, false, 5)
+	r.target = 40.0
+	var p := r.psychic
+	r.choose_side(p, 0)
+	r.give_clue(p, "Чай")
+	var guesser: int = r.team_members(r.active_team).filter(func(s): return s != p)[0]
+	r.move_dial(guesser, 50.0)
+	r.lock_dial(guesser)
+	var voters: Array = r.lr_voters()
+	check(voters.size() == 3 and r.phase == "side", "голосуют трое из другой команды")
+	check(not r.choose_lr(guesser, "left"), "команда телепата не голосует")
+	check(r.choose_lr(voters[0], "right") and r.phase == "side", "первый голос — ждём остальных")
+	check(r.choose_lr(voters[0], "left") and r.lr_votes[voters[0]] == "left", "голос можно поменять")
+	check(r.choose_lr(voters[1], "right") and r.phase == "side", "второй голос")
+	check(r.get_view(voters[2])["lr_voters"].size() == 3, "в виде — кто голосует")
+	check(r.choose_lr(voters[2], "left") and r.phase == "reveal", "все проголосовали — итог")
+	check(r.lr == "left" and r.result["other_points"] == 1, "большинство «левее» (2 из 3) — и угадали")
+	# поровну — решает голос, поданный раньше; время вышло — итог по поданным
+	var t := WLRules.new()
+	t.new_game([{"name": "А", "team": 0}, {"name": "Б", "team": 0}, {"name": "В", "team": 1}, {"name": "Г", "team": 1}], false, 6)
+	t.choose_side(t.psychic, 0)
+	t.give_clue(t.psychic, "x")
+	var g: int = t.team_members(t.active_team).filter(func(s): return s != t.psychic)[0]
+	t.lock_dial(g)
+	var o: Array = t.lr_voters()
+	t.choose_lr(o[1], "right")
+	check(t.force_lr() and t.lr == "right", "время вышло — итог по одному голосу")
+	var u := WLRules.new()
+	u.new_game([{"name": "А", "team": 0}, {"name": "Б", "team": 0}, {"name": "В", "team": 1}, {"name": "Г", "team": 1}], false, 6)
+	u.choose_side(u.psychic, 0)
+	u.give_clue(u.psychic, "x")
+	u.lock_dial(u.team_members(u.active_team).filter(func(s): return s != u.psychic)[0])
+	var w: Array = u.lr_voters()
+	u.choose_lr(w[1], "right")
+	u.choose_lr(w[0], "left")
+	check(u.phase == "reveal" and u.lr == "right", "1:1 — решает голос, поданный раньше")
 
 
 func test_catchup() -> void:

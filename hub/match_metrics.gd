@@ -121,7 +121,7 @@ func observe(session: String, game: String, logic: Object, peers: Array = []) ->
 
 
 static func _won(game: String, view: Dictionary, seat: int) -> bool:
-	if game in ["tip_top", "the_gang"]:
+	if game in ["tip_top", "the_gang", "the_mind"]:
 		return bool(view.won)
 	if game == "phantom_ink":
 		return int(view.winner) == int(view.roles[seat]) / 2

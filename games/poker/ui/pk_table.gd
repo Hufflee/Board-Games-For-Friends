@@ -57,6 +57,10 @@ var _last_revision := -1
 var _last_board := 0
 var _last_phase := ""
 var _finish: Button
+## Премув: действие, отмеченное заранее, до своего хода. "check_fold" — чек, а если надо платить — пас;
+## "check" — только чек; "call" — колл любой ставки. Срабатывает, когда приходит мой ход и действие допустимо.
+var _premove := ""
+var _premove_hand := -1
 
 
 func _ready() -> void:
@@ -169,6 +173,7 @@ func _state(next: Dictionary) -> void:
 		_last_revision = int(view.get("revision", 0))
 		_sounds(old_board, old_phase)
 		_raise_value = int(view.me.get("min_raise_to", 0)) if not view.me.is_empty() else 0
+	_try_premove()  # ход ушёл заранее отмеченным действием — следующее состояние придёт от хоста
 	_layout()
 
 
@@ -579,7 +584,7 @@ func _sync_mine() -> void:
 		Style.clear(_mine_layer)
 		_mine_faces = [false, false]  # новая раздача — снова рубашкой
 		for k: int in cards.size():
-			_add_mine(int(cards[k]), k, bool(open[k]))
+			_add_mine(int(cards[k]), k, bool(open[k]) or _open_mode())
 	# показанные всем карты — лицом вверх (переворотом, если были закрыты)
 	for k: int in mini(_mine_flips.size(), open.size()):
 		var flip: Node = _mine_flips[k]
@@ -604,16 +609,20 @@ func _sync_mine() -> void:
 func _add_mine(id: int, index: int, up: bool) -> void:
 	var card := _card(id, Rect2(Vector2.ZERO, MY_CARD), "Mine%d" % index, _mine_layer)
 	card.mouse_filter = Control.MOUSE_FILTER_STOP
-	card.tooltip_text = "Потяните край карты, чтобы подсмотреть (видно только вам)"
+	card.tooltip_text = "Режим «Открытые карты»: свои карты всегда лицом вверх" if _open_mode() 		else "Потяните край карты, чтобы подсмотреть (видно только вам)"
 	var show_side := func(face: bool):
 		card.texture = Style.card_texture(id if face else -1)
 		card.set_meta("id", id if face else -1)
 		_preview.hide()
 	var flip: Node = CardFlip.attach(card, show_side, up, true)
-	# показанную всем карту обратно не закрыть
-	flip.can_interact = func() -> bool: return not _shown_mine(index)
+	# показанную всем карту обратно не закрыть; в режиме «Открытые карты» — никакую
+	flip.can_interact = func() -> bool: return not _shown_mine(index) and not _open_mode()
 	flip.flipped.connect(func(face: bool): _mine_faces[index] = face)
 	_mine_flips.append(flip)
+
+
+func _open_mode() -> bool:
+	return bool(view.get("open_cards", false))
 
 
 func _shown_mine(index: int) -> bool:
@@ -827,6 +836,7 @@ func _build_action() -> void:
 		return
 	var text := _status_text()
 	_action_row.add_child(Style.label(text, 16))
+	_build_premoves()
 	if me >= 0 and bool(mine.get("can_rebuy", false)) and phase != "hand":
 		var rebuy := Style.button("Сесть заново · 100 BB")
 		rebuy.name = "Rebuy"
@@ -849,6 +859,8 @@ func _status_text() -> String:
 			var seat: int = int(view.to_act)
 			return ("Ходит %s" % people[seat].name if seat >= 0 else "Открываем карты…") + mine
 		"showdown":
+			if float(view.get("reveal_in", -1.0)) > 0.0:
+				return "Колл — вскрываемся…"
 			var names := PackedStringArray()
 			for p: Dictionary in view.result.get("pots", []):
 				for seat: int in p.winners:
@@ -972,6 +984,69 @@ func _send_raise() -> void:
 	Sfx.play("chips_big", -6)
 
 
+# ---------------------------------------------------------------- премувы
+
+
+## Можно ли мне отмечать премув: идёт раздача, ход чужой, я в раздаче и не в ва-банке.
+func _premove_allowed() -> bool:
+	var me := _me()
+	if str(view.phase) != "hand" or me < 0 or int(view.to_act) == me:
+		return false
+	if bool(view.folded[me]) or (view.hole[me] as Array).is_empty() or int(view.stacks[me]) == 0:
+		return false
+	return true
+
+
+func _build_premoves() -> void:
+	if int(view.hand_no) != _premove_hand:
+		_premove = ""
+	if not _premove_allowed():
+		return
+	var owed := int(view.current_bet) - int(view.bets[_me()])  # сколько пришлось бы доставить сейчас
+	var sep := VSeparator.new()
+	_action_row.add_child(sep)
+	var options: Array = [["check_fold", "Чек / пас"], ["call", "Колл любую"]]
+	if owed <= 0:
+		options.insert(1, ["check", "Чек"])
+	for item: Array in options:
+		var b := Style.button(item[1], 16)
+		b.name = "Pre_" + str(item[0])
+		b.toggle_mode = true
+		b.button_pressed = _premove == item[0]
+		Style.pick(b, _premove == item[0])
+		b.tooltip_text = "Отметить заранее: сработает, когда придёт ваш ход. Нажмите ещё раз — снять отметку"
+		b.pressed.connect(func():
+			_premove = "" if _premove == item[0] else str(item[0])
+			_premove_hand = int(view.hand_no)
+			Sfx.play("chip", -14)
+			_layout())
+		_action_row.add_child(b)
+
+
+## Мой ход и есть отметка — выполнить, если действие ещё допустимо (иначе просто снять отметку).
+func _try_premove() -> bool:
+	var me := _me()
+	if _premove.is_empty() or str(view.phase) != "hand" or me < 0 or int(view.to_act) != me:
+		return false
+	var kind := _premove
+	_premove = ""
+	if int(view.hand_no) != _premove_hand:
+		return false
+	var need := int(view.me.get("to_call", 0))
+	match kind:
+		"check_fold":
+			Net.send_action("call" if need == 0 else "fold", {})
+		"check":
+			if need > 0:
+				return false  # ставку повысили — чек уже нельзя, решаем сами
+			Net.send_action("call", {})
+		"call":
+			Net.send_action("call", {})
+		_:
+			return false
+	return true
+
+
 # ---------------------------------------------------------------- итоги сессии
 
 
@@ -993,11 +1068,21 @@ func _build_overlay() -> void:
 		nick.custom_minimum_size.x = 200
 		line.add_child(nick)
 		line.add_child(Style.label("+%d" % int(entry.points), 16, Style.GOOD if int(entry.points) > 0 else Style.muted()))
+		if int(entry.get("bonus", 0)) > 0:
+			# бонус: забрал за сессию все фишки у всех соперников
+			var bonus := Style.label("+1 за все фишки", 12, Style.GOLD)
+			bonus.name = "Bonus%d" % seat
+			bonus.tooltip_text = "Забрал за сессию все фишки у всех соперников — дополнительное победное очко"
+			bonus.mouse_filter = Control.MOUSE_FILTER_STOP
+			bonus.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+			line.add_child(bonus)
 		var total := Style.heading("%d / %d" % [int(view.scores[seat]), int(view.target)], 16, Style.GOLD)
 		total.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		total.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		line.add_child(total)
 		col.add_child(line)
+	if bool(view.get("tiebreak", false)) and view.winners.is_empty():
+		col.add_child(Style.label("Ничья по очкам на финише — дополнительная сессия до победы", 14, Style.PINK))
 	col.add_child(Style.label("Новая сессия — у всех снова 100 BB", 12, Style.muted()))
 	if Net.is_host():
 		var next := Style.button("Следующая сессия")

@@ -87,6 +87,7 @@ func _rebuild() -> void:
 	else:
 		_body.add_child(_ink("Экспертный вариант: %s" % ("да" if s.get("tt_expert", false) else "нет")))
 	_body.add_child(TurnClock.settings_row(func(tx, z): return TTStyle.button(tx, z), func(tx, z): return _ink(tx, z)))
+	_body.add_child(SeatShuffle.settings_row(func(tx, z): return TTStyle.button(tx, z), func(tx, z): return _ink(tx, z)))
 	var start_row := TTStyle.hbox(12)
 	if host:
 		var start := TTStyle.primary("Поехали!", TTStyle.BODY, 220)

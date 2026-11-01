@@ -2,7 +2,7 @@ class_name GameBox
 extends Node3D
 ## Игра в шкафу. Обычно — коробка: стоит вертикально, как книга, торцом к игроку.
 ## Лицевая сторона (+X) — обложка, задняя (−X) — оборот, торец (+Z) — корешок с названием.
-## Картинки берутся из hub/covers/<id>_front|_back|_spine.(png|jpg); если их нет — цветная коробка с надписью.
+## Картинки берутся из hub/covers/<id>_front|_back|_spine (изображения или AtlasTexture .tres).
 ## «Перудо» — не коробка, а набор кожаных стаканчиков с кубиками (face_z: к игроку повёрнута сторона +Z).
 ## Наведение — выезжает и светится; выбор — плавно летит к камере лицом к игроку.
 
@@ -58,6 +58,10 @@ func setup(g: Dictionary, box_size: Vector3, box_color: Color) -> void:
 		size.x = clampf(size.y * spine.get_width() / spine.get_height(), 0.03, 0.12)
 	if g.has("thickness"):
 		size.x = float(g["thickness"])  # толщина задана явно (обложка торца может быть не в пропорции)
+	if g.get("custom", false) and g.get("box_size") is Vector2:
+		var face: Vector2 = g.box_size
+		size.y = face.y
+		size.z = face.x
 
 
 ## Коробка-заглушка «Coming soon» (белый шум) — для выбора не предназначена.
@@ -219,9 +223,20 @@ func _build_box() -> void:
 	_face("front", Vector3(size.x / 2.0 + 0.0008, 0, 0), Vector3(0, PI / 2.0, 0), Vector2(size.z - inset, size.y - inset), true)
 	_face("back", Vector3(-size.x / 2.0 - 0.0008, 0, 0), Vector3(0, -PI / 2.0, 0), Vector2(size.z - inset, size.y - inset), false)
 	_face("spine", Vector3(0, 0, size.z / 2.0 + 0.0008), Vector3.ZERO, Vector2(size.x - inset, size.y - inset), false)
-	if str(game.get("id", "")) in ["stillion", "gloom", "gloomier", "ready_set_bet", "brodilka"]:
+	if game.get("custom", false) or str(game.get("id", "")) in ["stillion", "gloom", "gloomier", "ready_set_bet", "brodilka", "the_mind"]:
 		# Та же боковина сверху. Верх букв направлен к −X, от лицевой стороны +X.
 		_face("top", Vector3(0, size.y / 2.0 + 0.0008, 0), Vector3(-PI / 2.0, 0, PI), Vector2(size.x - inset, size.z - inset), false)
+	if game.get("custom", false):
+		var mark := Label3D.new()
+		mark.text = "СВОЯ ИГРА"
+		mark.font = HubStyle.font("regular")
+		mark.font_size = 24
+		mark.pixel_size = 0.0005
+		mark.modulate = Color("d9cbe8")
+		mark.no_depth_test = false
+		mark.position = Vector3(size.x / 2.0 + 0.002, -size.y * 0.40, 0)
+		mark.rotation = Vector3(0, PI / 2.0, 0)
+		add_child(mark)
 	# неоновый ореол при наведении (его подхватывает glow окружения)
 	_halo = MeshInstance3D.new()
 	var hm := SphereMesh.new()  # шейдер переносит вершины на скруглённую коробку
@@ -297,12 +312,15 @@ static func _edge_color(t: Texture2D) -> Color:
 	for k in 24:
 		var f := k / 23.0
 		for p in [Vector2i(int(f * (w - 1)), 2), Vector2i(int(f * (w - 1)), h - 3), Vector2i(2, int(f * (h - 1))), Vector2i(w - 3, int(f * (h - 1)))]:
-			sum += img.get_pixelv(p)
+			var sample: Vector2i = (p as Vector2i).clamp(Vector2i.ZERO, Vector2i(w - 1, h - 1))
+			sum += img.get_pixelv(sample)
 			n += 1
 	return Color(sum.r / n, sum.g / n, sum.b / n)
 
 
 static func cover_texture(id: String, part: String) -> Texture2D:
+	if id.begins_with("custom:"):
+		return preload("res://games/custom/logic/cg_library.gd").cover_texture(id.trim_prefix("custom:"), part)
 	if part == "top" and id in ["gloom", "gloomier", "ready_set_bet", "brodilka"]:
 		return cover_texture(id, "spine")
 	if id == "stillion" and part in ["spine", "top"]:
@@ -314,7 +332,7 @@ static func cover_texture(id: String, part: String) -> Texture2D:
 			strip.region = Rect2(258, 0, 408, 1705)
 			strip.filter_clip = true
 			return strip
-	for ext in ["png", "jpg", "jpeg", "webp"]:
+	for ext in ["tres", "png", "jpg", "jpeg", "webp"]:
 		var p := "%s%s_%s.%s" % [COVERS, id, part, ext]
 		if ResourceLoader.exists(p):
 			return load(p)
@@ -368,6 +386,8 @@ func _face(part: String, pos: Vector3, rot: Vector3, quad: Vector2, big_title: b
 	# нет картинки — надпись прямо на коробке
 	var l := Label3D.new()
 	l.text = str(game.get("title", "")) if part != "back" else str(game.get("players", ""))
+	if game.get("custom", false) and l.text.length() > 64:
+		l.text = l.text.left(63) + "…"
 	l.font = HubStyle.font("title")
 	l.font_size = 64 if big_title else 40
 	l.pixel_size = 0.0009 if big_title else 0.0007
@@ -376,6 +396,18 @@ func _face(part: String, pos: Vector3, rot: Vector3, quad: Vector2, big_title: b
 	l.outline_modulate = color.darkened(0.6)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l.width = (quad.x if part != "spine" else quad.y) / l.pixel_size * 0.9
+	if game.get("custom", false):
+		l.outline_size = 3
+		l.width *= 0.9
+		var height_limit := (quad.y if part != "spine" else quad.x) / l.pixel_size * 0.62
+		while l.font_size > 12:
+			var measured := l.font.get_multiline_string_size(l.text, HORIZONTAL_ALIGNMENT_CENTER, l.width, l.font_size)
+			var longest := 0.0
+			for word: String in l.text.split(" "):
+				longest = maxf(longest, l.font.get_string_size(word, HORIZONTAL_ALIGNMENT_LEFT, -1, l.font_size).x)
+			if measured.y <= height_limit and longest <= l.width:
+				break
+			l.font_size -= 2
 	l.position = pos + pos.normalized() * 0.001
 	l.rotation = rot
 	if part == "spine":

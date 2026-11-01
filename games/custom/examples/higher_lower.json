@@ -1,0 +1,424 @@
+{
+  "format": 1,
+  "id": "больше_или_меньше",
+  "game_version": 1,
+  "meta": {
+    "title": "Больше или меньше",
+    "players": [
+      2,
+      8
+    ],
+    "time": "5 минут",
+    "description": "Пример редактора",
+    "phase_titles": {
+      "setup": "Подготовка",
+      "turn": "Ход игрока",
+      "game_over": "Итоги"
+    },
+    "action_titles": {
+      "draw": "Взять карту",
+      "raise": "Поднять ставку",
+      "challenge": "Проверить",
+      "higher": "Больше",
+      "lower": "Меньше"
+    }
+  },
+  "elements": {
+    "decks": [
+      {
+        "id": "draw",
+        "size": 3,
+        "rows": [
+          {
+            "rank": 1,
+            "copies": 1
+          },
+          {
+            "rank": 2,
+            "copies": 1
+          },
+          {
+            "rank": 3,
+            "copies": 1
+          },
+          {
+            "rank": 4,
+            "copies": 1
+          },
+          {
+            "rank": 5,
+            "copies": 1
+          },
+          {
+            "rank": 6,
+            "copies": 1
+          },
+          {
+            "rank": 7,
+            "copies": 1
+          },
+          {
+            "rank": 8,
+            "copies": 1
+          },
+          {
+            "rank": 9,
+            "copies": 1
+          },
+          {
+            "rank": 10,
+            "copies": 1
+          },
+          {
+            "rank": 11,
+            "copies": 1
+          },
+          {
+            "rank": 12,
+            "copies": 1
+          },
+          {
+            "rank": 13,
+            "copies": 1
+          },
+          {
+            "rank": 14,
+            "copies": 1
+          },
+          {
+            "rank": 15,
+            "copies": 1
+          },
+          {
+            "rank": 16,
+            "copies": 1
+          },
+          {
+            "rank": 17,
+            "copies": 1
+          },
+          {
+            "rank": 18,
+            "copies": 1
+          },
+          {
+            "rank": 19,
+            "copies": 1
+          },
+          {
+            "rank": 20,
+            "copies": 1
+          },
+          {
+            "rank": 21,
+            "copies": 1
+          },
+          {
+            "rank": 22,
+            "copies": 1
+          },
+          {
+            "rank": 23,
+            "copies": 1
+          },
+          {
+            "rank": 24,
+            "copies": 1
+          },
+          {
+            "rank": 25,
+            "copies": 1
+          },
+          {
+            "rank": 26,
+            "copies": 1
+          },
+          {
+            "rank": 27,
+            "copies": 1
+          },
+          {
+            "rank": 28,
+            "copies": 1
+          },
+          {
+            "rank": 29,
+            "copies": 1
+          },
+          {
+            "rank": 30,
+            "copies": 1
+          }
+        ]
+      }
+    ]
+  },
+  "layout": {
+    "screens": [
+      {
+        "id": "main",
+        "items": [
+          {
+            "kind": "zone",
+            "id": "draw",
+            "title": "Колода",
+            "owner": "shared",
+            "view": "pile"
+          },
+          {
+            "kind": "zone",
+            "id": "hand",
+            "title": "Ваша рука",
+            "owner": "player",
+            "view": "fan"
+          },
+          {
+            "kind": "zone",
+            "id": "table",
+            "title": "На столе",
+            "owner": "shared",
+            "view": "discard"
+          }
+        ]
+      }
+    ]
+  },
+  "rules": {
+    "phases": [
+      "setup",
+      "turn"
+    ],
+    "turns": "round",
+    "vars": [
+      {
+        "id": "previous",
+        "scope": "shared",
+        "type": "number",
+        "init": 0,
+        "title": "Предыдущая"
+      },
+      {
+        "id": "draws",
+        "scope": "shared",
+        "type": "number",
+        "init": 0,
+        "title": "Открыто"
+      },
+      {
+        "id": "score",
+        "scope": "player",
+        "type": "number",
+        "init": 0,
+        "title": "Очки"
+      }
+    ],
+    "chains": [
+      {
+        "event": {
+          "type": "start"
+        },
+        "blocks": [
+          {
+            "op": "shuffle",
+            "zone": "draw"
+          },
+          {
+            "op": "draw",
+            "from": "draw",
+            "to": "table",
+            "count": 1
+          },
+          {
+            "op": "open",
+            "card": {
+              "op": "card"
+            }
+          },
+          {
+            "op": "set",
+            "var": "previous",
+            "value": {
+              "op": "property",
+              "card": {
+                "op": "card"
+              },
+              "field": "rank"
+            }
+          },
+          {
+            "op": "phase",
+            "phase": "turn"
+          }
+        ]
+      },
+      {
+        "event": {
+          "type": "button",
+          "id": "higher",
+          "phase": "turn",
+          "by": "current"
+        },
+        "blocks": [
+          {
+            "op": "draw",
+            "from": "draw",
+            "to": "table",
+            "count": 1
+          },
+          {
+            "op": "open",
+            "card": {
+              "op": "card"
+            }
+          },
+          {
+            "op": "if",
+            "condition": {
+              "op": "gt",
+              "a": {
+                "op": "property",
+                "card": {
+                  "op": "card"
+                },
+                "field": "rank"
+              },
+              "b": {
+                "op": "var",
+                "id": "previous"
+              }
+            },
+            "then": [
+              {
+                "op": "change",
+                "var": "score",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "op": "set",
+            "var": "previous",
+            "value": {
+              "op": "property",
+              "card": {
+                "op": "card"
+              },
+              "field": "rank"
+            }
+          },
+          {
+            "op": "change",
+            "var": "draws",
+            "value": 1
+          },
+          {
+            "op": "if",
+            "condition": {
+              "op": "ge",
+              "a": {
+                "op": "var",
+                "id": "draws"
+              },
+              "b": 10
+            },
+            "then": [
+              {
+                "op": "finish",
+                "var": "score"
+              }
+            ],
+            "else": [
+              {
+                "op": "next"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "event": {
+          "type": "button",
+          "id": "lower",
+          "phase": "turn",
+          "by": "current"
+        },
+        "blocks": [
+          {
+            "op": "draw",
+            "from": "draw",
+            "to": "table",
+            "count": 1
+          },
+          {
+            "op": "open",
+            "card": {
+              "op": "card"
+            }
+          },
+          {
+            "op": "if",
+            "condition": {
+              "op": "lt",
+              "a": {
+                "op": "property",
+                "card": {
+                  "op": "card"
+                },
+                "field": "rank"
+              },
+              "b": {
+                "op": "var",
+                "id": "previous"
+              }
+            },
+            "then": [
+              {
+                "op": "change",
+                "var": "score",
+                "value": 1
+              }
+            ]
+          },
+          {
+            "op": "set",
+            "var": "previous",
+            "value": {
+              "op": "property",
+              "card": {
+                "op": "card"
+              },
+              "field": "rank"
+            }
+          },
+          {
+            "op": "change",
+            "var": "draws",
+            "value": 1
+          },
+          {
+            "op": "if",
+            "condition": {
+              "op": "ge",
+              "a": {
+                "op": "var",
+                "id": "draws"
+              },
+              "b": 10
+            },
+            "then": [
+              {
+                "op": "finish",
+                "var": "score"
+              }
+            ],
+            "else": [
+              {
+                "op": "next"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

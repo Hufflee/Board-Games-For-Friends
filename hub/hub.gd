@@ -32,12 +32,16 @@ func _ready() -> void:
 	# отладочные аргументы ведут сразу в игру
 	for a in OS.get_cmdline_user_args():
 		if a.begins_with("--"):
-			_open_scene(HubGames.LIST[0])
+			_open_scene(HubGames.all()[0])
 			return
 	_room = NeonRoom.new()
 	add_child(_room)
 	_room.box_selected.connect(_on_box_selected)
 	_room.box_released.connect(_on_box_released)
+	_room.game_editor_requested.connect(func():
+		if not _leaving:
+			_leaving = true
+			get_tree().change_scene_to_file.call_deferred("res://editor/main.tscn"))
 	_room.editor_mode_changed.connect(
 		func(on: bool):
 			if is_instance_valid(_ui):
@@ -351,7 +355,7 @@ func _party_panel() -> Control:
 
 
 func _game_title(id: String) -> String:
-	for g in HubGames.LIST:
+	for g in HubGames.all():
 		if g["id"] == id:
 			return g["title"]
 	return id
@@ -398,9 +402,9 @@ func _on_party_game(game_id: String) -> void:
 func _open_by_id(game_id: String) -> void:
 	if not Net.is_party() or game_id != Net.party_game:
 		return
-	for g in HubGames.LIST:
-		if g["id"] == game_id:
-			_open_scene(g, true, true)  # ведущий запустил игру для всей пати
+	var game := HubGames.by_id(game_id)
+	if not game.is_empty():
+		_open_scene(game, true, true)  # Полученная игра клиента находится только в кэше.
 
 
 func _open_scene(g: Dictionary, wipe: bool = false, party_request: bool = false) -> void:

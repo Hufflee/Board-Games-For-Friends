@@ -1,0 +1,119 @@
+[
+  {
+    "id": "lobster",
+    "family": "Lobster",
+    "commit": "6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec",
+    "url": "https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/lobster/Lobster-Regular.ttf",
+    "original_filename": "Lobster-Regular.ttf",
+    "sha256": "d6568e697fd50cedc0be04d8aae4127fe95add607e7bff954ca88604be80c205",
+    "note": "Бинарный файл не изменён; кириллица дополнительно проверяется в Godot."
+  },
+  {
+    "id": "comfortaa",
+    "family": "Comfortaa",
+    "commit": "6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec",
+    "url": "https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/comfortaa/Comfortaa%5Bwght%5D.ttf",
+    "original_filename": "Comfortaa[wght].ttf",
+    "sha256": "0fc3f45dc48b614db9c39181502544b37217ecbf8bee2fb35886992bc96c5bd3",
+    "note": "Бинарный файл не изменён; кириллица дополнительно проверяется в Godot."
+  },
+  {
+    "id": "yesevaone",
+    "family": "Yeseva One",
+    "commit": "6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec",
+    "url": "https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/yesevaone/YesevaOne-Regular.ttf",
+    "original_filename": "YesevaOne-Regular.ttf",
+    "sha256": "88362b33820f0011e163e67b1d570fecd442aa8c05eaac89d5162f9c40d9dac3",
+    "note": "Бинарный файл не изменён; кириллица дополнительно проверяется в Godot."
+  },
+  {
+    "id": "unbounded",
+    "family": "Unbounded",
+    "commit": "6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec",
+    "url": "https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/unbounded/Unbounded%5Bwght%5D.ttf",
+    "original_filename": "Unbounded[wght].ttf",
+    "sha256": "323b511be380c8d474ef030686b71aedde501f8d9cd46da558b7c40454372c3f",
+    "note": "Бинарный файл не изменён; кириллица дополнительно проверяется в Godot."
+  },
+  {
+    "id": "amaticsc",
+    "family": "Amatic SC",
+    "commit": "6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec",
+    "url": "https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/amaticsc/AmaticSC-Regular.ttf",
+    "original_filename": "AmaticSC-Regular.ttf",
+    "sha256": "513a76f96d39a5366bd27c258674aaea35ee51c42b8f3060387f74649ee8c8aa",
+    "note": "Бинарный файл не изменён; кириллица дополнительно проверяется в Godot."
+  },
+  {
+    "id": "badscript",
+    "family": "Bad Script",
+    "commit": "6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec",
+    "url": "https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/badscript/BadScript-Regular.ttf",
+    "original_filename": "BadScript-Regular.ttf",
+    "sha256": "40ec737eee65ec4efbc24ae636fa31d7d84d1ccca83ab54cd555edb72cb3eaf0",
+    "note": "Бинарный файл не изменён; кириллица дополнительно проверяется в Godot."
+  },
+  {
+    "id": "marckscript",
+    "family": "Marck Script",
+    "commit": "6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec",
+    "url": "https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/marckscript/MarckScript-Regular.ttf",
+    "original_filename": "MarckScript-Regular.ttf",
+    "sha256": "504de8cc6f919163bc9afb67b9bc208d258230c5e8d00cb82ec52474f9fafc3b",
+    "note": "Бинарный файл не изменён; кириллица дополнительно проверяется в Godot."
+  },
+  {
+    "id": "neucha",
+    "family": "Neucha",
+    "commit": "6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec",
+    "url": "https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/neucha/Neucha.ttf",
+    "original_filename": "Neucha.ttf",
+    "sha256": "7927bd6ce090fa032857dcbc3ad0e8b765c462d0a72a8779068132496b4e087d",
+    "note": "Бинарный файл не изменён; кириллица дополнительно проверяется в Godot."
+  },
+  {
+    "id": "seymourone",
+    "family": "Seymour One",
+    "commit": "6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec",
+    "url": "https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/seymourone/SeymourOne-Regular.ttf",
+    "original_filename": "SeymourOne-Regular.ttf",
+    "sha256": "8699709245074a91a64b43495bf864f6df6d43648d7e9d0d09144ca74433c3d4",
+    "note": "Бинарный файл не изменён; кириллица дополнительно проверяется в Godot."
+  },
+  {
+    "id": "rubikglitch",
+    "family": "Rubik Glitch",
+    "commit": "6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec",
+    "url": "https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/rubikglitch/RubikGlitch-Regular.ttf",
+    "original_filename": "RubikGlitch-Regular.ttf",
+    "sha256": "260245012483d56956269100ebece747aa95b4b67e5a9411a81a36e91f55e653",
+    "note": "Бинарный файл не изменён; кириллица дополнительно проверяется в Godot."
+  },
+  {
+    "id": "rubikbeastly",
+    "family": "Rubik Beastly",
+    "commit": "6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec",
+    "url": "https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/rubikbeastly/RubikBeastly-Regular.ttf",
+    "original_filename": "RubikBeastly-Regular.ttf",
+    "sha256": "854c5f4bd05aae76d7830e871e2c990ea309a436072d8f0b67a796a80ec1cb18",
+    "note": "Бинарный файл не изменён; кириллица дополнительно проверяется в Godot."
+  },
+  {
+    "id": "pacifico",
+    "family": "Pacifico",
+    "commit": "6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec",
+    "url": "https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/pacifico/Pacifico-Regular.ttf",
+    "original_filename": "Pacifico-Regular.ttf",
+    "sha256": "5b6c0d5334a7bf77dea52b975c5a0c408878c0f7115ed5b6fb151f634b7bf701",
+    "note": "Бинарный файл не изменён; кириллица дополнительно проверяется в Godot."
+  },
+  {
+    "id": "rubikwetpaint",
+    "family": "Rubik Wet Paint",
+    "commit": "6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec",
+    "url": "https://raw.githubusercontent.com/google/fonts/6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec/ofl/rubikwetpaint/RubikWetPaint-Regular.ttf",
+    "original_filename": "RubikWetPaint-Regular.ttf",
+    "sha256": "3f35d1c77219c5219826b23c2f0c72dd0eed46425a0d4fff21b8827cdce61693",
+    "note": "Бинарный файл не изменён; кириллица дополнительно проверяется в Godot."
+  }
+]

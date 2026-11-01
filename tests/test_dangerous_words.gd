@@ -13,6 +13,7 @@ func _init() -> void:
 	test_horror_and_defuse()
 	test_guess_match()
 	test_eight_rounds()
+	test_tiebreak()
 	print("Опасные слова — проверок: %d, ошибок: %d" % [checks, failures])
 	quit(1 if failures > 0 else 0)
 
@@ -173,3 +174,17 @@ func test_eight_rounds() -> void:
 	check(m.move_cand(0, idx.call("а"), 4) == 1 and words.call() == "бавгд", "2 голоса не опускаются ниже слов с 1 голосом — последним в своей группе")
 	check(m.move_cand(0, idx.call("г"), 0) == 2 and words.call() == "багвд", "1 голос не поднимается выше слов с 2 голосами — первым в своей группе")
 	check(m.move_cand(0, idx.call("д"), 0) == 4 and words.call() == "багвд", "без голоса — всегда в самом низу")
+
+
+
+## Обе команды победили монстра в одном раунде — ничья: доп. раунд, обе снова сражаются.
+func test_tiebreak() -> void:
+	var r := make("troll")
+	r.winners = [0, 1]
+	r._end_round()
+	check(r.phase == "round_result" and r.winners.is_empty() and r.tiebreak, "две победы в раунде — доп. раунд")
+	check(bool(r.get_view(0)["tiebreak"]), "в виде — доп. раунд")
+	r.advance()  # следующий раунд
+	r.winners = [1]
+	r._end_round()
+	check(r.phase == "game_over" and r.winners == [1], "одна победа — конец")

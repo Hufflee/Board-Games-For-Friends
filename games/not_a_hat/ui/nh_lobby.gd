@@ -89,6 +89,7 @@ func _rebuild() -> void:
 	else:
 		_body.add_child(NHStyle.label("Подарков перед каждым: %d" % each, NHStyle.BODY))
 	_body.add_child(TurnClock.settings_row(func(tx, z): return NHStyle.button(tx, z), func(tx, z): return NHStyle.label(tx, z)))
+	_body.add_child(SeatShuffle.settings_row(func(tx, z): return NHStyle.button(tx, z), func(tx, z): return NHStyle.label(tx, z)))
 	var start_row := NHStyle.hbox(12)
 	if host:
 		var start := NHStyle.primary("Дарим подарки!", NHStyle.BODY, 220)

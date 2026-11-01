@@ -230,7 +230,7 @@ func _on_state(v: Dictionary) -> void:
 			if not v["vip_hand"][s].is_empty():
 				_as = s
 				break
-	_top.info.text = "Забег %d из %d" % [v["race_no"], RSBData.RACES]
+	_top.info.text = "Доп. забег · ничья" if bool(v.get("tiebreak", false)) else "Забег %d из %d" % [v["race_no"], RSBData.RACES]
 	_track.set_state(v, prev_phase == "race" or phase == "race")
 	_board.set_view(v)
 	_update_status(phase)
@@ -810,7 +810,7 @@ func _results_panel() -> void:
 		col.add_child(txt)
 	var row := RSBStyle.hbox(10)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
-	var next := RSBStyle.primary("Дальше" if _v["race_no"] < RSBData.RACES else "К итогам", RSBStyle.BODY, 180)
+	var next := RSBStyle.primary("Дальше" if _v["race_no"] < RSBData.RACES else "Дальше · итоги", RSBStyle.BODY, 180)
 	next.pressed.connect(func():
 		next.disabled = true
 		Net.send_action("next"))

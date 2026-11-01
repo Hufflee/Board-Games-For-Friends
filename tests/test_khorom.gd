@@ -118,7 +118,21 @@ func _crow_and_blitz() -> void:
 		_act(r, r.turn(), "reveal", {"row": r.blitz_row})
 	check(r.phase == "round_end", "блиц открыт до конца")
 	_act(r, 0, "next")
-	check(r.phase == "game_over", "после трёх раундов — конец")
+	if r.winners.size() == 1 or r.phase == "game_over":
+		check(r.phase == "game_over", "после трёх раундов — конец")
+	else:
+		check(r.phase == "write" and r.tiebreak_rounds == 1, "после трёх раундов ничья — доп. раунд")
+	# ничья по очкам — доп. раунд; единственный лидер — конец
+	var t := KHRules.new()
+	t.new_game([{"name": "А"}, {"name": "Б"}, {"name": "В"}], {"rounds": 1, "seed": 4})
+	t.phase = "round_end"
+	t.banked = [5, 5, 1]
+	t.marked = [[false, false, false, false, false, false], [false, false, false, false, false, false], [false, false, false, false, false, false]]
+	t.answers = [["", "", "", "", "", ""], ["", "", "", "", "", ""], ["", "", "", "", "", ""]]
+	check(t.next_round(true) and t.phase == "write" and t.tiebreak_rounds == 1 and bool(t.get_view(0).tiebreak), "ничья 5:5 — доп. раунд")
+	t.phase = "round_end"
+	t.banked = [7, 5, 1]
+	check(t.next_round(true) and t.phase == "game_over" and t.winners == [0], "доп. раунд определил победителя")
 
 func _limits() -> void:
 	var r := KHRules.new()

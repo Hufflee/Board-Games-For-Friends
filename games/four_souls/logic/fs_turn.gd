@@ -10,6 +10,7 @@ func _advance_start() -> void:
 	else:
 		_begin_turn()
 func _begin_turn() -> void:
+	turn_serial += 1  # новый ход — часы чужих карт с нуля (FSRules.tick)
 	_turn_attack_rolls.clear()
 	_turn_faces.clear()
 	_turn_kills = 0

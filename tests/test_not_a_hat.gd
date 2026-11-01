@@ -86,6 +86,7 @@ func test_random_games() -> void:
 			var mx := 0
 			for p in r.penalties:
 				mx = maxi(mx, p.size())
-			check(mx == NHRules.MAX_PENALTY, "конец — у кого-то 3 штрафа")
+			check(mx >= NHRules.MAX_PENALTY, "конец — у кого-то 3 штрафа (в доп. раунде при ничьей — больше)")
+			check(r.winners().size() == 1 or r.turn_no >= r.tiebreak_turn + NHRules.MAX_TIEBREAK_TURNS, "ничьей нет: доп. раунд до одного победителя")
 			check(not r.winners().is_empty(), "есть победитель")
 	check(over == 40, "все партии доиграны")

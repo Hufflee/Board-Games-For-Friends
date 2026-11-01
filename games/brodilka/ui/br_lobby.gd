@@ -96,6 +96,7 @@ func _rebuild() -> void:
 	else:
 		_body.add_child(BRStyle.label("Монеты на старте: %d" % (10 + coins), BRStyle.BODY))
 	_body.add_child(TurnClock.settings_row(func(tx, z): return BRStyle.button(tx, z), func(tx, z): return BRStyle.label(tx, z)))
+	_body.add_child(SeatShuffle.settings_row(func(tx, z): return BRStyle.button(tx, z), func(tx, z): return BRStyle.label(tx, z)))
 	var start_row := BRStyle.hbox(12)
 	if host:
 		var start := BRStyle.primary("В путь!", BRStyle.BODY, 220)

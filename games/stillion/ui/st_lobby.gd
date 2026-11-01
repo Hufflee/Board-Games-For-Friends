@@ -85,6 +85,7 @@ func _rebuild() -> void:
 		_body.add_child(tl)
 	# настройки партии (меняет хост)
 	_body.add_child(STStyle.label("НАСТРОЙКИ ПАРТИИ", STStyle.CAP, STStyle.muted(), HORIZONTAL_ALIGNMENT_LEFT, "bold"))
+	_body.add_child(SeatShuffle.settings_row(func(t, _z): return STStyle.button(t, STStyle.CAP), func(t, _z): return STStyle.label(t, STStyle.CAP)))
 	_choice_row("Жизни", "st_lives", int(s.get("st_lives", STRules.MAX_LIVES)), [1, 2, 3, 4, 5], host)
 	_choice_row("Шкала", "st_meter", int(s.get("st_meter", STRules.METER_MAX)), [10, 15, 20, 30], host,
 		"Сколько очков ответов нужно набрать, чтобы вернуть жизнь.")

@@ -39,6 +39,7 @@ func _rebuild() -> void:
 	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; _body.add_child(text)
 	var info := FSStyle.label("Стол как в Tabletop Simulator: колоды, ресурсы и бой ведёт игра, сложные эффекты карт выполняют игроки через панель эффекта. Ботов нет.",FSStyle.CAP)
 	info.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; _body.add_child(info)
+	_body.add_child(SeatShuffle.settings_row(func(t, _z): return FSStyle.button(t, FSStyle.CAP), func(t, _z): return FSStyle.label(t, FSStyle.CAP)))
 	if Net.is_host():
 		var start := FSStyle.primary("Спуститься в подвал")
 		start.pressed.connect(func(): _error.text = Net.start_game()); _body.add_child(start)

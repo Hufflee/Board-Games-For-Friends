@@ -97,6 +97,7 @@ func _rebuild() -> void:
 		_body.add_child(r1)
 	else:
 		_body.add_child(RSBStyle.label("Скорость бросков: %s" % names[speed], RSBStyle.CAP))
+	_body.add_child(SeatShuffle.settings_row(func(t, _z): return RSBStyle.button(t, RSBStyle.CAP), func(t, _z): return RSBStyle.label(t, RSBStyle.CAP)))
 	_body.add_child(RSBStyle.label("Дом (бросает кубики и ведёт забег) — программа. 4 забега, у кого больше денег — тот и победил.", RSBStyle.CAP, RSBStyle.MUTED))
 
 	var start_row := RSBStyle.hbox(12)

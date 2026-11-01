@@ -247,17 +247,38 @@ static func neon_ellipse(canvas: CanvasItem, center: Vector2, radii: Vector2, co
 
 
 ## Комната: фон, лучи прожекторов и гирлянда лампочек сверху.
-static func paint_backdrop(canvas: CanvasItem, dimensions: Vector2) -> void:
+## motion — смещение за курсором (параллакс): пятна света на разной «глубине» сдвигаются по-разному.
+static func paint_backdrop(canvas: CanvasItem, dimensions: Vector2, motion := Vector2.ZERO) -> void:
 	canvas.draw_rect(Rect2(Vector2.ZERO, dimensions), page())
 	var glow_a := 0.16 if dark() else 0.10
-	for spot: Array in [[Vector2(0.12, 0.2), PINK], [Vector2(0.88, 0.25), CYAN], [Vector2(0.5, 1.05), Color("9b5cff")]]:
-		var c: Vector2 = spot[0] * dimensions
+	for spot: Array in [[Vector2(0.12, 0.2), PINK, 1.6], [Vector2(0.88, 0.25), CYAN, 1.0], [Vector2(0.5, 1.05), Color("9b5cff"), 2.2]]:
+		var c: Vector2 = spot[0] * dimensions + motion * float(spot[2])
 		for k: int in 8:
 			canvas.draw_circle(c, dimensions.y * (0.55 - k * 0.06), Color(spot[1], glow_a / 8.0))
 	# гирлянда: ряд лампочек у верхнего края
 	var bulbs := int(dimensions.x / 28.0)
 	for i: int in bulbs:
-		var p := Vector2(14 + i * 28, 8)
+		var p := Vector2(14 + i * 28 + motion.x * 0.3, 8)
 		var on := i % 3 != 0
 		canvas.draw_circle(p, 6, Color(GOLD, 0.12 if on else 0.04))
 		canvas.draw_circle(p, 2.5, Color(GOLD, 0.8 if on else 0.25))
+
+
+## Фон покера с параллаксом: свет зала плавно смещается за мышью (выключается в настройках — Prefs.parallax).
+class Backdrop extends Control:
+	var paint: Callable  # paint_backdrop(canvas, size, motion) — внешний класс задаёт при создании
+	var _motion := Vector2.ZERO
+
+	func _ready() -> void:
+		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		resized.connect(queue_redraw)
+
+	func _process(delta: float) -> void:
+		var next: Vector2 = preload("res://hub/cursor_parallax.gd").step(self, _motion, delta, 14.0)
+		if next.distance_squared_to(_motion) > 0.0004:
+			_motion = next
+			queue_redraw()
+
+	func _draw() -> void:
+		if paint.is_valid():
+			paint.call(self, size, _motion)

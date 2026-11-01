@@ -141,6 +141,7 @@ func _rebuild_lobby() -> void:
 		seats_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_lobby_body.add_child(seats_hint)
 	_lobby_body.add_child(TurnClock.settings_row(TGStyle.button, TGStyle.label))
+	_lobby_body.add_child(SeatShuffle.settings_row(TGStyle.button, TGStyle.label))
 	var references := TGStyle.row()
 	for entry in [["Правила", show_rules], ["Комбинации", show_poker_reference], ["Настройки", show_settings]]:
 		var reference := TGStyle.button(entry[0])

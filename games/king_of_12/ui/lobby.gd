@@ -207,6 +207,7 @@ func _rebuild() -> void:
 		_body.add_child(K12UI.label("Сейчас идёт партия — вы сядете за стол в следующей. Пока можно общаться в чате.", K12UI.BODY, K12UI.GOLD))
 
 	mv.add_child(TurnClock.settings_row(func(t, z): return K12UI.button(t, z), func(t, z): return K12UI.label(t, z)))
+	mv.add_child(SeatShuffle.settings_row(func(t, z): return K12UI.button(t, z), func(t, z): return K12UI.label(t, z)))
 
 	# --- Старт: всегда видно внизу, главная кнопка выделена золотом ---
 	var start_row := _footer

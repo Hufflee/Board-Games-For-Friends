@@ -9,6 +9,9 @@ const PHASES := ["roll", "select", "sorcerer", "oracle", "pick_under", "bid", "c
 
 var _label: Label
 var _sb: StyleBoxFlat
+## Размер цифр; в верхней полосе часы мельче (TopBar ставит 12) — без scale, чтобы место в строке
+## совпадало с рисунком и текст не вылезал за плашку.
+var font_size := 14
 ## Фон часов — по запасу времени: спокойный зелёный, ≤ 20 с — янтарный, ≤ 10 с — красный.
 const BG_OK := Color(0.16, 0.42, 0.3, 0.85)
 const BG_WARN := Color(0.62, 0.42, 0.08, 0.9)
@@ -40,11 +43,17 @@ func _ready() -> void:
 	add_child(row)
 	var icon := ClockIcon.new()
 	icon.custom_minimum_size = Vector2(16, 18)
+	icon.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	row.add_child(icon)
 	_label = Label.new()
-	_label.add_theme_font_size_override("font_size", 14)
+	_label.add_theme_font_size_override("font_size", font_size)
 	_label.add_theme_color_override("font_color", Color.WHITE)
+	_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	_label.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	# ширина под самое длинное число «120 с»: плашка не прыгает каждую секунду, текст всегда внутри
+	var font := _label.get_theme_font("font")
+	_label.custom_minimum_size.x = ceilf(font.get_string_size("120 с", HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x) + 1.0
 	row.add_child(_label)
 	visible = false
 	Net.state_changed.connect(_on_state)

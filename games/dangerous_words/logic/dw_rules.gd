@@ -42,6 +42,9 @@ var turn_team := -1
 var wrong := 0
 var turn_log: Array = []  # итоги ходов раунда
 var winners: Array = []
+var tiebreak := false  # обе команды победили в одном раунде — идут доп. раунды
+var tiebreak_rounds := 0
+const MAX_TIEBREAK_ROUNDS := 10
 var monster_won := false
 var start_pos := [0, 0]
 var rng := RandomNumberGenerator.new()
@@ -73,6 +76,8 @@ func new_game(player_list: Array, room_list: Array = DWData.ROOMS_DEFAULT, monst
 	torch = [rng.randi_range(0, 7), rng.randi_range(0, 7)]
 	tie_first = 0
 	winners = []
+	tiebreak = false
+	tiebreak_rounds = 0
 	monster_won = false
 	_start_round()
 
@@ -455,9 +460,17 @@ func _end_round() -> void:
 		if e["ok"]:
 			advanced = true
 	var monster_moved := false
-	if not winners.is_empty():
+	if winners.size() == 1:
 		phase = "game_over"
 		return
+	if winners.size() > 1:
+		if tiebreak_rounds >= MAX_TIEBREAK_ROUNDS:
+			phase = "game_over"  # страховка от бесконечной ничьей — общая победа
+			return
+		# Обе команды победили монстра в одном раунде — ничья: доп. раунд, обе снова сражаются.
+		winners.clear()
+		tiebreak = true
+		tiebreak_rounds += 1
 	if not advanced and not fighting[0] and not fighting[1]:
 		monster_pos = maxi(monster_pos - 1, 0)
 		monster_moved = true
@@ -470,7 +483,7 @@ func _end_round() -> void:
 	torch[0] += 1
 	torch[1] += 1
 	tie_first = 1 - tie_first
-	if round_no >= MAX_ROUNDS:
+	if round_no >= MAX_ROUNDS and not tiebreak:
 		monster_won = true
 		phase = "game_over"
 		return
@@ -586,6 +599,7 @@ func get_view(seat: int, show_all: bool = false) -> Dictionary:
 		"max_guesses": [max_guesses(0), max_guesses(1)],
 		"turn_log": turn_log.duplicate(true),
 		"winners": winners.duplicate(),
+		"tiebreak": tiebreak,
 		"monster_won": monster_won,
 		"show_all": show_all,
 	}

@@ -28,6 +28,8 @@ var turn_index := 0  # позиция в очереди от ведущего
 var blitz_row := 0
 var time_left := 0.0
 var winners: Array = []
+var tiebreak_rounds := 0  # сыграно доп. раундов из-за ничьей
+const MAX_TIEBREAK_ROUNDS := 10
 var revision := 0
 var _used_topics: Array = []
 var _used_blitz: Array = []
@@ -49,6 +51,7 @@ func new_game(seats: Array, options: Dictionary = {}) -> String:
 	for _i: int in players.size():
 		banked.append(0)
 	round_no = 0
+	tiebreak_rounds = 0
 	winners.clear()
 	_start_round()
 	return ""
@@ -228,7 +231,6 @@ func next_round(host_authorized: bool) -> bool:
 		banked[seat] = int(banked[seat]) + round_points(seat)
 	round_no += 1
 	if round_no >= total_rounds:
-		phase = "game_over"
 		var best := -1
 		for seat: int in players.size():
 			best = maxi(best, int(banked[seat]))
@@ -236,7 +238,12 @@ func next_round(host_authorized: bool) -> bool:
 		for seat: int in players.size():
 			if int(banked[seat]) == best:
 				winners.append(seat)
-		return true
+		# Ничья — доп. раунд до единственного победителя (страховка — MAX_TIEBREAK_ROUNDS).
+		if winners.size() == 1 or tiebreak_rounds >= MAX_TIEBREAK_ROUNDS:
+			phase = "game_over"
+			return true
+		winners.clear()
+		tiebreak_rounds += 1
 	_start_round()
 	return true
 
@@ -309,7 +316,7 @@ func get_view(seat: int) -> Dictionary:
 		scores.append(score(owner))
 	return {"players": players.duplicate(true), "you": seat, "phase": phase, "kind": kind,
 		"kind_name": KHData.KIND_NAMES[kind], "topics": topics.duplicate(), "leader": leader,
-		"turn": turn(), "blitz_row": blitz_row, "round_no": round_no, "total_rounds": total_rounds,
+		"turn": turn(), "blitz_row": blitz_row, "round_no": round_no, "total_rounds": total_rounds, "tiebreak": tiebreak_rounds > 0,
 		"time_left": time_left, "timer": timer, "books": books, "scores": scores,
 		"winners": winners.duplicate(), "revision": revision}
 

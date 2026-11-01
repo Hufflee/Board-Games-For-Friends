@@ -70,6 +70,11 @@ func _ready() -> void:
 		var lobby := _button("В лобби", "VictoryLobby")
 		lobby.pressed.connect(Net.end_game)
 		_buttons.add_child(lobby)
+		if game == "the_mind":
+			var blind := _button("Продолжить вслепую", "ContinueBlind")
+			blind.visible = false
+			blind.pressed.connect(func(): Net.send_action("blind", {"revision": Net.view.get("revision", -1)}))
+			_buttons.add_child(blind)
 	var app: Node = table.get("app")
 	if is_instance_valid(app):
 		var route := "back_to_menu" if app.has_method("back_to_menu") else "back_to_hub"
@@ -108,6 +113,10 @@ func _button(text: String, id: String) -> Button:
 	return button
 
 func sync(view: Dictionary) -> void:
+	if game == "the_mind" and is_instance_valid(_buttons):
+		var blind := _buttons.get_node_or_null("ContinueBlind") as Button
+		if blind != null:
+			blind.visible = bool(view.get("won", false)) and not bool(view.get("blind", false))
 	var next: Dictionary = Result.resolve(game, view)
 	visible = bool(next.finished)
 	top_bar.set_victory_backdrop(visible and _showing, _top_ink())
@@ -451,10 +460,16 @@ func _layout_leader(card: Control) -> void:
 ## Фон самой игры, без поля и карт: отдельный экземпляр того же задника, что под столом.
 func _game_backdrop() -> Control:
 	match game:
+		"the_mind":
+			return preload("res://games/the_mind/ui/tm_style.gd").Background.new()
 		"brodilka":
 			return preload("res://games/brodilka/ui/br_style.gd").Backdrop.new()
 		"four_souls":
-			return preload("res://games/four_souls/ui/fs_style.gd").Backdrop.new()
+			# Только load: Айзека может не быть в сборке (исключён из экспорта), а preload
+			# несуществующего файла ломает разбор всего экрана победы во всех играх.
+			const FS_STYLE := "res://games/four_souls/ui/fs_style.gd"
+			if ResourceLoader.exists(FS_STYLE):
+				return load(FS_STYLE).Backdrop.new()
 		"gloom", "gloomier":
 			return preload("res://games/gloom/ui/gl_style.gd").Backdrop.new()
 		"not_a_hat":

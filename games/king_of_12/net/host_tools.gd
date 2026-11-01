@@ -4,7 +4,8 @@ extends RefCounted
 ## правка игроков (очки/фишки, карты), смена загаданной темы, кик и «сделать зрителем».
 ## Живёт в Net (только на хосте). Снимок — все переменные скрипта объекта правил, вложенные
 ## RefCounted-объекты восстанавливаются в те же экземпляры, ГСЧ — по state.
-## Игровые правки — через необязательные методы правил: host_stats / host_set_stat /
+## Игровые правки — через необязательные методы правил: host_stats / host_set_stat / host_game_stats /
+## host_set_game_stat /
 ## host_give_card / host_take_card / host_hand / host_new_theme (нет метода — нет кнопки).
 
 const LIMIT := 40  # сколько действий можно отменить
@@ -221,6 +222,7 @@ func info() -> Dictionary:
 		"timer_on": limit > 0,
 		"timer": limit if limit > 0 else int(net.settings.get("host_last_turn_time", 60)),
 		"theme": g != null and g.has_method("host_new_theme"),
+		"game_stats": g.call("host_game_stats") if g != null and g.has_method("host_game_stats") else [],
 		"players": players,
 		"spectate": net.mode != "offline",
 	}
@@ -267,6 +269,23 @@ func set_stat(seat: int, key: String, value: int) -> bool:
 	if not bool(g.call("host_set_stat", seat, key, value)):
 		_pending = null
 		return false
+	net._push_state()
+	return true
+
+
+## Параметр всей партии (host_game_stats / host_set_game_stat). Ключ — он же настройка лобби:
+## новое значение остаётся и для следующей партии.
+func set_game_stat(key: String, value: int) -> bool:
+	var g: Object = net._game_obj()
+	if g == null or not g.has_method("host_set_game_stat"):
+		return false
+	before_action("host")
+	if not bool(g.call("host_set_game_stat", key, value)):
+		_pending = null
+		return false
+	if net.settings.has(key):
+		net.settings[key] = value
+		net._broadcast_lobby()
 	net._push_state()
 	return true
 

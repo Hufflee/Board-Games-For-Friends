@@ -20,6 +20,8 @@ var _field: Control
 var _hand_orders := {}
 var _preview_generation := 0
 var _hand: Control
+var _hand_key := ""  # _hand_signature() руки, которая сейчас на столе
+var _hand_used := false  # пересборка поставила руку (иначе старую убираем)
 var _margin: MarginContainer
 var _judge_reject: Button
 var _postgame_seen := false
@@ -125,10 +127,13 @@ func _rebuild() -> void:
 		if is_instance_valid(flip):
 			flip.cancel()
 	_rule_flips.clear()
-	if is_instance_valid(_hand):
+	_hand_used = false
+	# Рука переживает пересборку, если её карты те же: чужое действие (другой игрок поставил карточку)
+	# не должно вырывать у меня перетаскиваемую карту и возвращать её в руку.
+	if is_instance_valid(_hand) and _hand_key != _hand_signature():
 		remove_child(_hand)
 		_hand.queue_free()
-	_hand = null
+		_hand = null
 	_field = null
 	Style.clear(_left)
 	Style.clear(_main)
@@ -183,6 +188,7 @@ func _rebuild() -> void:
 	_main.add_child(caption)
 	if phase == "choose_rules":
 		_build_choices()
+		_drop_unused_hand()
 		return
 	var field := Field.new()
 	field.name = "RingField"
@@ -240,6 +246,7 @@ func _rebuild() -> void:
 			_build_hand()
 	elif phase not in ["postgame", "game_over"]:
 		_build_hand()
+	_drop_unused_hand()
 	var actions := Style.row()
 	if phase in ["postgame", "game_over"]:
 		_build_final_rules()
@@ -332,7 +339,25 @@ func _build_choices() -> void:
 	confirm.pressed.connect(func(): _send("begin_clues"))
 	_main.add_child(confirm)
 
+## Пересборка не поставила руку (в этой фазе её нет) — убрать оставшуюся с прошлого состояния.
+func _drop_unused_hand() -> void:
+	if is_instance_valid(_hand) and not _hand_used:
+		remove_child(_hand)
+		_hand.queue_free()
+		_hand = null
+
+
+## Состав руки и чья она — если не изменился, рука не пересоздаётся (см. _rebuild).
+func _hand_signature() -> String:
+	return str([view.get("game_id", ""), view.get("you", -1), view.get("hand", []), can_place()])
+
+
 func _build_hand() -> void:
+	_hand_used = true
+	if is_instance_valid(_hand):
+		move_child(_hand, -1)  # та же рука — только поверх заново собранного стола
+		return
+	_hand_key = _hand_signature()
 	var hand := Hand.new()
 	hand.name = "PrivateHand"
 	hand.card_size = Vector2(88, 132)
@@ -579,8 +604,9 @@ func can_blind_move() -> bool:
 ## Знающий выбрал карточку кликом — следующий клик по области переносит её.
 func select_blind(owner: int) -> void:
 	blind_selected = owner
+	# без пересборки поля: нажатие — это и начало перетаскивания, карточка под мышью должна остаться
 	if is_instance_valid(_field):
-		_field._schedule_layout()
+		_field.highlight_blind(owner)
 	if is_instance_valid(_selection):
 		_selection.text = "%s · нажмите верную область" % str(view.players[owner].name)
 

@@ -111,6 +111,7 @@ func _rebuild() -> void:
 		_body.add_child(lrow)
 
 	_body.add_child(HCStyle.caption("Настройки"))
+	_body.add_child(SeatShuffle.settings_row(func(t, _z): return HCStyle.button(t, HCStyle.CAP), func(t, _z): return HCStyle.label(t, HCStyle.BODY)))
 	var count := WSData.INTRO_CARDS if s.get("ws_cards", "standard") == "intro" else WSData.standard_cards(members.size())
 	if host:
 		var r0 := HCStyle.hbox(8)

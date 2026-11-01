@@ -62,6 +62,7 @@ func _rebuild() -> void:
 		b.pressed.connect(func(): Net.set_setting("kh_timer", seconds))
 		timer_row.add_child(b)
 	body.add_child(_group("Время на ответы · в «Блице» 60 с", timer_row))
+	body.add_child(_group("Порядок мест", SeatShuffle.settings_row(func(t, _z): return Style.button(t), func(t, _z): return Style.label(t, 16, Style.muted()))))
 	var error := Style.label("", 16, Style.muted())
 	error.visible = false
 	body.add_child(error)

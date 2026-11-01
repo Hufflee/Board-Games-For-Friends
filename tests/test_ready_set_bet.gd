@@ -12,6 +12,7 @@ func _init() -> void:
 	test_betting()
 	test_payouts()
 	test_vip_and_game_end()
+	test_tiebreak()
 	print("На старт, ставки! — проверок: %d, ошибок: %d" % [checks, failures])
 	quit(1 if failures > 0 else 0)
 
@@ -140,3 +141,21 @@ func test_vip_and_game_end() -> void:
 	check(r.race_no == 4 and r.phase == "results", "четвёртый забег")
 	r.advance()
 	check(r.phase == "game_over" and not r.winners.is_empty(), "конец игры")
+
+
+
+## Ничья по деньгам после 4-го забега — доп. забег до единственного победителя.
+func test_tiebreak() -> void:
+	var r := make()
+	r.race_no = RSBData.RACES
+	r.phase = "results"
+	r.money = [30, 30, 10]
+	r.advance()
+	check(r.phase == "vip" and r.winners.is_empty(), "ничья 30:30 — доп. забег (снова VIP)")
+	for s in 3:
+		r.pick_vip(s, 0)
+	check(r.race_no == RSBData.RACES + 1 and bool(r.get_view(0, false)["tiebreak"]), "идёт доп. забег")
+	r.phase = "results"
+	r.money = [35, 30, 10]
+	r.advance()
+	check(r.phase == "game_over" and r.winners == [0], "доп. забег определил победителя")

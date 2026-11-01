@@ -285,6 +285,7 @@ func _legal(r: GLRules) -> Array:
 
 func test_random_games() -> void:
 	var ended := 0
+	var tiebreaks := 0
 	for g in 100:
 		var n := 2 + g % 4
 		var mode: Array = [["base"], ["base", "ug", "ud"], ["gm"], ["base", "ug", "ud", "gm"]][g / 25]
@@ -355,6 +356,12 @@ func test_random_games() -> void:
 		if r.phase == "game_over":
 			ended += 1
 			check(r.winners.size() >= 1 and r.finals.size() == n, "партия %d: есть победитель" % g)
+			# ничья по итогу — доп. круг ходов до одного победителя (или до страховочного предела)
+			check(r.winners.size() == 1 or r.tiebreak_rounds >= GLRules.MAX_TIEBREAK_ROUNDS, "партия %d: победитель один (%s)" % [g, str(r.winners)])
+			if r.tiebreak_rounds > 0:
+				tiebreaks += 1
+	if tiebreaks > 0:
+		print("  партий с доп. кругом из-за ничьей: %d" % tiebreaks)
 	DECK = 88
 	check(ended == 100, "все случайные партии закончились (%d из 100)" % ended)
 

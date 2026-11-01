@@ -1,0 +1,8 @@
+Встроенный начальный набор редактора, 01.11.2026.
+Копии уже используемых проектом OFL-шрифтов, без изменения бинарных файлов:
+Russo One — hub/art/fonts/RussoOne-Regular.ttf, OFL_RussoOne.txt.
+Exo 2 — hub/art/fonts/Exo2-Variable.ttf, OFL_Exo2.txt.
+Underdog — games/perudo/art/fonts/Underdog-Regular.ttf, OFL_Underdog.txt.
+Nunito — games/tip_top/art/fonts/Nunito-Variable.ttf, OFL_Nunito.txt.
+Точная версия определяется встроенными метаданными TTF; новая внешняя версия не скачивалась.
+Расширенный набор: base/ — неизменённые копии остальных OFL-шрифтов проекта, SOURCE.json фиксирует исходный путь и SHA-256; extra/ — официальный google/fonts, закреплённый commit 6c1dbe27dcf7d817d4b62cec033ba77fa8e2a5ec. У каждой семьи OFL.txt, METADATA.pb и SOURCE.json с точным URL/SHA, общий manifest.json. Загрузчик — tools/fetch_editor_fonts.py. Rubik Wet Paint взят из официального источника с собственным OFL (лицензия обычного Rubik к нему не подставляется).

@@ -103,6 +103,7 @@ func _rebuild() -> void:
 	fam_note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_body.add_child(fam_note)
 	_body.add_child(TurnClock.settings_row(func(tx, z): return GLStyle.button(tx, z), func(tx, z): return GLStyle.label(tx, z)))
+	_body.add_child(SeatShuffle.settings_row(func(tx, z): return GLStyle.button(tx, z), func(tx, z): return GLStyle.label(tx, z)))
 	var start_row := GLStyle.hbox(12)
 	if host:
 		var start := GLStyle.primary("Начать трагедию", GLStyle.BODY, 220)

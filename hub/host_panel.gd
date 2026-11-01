@@ -73,6 +73,8 @@ func _ready() -> void:
 	Net.state_changed.connect(func(_v): _rebuild())
 	Net.session_closed.connect(func(_r): queue_free())
 	Net.game_ended.connect(queue_free)
+	Net.party_game_changed.connect(func(_g): queue_free())
+	get_tree().scene_changed.connect(queue_free)
 	get_viewport().size_changed.connect(_fit)
 	_rebuild()
 	_place.call_deferred()
@@ -108,6 +110,12 @@ func _on_head_input(e: InputEvent) -> void:
 
 
 ## Пересобираем по каждому состоянию, но не пока хост печатает число в поле.
+## Панель живёт только в партии хоста: вышли в лобби, к выбору игры или в меню — закрываем сами.
+func _process(_d: float) -> void:
+	if not Net.in_game or not Net.is_host():
+		queue_free()
+
+
 func _rebuild() -> void:
 	if not Net.is_host() or not Net.in_game:
 		queue_free()
@@ -185,6 +193,17 @@ func _game_rows(info: Dictionary) -> Array:
 	on.toggled.connect(func(v: bool): Net.host_tools.set_timer(v, int(secs.value)))
 	secs.value_changed.connect(func(v: float): Net.host_tools.set_timer(true, int(v)))
 	rows.append(timer_row)
+	for st: Dictionary in info.get("game_stats", []):
+		var stat_row := HBoxContainer.new()
+		stat_row.add_theme_constant_override("separation", 8)
+		var caption := _label(str(st.label), 14, INK)
+		caption.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		stat_row.add_child(caption)
+		var value := _spin(int(st.value), int(st.get("min", 0)), int(st.get("max", 9999)), 1)
+		var stat_key := str(st.key)
+		value.value_changed.connect(func(v: float): Net.host_tools.set_game_stat(stat_key, int(v)))
+		stat_row.add_child(value)
+		rows.append(stat_row)
 	if bool(info.theme):
 		var theme := _button("Изменить тему", true)
 		theme.tooltip_text = "Загаданное слово/тема меняется на случайное"

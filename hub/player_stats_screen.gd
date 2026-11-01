@@ -34,7 +34,7 @@ func _ready() -> void:
 	head.add_child(close)
 	var select := OptionButton.new()
 	select.add_item("Все игры")
-	for game: Dictionary in HubGames.LIST:
+	for game: Dictionary in HubGames.all():
 		if _game_ids.has(str(game.id)):
 			continue
 		_game_ids.append(str(game.id))
@@ -99,7 +99,7 @@ func _coins() -> void:
 	collection.add_child(contents)
 	var owned := 0
 	var total := 0
-	for game: Dictionary in HubGames.LIST:
+	for game: Dictionary in HubGames.all():
 		if not _filter.is_empty() and str(game.id) != _filter:
 			continue
 		var progress := coin_progress(str(game.id), Prefs.coin_secrets)

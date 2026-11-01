@@ -113,7 +113,7 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 	left.add_child(t.info)
 	t._clock = TurnClock.new()
 	t._clock.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	t._clock.scale = Vector2(0.8, 0.8)  # в строке мелкого названия — чуть меньше
+	t._clock.font_size = 12  # в строке мелкого названия — чуть меньше (не scale: он ломал место под плашку)
 	head.add_child(t._clock)
 	row.add_child(spacer)
 	t._esc_btn = load("res://hub/escape_key.gd").new()
@@ -275,7 +275,10 @@ func _invite() -> void:
 
 func _process(_d: float) -> void:
 	if is_instance_valid(_victory_screen):
-		_victory_screen.sync(Net.view)
+		var shown: Dictionary = Net.view
+		if get_parent().has_method("presentation_view"):
+			shown = get_parent().call("presentation_view")
+		_victory_screen.sync(shown)
 	# z_index влияет на рисунок, но поздние контейнеры стола перехватывают GUI.
 	# Поднимаем полосу только под немодальными соседями; окна остаются последними.
 	var parent := get_parent()

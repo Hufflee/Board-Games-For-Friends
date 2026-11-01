@@ -10,6 +10,7 @@ signal box_selected(game: Dictionary)
 signal shelf_hint(text: String)
 signal box_released
 signal editor_mode_changed(on:bool)
+signal game_editor_requested
 
 const HINT := "Нажмите на коробку, чтобы открыть · Удерживайте для выделения, затем удерживайте снова для переноса"
 
@@ -28,7 +29,7 @@ const BOXED_ROWS := 3  # ячеек с коробками (в последней
 const SHELF_LAYOUT := [
 	["wavelength", "hues_and_cues", "dangerous_words", "king_of_12", "not_a_hat", "khorom"],
 	["ready_set_bet", "tip_top", "tip_top_18", "gloom", "gloomier", "stillion", "poker"],
-	["word_slam", "brodilka", "phantom_ink", "four_souls", "the_gang", "things_in_rings"],
+	["word_slam", "brodilka", "phantom_ink", "four_souls", "the_gang", "things_in_rings", "the_mind"],
 ]
 const SHELF_X := 0.25
 const PERUDO_SPACE := 0.17  # место под набор «Перудо» во второй ячейке
@@ -780,7 +781,7 @@ func _tv_picture() -> SubViewport:
 	add_child(vp)
 	var title := Label.new()
 	_tv_title = title
-	title.text = "НАСТОЛКИ"
+	title.text = "РЕДАКТОР"
 	title.add_theme_font_override("font", HubStyle.font("pixel"))
 	title.add_theme_font_size_override("font_size", 38)
 	title.add_theme_color_override("font_color", Color(1.0, 0.92, 0.45))
@@ -789,7 +790,7 @@ func _tv_picture() -> SubViewport:
 	title.position = Vector2(0, 124)
 	vp.add_child(title)
 	_blink = Label.new()
-	_blink.text = "PRESS START"
+	_blink.text = "СОЗДАТЬ ИГРУ"
 	_blink.add_theme_font_override("font", HubStyle.font("pixel"))
 	_blink.add_theme_font_size_override("font_size", 24)
 	_blink.add_theme_color_override("font_color", Color(0.55, 1.0, 1.0))
@@ -953,7 +954,7 @@ func _shelf() -> void:
 	var rows := ROWS
 	var palette := [Color("e0a83a"), Color("b8402e"), Color("3a7bd5"), Color("6b3fa0"), Color("2ea86b"), Color("d4392b"), Color("e86f3c")]
 	# 1) коробки (размеры — по обложкам): по полкам — SHELF_LAYOUT, в последней ячейке ещё «Перудо»
-	var cups: Array = HubGames.LIST.filter(func(g): return g["id"] == "perudo")
+	var cups: Array = HubGames.all().filter(func(g): return g["id"] == "perudo")
 	var make := func(g: Dictionary, i: int) -> GameBox:
 		var b := GameBox.new()
 		b.setup(g, Vector3(float(g.get("thickness", 0.07)), 0.3, 0.3), g.get("color", palette[i % palette.size()]))  # свой цвет коробки — из HubGames
@@ -1034,6 +1035,14 @@ func _shelf() -> void:
 		_place_cups(x_end, false)
 		boxes.append(b)
 	# 5) нижняя ячейка — стопка затемнённых коробок «Coming soon», лёжа
+	# Пользовательские коробки передаём общему упаковщику ShelfConfig вместе со встроенными.
+	for game: Dictionary in HubGames.all():
+		if not game.get("custom", false):
+			continue
+		var custom_box: GameBox = make.call(game, n)
+		n += 1
+		_shelf_root.add_child(custom_box)
+		boxes.append(custom_box)
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 12
 	for r in range(BOXED_ROWS, rows):
@@ -1637,10 +1646,7 @@ func _room_prop_at(point: Vector2) -> String:
 func _use_room_prop(kind: String) -> void:
 	_clear_shelf_selection()
 	if kind == "tv":
-		_tv_channel = (_tv_channel + 1) % 3
-		_tv_title.text = ["НАСТОЛКИ", "PLAYER ONE", "GOOD GAME"][_tv_channel]
-		_blink.text = ["PRESS START", "READY?", "PLAY AGAIN"][_tv_channel]
-		shelf_hint.emit("Телевизор · канал %d" % (_tv_channel + 1))
+		game_editor_requested.emit()
 	elif kind == "lamp":
 		_lamp_color = (_lamp_color + 1) % 3
 		var tint: Color = [Color("ff3ea5"), Color("35e6d1"), Color("ffaf44")][_lamp_color]
@@ -1828,6 +1834,13 @@ func _unhandled_input(event: InputEvent) -> void:
 		get_viewport().set_input_as_handled()
 		return
 	if panels and panels.is_open:
+		return
+	if focused == null and event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN] and _room_prop_at(event.position) == "tv":
+		_tv_channel = posmod(_tv_channel + (1 if event.button_index == MOUSE_BUTTON_WHEEL_DOWN else -1), 3)
+		_tv_title.text = ["РЕДАКТОР", "PLAYER ONE", "GOOD GAME"][_tv_channel]
+		_blink.text = ["СОЗДАТЬ ИГРУ", "READY?", "PLAY AGAIN"][_tv_channel]
+		shelf_hint.emit("Телевизор · канал%d · нажмите для редактора" % (_tv_channel + 1))
+		get_viewport().set_input_as_handled()
 		return
 	if (
 		focused == null

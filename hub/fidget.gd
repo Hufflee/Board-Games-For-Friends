@@ -35,6 +35,10 @@ const COINS := "res://hub/art/coins/"
 const COIN_VARIANTS := COINS + "variants/codex_2026-10-23/"
 ## Монеты-картинки: [орёл, решка]. Остальные стили рисуются кодом.
 const TEXTURES := {
+	"the_mind": [COINS + "unspoken_coin.png", COINS + "unspoken_coin.png"],
+	"the_mind_dark": [COINS + "unspoken_dark_coin.png", COINS + "unspoken_dark_coin.png"],
+	"the_mind_secret": [COINS + "unspoken_secret_coin.png", COINS + "unspoken_secret_coin.png"],
+	"the_mind_dark_secret": [COINS + "unspoken_dark_secret_coin.png", COINS + "unspoken_dark_secret_coin.png"],
 	"phantom_ink": [COINS + "phantom_ink_regular.png", COINS + "phantom_ink_regular.png"],
 	"phantom_ink_secret": [COINS + "phantom_ink_secret.png", COINS + "phantom_ink_secret.png"],
 	"four_souls_secret": [COINS + "four_souls_secret.png", COINS + "four_souls_secret.png"],
@@ -95,6 +99,10 @@ const TEXTURES := {
 }
 ## Области сторон на листах. Круглая отрисовка отсекает фон за ободком.
 const COIN_REGIONS := {
+	"the_mind": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"the_mind_dark": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"the_mind_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"the_mind_dark_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
 	"phantom_ink": [Rect2(0, 0, 887, 887), Rect2(886, 0, 887, 887)],
 	"phantom_ink_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
 	"four_souls_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
@@ -118,7 +126,7 @@ const COIN_REGIONS := {
 	"khorom_dark_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
 }
 ## Листы, где монета нарисована целиком (с гуртом и выступами): рисуем по альфе листа, без круглой маски.
-const FULL_ART := ["the_gang", "things_in_rings", "things_in_rings_secret", "poker", "poker_secret",
+const FULL_ART := ["the_mind", "the_mind_dark", "the_mind_secret", "the_mind_dark_secret", "the_gang", "things_in_rings", "things_in_rings_secret", "poker", "poker_secret",
 	"khorom", "khorom_secret", "khorom_dark", "khorom_dark_secret", "phantom_ink", "phantom_ink_secret",
 	"four_souls", "four_souls_secret", "stillion", "stillion_secret", "gloom_secret",
 	"hues_and_cues", "hues_and_cues_dark", "hues_and_cues_secret", "hues_and_cues_dark_secret"]
@@ -127,7 +135,7 @@ const FULL_ART := ["the_gang", "things_in_rings", "things_in_rings_secret", "pok
 const GAME_COINS := [["phantom_ink", false], ["four_souls", false], ["stillion", false], ["tip_top_18", false], ["tip_top", false], ["king_of_12", false], ["dangerous_words", false],
 	["ready_set_bet", true], ["word_slam", true], ["wavelength", true], ["not_a_hat", false],
 	["hues_and_cues", true], ["brodilka", false], ["gloom", false], ["the_gang", false], ["things_in_rings", false],
-	["poker", false], ["khorom", true]]
+	["poker", false], ["khorom", true], ["the_mind", true]]
 static var _tex_cache := {}
 
 var _vel := Vector2.ZERO
@@ -554,6 +562,8 @@ func _count_heads(heads: bool) -> void:
 
 func _colors() -> Array:
 	match _style:
+		"the_mind", "the_mind_dark", "the_mind_secret", "the_mind_dark_secret":
+			return [Color("d69b49"), Color("183d35"), Color("e5d6b8")]
 		"four_souls", "four_souls_secret":
 			return [Color("74634c"), Color("28241f"), Color("b59a70")]
 		"phantom_ink", "phantom_ink_secret":

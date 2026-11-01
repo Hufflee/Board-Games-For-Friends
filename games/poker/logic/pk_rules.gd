@@ -1,16 +1,19 @@
 class_name PKRules
 extends RefCounted
-## «Покер»: техасский холдем без лимита на хосте, без UI. Режимы «Классика» и «Спортивный» (сессии по 14 раздач).
+## «Покер»: техасский холдем без лимита на хосте, без UI. Режимы «Классика» и «Спортивный» (сессии по 12 раздач).
 ## Оценка рук — TGPoker (The Gang). Карты: id 0..51, масть = id / 13, значение = id % 13 + 2.
 ## Проверка: godot --headless --path . --script res://tests/test_poker.gd
 
 const SB := 1
 const BB := 2
 const START := 100 * BB  # все начинают со 100 BB
-const SESSION_HANDS := 14
+const SESSION_HANDS := 12
 const TURN_TIME := 30.0
 const SHOW_TIME := 8.0  # вскрытие: игроки по желанию открывают карты, потом следующая раздача
 const FOLD_SHOW_TIME := 4.0
+const REVEAL_DELAY := 2.5  # драматическая пауза перед автоматическим вскрытием после колла
+const VIEW_TIME := 6.0  # после каждого открытия карт — не меньше столько на просмотр
+const MAX_TIEBREAK_SESSIONS := 5  # ничья по очкам — доп. сессии (страховка от бесконечной ничьей)
 const SESSION_TIME := 12.0  # итоги сессии, потом следующая
 const Bot := preload("res://games/poker/logic/pk_bot.gd")
 const STREETS := ["preflop", "flop", "turn", "river"]
@@ -48,6 +51,11 @@ var winners: Array = []
 var log: Array = []
 var time_left := 0.0
 var turn_time := TURN_TIME  # время на ход из настроек лобби; 0 — без ограничения
+var target_points := 0  # цель спортивного режима из настроек; 0 — по умолчанию 2N+1
+var open_cards := false  # режим «Открытые карты»: свои карты всегда лицом вверх, спрятать нельзя
+var reveal_in := -1.0  # вскрытие после колла: через сколько открыть руки оставшихся (-1 — нет)
+var tiebreak_sessions := 0  # сыграно доп. сессий из-за ничьей по очкам
+var _last_kind := ""  # последнее действие торговли в раздаче: fold / check / call / raise
 var _bot_wait := 0.0
 var revision := 0
 var rng := RandomNumberGenerator.new()
@@ -59,6 +67,9 @@ func new_game(seats: Array, options: Dictionary = {}) -> String:
 	players = seats.duplicate(true)
 	mode = "sport" if str(options.get("mode", "classic")) == "sport" else "classic"
 	turn_time = float(options.get("turn_time", TURN_TIME))
+	target_points = maxi(0, int(options.get("target", 0)))
+	open_cards = bool(options.get("open", false))
+	tiebreak_sessions = 0
 	if options.has("seed"):
 		rng.seed = int(options.seed)
 	else:
@@ -88,7 +99,7 @@ func _filled(value: Variant) -> Array:
 
 ## Сколько очков нужно для победы в спортивном режиме.
 func target() -> int:
-	return players.size() * 2 + 1
+	return target_points if target_points > 0 else players.size() * 2 + 1
 
 
 ## Очки за место (1 — лучшее) при N игроках: N, N−1, …, 2, последнее — 0.
@@ -129,6 +140,8 @@ func _start_hand() -> void:
 	hand_start_stacks = stacks.duplicate()
 	board.clear()
 	result = {}
+	reveal_in = -1.0
+	_last_kind = ""
 	shown = []
 	for i: int in players.size():
 		shown.append([false, false])
@@ -224,18 +237,26 @@ func min_raise_to(seat: int) -> int:
 	return mini(current_bet + min_raise, int(bets[seat]) + int(stacks[seat]))
 
 
+## Потолок ставки «до» — эффективный стек (no-limit): больше, чем может уравнять самый богатый
+## соперник в раздаче, ставить бессмысленно — лишнее никто не покроет.
 func max_raise_to(seat: int) -> int:
-	return int(bets[seat]) + int(stacks[seat])
+	var own := int(bets[seat]) + int(stacks[seat])
+	var cover := 0
+	for other: int in players.size():
+		if other != seat and in_hand(other):
+			cover = maxi(cover, int(bets[other]) + int(stacks[other]))
+	return mini(own, cover)
 
 
 func can_raise(seat: int) -> bool:
-	return not bool(locked[seat]) and int(stacks[seat]) > to_call(seat)
+	return not bool(locked[seat]) and int(stacks[seat]) > to_call(seat) and max_raise_to(seat) > current_bet
 
 
 func fold(seat: int) -> bool:
 	if phase != "hand" or seat != to_act:
 		return false
 	folded[seat] = true
+	_last_kind = "fold"
 	last_action[seat] = "Пас"
 	_note("%s: пас" % players[seat].name)
 	_after_action(seat)
@@ -248,6 +269,7 @@ func check_call(seat: int) -> bool:
 	var need := to_call(seat)
 	_put(seat, need)
 	acted[seat] = true
+	_last_kind = "check" if need == 0 else "call"
 	if need == 0:
 		last_action[seat] = "Чек"
 		_note("%s: чек" % players[seat].name)
@@ -283,6 +305,7 @@ func raise_to(seat: int, amount: int) -> bool:
 	var opened := current_bet == 0
 	current_bet = amount
 	acted[seat] = true
+	_last_kind = "raise"
 	var verb := "Ставка" if opened else "Рейз до"
 	last_action[seat] = "Ва-банк %d" % amount if int(stacks[seat]) == 0 else "%s %d" % [verb, amount]
 	_note("%s: %s" % [players[seat].name, str(last_action[seat]).to_lower()])
@@ -322,6 +345,7 @@ func _finish_street() -> void:
 	current_bet = 0
 	min_raise = BB
 	var index := STREETS.find(street)
+	_open_all_in()
 	if index >= 3:
 		_showdown()
 		return
@@ -342,6 +366,27 @@ func _finish_street() -> void:
 	revision += 1
 	if to_act < 0:
 		_finish_street()  # все в ва-банке — докладываем стол до ривера
+
+
+## Все оставшиеся в раздаче больше не могут торговаться (ва-банк, повышать некому) — руки открываются
+## сразу, до докладки стола: дальше решают только карты.
+func _open_all_in() -> void:
+	if reveal_in == 0.0:
+		return  # уже открыты
+	var alive := []
+	var free := 0  # кто ещё не в ва-банке
+	for seat: int in players.size():
+		if in_hand(seat):
+			alive.append(seat)
+			if not all_in(seat):
+				free += 1
+	# торговаться больше некому: самое большее один со стеком, остальные в ва-банке
+	if alive.size() < 2 or free > 1:
+		return
+	for seat: int in alive:
+		shown[seat] = [true, true]
+	reveal_in = 0.0  # открыто — паузы вскрытия не нужно
+	_note("Ва-банк — карты открываются")
 
 
 func _award_uncontested(seat: int) -> void:
@@ -397,6 +442,10 @@ func _showdown() -> void:
 			last_action[seat] = "Выиграл · %s" % hands[seat] if won > 0 else "Проиграл"
 	result = {"pots": pots_out, "hands": hands, "fold_win": false}
 	_close_hand(SHOW_TIME)
+	if reveal_in != 0.0 and _last_kind == "call":
+		# торговля закончилась коллом — руки оставшихся откроются сами после паузы
+		reveal_in = REVEAL_DELAY
+		time_left = REVEAL_DELAY + VIEW_TIME
 	for seat: int in players.size():  # бот-победитель показывает руку сам
 		if bool(players[seat].get("bot", false)) and str(last_action[seat]).begins_with("Выиграл"):
 			show_card(seat, 0)
@@ -492,20 +541,34 @@ func session_places() -> Array:
 
 func _end_session() -> void:
 	places = session_places()
+	# +1 очко тому, кто за сессию забрал все фишки у всех соперников (остался один с фишками)
+	var alive := active_seats()
+	if alive.size() == 1 and players.size() > 1:
+		for entry: Dictionary in places:
+			if int(entry.seat) == int(alive[0]):
+				entry["bonus"] = 1
+				entry["points"] = int(entry.points) + 1
+				_note("%s забрал все фишки: +1 очко" % players[int(alive[0])].name)
 	for entry: Dictionary in places:
 		scores[entry.seat] = int(scores[entry.seat]) + int(entry.points)
 	_note("Итоги сессии %d" % session_no)
 	var best := 0
 	for seat: int in players.size():
 		best = maxi(best, int(scores[seat]))
+	winners.clear()
 	if best >= target():
-		winners.clear()
 		for seat: int in players.size():
 			if int(scores[seat]) == best:
 				winners.append(seat)
+	if winners.size() == 1 or (winners.size() > 1 and tiebreak_sessions >= MAX_TIEBREAK_SESSIONS):
 		phase = "game_over"
 		to_act = -1
 	else:
+		if not winners.is_empty():
+			# ничья по очкам на финише — доп. сессия до единственного победителя
+			tiebreak_sessions += 1
+			_note("Ничья по очкам — дополнительная сессия")
+			winners.clear()
 		phase = "session_end"
 		time_left = SESSION_TIME
 	revision += 1
@@ -584,6 +647,11 @@ func tick(delta: float) -> bool:
 				return true
 		"showdown":
 			time_left -= delta
+			if reveal_in > 0.0:
+				reveal_in -= delta
+				if reveal_in <= 0.0:
+					_reveal_remaining()
+					return true
 			if time_left <= 0.0:
 				_after_showdown()
 				return true
@@ -658,8 +726,19 @@ func show_card(seat: int, card: int) -> bool:
 	if (hole[seat] as Array).size() != 2 or seat >= shown.size() or bool(shown[seat][card]):
 		return false
 	shown[seat][card] = true
+	time_left = maxf(time_left, VIEW_TIME)  # открыли — даём рассмотреть
 	revision += 1
 	return true
+
+
+## Вскрытие после колла: руки всех, кто дошёл до конца раздачи, открываются сами.
+func _reveal_remaining() -> void:
+	reveal_in = 0.0
+	for seat: int in players.size():
+		if in_hand(seat) and (hole[seat] as Array).size() == 2:
+			shown[seat] = [true, true]
+	time_left = maxf(time_left, VIEW_TIME)
+	revision += 1
 
 
 ## Вид для места seat: свои карты; чужие — рубашкой, пока владелец сам не откроет их на вскрытии.
@@ -681,7 +760,7 @@ func get_view(seat: int) -> Dictionary:
 	if seat >= 0 and seat < players.size():
 		me = {
 			"to_call": to_call(seat) if phase == "hand" else 0,
-			"min_raise_to": min_raise_to(seat) if phase == "hand" else 0,
+			"min_raise_to": mini(min_raise_to(seat), max_raise_to(seat)) if phase == "hand" else 0,
 			"max_raise_to": max_raise_to(seat) if phase == "hand" else 0,
 			"can_raise": can_raise(seat) if phase == "hand" else false,
 			"can_rebuy": mode == "classic" and int(stacks[seat]) == 0 and phase != "game_over",
@@ -699,6 +778,7 @@ func get_view(seat: int) -> Dictionary:
 		"target": target(), "places": places.duplicate(true), "rebuys": rebuys.duplicate(), "profits": profits,
 		"result": result.duplicate(true), "winners": winners.duplicate(), "log": log.duplicate(),
 		"time_left": time_left, "turn_time": turn_time, "big_blind": BB, "revision": revision,
+		"open_cards": open_cards, "reveal_in": reveal_in, "tiebreak": tiebreak_sessions > 0,
 	}
 
 
@@ -714,6 +794,22 @@ func host_stats(seat: int) -> Array:
 	if mode == "sport":
 		out.append({"key": "scores", "label": "Победные очки", "value": int(scores[seat]), "min": 0, "max": target() * 2})
 	return out
+
+
+## Параметры всей партии для панели хоста: цель спортивного режима (ключ = настройка лобби).
+func host_game_stats() -> Array:
+	if mode != "sport" or phase == "game_over":
+		return []
+	return [{"key": "pk_target", "label": "Победных очков до победы", "value": target(), "min": 3, "max": 99}]
+
+
+func host_set_game_stat(key: String, value: int) -> bool:
+	if key != "pk_target" or mode != "sport" or phase == "game_over":
+		return false
+	target_points = clampi(value, 3, 99)
+	_note("Хост меняет цель: %d очков" % target_points)
+	revision += 1
+	return true
 
 
 ## Применить правку хоста (значение подрезается до границ). Сумма фишек за столом может меняться.

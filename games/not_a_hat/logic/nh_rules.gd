@@ -24,6 +24,9 @@ var from_shop := false  # подарок только что взят из ма�
 var claim := -1  # что назвал даритель
 var reveal := {}  # {g, claim, loser, receiver, giver}
 var turn_no := 0
+var tiebreak := false  # ничья по итогу — игра идёт дальше до единственного победителя
+var tiebreak_turn := 0
+const MAX_TIEBREAK_TURNS := 30  # страховка от бесконечной ничьей
 var log: Array = []  # [{giver, receiver, claim, result}] — последние события
 var rng := RandomNumberGenerator.new()
 var stats_risks: Array = []
@@ -31,6 +34,8 @@ var stats_risks: Array = []
 
 func new_game(player_list: Array, cards_each: int = 1, seed_value: int = 0) -> void:
 	stats_risks.clear()
+	tiebreak = false
+	tiebreak_turn = 0
 	players = player_list.duplicate(true)
 	start_cards = clampi(cards_each, 1, 2)
 	if seed_value != 0:
@@ -124,9 +129,14 @@ func advance() -> void:
 	if phase != "reveal":
 		return
 	var loser: int = reveal["loser"]
-	if penalties[loser].size() >= MAX_PENALTY:
-		phase = "game_over"
-		return
+	if penalties[loser].size() >= MAX_PENALTY or tiebreak:
+		# Ничья среди лучших — доп. раунд: игра идёт дальше до единственного победителя.
+		if winners().size() == 1 or (tiebreak and turn_no >= tiebreak_turn + MAX_TIEBREAK_TURNS):
+			phase = "game_over"
+			return
+		if not tiebreak:
+			tiebreak = true
+			tiebreak_turn = turn_no
 	_take_from_shop(loser)
 
 
@@ -182,6 +192,7 @@ func get_view(seat: int, show_all: bool = false) -> Dictionary:
 		"shop_top": int(shop[-1]["g"]) if not shop.is_empty() else -1,
 		"shop_left": shop.size(),
 		"phase": phase,
+		"tiebreak": tiebreak,
 		"giver": giver,
 		"receiver": receiver,
 		"card": moving,

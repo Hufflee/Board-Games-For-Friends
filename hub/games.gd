@@ -4,11 +4,21 @@ extends RefCounted
 
 const LIST := [
 	{
+		"id": "the_mind",
+		"title": "Unspoken",
+		"players": "2–8 игроков",
+		"time": "20 минут",
+		"description": "Почувствуйте общий ритм: выкладывайте числа по возрастанию, не раскрывая карты и не подавая сигналов. Одна команда, общие жизни и помощь «Паники». Рисованная атмосфера 60-х.",
+		"scene": "res://games/the_mind/ui/main.tscn",
+		"color": Color("183d35"),
+		"thickness": 0.06,
+	},
+	{
 		"id": "poker",
 		"title": "Покер",
 		"players": "2–8 игроков",
 		"time": "30–60 минут",
-		"description": "Техасский холдем под неоновыми огнями! «Классика» — раздачи без конца, проиграл — садись заново. «Спортивный» — сессии по 14 раздач и очки за места. Играйте с друзьями или с ботами.",
+		"description": "Техасский холдем под неоновыми огнями! «Классика» — раздачи без конца, проиграл — садись заново. «Спортивный» — сессии по 12 раздач и очки за места. Играйте с друзьями или с ботами.",
 		"scene": "res://games/poker/ui/main.tscn",
 		"color": Color("ff3fa4"),
 		"thickness": 0.06,
@@ -207,6 +217,12 @@ const LIST := [
 ]
 
 const HUB_SCENE := "res://hub/hub.tscn"
+const CustomLibrary := preload("res://games/custom/logic/cg_library.gd")
+
+static func all() -> Array:
+	var games: Array = LIST.duplicate(true)
+	games.append_array(CustomLibrary.list())
+	return games
 
 
 ## Под каким id игру запускать (варианты одной игры — одна сцена и одна партия).
@@ -216,6 +232,8 @@ static func play_id(g: Dictionary) -> String:
 
 ## Настройки комнаты, которые задаёт вариант игры (Gloom / Gloomier).
 static func apply_settings(g: Dictionary) -> void:
+	if g.get("custom", false):
+		Net.settings["cg_selected"] = str(g.get("uuid", str(g.get("id", "")).trim_prefix("custom:")))
 	for k in g.get("settings", {}):
 		Net.settings[k] = g["settings"][k]
 
@@ -226,6 +244,15 @@ static func is_release_soon(g: Dictionary) -> bool:
 
 
 static func by_id(id: String) -> Dictionary:
+	# Технический вход редактора; коробки пользовательских игр добавляет библиотека на следующем этапе.
+	if id == "cg":
+		return {"id": "cg", "title": "Пользовательская игра", "players": "2–8 игроков", "scene": "res://games/custom/ui/main.tscn", "color": Color("413260"), "thickness": 0.06}
+	if id.begins_with("custom:") and CustomLibrary.uuid_valid(id.trim_prefix("custom:")):
+		for game: Dictionary in CustomLibrary.list():
+			if game.id == id:
+				return game
+		# У клиента полученная игра живёт в кэше и не появляется на полке.
+		return {"id": id, "custom": true, "title": "Игра друга", "scene": "res://games/custom/ui/main.tscn"}
 	for g in LIST:
 		if g["id"] == id:
 			return g

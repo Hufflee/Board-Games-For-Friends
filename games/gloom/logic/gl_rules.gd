@@ -57,6 +57,9 @@ var turn_no := 0
 var log: Array = []
 var finals: Array = []
 var winners: Array = []
+var tiebreak_until := -1  # доп. круг при ничьей: место, с которого круг начался (-1 — не идёт)
+var tiebreak_rounds := 0
+const MAX_TIEBREAK_ROUNDS := 10  # страховка от бесконечной ничьей — потом общая победа
 var rng := RandomNumberGenerator.new()
 
 
@@ -119,6 +122,8 @@ func new_game(player_list: Array, seed_value: int = 0, card_sets: Array = ["base
 	log = []
 	finals = []
 	winners = []
+	tiebreak_until = -1
+	tiebreak_rounds = 0
 	prompts = []
 	react = {}
 	turn_no = 0
@@ -194,6 +199,12 @@ func _start_play() -> void:
 
 
 func _begin_turn(s: int) -> void:
+	if tiebreak_until >= 0 and s == tiebreak_until:
+		# доп. круг замкнулся: есть единственный лидер (или кончился запас кругов) — конец
+		if _score_finals().size() == 1 or tiebreak_rounds >= MAX_TIEBREAK_ROUNDS:
+			_finish_game()
+			return
+		tiebreak_rounds += 1
 	current = s
 	plays_left = 2
 	plays_used = 0
@@ -976,6 +987,8 @@ func _finish_turn() -> void:
 
 
 func _check_end() -> bool:
+	if tiebreak_until >= 0:
+		return false  # идёт доп. круг — конец считает _begin_turn, когда круг замкнётся
 	for s in players.size():
 		var has := false
 		for c in chars.size():
@@ -983,6 +996,12 @@ func _check_end() -> bool:
 				has = true
 				break
 		if has and living_of(s) == 0:
+			if _score_finals().size() > 1:
+				# Ничья — доп. круг: каждый ходит ещё раз, потом снова считаем (до одного победителя).
+				tiebreak_until = current
+				tiebreak_rounds = 1
+				_log("Ничья по итогу — ещё один круг ходов до единственного победителя", -1)
+				return false
 			_finish_game()
 			return true
 	return false
@@ -990,6 +1009,12 @@ func _check_end() -> bool:
 
 func _finish_game() -> void:
 	phase = "game_over"
+	tiebreak_until = -1
+	winners = _score_finals()
+
+
+## Итоговые суммы (finals) и места с лучшей (наименьшей) суммой.
+func _score_finals() -> Array:
 	finals = []
 	var best := 1 << 30
 	for s in players.size():
@@ -1017,10 +1042,11 @@ func _finish_game() -> void:
 					total -= 10
 		finals.append(total)
 		best = mini(best, total)
-	winners = []
+	var out := []
 	for s in players.size():
 		if finals[s] == best:
-			winners.append(s)
+			out.append(s)
+	return out
 
 
 # --- Срабатывание карт ---------------------------------------------------------------
@@ -1724,6 +1750,7 @@ func get_view(seat: int, show_all: bool = false) -> Dictionary:
 		"log": log.duplicate(true),
 		"finals": finals.duplicate(),
 		"winners": winners.duplicate(),
+		"tiebreak": tiebreak_until >= 0,
 		"hotseat": show_all,
 		"clock": phase in ["trim", "draft", "play", "prompt"],
 	}

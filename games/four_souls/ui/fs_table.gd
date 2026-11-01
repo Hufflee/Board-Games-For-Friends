@@ -12,6 +12,7 @@ var _unlocked := -2
 var _last_roll := -1
 # Не отправляем второй запрос, пока хост не подтвердил изменение состояния.
 var _roll_request_revision := -1
+var _view_at := 0  # когда пришло состояние: часы окна чужих карт считаются от него
 var _popup: Control
 var _preview_token := 0
 var _play_zone: PanelContainer
@@ -137,6 +138,8 @@ func _changed(view: Dictionary) -> void:
 		return
 	_end_card_drag()
 	_v = view
+	_view_at = Time.get_ticks_msec()
+	_schedule_off_turn_close()
 	if int(view.revision) > _roll_request_revision:
 		_roll_request_revision = -1
 	FSStyle.clear(_body)
@@ -368,8 +371,29 @@ func _changed(view: Dictionary) -> void:
 		_last_roll = int(view.roll_no)
 
 
+## Окно своих карт в чужой ход (первые 10 с хода): сколько осталось по часам хоста.
+func _off_turn_left() -> float:
+	return maxf(0.0, float(_v.get("off_turn_left", 0.0)) - (Time.get_ticks_msec() - _view_at) / 1000.0)
+
+
+func _off_turn_ok() -> bool:
+	return _v.seat == _v.current or _off_turn_left() > 0.0
+
+
+## Окно закрылось — пересобрать стол, чтобы карты и предметы погасли (новое состояние может не прийти).
+func _schedule_off_turn_close() -> void:
+	var left := _off_turn_left()
+	if left <= 0.0 or _v.seat == _v.current:
+		return
+	var revision := int(_v.revision)
+	get_tree().create_timer(left + 0.05).timeout.connect(func():
+		if is_inside_tree() and int(_v.revision) == revision:
+			_changed(_v))
+
+
 func _can_play_hand() -> bool:
 	if _v.seat < 0: return false
+	if not _off_turn_ok(): return false
 	if _v.phase == "discard": return _v.seat == _v.current
 	return _v.phase in ["turn","priority","battle_roll","death"] and not _v.players[int(_v.seat)].dead and (bool(_v.players[int(_v.seat)].ready) or _v.seat == _v.current and int(_v.free_loot) > 0)
 func _hands(view: Dictionary) -> void:
@@ -522,7 +546,7 @@ func _drop_card(entry: Dictionary, screen: Vector2) -> bool:
 
 
 func _can_use_item() -> bool:
-	return _v.seat >= 0 and not _v.players[int(_v.seat)].dead and _v.phase in ["turn","priority","battle_roll","death"]
+	return _v.seat >= 0 and _off_turn_ok() and not _v.players[int(_v.seat)].dead and _v.phase in ["turn","priority","battle_roll","death"]
 func _item_dialog(index: int) -> void:
 	var item: Dictionary = _v.players[int(_v.seat)].items[index]
 	var ability := FSData.item_response_kind(int(item.id))
@@ -643,10 +667,14 @@ func _controls(col: Control) -> void:
 	_note(col,{"turn":"Ваши решения","priority":"Окно ответов","effect":"Выполнить эффект","battle_roll":"Бросок атаки","death":"Штраф за смерть","discard":"Сбросить до 10"}.get(_v.phase,_v.phase),FSStyle.BODY)
 	_note(col,"Ход: " + str(_v.players[int(_v.current)].name) if _v.phase=="priority" else "Сейчас: " + str(_v.players[int(_v.actor)].name))
 	_note(col,"В банке: %d¢" % int(_v.bank))
+	if _v.seat >= 0 and _v.seat != _v.current and _v.phase != "game_over":
+		# свои карты в чужой ход — только первые 10 с хода
+		var left := _off_turn_left()
+		_note(col, "Свои карты в чужой ход: ещё %d с" % ceili(left) if left > 0.0 else "Свои карты в чужой ход — только в первые 10 с хода")
 	if _v.phase == "priority":
 		for e in _v.stack:
 			_note(col,FSData.effect_title(e))
-		_note(col,"Любой игрок может ответить до следующего действия активного игрока.")
+		_note(col,"Ответы — до следующего действия активного игрока; без ответов стек разрешится сам через %d с." % int(_v.get("response_window", 5)))
 		if _v.stack.any(func(e): return e.kind in ["roll", "combat"]):
 			_note(col, "Урон применится перед следующим броском, после ответов игроков.")
 	if _v.phase == "priority" and int(_v.get("death_actor", -1)) == int(_v.seat) and _v.seat >= 0:
