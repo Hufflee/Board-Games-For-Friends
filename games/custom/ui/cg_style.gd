@@ -4,6 +4,7 @@ extends RefCounted
 
 const HEAD := preload("res://hub/art/fonts/RussoOne-Regular.ttf")
 const BODY := preload("res://games/custom/ui/cg_body.tres")
+const CardLayers := preload("res://games/custom/ui/cg_card_layers.gd")
 
 static func dark() -> bool:
 	return Prefs.dark_theme()
@@ -24,10 +25,14 @@ static func theme() -> Theme:
 	var result := Theme.new()
 	result.default_font = BODY
 	result.default_font_size = 16
+	for state: String in ["font_color", "font_focus_color"]:
+		result.set_color(state, "LinkButton", ink())
+	for state: String in ["font_hover_color", "font_pressed_color"]:
+		result.set_color(state, "LinkButton", accent())
 	for type: String in ["Button", "OptionButton"]:
-		for state: String in ["normal", "hover", "pressed", "disabled", "focus"]:
+		for state: String in ["normal", "hover", "pressed", "hover_pressed", "disabled", "focus"]:
 			result.set_stylebox(state, type, box(panel().lightened(0.06) if state == "hover" else panel(), 12))
-		for state: String in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+		for state: String in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
 			result.set_color(state, type, ink())
 		result.set_color("font_disabled_color", type, ink().lerp(panel(), 0.55))
 	for state: String in ["normal", "focus", "read_only"]:
@@ -35,6 +40,11 @@ static func theme() -> Theme:
 	for state: String in ["font_color", "font_placeholder_color", "caret_color"]:
 		result.set_color(state, "LineEdit", ink())
 	result.set_color("selection_color", "LineEdit", Color(accent(), 0.35))
+	for state: String in ["normal", "focus", "read_only"]:
+		result.set_stylebox(state, "TextEdit", box(panel().darkened(0.08), 8))
+	for state: String in ["font_color", "font_readonly_color", "caret_color"]:
+		result.set_color(state, "TextEdit", ink())
+	result.set_color("selection_color", "TextEdit", Color(accent(), 0.35))
 	result.set_stylebox("panel", "PopupMenu", box(panel()))
 	result.set_stylebox("hover", "PopupMenu", box(panel().lightened(0.1)))
 	result.set_color("font_color", "PopupMenu", ink())
@@ -76,7 +86,12 @@ static func button(text: String, size: int = 16) -> Button:
 	item.add_theme_font_size_override("font_size", size)
 	for mode in ["normal", "hover", "pressed", "disabled", "focus"]:
 		item.add_theme_stylebox_override(mode, box(panel().lightened(0.06) if mode == "hover" else panel(), 12))
-	for mode in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
+	var focus := box(Color.TRANSPARENT, 12)
+	focus.border_color = accent()
+	focus.set_border_width_all(2)
+	focus.shadow_size = 0
+	item.add_theme_stylebox_override("focus", focus)
+	for mode in ["font_color", "font_hover_color", "font_pressed_color", "font_hover_pressed_color", "font_focus_color"]:
 		item.add_theme_color_override(mode, ink())
 	item.add_theme_color_override("font_disabled_color", ink().lerp(panel(), 0.55))
 	return item
@@ -85,14 +100,28 @@ static func primary(text: String, size: int = 16) -> Button:
 	var item := button(text, size)
 	item.add_theme_stylebox_override("normal", box(accent()))
 	item.add_theme_stylebox_override("hover", box(accent().lightened(0.1)))
+	item.add_theme_stylebox_override("pressed", box(accent().darkened(0.06)))
+	item.add_theme_stylebox_override("hover_pressed", box(accent().darkened(0.06)))
 	item.add_theme_color_override("font_color", bg())
 	item.add_theme_color_override("font_hover_color", bg())
+	item.add_theme_color_override("font_focus_color", bg())
+	item.add_theme_color_override("font_pressed_color", bg())
+	item.add_theme_color_override("font_hover_pressed_color", bg())
 	return item
 
 static func column(gap: int = 16) -> VBoxContainer:
 	var item := VBoxContainer.new()
 	item.add_theme_constant_override("separation", gap)
 	return item
+
+## Обычный Window не наследует заливку экрана; без неё светлый текстовый интерфейс попадает на серый фон движка.
+static func window_surface(window: Window) -> void:
+	var background := ColorRect.new()
+	background.name = "EditorWindowSurface"
+	background.color = bg()
+	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	background.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	window.add_child(background)
 
 static func row(gap: int = 8) -> HBoxContainer:
 	var item := HBoxContainer.new()
@@ -142,11 +171,19 @@ class CardFace extends Control:
 	var data: Dictionary
 	var art_texture: Texture2D
 	var custom_font: Font
+	var layer_reader: RefCounted
 	var _art: TextureRect
 	func _init(fields: Dictionary) -> void:
 		data = fields
 		mouse_filter = MOUSE_FILTER_IGNORE
 	func _ready() -> void:
+		if data.has("layers"):
+			var layers := CGStyle.CardLayers.new()
+			layers.name = "CardFaceLayers"
+			layers.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+			add_child(layers)
+			layers.setup(data, layer_reader, custom_font if custom_font != null else CGStyle.BODY)
+			return
 		if art_texture != null:
 			_art = TextureRect.new()
 			_art.texture = art_texture
@@ -163,6 +200,8 @@ class CardFace extends Control:
 	func _draw() -> void:
 		var paper := Color("ded7c8")
 		draw_style_box(CGStyle.box(paper, 0), Rect2(Vector2.ZERO, size))
+		if data.has("layers"):
+			return
 		var title := CGStyle.value_text(data.get("title", data.get("name", data.get("rank", "Карта"))))
 		var number := CGStyle.value_text(data.get("rank", data.get("value", "")))
 		draw_string(custom_font if custom_font != null else CGStyle.BODY, Vector2(10, 24), title, HORIZONTAL_ALIGNMENT_LEFT, size.x - 20, 16, Color("30263f"))

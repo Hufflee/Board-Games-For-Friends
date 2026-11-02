@@ -20,6 +20,10 @@ static func validate(def: Dictionary) -> Dictionary:
 		return result
 	if def.layout.has("custom") and not def.layout.custom is bool:
 		result.errors.append("Признак собственного стола должен быть логическим.")
+	if def.rules.has("dictionary") and def.rules.dictionary not in ["", "shared"]:
+		result.errors.append("Неизвестный словарь игры.")
+	if def.rules.get("turn_mode", "circle") not in Blocks.TURN_MODES:
+		result.errors.append("Неизвестный порядок ходов.")
 	var assets: Variant = def.get("assets", {})
 	if not assets is Dictionary or assets.size() > 1000:
 		result.errors.append("Ассеты должны быть словарём до 1000 файлов.")
@@ -84,6 +88,10 @@ static func validate(def: Dictionary) -> Dictionary:
 			if not item is Dictionary:
 				result.errors.append("Неверный элемент раскладки.")
 				continue
+			if item.has("anchors"):
+				var anchors: Variant = item.anchors
+				if not anchors is Dictionary or anchors.get("x", "center") not in ["left", "center", "right", "stretch"] or anchors.get("y", "top") not in ["top", "center", "bottom", "stretch"]:
+					result.errors.append("Неизвестный якорь элемента стола.")
 			if item.has("rect"):
 				var rect: Variant = item.rect
 				if not rect is Array or rect.size() != 4:
@@ -148,6 +156,30 @@ static func validate(def: Dictionary) -> Dictionary:
 			for binding: String in ["title", "value", "text", "art", "font"]:
 				if deck.face.has(binding) and not deck.face[binding] is String:
 					result.errors.append("Привязка шаблона карты должна быть текстовым ключом.")
+			if deck.face.has("layers"):
+				if not deck.face.layers is Array or not box_valid({"faces": {"front": deck.face.layers}}):
+					result.errors.append("Неверные слои шаблона лица карты.")
+				else:
+					var column_types := {}
+					if columns is Array:
+						for column: Variant in columns:
+							if column is Dictionary:
+								column_types[str(column.get("id", ""))] = str(column.get("type", "text"))
+					# Старые примеры хранят свойства прямо в строках без отдельного списка колонок.
+					for row: Variant in deck.get("rows", []):
+						if not row is Dictionary:
+							continue
+						for key: String in row:
+							if key == "copies" or column_types.has(key):
+								continue
+							var value: Variant = row[key]
+							column_types[key] = "bool" if value is bool else ("number" if _number(value) else ("image" if key == "art" or value is String and _hash(value) else "text"))
+					for layer: Dictionary in deck.face.layers:
+						var field: Variant = layer.get("field", "")
+						if not field is String or not str(field).is_empty() and (not column_types.has(field) or (layer.kind == "image" and column_types.get(field) != "image")):
+							result.errors.append("Слой лица ссылается на отсутствующую или неподходящую колонку.")
+						if layer.get("shape", "rect") not in ["rect", "ellipse"]:
+							result.errors.append("Неизвестная фигура слоя карты.")
 		for row: Variant in deck.get("rows", []):
 			if not row is Dictionary or not _number(row.get("copies", 1)):
 				result.errors.append("Неверная строка таблицы карт.")
@@ -222,6 +254,8 @@ static func validate(def: Dictionary) -> Dictionary:
 		result.errors.append("Цепочки должны быть массивом.")
 		return result
 	for chain: Variant in chains:
+		if chain is Dictionary and chain.has("comment") and (not chain.comment is String or str(chain.comment).length() > 4096):
+			result.errors.append("Комментарий цепочки должен быть текстом до4096символов.")
 		if not chain is Dictionary or not chain.get("blocks", []) is Array:
 			result.errors.append("Неверная цепочка блоков.")
 			continue
@@ -234,10 +268,56 @@ static func validate(def: Dictionary) -> Dictionary:
 		_walk_value(chain.get("guard", true), result, 0)
 		if event.has("zone"):
 			_walk_value(event.zone, result, 0)
-		_walk_blocks(chain.get("blocks", []), result, phases, 0)
+		_walk_blocks(chain.get("blocks", []), result, phases, 0, str(def.rules.get("turn_mode", "circle")))
+		if not _zone_references(chain, zone_owners):
+			result.errors.append("Цепочка ссылается на отсутствующую зону.")
 	return result
 
-static func _walk_blocks(blocks: Array, result: Dictionary, phases: Array, depth: int) -> void:
+static func zone_references_valid(def: Dictionary, value: Variant) -> bool:
+	var zones := {}
+	for screen: Dictionary in def.layout.screens:
+		for item: Dictionary in screen.get("items", []):
+			if item.get("kind") == "zone":
+				zones[str(item.id)] = str(item.get("owner", "shared"))
+	return _zone_references(value, zones)
+
+static func _zone_value(value: Variant, zones: Dictionary) -> bool:
+	if value is Dictionary:
+		if value.get("op") == "literal":
+			return _zone_value(value.get("value"), zones)
+		return _zone_references(value, zones) # Динамические выражения проверяются при выполнении.
+	if not value is String:
+		return false
+	if zones.has(value):
+		return true
+	for separator: String in ["@", "#"]:
+		var parts := str(value).split(separator)
+		if parts.size() == 2 and parts[1].is_valid_int() and int(parts[1]) >= 0 and zones.get(parts[0]) == ("player" if separator == "@" else "team"):
+			return true
+	return false
+
+static func _zone_references(value: Variant, zones: Dictionary) -> bool:
+	if value is Array:
+		for entry: Variant in value:
+			if not _zone_references(entry, zones):
+				return false
+	elif value is Dictionary:
+		var op := str(value.get("op", ""))
+		if op == "literal":
+			return true
+		if op == "zone" and not zones.has(value.get("id")):
+			return false
+		for field: String in Blocks.ZONE_FIELDS.get(op, []):
+			if value.has(field) and not _zone_value(value[field], zones):
+				return false
+		if value.get("type") in Blocks.EVENTS and value.has("zone") and not _zone_value(value.zone, zones):
+			return false
+		for entry: Variant in value.values():
+			if not _zone_references(entry, zones):
+				return false
+	return true
+
+static func _walk_blocks(blocks: Array, result: Dictionary, phases: Array, depth: int, turn_mode: String = "circle") -> void:
 	if depth > 32:
 		result.errors.append("Слишком глубокое вложение блоков.")
 		return
@@ -254,6 +334,8 @@ static func _walk_blocks(blocks: Array, result: Dictionary, phases: Array, depth
 				result.errors.append("В блоке %s пустое гнездо %s." % [op, field])
 		if op == "phase" and block.get("phase") not in phases:
 			result.errors.append("Переход в неизвестную фазу.")
+		if op == "next" and turn_mode == "simultaneous":
+			result.errors.append("В одновременном режиме передача хода недоступна: фаза ждёт готовности всех.")
 		if op == "sound" and block.get("name") not in Blocks.SOUNDS:
 			result.errors.append("Неизвестный встроенный звук.")
 		for field: String in block:
@@ -262,7 +344,7 @@ static func _walk_blocks(blocks: Array, result: Dictionary, phases: Array, depth
 		for nested in ["then", "else", "body"]:
 			if block.has(nested):
 				if block[nested] is Array:
-					_walk_blocks(block[nested], result, phases, depth + 1)
+					_walk_blocks(block[nested], result, phases, depth + 1, turn_mode)
 				else:
 					result.errors.append("Вложенные блоки должны быть массивом.")
 

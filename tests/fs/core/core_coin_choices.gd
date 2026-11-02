@@ -1,0 +1,48 @@
+extends RefCounted
+## Особые монеты: передача разыгранной карты, дополнительный бросок и чужая перезарядка.
+const Scenario := preload("res://tests/fs/fs_scenario.gd")
+const Check := preload("res://tests/fs/fs_check.gd")
+
+func _game(t: Check, card: int):
+	return Scenario.new(t).players(2).dlc().current(0).character(0, 821).character(1, 821) \
+		.no_items(0).no_items(1).hand(0, [card]).coins(0, 0).build()
+
+func run(t: Check) -> void:
+	var gift = _game(t, 506)
+	gift.ok(0, "loot", {"card": 506})
+	gift.close()
+	t.check(gift.g.legal_actions(0).any(func(action): return action.kind == "effect" and action.arg.get("op") == "self_give"), "Передача присутствует среди законных действий")
+	gift.no(0, "effect", {"op": "self_give", "target": 0}, "Нельзя отдать сыгранную карту самому себе")
+	gift.effect(0, "self_give", {"target": 1})
+	t.equal(gift.zone_of(506), "hand:1", "Та же физическая карта переходит в чужую руку")
+	gift.no(0, "effect", {"op": "self_give", "target": 1}, "Нельзя повторно передать уже перемещённую карту")
+	gift.no(0, "effect", {"op": "self_underdeck"}, "Переданную карту нельзя ещё и положить под колоду")
+	gift.ok(0, "effect_done", null)
+	t.equal(gift.zone_of(506), "hand:1", "Завершение не отправляет переданную карту в сброс")
+	gift.inv("Передача Липкого пятака")
+	var cancel = _game(t, 506)
+	cancel.ok(0, "loot", {"card": 506})
+	cancel.close()
+	cancel.effect(0, "self_give", {"target": 1})
+	cancel.g._cancel_unresolved()
+	t.equal(cancel.zone_of(506), "hand:1", "Отмена остатка эффекта не дублирует переданную карту")
+	cancel.inv("Отмена после передачи")
+	var roll = _game(t, 476)
+	roll.ok(0, "loot", {"card": 476})
+	roll.close()
+	roll.effect(0, "coins", {"amount": 1})
+	roll.roll(4)
+	roll.ok(0, "effect_roll", null)
+	roll.close()
+	t.equal(roll.g.last_roll, 4, "После монеты доступен отдельный настоящий бросок")
+	roll.ok(0, "effect_done", null)
+	t.equal(roll.g.coins[0], 1, "Ручной номинал не начисляется второй раз автоматически")
+	var recharge = _game(t, 544)
+	recharge.g.items[1][0].tapped = true
+	recharge.ok(0, "loot", {"card": 544})
+	recharge.close()
+	recharge.effect(0, "coins", {"amount": 1})
+	recharge.effect(0, "recharge", {"target": 1, "item": 0})
+	recharge.ok(0, "effect_done", null)
+	t.check(not recharge.g.items[1][0].tapped, "Заряженный пенни позволяет перезарядить чужой предмет")
+	recharge.inv("Чужая перезарядка")

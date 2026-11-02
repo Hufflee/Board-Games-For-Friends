@@ -10,7 +10,13 @@ func _advance_start() -> void:
 	else:
 		_begin_turn()
 func _begin_turn() -> void:
+	# Пропущенный ход не даёт добор/перезарядку и не запускает его начало/конец.
+	while int(skipped_turns[current]) > 0:
+		skipped_turns[current] = int(skipped_turns[current]) - 1
+		_note("%s пропускает ход" % name_of(current))
+		_advance_turn_order()
 	turn_serial += 1  # новый ход — часы чужих карт с нуля (FSRules.tick)
+	reward_boost = 1
 	_turn_attack_rolls.clear()
 	_turn_faces.clear()
 	_turn_kills = 0
@@ -19,6 +25,8 @@ func _begin_turn() -> void:
 	discard_choice = {}
 	_refresh_passive_stats()
 	phase = "turn"; priority = current; free_loot = 1; bought = false; attacked = false; battle = -1
+	# Новый ход больше не продолжает прежний end_turn/starting_continue после автоматического события.
+	_after_stack = "turn"
 	temporary_attack = []
 	deck_attacks = 0
 	required_deck_attacks = 0
@@ -97,6 +105,14 @@ func _end_turn() -> void:
 	for monster: Dictionary in monsters:
 		monster.hp = _monster_hp(int(monster.id))
 		_expire_monster_modifiers(monster)
+	_advance_turn_order()
+	_ending_turn = false
+	_end_discard_prepared = false
+	_discard_limit = 10
+	_begin_turn()
+
+## Одна очередь для обычного перехода и пропуска, с сохранением места возврата из доп. ходов.
+func _advance_turn_order() -> void:
 	if not extra_turns.is_empty():
 		if _turn_resume < 0:
 			_turn_resume = (current + 1) % players.size()
@@ -105,10 +121,6 @@ func _end_turn() -> void:
 		current = _turn_resume if _turn_resume >= 0 else (current + 1) % players.size()
 		_turn_resume = -1
 		if current == 0: round_no += 1
-	_ending_turn = false
-	_end_discard_prepared = false
-	_discard_limit = 10
-	_begin_turn()
 ## Окончание хода погибшего ждёт штрафов остальных одновременно погибших игроков.
 func _resume_after_deaths() -> void:
 	var pending_passives := stack.filter(func(effect): return effect.kind == "passive")
@@ -142,6 +154,8 @@ func _check_deaths() -> void:
 		_death_resume = _after_stack if phase == "priority" else phase
 		_push({"kind": "death", "owner": int(_death_queue[0])}, _death_resume)
 func _check_bonuses() -> void:
+	if phase == "game_over":
+		return
 	for id in bonuses:
 		if claimed.has(id): continue
 		var key: String = FSData.card(int(id)).key
@@ -152,11 +166,17 @@ func _check_bonuses() -> void:
 			for item in items[seat]:
 				if str(FSData.card(int(item.id)).key).begins_with("guppy"): guppy += 1
 			if key == "soulofgreed" and coins[seat] >= 25 or key == "soulofgluttony" and hands[seat].size() >= 10 or key == "soulofguppy" and guppy >= 2:
-				claimed.append(id); souls[seat] += 1; soul_cards[seat].append({"id":int(id),"value":1}); _note(name_of(seat) + " получает " + FSData.title(int(id))); break
+				claimed.append(id)
+				_gain_soul_card(seat, {"id": int(id), "value": 1})
+				_note(name_of(seat) + " получает " + FSData.title(int(id)))
+				break
 	_refresh_passive_stats()
 func _check_win() -> void:
+	if phase == "game_over":
+		return
 	for seat in players.size():
 		if souls[seat] >= 4:
+			_cleanup_reward_cards()
 			winner = seat; phase = "game_over"; _note("Четыре души! Победитель: " + name_of(seat)); return
 func actor() -> int:
 	if phase == "forced_discard":

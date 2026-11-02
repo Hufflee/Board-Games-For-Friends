@@ -25,6 +25,8 @@ var events: Array = []
 var discard_info: Array = []
 var event_no := 0
 var last_play: Dictionary = {}
+var refocus_left := 0.0
+const REFOCUS_DELAY := 15.0
 
 func new_game(seats: Array, seed_value: int = -1) -> String:
 	if seats.size() < 2 or seats.size() > 8:
@@ -46,6 +48,7 @@ func new_game(seats: Array, seed_value: int = -1) -> String:
 	blind = false
 	log.clear()
 	event_no = 0
+	refocus_left = 0.0
 	_deal()
 	return ""
 
@@ -76,6 +79,8 @@ func _focus(text: String) -> void:
 	ready = []
 	ready.resize(players.size())
 	ready.fill(false)
+	for seat in hands.size():
+		ready[seat] = hands[seat].is_empty()
 	votes.clear()
 	message = text
 	_note(text)
@@ -95,12 +100,16 @@ func action(seat: int, kind: String, data: Variant = {}) -> bool:
 		"ready":
 			if phase == "focus" and not ready[seat]:
 				ready[seat] = true
+				for i in hands.size():
+					if hands[i].is_empty():
+						ready[i] = true
 				if not ready.has(false):
 					phase = "play"
 					message = "Почувствуйте момент. Разыгрывайте карты по возрастанию."
 				accepted = true
 		"refocus":
-			if phase == "play" and pending_cutoff == 0:
+			if phase == "play" and pending_cutoff == 0 and refocus_left <= 0.0:
+				refocus_left = REFOCUS_DELAY
 				_focus("Стоп. Снова настройтесь друг на друга.")
 				accepted = true
 		"stop":
@@ -242,6 +251,19 @@ func _finish(success: bool) -> void:
 	message = "Вы на одной волне!" if success else "Жизни закончились. Попробуем ещё раз!"
 	_note(message)
 
+## Отсчёт только на хосте; сеть обновляется при окончании блокировки.
+func tick(delta: float) -> bool:
+	var before := refocus_left
+	refocus_left = maxf(0.0, refocus_left - maxf(0.0, delta))
+	return before > 0.0 and refocus_left == 0.0
+
+func level_reward() -> String:
+	if level in [2, 5, 8]:
+		return "+1 Паника (до 3)"
+	if level in [3, 6, 9]:
+		return "+1 жизнь (до 5)"
+	return "без бонуса"
+
 func get_view(seat: int) -> Dictionary:
 	var public_players: Array = []
 	for i in players.size():
@@ -259,6 +281,7 @@ func get_view(seat: int) -> Dictionary:
 	return {"players": public_players, "seat": seat, "hand": hands[seat].duplicate() if seat >= 0 and seat < hands.size() else [],
 		"events": shown_events, "last_play": shown_last, "discard_info": discard_info.duplicate(true),
 		"can_stop": can_stop(seat), "can_play": phase == "play" and pending_cutoff == 0,
+		"refocus_left": refocus_left, "level_reward": level_reward(),
 		"phase": phase, "level": level, "target": target, "lives": lives, "panic": panic, "ready": ready.duplicate(),
 		"votes": votes.duplicate(), "pile": [] if blind and phase in ["play", "focus", "vote"] else pile.duplicate(),
 		"pile_count": pile.size(), "discarded": discarded.duplicate(), "revision": revision, "turn_no": turn_no,

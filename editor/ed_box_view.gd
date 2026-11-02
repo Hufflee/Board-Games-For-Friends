@@ -8,12 +8,14 @@ const PARTS := ["front", "back", "spine", "top"]
 const CORRECTION := preload("res://editor/ed_layer.gdshader")
 const Fonts := preload("res://editor/ed_fonts.gd")
 signal layer_moved(index: int, rect: Array)
+signal layer_rotated(index: int, degrees: float)
 var document: RefCounted
 var surfaces: Dictionary = {}
 var assets := AssetReader.new()
 var _box: Node3D
 var _camera: Camera3D
 var _face_image: TextureRect
+var _selection: Control
 var _three: SubViewportContainer
 var selected_face := "front"
 var layer_index := -1
@@ -22,6 +24,28 @@ var _drag_start := Vector2.ZERO
 var _drag_rect := Rect2()
 var _drag_delta := Vector2.ZERO
 var _drag_mode := "move"
+var _drag_corner := Vector2.ONE
+var _drag_rotation := 0.0
+var _rotation_value := 0.0
+var _start_angle := 0.0
+
+func _layer_rotation() -> float:
+	var layers: Array = document.data.box.get("faces", {}).get(selected_face, [])
+	return deg_to_rad(float(layers[layer_index].get("rotation", 0))) if layer_index >= 0 and layer_index < layers.size() else 0.0
+
+func _handle_point(rect: Rect2, corner: Vector2, angle: float) -> Vector2:
+	return _face_origin() + (rect.get_center() + (rect.size * corner * 0.5).rotated(angle)) * _face_scale()
+
+func _transformed_rect() -> Rect2:
+	if not _dragging:
+		return _selected_rect()
+	if _drag_mode == "move":
+		return Rect2(_drag_rect.position + _drag_delta, _drag_rect.size)
+	if _drag_mode == "resize":
+		var dimensions := _drag_rect.size + _drag_delta * _drag_corner
+		var center := _drag_rect.get_center() + (_drag_delta * 0.5).rotated(_drag_rotation)
+		return Rect2(center - dimensions * 0.5, dimensions)
+	return _drag_rect
 
 class Layer extends Control:
 	var data: Dictionary
@@ -123,6 +147,11 @@ func setup(doc: RefCounted, with_3d: bool = true) -> void:
 	_face("back", Vector2(dimensions.x, dimensions.y), Vector3(0, 0, -thickness / 2 - 0.002), Vector3(0, PI, 0))
 	_face("spine", Vector2(thickness, dimensions.y), Vector3(-dimensions.x / 2 - 0.002, 0, 0), Vector3(0, -PI / 2, 0))
 	_face("top", Vector2(dimensions.x, thickness), Vector3(0, dimensions.y / 2 + 0.002, 0), Vector3(-PI / 2, 0, 0))
+	# Противоположные торцы используют тот же рисунок: картонная основа не светит белым.
+	_face("spine", Vector2(thickness, dimensions.y), Vector3(dimensions.x / 2 + 0.002, 0, 0), Vector3(0, PI / 2, 0))
+	_box.get_child(_box.get_child_count() - 1).set_meta("opposite", true)
+	_face("top", Vector2(dimensions.x, thickness), Vector3(0, -dimensions.y / 2 - 0.002, 0), Vector3(PI / 2, 0, 0))
+	_box.get_child(_box.get_child_count() - 1).set_meta("opposite", true)
 	_face_image = TextureRect.new()
 	_face_image.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	_face_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -130,6 +159,11 @@ func setup(doc: RefCounted, with_3d: bool = true) -> void:
 	_face_image.mouse_filter = MOUSE_FILTER_IGNORE
 	_face_image.hide()
 	add_child(_face_image)
+	_selection = Control.new()
+	_selection.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	_selection.mouse_filter = MOUSE_FILTER_IGNORE
+	_selection.draw.connect(_draw_selection)
+	add_child(_selection)
 	gui_input.connect(_input_view)
 
 func _load_current_assets() -> void:
@@ -165,10 +199,10 @@ func refresh() -> void:
 					child.position.z = (thick / 2 + 0.002) * (1 if child.get_meta("part") == "front" else -1)
 				"spine":
 					child.mesh.size = Vector2(thick, shape.y)
-					child.position.x = -shape.x / 2 - 0.002
+					child.position.x = (shape.x / 2 + 0.002) * (1 if child.get_meta("opposite", false) else -1)
 				"top":
 					child.mesh.size = Vector2(shape.x, thick)
-					child.position.y = shape.y / 2 + 0.002
+					child.position.y = (shape.y / 2 + 0.002) * (-1 if child.get_meta("opposite", false) else 1)
 
 static func face_size(data: Dictionary, part: String) -> Vector2i:
 	var shape: Vector2 = Library.SHAPES.get(str(data.get("box", {}).get("template", "square")), Library.SHAPES.square)
@@ -256,16 +290,26 @@ func _selected_rect() -> Rect2:
 	return Rect2(float(rect[0]), float(rect[1]), float(rect[2]), float(rect[3]))
 
 func _draw() -> void:
+	if is_instance_valid(_selection):
+		_selection.queue_redraw()
+
+func _draw_selection() -> void:
 	if selected_face.is_empty() or not is_instance_valid(_face_image) or not _face_image.visible:
 		return
-	var rect := _selected_rect()
+	var rect := _transformed_rect()
 	if rect.has_area():
-		if _drag_mode == "resize":
-			rect.size += _drag_delta
-		else:
-			rect.position += _drag_delta
-		draw_rect(Rect2(_face_origin() + rect.position * _face_scale(), rect.size * _face_scale()), Style.accent(), false, 2.0)
-		draw_rect(Rect2(_face_origin() + rect.end * _face_scale() - Vector2(5, 5), Vector2(10, 10)), Style.accent())
+		var angle := _rotation_value if _dragging else _layer_rotation()
+		var points := PackedVector2Array()
+		for corner: Vector2 in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]:
+			var point := _handle_point(rect, corner, angle)
+			points.append(point)
+			_selection.draw_rect(Rect2(point - Vector2(5, 5), Vector2(10, 10)), Style.accent())
+		points.append(points[0])
+		_selection.draw_polyline(points, Style.accent(), 2, true)
+		var top := _handle_point(rect, Vector2(0, -1), angle)
+		var rotate_handle := top + Vector2(0, -28).rotated(angle)
+		_selection.draw_line(top, rotate_handle, Style.accent(), 2, true)
+		_selection.draw_circle(rotate_handle, 6, Style.accent())
 
 func _drag_face(event: InputEvent) -> bool:
 	if selected_face.is_empty() or not _face_image.visible:
@@ -276,36 +320,60 @@ func _drag_face(event: InputEvent) -> bool:
 	if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT:
 		if event.pressed:
 			var point: Vector2 = (event.position - _face_origin()) / _face_scale()
-			_drag_mode = "resize" if event.position.distance_to(_face_origin() + _selected_rect().end * _face_scale()) < 12 else "move"
-			if _drag_mode != "resize" and not _selected_rect().has_point(point):
+			_drag_rotation = _layer_rotation()
+			_rotation_value = _drag_rotation
+			_drag_rect = _selected_rect()
+			_drag_mode = "move"
+			for corner: Vector2 in [Vector2(-1, -1), Vector2(1, -1), Vector2(1, 1), Vector2(-1, 1)]:
+				if event.position.distance_to(_handle_point(_drag_rect, corner, _drag_rotation)) < 12:
+					_drag_corner = corner
+					_drag_mode = "resize"
+			var rotate_handle := _handle_point(_drag_rect, Vector2(0, -1), _drag_rotation) + Vector2(0, -28).rotated(_drag_rotation)
+			if event.position.distance_to(rotate_handle) < 12:
+				_drag_mode = "rotate"
+			var local_point := (point - _drag_rect.get_center()).rotated(-_drag_rotation) + _drag_rect.get_center()
+			if _drag_mode == "move" and not _drag_rect.has_point(local_point):
 				return false
 			_dragging = true
 			_drag_start = point
-			_drag_rect = _selected_rect()
+			_start_angle = (point - _drag_rect.get_center()).angle()
 			_drag_delta = Vector2.ZERO
 		elif _dragging:
+			var result := _transformed_rect()
 			_dragging = false
-			var position_value := _drag_rect.position + (_drag_delta if _drag_mode == "move" else Vector2.ZERO)
-			var size_value := _drag_rect.size + (_drag_delta if _drag_mode == "resize" else Vector2.ZERO)
-			layer_moved.emit(layer_index, [position_value.x, position_value.y, size_value.x, size_value.y])
+			if _drag_mode == "rotate":
+				layer_rotated.emit(layer_index, rad_to_deg(_rotation_value))
+			else:
+				layer_moved.emit(layer_index, [result.position.x, result.position.y, result.size.x, result.size.y])
 			_drag_delta = Vector2.ZERO
 		queue_redraw()
 		return true
 	if event is InputEventMouseMotion and _dragging:
-		_drag_delta = (((event.position - _face_origin()) / _face_scale() - _drag_start) / 8.0).round() * 8
+		var point: Vector2 = (event.position - _face_origin()) / _face_scale()
+		_drag_delta = point - _drag_start
 		if _drag_mode == "resize":
-			_drag_delta.x = clampf(_drag_rect.size.x + _drag_delta.x, 8, 4096) - _drag_rect.size.x
-			_drag_delta.y = clampf(_drag_rect.size.y + _drag_delta.y, 8, 4096) - _drag_rect.size.y
+			_drag_delta = (_drag_delta.rotated(-_drag_rotation) / 8.0).round() * 8
+			var dimensions := _drag_rect.size + _drag_delta * _drag_corner
+			if event.shift_pressed:
+				dimensions = _drag_rect.size * maxf(dimensions.x / _drag_rect.size.x, dimensions.y / _drag_rect.size.y)
+			dimensions = dimensions.clamp(Vector2(8, 8), Vector2(4096, 4096))
+			_drag_delta = (dimensions - _drag_rect.size) * _drag_corner
+		elif _drag_mode == "rotate":
+			_rotation_value = _drag_rotation + angle_difference(_start_angle, (point - _drag_rect.get_center()).angle())
+			if event.shift_pressed:
+				_rotation_value = snappedf(_rotation_value, PI / 12.0)
 		else:
+			_drag_delta = (_drag_delta / 8.0).round() * 8
 			_drag_delta.x = clampf(_drag_rect.position.x + _drag_delta.x, -2048, 4096) - _drag_rect.position.x
 			_drag_delta.y = clampf(_drag_rect.position.y + _drag_delta.y, -2048, 4096) - _drag_rect.position.y
 		for layer: Control in surfaces[selected_face].get_children():
 			if layer.get_meta("layer_index", -1) == layer_index:
-				if _drag_mode == "resize":
-					layer.size = _drag_rect.size + _drag_delta
-					layer.queue_redraw()
-				else:
-					layer.position = _drag_rect.position + _drag_delta
+				var rect := _transformed_rect()
+				layer.position = rect.position
+				layer.size = rect.size
+				layer.pivot_offset = rect.size / 2
+				layer.rotation = _rotation_value
+				layer.queue_redraw()
 		queue_redraw()
 		return true
 	return false

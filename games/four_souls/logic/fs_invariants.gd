@@ -13,6 +13,8 @@ static var _pool_cache: Dictionary = {}
 static func check(g: FSRules, hang_check: bool = true) -> Array[String]:
 	var out: Array[String] = []
 	var n: int = g.players.size()
+	if g.skipped_turns.size() != n or g.skipped_turns.any(func(value): return int(value) < 0):
+		out.append("Пропуски ходов: неверное число мест или отрицательный счётчик")
 	# Монеты.
 	var total: int = g.bank
 	for seat in n:
@@ -88,14 +90,14 @@ static func _cards(g: FSRules) -> Array[String]:
 	var held := {}
 	for effect: Dictionary in _effects(g):
 		var kind: String = str(effect.get("kind", ""))
-		if kind == "loot" and not bool(effect.get("under_deck", false)):
+		if kind == "loot" and not bool(effect.get("under_deck", false)) and not effect.has("given_to"):
 			held[int(effect.card)] = true
 		elif kind == "event" and not bool(effect.get("attached", false)):
 			held[int(effect.card)] = true
 	# Награда «оставлена душой» до завершения: карта ещё лежит в ячейке монстра.
 	var allowed_twice := {}
 	for effect: Dictionary in _effects(g):
-		if str(effect.get("kind", "")) == "reward" and bool(effect.get("kept_as_soul", false)):
+		if str(effect.get("kind", "")) == "reward" and (bool(effect.get("kept_as_soul", false)) or bool(effect.get("kept_as_item", false))):
 			allowed_twice[int(effect.card)] = true
 		if str(effect.get("kind", "")) == "reward" and bool(effect.get("return_to_deck", false)):
 			allowed_twice[int(effect.card)] = true

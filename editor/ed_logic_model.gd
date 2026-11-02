@@ -8,6 +8,11 @@ var document: RefCounted
 func _init(doc: RefCounted) -> void:
 	document = doc
 
+func set_turn_mode(mode: String) -> bool:
+	if mode not in Blocks.TURN_MODES:
+		return false
+	return document.set_value(["rules", "turn_mode"], mode, "Порядок ходов")
+
 static func at(data: Dictionary, path: Array) -> Variant:
 	var current: Variant = data
 	for key: Variant in path:

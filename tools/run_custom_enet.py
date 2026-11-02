@@ -10,7 +10,8 @@ CUSTOM = '--custom' in sys.argv
 OUT = ROOT / 'build/editor_stage2'
 OUT.mkdir(parents=True, exist_ok=True)
 GODOT = r'C:\Users\rabin\Desktop\ШТУКИ\godot\Godot_v4.7.2-stable_win64_console.exe'
-for marker in ('attempt', 'offline_seen', 'resumed', 'resumed_client', 'done', 'package_ready_client', 'free_placed', 'free_seen'):
+for marker in ('attempt', 'offline_seen', 'resumed', 'resumed_client', 'done', 'package_ready_client', 'free_placed', 'free_seen',
+               'turn_client_ready', 'turn_offline_seen', 'turn_phase_seen', 'turn_leader_attempt', 'turn_leader_seen'):
     (OUT / marker).unlink(missing_ok=True)
 tasks = []
 for role in ('host', 'client'):

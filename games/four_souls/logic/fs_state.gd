@@ -3,6 +3,7 @@ extends RefCounted
 ## Часть цепочки fs_state → fs_stack → fs_combat → fs_turn → fs_effects → fs_rules (FSRules — фасад).
 ## Отдельно не используется: состояние и вызовы общие через self.
 const PassiveRules = preload("res://games/four_souls/logic/fs_passives.gd")
+const RewardData := preload("res://games/four_souls/logic/fs_reward_data.gd")
 var players: Array = []
 var dlc := false
 var phase := "turn"
@@ -26,6 +27,7 @@ var max_hp: Array = []
 var attack: Array = []
 var coins: Array = []
 var bank := 100
+var reward_boost := 1 # Множитель напечатанных наград до конца текущего хода; души отдельно.
 var souls: Array = []
 var soul_cards: Array = []
 var curses: Array = []
@@ -69,6 +71,8 @@ var _death_queue: Array = []
 var _death_resume := "turn"
 var damage_shields: Array = []
 var extra_turns: Array = []
+## Сколько ближайших ходов каждого места пропускается целиком (включая дополнительные).
+var skipped_turns: Array = []
 var _ending_turn := false
 var _discard_limit := 10
 var _turn_resume := -1
@@ -95,6 +99,32 @@ func _monster_hp(id: int) -> int:
 # --- Вызовы вверх по цепочке: реализация в модулях выше (переопределяется там) ---
 func _finish_monster_reward(effect: Dictionary) -> void:
 	pass
+func _advance_auto_reward() -> void:
+	pass
+func _check_bonuses() -> void:
+	pass
+func _check_win() -> void:
+	pass
+func _printed_monster_reward(id: int) -> Dictionary:
+	return RewardData.reward(id)
+func _reward_win_targets() -> Array:
+	var largest := 0
+	for value: int in souls:
+		largest = maxi(largest, value)
+	var candidates: Array = []
+	for seat in players.size():
+		if int(souls[seat]) == largest:
+			candidates.append(seat)
+	return candidates
+func _reward_damage_targets() -> Array:
+	var candidates: Array = []
+	for seat in players.size():
+		if not dead[seat] and int(hp[seat]) > 0:
+			candidates.append({"zone": "player", "target": seat})
+	for slot in monsters.size():
+		if int(monsters[slot].hp) > 0:
+			candidates.append({"zone": "monster", "target": slot})
+	return candidates
 func _emit_passives(event: String, data: Dictionary = {}) -> void:
 	pass
 func _queue_passive(seat: int, id: int, source: Dictionary, operations: Array) -> void:
@@ -116,6 +146,8 @@ func _fill_monster(initial: bool = false, slot: int = -1) -> void:
 func _monster_aura(key: String) -> int:
 	return 0
 func _monster_evasion(monster: Dictionary) -> int:
+	return 0
+func _monster_attack(monster: Dictionary) -> int:
 	return 0
 func _player_attack_targets() -> Array:
 	return []
@@ -156,10 +188,12 @@ func new_game(members: Array, expanded: bool = false, seed_value: int = 0) -> vo
 	_resolving_base = 0
 	damage_shields = []
 	extra_turns = []
+	skipped_turns = []
 	_ending_turn = false
 	_discard_limit = 10
 	_turn_resume = -1
 	_end_after_deaths = false
+	reward_boost = 1
 	stats_rolls.clear();stats_risks.clear()
 	_setting_up = true
 	_end_discard_prepared = false
@@ -177,6 +211,7 @@ func new_game(members: Array, expanded: bool = false, seed_value: int = 0) -> vo
 	_shuffle(characters)
 	for seat in players.size():
 		damage_shields.append(0)
+		skipped_turns.append(0)
 		var chosen: Dictionary = characters.pop_back()
 		chars.append(int(chosen.card))
 		var health := PassiveRules.character_health(int(chosen.card))
@@ -218,7 +253,9 @@ func _draw_loot(seat: int, count: int, reason: String = "effect") -> void:
 		count += _has_item(seat, "luckytoe")
 	for i in count:
 		var id := _draw("loot")
-		if id >= 0: hands[seat].append(id)
+		if id < 0:
+			break
+		hands[seat].append(id)
 func _gain_coins(seat: int, amount: int) -> void:
 	if amount >= 0:
 		if amount > 0:
@@ -239,6 +276,15 @@ func name_of(seat: int) -> String:
 	return str(players[seat].name)
 func _roll_die() -> int:
 	return clampi(int(roll_source.call()), 1, 6) if roll_source.is_valid() else _rng.randi_range(1, 6)
+
+## Получение контроля над физической картой души, включая перенос от другого игрока.
+func _gain_soul_card(seat: int, card: Dictionary) -> void:
+	souls[seat] = int(souls[seat]) + int(card.value)
+	soul_cards[seat].append(card)
+	# Одна физическая карта может стоить несколько душ: триггеры учитывают всю ценность.
+	for unit in maxi(0, int(card.value)):
+		_emit_passives("soul_control", {"seat": seat, "card": int(card.id), "value": 1, "soul_value": int(card.value)})
+
 func _remove_item(seat: int, index: int) -> Dictionary:
 	var entry: Dictionary = items[seat].pop_at(index)
 	attack[seat] = maxi(0, int(attack[seat]) - int(entry.get("_attack_bonus", 0)))
@@ -265,7 +311,19 @@ func _gain_item(seat: int, id: int, eternal: bool = false) -> void:
 	if id in [69, 77]:
 		_queue_passive(seat, id, entry, [PassiveRules.operation("coins", 14 if id == 69 else 9)])
 func _destroy_item(seat: int, index: int) -> void:
+	var source: Dictionary = items[seat][index]
+	if int(source.id) == 518 and int(source.counters) == 0:
+		source.counters = 1
+		_refresh_passive_stats()
+		_note("Пакет с обедом заменил уничтожение жетоном")
+		return
 	var item := _remove_item(seat, index)
+	# Сундук заменяет уничтожение превращением: штраф уже выбрал этот предмет.
+	# Повторно выбирать другую карту для того же штрафа не нужно.
+	if int(item.id) == 243:
+		_gain_soul_card(seat, {"id": int(item.id), "value": 1})
+		_note("Сундук вместо уничтожения стал душой: " + name_of(seat))
+		return
 	_discard_item(int(item.id))
 	if int(item.id) == 505:
 		_queue_passive(seat, 505, item, [PassiveRules.operation("treasure")])
@@ -311,7 +369,8 @@ func _refresh_passive_stats() -> void:
 			max_hp[seat] = maxi(1, int(max_hp[seat]) + bonus.y - int(entry.get("_health_bonus", 0)))
 			entry["_attack_bonus"] = bonus.x
 			entry["_health_bonus"] = bonus.y
-			hp[seat] = mini(int(hp[seat]), int(max_hp[seat]))
+		# Ограничиваем после всех источников, в том числе при пустом инвентаре.
+		hp[seat] = mini(int(hp[seat]), int(max_hp[seat]))
 func _bonus_targets(id: int) -> Array:
 	var result: Array = []
 	var ready := false

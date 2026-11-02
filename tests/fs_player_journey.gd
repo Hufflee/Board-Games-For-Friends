@@ -10,6 +10,9 @@ var errors := 0
 var rows: Array = []
 var counts := {}
 var log_file: FileAccess
+## Намерение игрока по ручной карте727: состояние правил не меняем, выбираем требуемую атаку мышью.
+var manual_deck_turn := -1
+var manual_deck_attacks := 0
 
 func _initialize() -> void:
 	_run.call_deferred()
@@ -42,6 +45,7 @@ func mouse(at: Vector2, down: bool) -> void:
 	event.button_index = MOUSE_BUTTON_LEFT
 	event.pressed = down
 	Input.parse_input_event(event)
+	Input.flush_buffered_events()
 	await frames(2)
 
 func click(control: Control, corner: bool = false) -> bool:
@@ -89,10 +93,24 @@ func click(control: Control, corner: bool = false) -> bool:
 		event.button_index = MOUSE_BUTTON_LEFT
 		event.pressed = down
 		Input.parse_input_event(event)
+		Input.flush_buffered_events()
 	await frames(4)
 	return true
 
 func press(text: String) -> bool:
+	if find_button(text) == null and text in ["Пауза", "Журнал", "Настройки", "Правила"]:
+		var bar := get_first_node_in_group("top_bar")
+		if bar != null and not bar.get("_menu_open"):
+			var key := InputEventKey.new()
+			key.keycode = KEY_TAB
+			key.pressed = true
+			Input.parse_input_event(key)
+			Input.flush_buffered_events()
+			key = key.duplicate()
+			key.pressed = false
+			Input.parse_input_event(key)
+			Input.flush_buffered_events()
+			await frames(20)
 	return await click(find_button(text))
 
 func snap(name: String) -> void:
@@ -140,6 +158,7 @@ func roll() -> void:
 	motion.position = table._die.center() + Vector2(-85, -22)
 	motion.global_position = motion.position
 	Input.parse_input_event(motion)
+	Input.flush_buffered_events()
 	await frames(2)
 	await mouse(motion.position, false)
 	note("Бросить кубик", "Один жест — один бросок, либо сначала ручной ответ/награда",
@@ -153,7 +172,7 @@ func roll() -> void:
 			"roll_no=%d, блокировка=%s" % [table._v.roll_no, blocked], blocked and int(table._v.roll_no) == before + 1)
 
 func choose_monster() -> int:
-	if int(table._v.get("forced_deck_attacks", 0)) > 0:
+	if int(table._v.get("forced_deck_attacks", 0)) > 0 or _manual_deck_pending():
 		return -1
 	var best := -1
 	var score := INF
@@ -173,12 +192,17 @@ func choose_monster() -> int:
 		return -1
 	return best
 
+func _manual_deck_pending() -> bool:
+	return manual_deck_attacks > 0 and manual_deck_turn == int(net.fours.turn_serial)
+
 func attack() -> void:
 	var slot := choose_monster()
 	if slot < 0:
 		var before: int = table._v.revision
 		await press("Атаковать верх колоды")
 		await press(FSData.title(int(table._v.monsters[0].id)))
+		if int(table._v.revision) > before and _manual_deck_pending():
+			manual_deck_attacks -= 1
 		note("Атаковать верх колоды", "Новая атака объявлена с выбором накрываемой ячейки", str(table._v.phase), int(table._v.revision) > before)
 		return
 	var health: Control = table.find_child("MonsterHealth%d" % slot, true, false)
@@ -190,14 +214,35 @@ func attack() -> void:
 
 func manual_effect() -> void:
 	var effect: Dictionary = table._v.resolving.duplicate(true)
+	if effect.has("reward_winners"):
+		var target: int = int(effect.reward_winners[0])
+		await press("Побеждает: " + str(table._v.players[target].name))
+		return
+	if effect.has("reward_soul_targets"):
+		var target: int = int(effect.reward_soul_targets[0])
+		await press("Получает душу: " + str(table._v.players[target].name))
+		return
+	if bool(effect.get("reward_damage", false)):
+		for monster: Dictionary in table._v.monsters:
+			if int(monster.hp) > 0:
+				await press("Урон монстру: " + FSData.title(int(monster.id)))
+				return
+		for player: Dictionary in table._v.players:
+			if not player.dead and int(player.hp) > 0:
+				await press("Урон игроку: " + str(player.name))
+				return
 	var id: int = effect.card
 	var request_path := OUT + "request.json"
 	var reply_path := OUT + "reply.json"
 	if FileAccess.file_exists(reply_path):
 		DirAccess.remove_absolute(ProjectSettings.globalize_path(reply_path))
 	var request := FileAccess.open(request_path, FileAccess.WRITE)
-	request.store_string(JSON.stringify({"step":steps,"effect":effect,"card":FSData.card(id),"view":table._v}))
+	request.store_string(JSON.stringify({"step":steps,"turn_serial":int(net.fours.turn_serial),"effect":effect,"card":FSData.card(id),"view":table._v}))
 	request.close()
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(OUT + "requests"))
+	var archive := FileAccess.open(OUT + "requests/%04d_%d.json" % [steps, id], FileAccess.WRITE)
+	archive.store_string(FileAccess.get_file_as_string(request_path))
+	archive.close()
 	await press("Прочитать карту")
 	await snap("manual-card")
 	print("NEEDS CARD PLAN: ", steps, " ", id, " ", FSData.title(id), " ", effect.kind)
@@ -217,12 +262,15 @@ func manual_effect() -> void:
 		note("Возобновить проверку после паузы", "Пауза снята до операций карты", str(net.paused), not net.paused)
 	# Полноразмерные карты этих боссов сверены отдельно: кроме ресурсов дают душу.
 	# Не завершать награду, если оператор пропустил напечатанную часть.
-	if effect.kind == "reward" and id in [415, 429, 465]:
+	if effect.kind == "reward" and not effect.has("auto_reward") and id in [415, 429, 465]:
 		if not plan.any(func(operation): return operation.get("op", "") == "souls" and int(operation.get("amount", 0)) == 1):
 			note("Полнота награды", "Помимо ресурсов начислить одну напечатанную душу", FSData.title(id), false)
 			return
 	table._hide_preview()
 	for operation: Dictionary in plan:
+		# Ветку карты выбираем после настоящего броска, а не угадываем будущую грань.
+		if operation.has("when_roll") and not int(table._v.last_roll) in operation.when_roll:
+			continue
 		if bool(operation.get("roll", false)):
 			await roll()
 			while table._v.phase == "priority" and table._pending_effect_roll():
@@ -234,20 +282,34 @@ func manual_effect() -> void:
 		var op: OptionButton = options[options.size() - 1]
 		target.select(int(operation.get("target", table._v.actor)))
 		var operations: Array = table.OPS + table.EXTRA_OPS
+		var selected := false
 		for i in operations.size():
 			if operations[i][0] == operation.op:
 				op.select(i)
+				op.item_selected.emit(i)
+				selected = true
+		if not selected:
+			note("План ручного эффекта", "Операция поддерживается сервером/UI", str(operation), false)
+			return
 		var spins := table.find_children("*", "SpinBox", true, false)
 		spins[0].value = int(table._v.last_roll) if operation.get("amount") is String and operation.amount == "last_roll" else int(operation.get("amount", 1))
+		spins[0].value *= int(operation.get("multiplier", 1))
 		spins[1].value = int(operation.get("item", 0)) + 1
+		await frames(3)
 		var before: int = table._v.revision
 		await press("Применить")
+		if id == 727 and str(operation.op) == "extra_attack" and int(table._v.revision) > before:
+			manual_deck_turn = int(net.fours.turn_serial)
+			manual_deck_attacks += int(operation.get("amount", 1))
+		if str(operation.op).begins_with("peek_"):
+			await snap("peek")
 		note("Выполнить эффект по тексту карты", "Применяется выбранная операция без пропуска выбора",
 			"%s: %s" % [FSData.title(id), JSON.stringify(operation)], table._v.revision > before)
 		if table._v.phase == "game_over":
 			break
 	if table._v.phase == "effect" or bool(table._v.get("effect_pending", false)):
-		await press("Эффект выполнен")
+		if find_button("Эффект выполнен") != null:
+			await press("Эффект выполнен")
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(request_path))
 	DirAccess.remove_absolute(ProjectSettings.globalize_path(reply_path))
 
@@ -306,6 +368,8 @@ func _run() -> void:
 			await press("Продолжить игру")
 			await frames(3)
 		steps += 1
+		if manual_deck_turn != int(net.fours.turn_serial):
+			manual_deck_attacks = 0
 		await unlock(int(table._v.current) if table._v.phase in ["turn", "priority", "battle_roll", "discard"] else int(table._v.actor))
 		var view: Dictionary = table._v
 		if steps % 10 == 0:
@@ -327,6 +391,13 @@ func _run() -> void:
 						break
 				note("Выбрать стартовый предмет Эдема", "Предмет выбран, остальные возвращены под низ", str(chosen))
 			"turn", "priority":
+				# Пассив после штрафа ещё закрывает ход погибшего. Его лут пока недоступен.
+				if view.phase == "priority" and (bool(view.players[int(view.current)].dead) or int(view.players[int(view.current)].hp) <= 0) and not bool(view.get("effect_pending", false)):
+					await create_timer(0.25, true, false, true).timeout
+					continue
+				if view.phase == "turn" and (int(view.get("forced_deck_attacks", 0)) > 0 or _manual_deck_pending()):
+					await attack()
+					continue
 				if int(view.get("required_player_attacks", 0)) > 0 and view.phase == "turn":
 					var target: int = view.player_attack_targets[0]
 					await press("Атаковать игрока: " + str(view.players[target].name))
@@ -343,7 +414,7 @@ func _run() -> void:
 					await roll()
 				else:
 					var loot := -1
-					if int(view.free_loot) > 0 or bool(view.players[int(view.seat)].ready):
+					if not bool(view.players[int(view.seat)].dead) and int(view.players[int(view.seat)].hp) > 0 and (int(view.free_loot) > 0 or bool(view.players[int(view.seat)].ready)):
 						for id in view.hand:
 							if str(FSData.card(int(id)).lua.get("type", "")) in ["1c", "2c", "3c", "4c", "5c", "lsoul", "trinkets"]:
 								loot = int(id)
@@ -385,7 +456,7 @@ func _run() -> void:
 	await snap("finish" if table._v.phase == "game_over" else "failure")
 	note("Завершить полноценную партию", "Победитель с четырьмя душами и кнопка новой партии",
 		"Фаза %s, победитель %s, раунд %s, действий %d" % [table._v.phase, table._v.winner, table._v.round_no, steps],
-		table._v.phase == "game_over" and table._v.winner >= 0 and find_button("Новая партия") != null)
+		table._v.phase == "game_over" and table._v.winner >= 0 and (find_button("Новая партия") != null or find_button("В лобби") != null))
 	var output := FileAccess.open(OUT + "ui-summary.json", FileAccess.WRITE)
 	output.store_string(JSON.stringify({"errors": errors,"steps":steps,"counts":counts,"final":table._v}, "\t"))
 	output.close()

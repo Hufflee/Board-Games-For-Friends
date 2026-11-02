@@ -1,6 +1,8 @@
 class_name FSStyle
 extends RefCounted
 ## Подвал Айзека: обожжённая бумага, тёмное дерево и красный акцент.
+## Саундтрек: «подвал», громкость и плавные вход/затухание — tools/fs_music.py (повтор по кругу без рывка).
+const MUSIC := ["res://games/four_souls/audio/basement_theme.ogg"]
 const H1 := 30
 const BODY := 18
 const CAP := 14
@@ -97,30 +99,39 @@ static func clear(node: Node) -> void:
 	for c in node.get_children():
 		node.remove_child(c)
 		c.queue_free()
+## Фон стола и меню — деревянный пол подвала из TTS-мода 2143991933 (модель «Board», 10000×5000 →
+## art/table_floor.webp 3840×1920). Заполняет экран без искажения (лишнее по краям обрезается, люк — по центру),
+## сверху лёгкое затемнение и виньетка, чтобы карты и текст читались.
 class Backdrop extends Control:
+	const FLOOR := preload("res://games/four_souls/art/table_floor.webp")
+	const SHADE := Color(0.05, 0.03, 0.03, 0.32)  # общее затемнение
+	const PARALLAX := 14.0  # пол чуть двигается за курсором (настройка «Двигающийся фон»)
+	var _motion := Vector2.ZERO
 	func _ready() -> void:
 		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 		resized.connect(queue_redraw)
+	func _process(delta: float) -> void:
+		var next: Vector2 = preload("res://hub/cursor_parallax.gd").step(self, _motion, delta, PARALLAX)
+		if next.distance_to(_motion) > 0.01:
+			_motion = next
+			queue_redraw()
 	func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, size), Color("1a1211"))
-		# Каменные стены и сходящиеся доски пола: рисунок остаётся тише карт и текста.
-		var ink := FSStyle.ink()
-		var horizon := size.y * 0.66
-		for row in range(0, int(horizon / 68.0) + 1):
-			var y := row * 68.0
-			draw_line(Vector2(0, y), Vector2(size.x, y), Color(ink, 0.045), 2, true)
-			for x in range(-160, int(size.x) + 160, 160):
-				var shifted := float(x + (80 if row % 2 else 0))
-				draw_line(Vector2(shifted, y), Vector2(shifted, y + 68), Color(ink, 0.035), 2, true)
-		var vanishing := Vector2(size.x * 0.52, horizon)
-		for i in range(-6, 8):
-			draw_line(vanishing, Vector2(size.x * 0.5 + i * size.x * 0.18, size.y), Color(ink, 0.035), 2, true)
-		for i in range(1, 6):
-			var y := lerpf(horizon, size.y, pow(i / 5.0, 1.7))
-			draw_line(Vector2(0, y), Vector2(size.x, y), Color(ink, 0.035), 2, true)
-		# Арка в глубине и небольшие трещины вместо отвлекающих предметов.
-		var arch := Vector2(size.x * 0.56, horizon - 120)
-		draw_arc(arch, 100, PI, TAU, 48, Color(ink, 0.045), 18, true)
-		for side in [-1, 1]:
-			draw_line(arch + Vector2(side * 100, 0), arch + Vector2(side * 100, 120), Color(ink, 0.045), 18, true)
+		# с запасом на сдвиг: края картинки не показываются
+		var area := size + Vector2.ONE * PARALLAX * 2.0
+		var tex_size := FLOOR.get_size()
+		var k := maxf(area.x / tex_size.x, area.y / tex_size.y)
+		var drawn := tex_size * k
+		draw_texture_rect(FLOOR, Rect2((size - drawn) * 0.5 + _motion, drawn), false)
+		draw_rect(Rect2(Vector2.ZERO, size), SHADE)
+		# виньетка: края темнее центра
+		var steps := 10
+		for i in steps:
+			var t := float(i) / steps
+			var inset := size * 0.5 * t * 0.55
+			var c := Color(0, 0, 0, 0.045)
+			draw_rect(Rect2(Vector2.ZERO, Vector2(size.x, inset.y)), c)
+			draw_rect(Rect2(Vector2(0, size.y - inset.y), Vector2(size.x, inset.y)), c)
+			draw_rect(Rect2(Vector2.ZERO, Vector2(inset.x, size.y)), c)
+			draw_rect(Rect2(Vector2(size.x - inset.x, 0), Vector2(inset.x, size.y)), c)

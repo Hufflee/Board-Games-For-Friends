@@ -27,7 +27,7 @@ var pair_used := false
 var last_roll := {}
 var rolls: Array = []  # последние броски [{d1, d2, sum, horse, bonus}]
 var roll_count := 0
-var crossed: Array = []  # лошади в порядке пересечения красной линии
+var crossed: Array = []  # черепахи в порядке пересечения красной линии
 var no_more_bets := false
 var bets := {}  # spot -> [{seat, tok, v, bonus, early}]
 var piggy_used: Array = []
@@ -265,7 +265,7 @@ func place(seat: int, tok: int, spot: String) -> bool:
 
 # --- Итоги забега -------------------------------------------------------------------
 
-## Места: first (одна лошадь), second, third (с учётом ничьих).
+## Места: first (одна черепаха), second, third (с учётом ничьих).
 static func compute_places(p: Array) -> Dictionary:
 	var first := p.find(RSBData.FINISH)
 	var rest := []

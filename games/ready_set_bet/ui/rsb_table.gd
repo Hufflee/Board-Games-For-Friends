@@ -1,5 +1,5 @@
 extends Control
-## Ипподром «Ready Set Bet»: трек и комментатор слева, поле ставок справа, лоток жетонов снизу.
+## Черепашьи бега «Ready Set Bet»: трек и комментатор слева, поле ставок справа, лоток жетонов снизу.
 ## Ставка — двумя способами: перетащить жетон на ячейку или кликнуть по ячейке и выбрать жетон
 ## (либо сначала выбрать жетон в лотке, потом ячейку).
 
@@ -276,7 +276,7 @@ func _count_bets(b: Dictionary) -> int:
 func _update_status(phase: String) -> void:
 	match phase:
 		"start":
-			_status_label.text = "Лошади у стартовых ворот" if _v.get("rsb_go", false) else "Изучите поле — ведущий скоро начнёт гонку"
+			_status_label.text = "Черепахи у стартовых ворот" if _v.get("rsb_go", false) else "Изучите поле — ведущий скоро начнёт гонку"
 			_status_label.add_theme_color_override("font_color", RSBStyle.INK)
 		"race":
 			if _v.get("paused", false):
@@ -297,7 +297,7 @@ func _update_roll(v: Dictionary, prev_phase: String) -> void:
 	var lr: Dictionary = v.get("last_roll", {})
 	if v["phase"] == "start":
 		_ticker_lines = []
-		_ticker.text = "Лошади у стартовых ворот… На старт!" if v.get("rsb_go", false) else ("Все готовы? Жмите старт →" if Net.is_host() else "Ждём, когда ведущий начнёт гонку")
+		_ticker.text = "Черепахи у стартовых ворот… На старт!" if v.get("rsb_go", false) else ("Все готовы? Жмите старт →" if Net.is_host() else "Ждём, когда ведущий начнёт гонку")
 		RSBStyle.clear(_dice_box)
 		_last_roll_n = -1
 		return

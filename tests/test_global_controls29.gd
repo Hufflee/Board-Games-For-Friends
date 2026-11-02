@@ -35,7 +35,11 @@ func _run() -> void:
 	prefs.ui_scale = 1.4
 	prefs.apply()
 	await settle()
-	check(root.content_scale_factor == 1.0 and prefs.ui_scale == 1.0, "Старый масштаб нормализован")
+	# масштаб интерфейса снова есть (решение владельца 31.10): применяется к окну, раскладка — от базы 1280×720
+	check(is_equal_approx(root.content_scale_factor, 1.4) and root.content_scale_mode == Window.CONTENT_SCALE_MODE_CANVAS_ITEMS, "Масштаб интерфейса применён, режим canvas_items")
+	prefs.ui_scale = 1.0
+	prefs.apply()
+	await settle()
 	net.host_offline("wavelength")
 	net.set_bots(3)
 	check(net.start_game() == "", "Настоящая партия WL запущена")
@@ -65,7 +69,7 @@ func _run() -> void:
 		for label: Node in settings.find_children("*", "Label", true, false):
 			if label.text == "Масштаб интерфейса":
 				scale_labels += 1
-		check(scale_labels == 0, "Настройка масштаба удалена")
+		check(scale_labels == 1, "Настройка масштаба интерфейса есть (возвращена 31.10)")
 		await shot("settings-" + mode + "-720")
 		settings.queue_free()
 		await process_frame

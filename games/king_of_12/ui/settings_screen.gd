@@ -211,6 +211,31 @@ func _ready() -> void:
 	lf.pressed.connect(func(): load("res://hub/crash_report.gd").open_folder())
 	lr.add_child(lf)
 	col.add_child(lr)
+	var updates := K12UI.vbox(8)
+	col.add_child(updates)
+	var update_button := _button("Проверить обновления", K12UI.CAP)
+	updates.add_child(update_button)
+	var update_status := _label("", K12UI.CAP)
+	update_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	updates.add_child(update_status)
+	var client: Node = load("res://hub/update/update_client.gd").get_or_create(get_tree())
+	var refresh := func():
+		if not is_instance_valid(update_button):
+			return
+		update_button.disabled = not Updater.enabled or client.state in [1, 4, 5, 6]
+		match int(client.state):
+			1: update_status.text = "Проверяем…"
+			2: update_status.text = "Установлена последняя версия."
+			3, 8: update_status.text = "Доступна версия %s. Обновление — в главном меню." % client.target
+			4, 5: update_status.text = "Обновление загружается…"
+			6: update_status.text = "Обновление готово. Перезапуск — в главном меню."
+			7: update_status.text = "Не удалось проверить обновления. Попробуйте позже."
+			_: update_status.text = ""
+		if not Updater.enabled:
+			update_status.text = "Обновления Steam — через Steam." if OS.has_feature("steam_store") else "Проверка доступна в собранной игре."
+	client.changed.connect(refresh)
+	update_button.pressed.connect(func(): client.check(true))
+	refresh.call()
 	var vs := CheckBox.new()
 	vs.text = "Вертикальная синхронизация"
 	vs.tooltip_text = "Кадры не чаще частоты монитора, без разрывов картинки"

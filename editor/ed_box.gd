@@ -37,6 +37,9 @@ func setup(owner: Control, tools: VBoxContainer, center: VBoxContainer, right: V
 	preview.layer_moved.connect(func(index: int, rect: Array):
 		document.set_value(["box", "faces", app._box_face, index, "rect"], rect, "Переместить слой коробки")
 		app._render.call_deferred())
+	preview.layer_rotated.connect(func(index: int, degrees: float):
+		document.set_value(["box", "faces", app._box_face, index, "rotation"], degrees, "Повернуть слой коробки")
+		app._render.call_deferred())
 	preview.show_face("" if app._box_mode_3d else app._box_face)
 	app._box_view = preview
 	for kind: String in ["fill", "text", "image"]:
@@ -48,7 +51,24 @@ func setup(owner: Control, tools: VBoxContainer, center: VBoxContainer, right: V
 				add_layer(kind))
 		tools.add_child(add)
 	tools.add_child(Style.label("Слои · снизу вверх"))
+	if app._box_face in ["spine", "top"]:
+		var copy_sides := Style.button("Рисунок →\nвсе торцы")
+		copy_sides.tooltip_text = "Противоположная сторона повторяет рисунок в 3D. Эта кнопка переносит его также на верх и низ."
+		copy_sides.pressed.connect(func():
+			var copy: Dictionary = document.data.duplicate(true)
+			var source_size := View.face_size(copy, app._box_face)
+			var target: String = "top" if app._box_face == "spine" else "spine"
+			var target_size := View.face_size(copy, target)
+			var layers: Array = copy.box.faces.get(app._box_face, []).duplicate(true)
+			for layer: Dictionary in layers:
+				var rect: Array = layer.rect
+				layer.rect = [float(rect[0]) * target_size.x / source_size.x, float(rect[1]) * target_size.y / source_size.y, float(rect[2]) * target_size.x / source_size.x, float(rect[3]) * target_size.y / source_size.y]
+			copy.box.faces[target] = layers
+			document.replace(copy, "Скопировать рисунок на все торцы")
+			app._render.call_deferred())
+		tools.add_child(copy_sides)
 	var layers: Array = document.data.box.get("faces", {}).get(app._box_face, [])
+	app._clipboard_controls(tools, "layer", ["box", "faces", app._box_face], app._box_layer)
 	for index in layers.size():
 		var layer: Dictionary = layers[index]
 		var button := Style.button(("◉ " if layer.get("visible", true) else "○ ") + str(layer.get("title", layer.get("kind", "Слой"))))
@@ -75,7 +95,7 @@ func setup(owner: Control, tools: VBoxContainer, center: VBoxContainer, right: V
 	else:
 		_metadata()
 
-func add_layer(kind: String, asset: String = "") -> void:
+func add_layer(kind: String, asset: String = "", image_size: Array = []) -> void:
 	var copy: Dictionary = document.data.duplicate(true)
 	if not copy.box.has("faces"):
 		copy.box.faces = {}
@@ -92,6 +112,8 @@ func add_layer(kind: String, asset: String = "") -> void:
 		layer.rect = [32, dimensions.y * 0.3, dimensions.x - 64, dimensions.y * 0.6]
 	if kind == "image":
 		layer["asset"] = asset
+		if image_size.size() == 2:
+			layer.rect = [0, 0, image_size[0], image_size[1]]
 	copy.box.faces[app._box_face].append(layer)
 	document.replace(copy, "Добавить слой коробки")
 	app._box_layer = copy.box.faces[app._box_face].size() - 1
@@ -112,7 +134,7 @@ func _import(paths: PackedStringArray) -> void:
 		var copy: Dictionary = document.data.duplicate(true)
 		copy.assets[imported.hash] = imported.asset
 		document.replace(copy, "Импорт рисунка коробки")
-		add_layer("image", str(imported.hash))
+		add_layer("image", str(imported.hash), imported.dimensions)
 
 func _metadata() -> void:
 	app._text(properties, "Название", ["meta", "title"])

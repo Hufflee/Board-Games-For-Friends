@@ -29,7 +29,7 @@ func _run() -> void:
 	g.decks.monster = [451]
 	g._continue_stack()
 	g._finish_responses()
-	check(g.action(0, "effect_done"), "Завоеватель разрешил награду и оставил обязательную атаку")
+	check(g.resolving.is_empty() and g.required_player_attacks > 0, "Завоеватель автоматически выдал награду и оставил обязательную атаку")
 	net.fs_switch_seat(0)
 	change_scene_to_file("res://games/four_souls/ui/main.tscn")
 	await scene_changed

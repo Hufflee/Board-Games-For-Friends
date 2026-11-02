@@ -127,7 +127,12 @@ func _board_team(parent: Control, t: int) -> void:
 	var names := PackedStringArray()
 	for i in _v.players.size():
 		if int(int(_v.roles[i]) / 2) == t:
-			names.append(str(_v.players[i].name) + (" · дух" if int(_v.roles[i]) % 2 == 1 else ""))
+			if int(_v.roles[i]) % 2 == 1:
+				var spirit := PIStyle.label("ДУХ · " + str(_v.players[i].name), PIStyle.BODY, true)
+				spirit.add_theme_color_override("font_color", Color("e7bc78"))
+				col.add_child(spirit)
+			else:
+				names.append(str(_v.players[i].name))
 	var names_label := PIStyle.label(" · ".join(names), PIStyle.CAP)
 	names_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	col.add_child(names_label)
@@ -175,16 +180,22 @@ func _send(kind: String, arg = null) -> void:
 
 func _controls(col: Control) -> void:
 	var phase: String = _v.phase
-	if int(_v.object_card) >= 0:
-		var obj := TextureRect.new()
-		obj.texture = PIData.card("o", int(_v.object_card))
-		obj.custom_minimum_size = Vector2(180, 250)
-		obj.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		obj.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		col.add_child(obj)
-		obj.mouse_entered.connect(func(): _show_card("o", int(_v.object_card)))
-		obj.mouse_exited.connect(_hide_preview)
-		_note(col, "Тайный предмет: № %d" % (int(_v.object_slot) + 1) if _v.object_slot >= 0 else "Согласуйте с другим духом номер слова.")
+	var object_words: Array = _v.get("object_words", [])
+	if not object_words.is_empty():
+		_note(col, "СЛОВА ДУХОВ")
+		for i in object_words.size():
+			var marks := PackedStringArray()
+			var votes: Array = _v.get("votes", [])
+			for t in votes.size():
+				if int(votes[t]) == i:
+					marks.append("☀" if t == 0 else "☾")
+			var label := "%d. %s  %s" % [i + 1, str(object_words[i]), " ".join(marks)]
+			if phase == "object":
+				var choice := _button(col, label, "object", i)
+				if votes.size() == 2 and int(votes[int(int(_v.role) / 2)]) == i:
+					choice.theme_type_variation = "PrimaryButton"
+			elif i == int(_v.object_slot):
+				_note(col, "Тайное слово: " + str(object_words[i]))
 	if phase == "game_over":
 		_note(col, "Оба мира молчат. Никто не угадал предмет." if _v.winner < 0 else "Победа команды «%s»!" % ["Солнце", "Луна"][int(_v.winner)])
 		if Net.is_host():
@@ -198,12 +209,9 @@ func _controls(col: Control) -> void:
 	match phase:
 		"object":
 			_note(col, "Оба духа должны выбрать одинаковый номер.")
-			var row := PIStyle.hbox(4)
-			col.add_child(row)
-			for i in 6:
-				var b := _button(row, str(i + 1), "object", i)
-				if int(_v.votes[int(int(_v.role) / 2)]) == i:
-					b.theme_type_variation = "PrimaryButton"
+			for t in 2:
+				var vote: int = _v.votes[t]
+				_note(col, ("Солнце" if t == 0 else "Луна") + (": ещё выбирает" if vote < 0 else ": слово № %d" % (vote + 1)))
 		"eye":
 			_note(col, "Око: выберите строку любой незаконченной подсказки, чтобы открыть ещё букву.")
 			_button(col, "Пропустить око", "eye_skip")

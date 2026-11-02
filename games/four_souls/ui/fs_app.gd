@@ -13,7 +13,7 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	get_tree().root.theme = FSStyle.theme()
 	Sfx.start_music()
-	Sfx.set_playlist(GLStyle.MUSIC)
+	Sfx.set_playlist(FSStyle.MUSIC)
 	Net.lobby_changed.connect(_on_lobby_changed)
 	Net.game_started.connect(show_table)
 	Net.game_ended.connect(show_lobby)

@@ -3,9 +3,10 @@ extends SceneTree
 ##   godot --headless --audio-driver Dummy --path . --script res://tests/fs/run.gd -- --group core,cards
 ## Группы: core (tests/fs/core), cards (tests/fs/cases), regress (tests/fs/regress), fuzz (фаззер),
 ##   legacy (старые tests/test_fs_*.gd отдельными процессами), ui (*_ui.gd, с окном), long (полная партия),
-##   net (ENet: tools/run_fs_passive_network.py).
+##   net (ENet: tools/run_fs_passive_network.py). all — все перечисленные группы по порядку.
 ##   По умолчанию: core,cards,regress. Флаги: --filter <подстрока имени файла>, --games N, --seed N,
 ##   --steps N (фаззер), --no-regress-write (фаззер не пишет файлы). Логи — build/fs_tests/.
+##   --stop-on-failure: остановить фазз после первого нарушения с сохранением свидетельства/регресса.
 const FSCheck = preload("res://tests/fs/fs_check.gd")
 
 const LOG_DIR := "res://build/fs_tests/"
@@ -15,16 +16,40 @@ const Fuzz = preload("res://tests/fs/fs_fuzz.gd")
 var args := {}
 var failed := false
 
+## Ошибка GDScript прерывает функцию кейса, но раньше раннер продолжал с «0 ошибок».
+class ErrorWatch extends Logger:
+	var errors: Array[String] = []
+	var guard := Mutex.new()
+	func _log_error(_function: String, file: String, line: int, code: String, rationale: String,
+			_editor_notify: bool, error_type: int, _backtraces: Array[ScriptBacktrace]) -> void:
+		if error_type == 1: # ERROR_TYPE_WARNING: предупреждения не равны падению скрипта.
+			return
+		guard.lock()
+		errors.append("Ошибка движка %s:%d — %s %s" % [file, line, code, rationale])
+		guard.unlock()
+	func take() -> Array[String]:
+		guard.lock()
+		var result: Array[String] = errors.duplicate()
+		errors.clear()
+		guard.unlock()
+		return result
+
 func _initialize() -> void:
 	_parse_args()
+	var watcher := ErrorWatch.new()
+	OS.add_logger(watcher)
 	Cases.trace = int(args.get("trace", 0))
 	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(LOG_DIR))
 	var groups: PackedStringArray = str(args.get("group", "core,cards,regress")).split(",")
+	if "all" in groups:
+		groups = PackedStringArray(["core", "cards", "regress", "legacy", "long", "ui", "net", "fuzz"])
 	var lines: Array[String] = []
 	for group in groups:
 		var started := Time.get_ticks_msec()
 		var t := FSCheck.new()
 		var notes: Array = []
+		if args.has("probe-error"):
+			_probe_error()
 		match group.strip_edges():
 			"core": _run_core(t)
 			"cards": _run_cases(t, "res://tests/fs/cases/", notes)
@@ -36,6 +61,8 @@ func _initialize() -> void:
 			"long": _run_processes(t, ["res://tests/test_fs_full_game.gd"], notes, true, 900)
 			"net": _run_net(t, notes)
 			_: t.check(false, "Неизвестная группа " + group)
+		for engine_error: String in watcher.take():
+			t.check(false, engine_error)
 		var seconds := (Time.get_ticks_msec() - started) / 1000.0
 		var line := "FS %-8s %5d проверок · %d ошибок · %.1f с" % [group, t.checks, t.errors.size(), seconds]
 		lines.append(line)
@@ -49,7 +76,12 @@ func _initialize() -> void:
 		_write_log(group, line, t.errors, notes)
 		failed = failed or not t.errors.is_empty()
 	print("FS ИТОГ: " + ("ЕСТЬ ОШИБКИ" if failed else "всё зелёное"))
+	OS.remove_logger(watcher)
 	quit(1 if failed else 0)
+
+func _probe_error() -> void:
+	var missing: Variant = null
+	missing.get("Проверка ошибки раннера")
 
 func _parse_args() -> void:
 	var raw := OS.get_cmdline_user_args()
@@ -92,7 +124,7 @@ func _run_cases(t: FSCheck, dir: String, notes: Array) -> void:
 
 func _run_fuzz(t: FSCheck) -> String:
 	var games := int(args.get("games", 100))
-	var stats: Dictionary = Fuzz.run(t, games, int(args.get("seed", 1)), int(args.get("steps", 800)), not args.has("no-regress-write"))
+	var stats: Dictionary = Fuzz.run(t, games, int(args.get("seed", 1)), int(args.get("steps", 800)), not args.has("no-regress-write"), args.has("stop-on-failure"))
 	return "партий %d, до конца %d, действий %d, с нарушением %d, классов %d" % [stats.games, stats.finished, stats.steps, stats.failed, stats.classes.size()]
 
 ## Старые тесты — отдельными процессами: они сами вызывают quit() и печатают итог.
@@ -121,6 +153,10 @@ func _run_processes(t: FSCheck, paths: Array, notes: Array, headless: bool = tru
 			OS.kill(pid)
 		var code := -1 if timed_out else OS.get_process_exit_code(pid)
 		var text := FileAccess.get_file_as_string(log_path)
+		t.check(not text.contains("SCRIPT ERROR:"), "%s — нет ошибок GDScript в журнале" % path.get_file())
+		if not headless:
+			t.check(not text.contains("ObjectDB instances were leaked") and not text.contains("resources still in use"),
+				"%s — нет утечек объектов/ресурсов после выхода" % path.get_file())
 		var summary := ("тайм-аут %d с" % timeout_s) if timed_out else _summary(text)
 		t.check(code == 0, "%s — код выхода %d (%s)" % [path.get_file(), code, summary])
 		if code == 0:

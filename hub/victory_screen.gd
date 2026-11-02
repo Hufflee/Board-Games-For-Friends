@@ -4,6 +4,7 @@ extends Control
 
 const Result := preload("res://hub/victory_result.gd")
 const AvatarMask := preload("res://hub/victory_avatar.gdshader")
+const Burst := preload("res://hub/victory_burst.gd")
 var table: Control
 var top_bar: TopBar
 var make_button: Callable
@@ -12,6 +13,7 @@ var outcome: Dictionary = {}
 var players: Array = []
 var accent := Color("d3a44a")
 var _surface: Control
+var _burst: Control
 var _backdrop: Control
 var _return: Button
 var _buttons: HBoxContainer
@@ -60,6 +62,10 @@ func _ready() -> void:
 	_surface.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(_surface)
 	_surface.draw.connect(_draw_surface)
+	_burst = Burst.new()
+	_burst.name = "VictoryBurst"
+	_burst.visible = false
+	_surface.add_child(_burst)
 	_buttons = HBoxContainer.new()
 	_buttons.add_theme_constant_override("separation", 16)
 	_surface.add_child(_buttons)
@@ -146,6 +152,7 @@ func sync(view: Dictionary) -> void:
 		if not outcome.winners.is_empty():
 			_confetti.call_deferred()
 		_layout()
+		_burst.restart()
 		_layout.call_deferred()
 	_refresh_avatars()
 	if not outcome.winners.is_empty():
@@ -296,9 +303,12 @@ func _confetti() -> void:
 	add_child(conf)
 	move_child(conf, _backdrop.get_index() + 1)
 	conf.emitting = true
-	get_tree().create_timer(6.0).timeout.connect(func():
-		if is_instance_valid(conf):
-			conf.queue_free())
+	get_tree().create_timer(6.0).timeout.connect(_free_confetti.bind(weakref(conf)))
+
+static func _free_confetti(reference: WeakRef) -> void:
+	var conf: Node = reference.get_ref()
+	if is_instance_valid(conf):
+		conf.queue_free()
 
 ## Ведущий без собственного условия победы: отдельно, справа ниже звезды, с лайками игроков.
 func _add_leader(seat: int) -> void:
@@ -427,6 +437,9 @@ func _layout() -> void:
 		_like_button.position = _leader_card.position + leader_avatar.position + Vector2(leader_avatar.size.x + 12, leader_avatar.size.y - _like_button.size.y)
 	_surface.queue_redraw()
 	_backdrop.queue_redraw()
+	_burst.visible = win_count == 1
+	if _burst.visible:
+		_burst.configure(star_polygon(), Vector2(size.x * 0.5, center_y), accent, _dark())
 
 ## Справа от звезды; если звезда широкая — под её правым краем.
 func _layout_leader(card: Control) -> void:
@@ -510,11 +523,13 @@ func _draw_backdrop() -> void:
 
 func _draw_surface() -> void:
 	var dark := _dark()
-	if not outcome.get("winners", []).is_empty():
+	# Широкие варианты пока прежние: сначала владелец выбирает оформление одиночной победы.
+	if outcome.get("winners", []).size() > 1:
 		var points := star_polygon()
-		_surface.draw_colored_polygon(points, accent.darkened(0.28))
-		points.append(points[0])
-		_surface.draw_polyline(points, accent.lightened(0.25), 3.0, true)
+		var bounds := Rect2(points[0], Vector2.ZERO)
+		for point: Vector2 in points:
+			bounds = bounds.expand(point)
+		_surface.draw_texture_rect(preload("res://hub/art/victory_burst_20261102.png"), bounds, false)
 	var font := ThemeDB.fallback_font
 	var heading: String = outcome.get("title", "")
 	var ink := Color("f9edd8") if dark else Color("312d29")
@@ -539,6 +554,8 @@ func star_polygon() -> PackedVector2Array:
 	var radius := Vector2(
 		minf(size.x * 0.48, count * 110.0) if wide else minf(size.x * 0.46, maxf(280, mini(count, 5) * 110)),
 		218 if count > 5 and not team_win else 174)
+	if count == 1:
+		radius *= Burst.SINGLE_FIT
 	var points := PackedVector2Array()
 	for index: int in 36:
 		var angle := TAU * index / 36.0 - PI * 0.5

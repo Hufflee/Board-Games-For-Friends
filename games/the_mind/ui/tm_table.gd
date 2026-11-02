@@ -25,6 +25,7 @@ var _fx_epoch := ""
 var _fx_generation := 0
 var _fx_layer: Control
 var _hand_control: Control
+var _hand_signature := ""
 
 func _ready() -> void:
 	add_child(Style.Background.new())
@@ -90,6 +91,13 @@ func _state(view: Dictionary) -> void:
 		_run_fx.call_deferred()
 
 func _rebuild() -> void:
+	var hand_signature := str([_hand_key, _seat, _revealed, _view.get("spectator", false), _view.get("hand", [])])
+	var keep_hand: bool = is_instance_valid(_hand_control) and hand_signature == _hand_signature
+	if keep_hand:
+		_hand_control.get_parent().remove_child(_hand_control)
+	else:
+		_hand_control = null
+	_hand_signature = hand_signature
 	Style.clear(_body)
 	_seat_positions.clear()
 	_drag_active = false
@@ -131,6 +139,7 @@ func _rebuild() -> void:
 		msg.text = "У вас меньшая карта — нажмите СТОП." if bool(_view.get("can_stop", false)) else "Ждём СТОП владельца меньшей карты."
 	msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_col.add_child(msg)
+	status_col.add_child(Style.label("Бонус за уровень: " + str(_view.get("level_reward", "без бонуса")), 14))
 	var panic_card := Style.PanicCard.new()
 	panic_card.mouse_entered.connect(_show_panic)
 	panic_card.mouse_exited.connect(_close_preview)
@@ -214,7 +223,7 @@ func _rebuild() -> void:
 	var paused: bool = bool(_view.get("game_paused", false))
 	match str(_view.phase):
 		"focus":
-			if active:
+			if active and not (_view.hand as Array).is_empty():
 				var ready := Style.primary("Готов" if not bool(_view.ready[_seat]) else "Ждём команду…")
 				ready.name = "Ready"
 				ready.disabled = paused or bool(_view.ready[_seat])
@@ -230,6 +239,9 @@ func _rebuild() -> void:
 				for item: Array in [["Паника", "panic"], ["Собраться", "refocus"]]:
 					var b := Style.button(item[0])
 					b.disabled = paused or not bool(_view.get("can_play", true)) or (item[1] == "panic" and int(_view.panic) == 0)
+					if item[1] == "refocus" and float(_view.get("refocus_left", 0.0)) > 0.0:
+						b.disabled = true
+						b.tooltip_text = "Между сборами команды должно пройти 15 секунд."
 					b.pressed.connect(func(): _send(item[1]))
 					actions.add_child(b)
 		"vote":
@@ -263,20 +275,23 @@ func _rebuild() -> void:
 			var hint := Style.label("Ваша рука · нажмите карту или перетащите её в центр")
 			hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			_body.add_child(hint)
-			var row := Hand.new()
-			_hand_control = row
-			row.card_size = Vector2(104, 140)
-			row.order = _order.duplicate()
-			for value: int in hand:
-				row.entries.append({"key": str(value), "value": value, "face_up": true})
-			row.chosen.connect(_chosen)
-			row.drop_action = _drop_card
-			row.drag_began.connect(func(_entry): _set_drag(true))
-			row.drag_ended.connect(func(): _set_drag(false))
-			row.order_changed.connect(func(keys): _order = keys)
-			row.preview_requested.connect(_show_preview)
-			row.preview_closed.connect(_close_preview)
-			_body.add_child(row)
+			if keep_hand:
+				_body.add_child(_hand_control)
+			else:
+				var row := Hand.new()
+				_hand_control = row
+				row.card_size = Vector2(104, 140)
+				row.order = _order.duplicate()
+				for value: int in hand:
+					row.entries.append({"key": str(value), "value": value, "face_up": true})
+				row.chosen.connect(_chosen)
+				row.drop_action = _drop_card
+				row.drag_began.connect(func(_entry): _set_drag(true))
+				row.drag_ended.connect(func(): _set_drag(false))
+				row.order_changed.connect(func(keys): _order = keys)
+				row.preview_requested.connect(_show_preview)
+				row.preview_closed.connect(_close_preview)
+				_body.add_child(row)
 	else:
 		var empty_hand := Style.label("Зритель: чужие карты скрыты." if not active else "Вы сыграли все карты. Следите за командой.")
 		empty_hand.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER

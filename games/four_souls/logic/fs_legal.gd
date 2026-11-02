@@ -6,12 +6,15 @@ extends RefCounted
 
 ## Операции панели, которые пробуются как «законные» (аргументы подставляются ниже).
 const EFFECT_MENU := ["coins", "loot", "damage", "heal", "prevent_death", "cancel_attack", "roll",
-	"reroll", "attach_curse", "souls", "monster_damage", "self_underdeck", "recharge", "treasure"]
+	"reroll", "attach_curse", "souls", "monster_damage", "self_underdeck", "self_give", "recharge", "treasure", "take_shop", "skip_turn"]
 
 static func legal(g: FSRules, seat: int) -> Array:
 	var out: Array = []
 	for candidate: Dictionary in candidates(g, seat):
 		var trial := g.clone()
+		# Внешний тестовый источник может иметь очередь/счётчик. Пробное действие
+		# использует копию RNG и не расходует очередь исходной партии.
+		trial.roll_source = Callable()
 		if trial.action(seat, str(candidate.kind), candidate.get("arg")):
 			out.append(candidate)
 	return out
@@ -55,6 +58,13 @@ static func candidates(g: FSRules, seat: int) -> Array:
 		"death":
 			out.append(_a("death", _death_choice(g, seat)))
 		"effect":
+			for target in g.resolving.get("reward_soul_targets", []):
+				out.append(_a("reward_soul_target", {"target": target}))
+			if bool(g.resolving.get("reward_damage", false)):
+				for target: Dictionary in g._reward_damage_targets():
+					out.append(_a("reward_damage", target))
+			for target in g.resolving.get("reward_winners", []):
+				out.append(_a("reward_winner", {"target": target}))
 			out.append(_a("effect_done"))
 			out.append(_a("effect_roll"))
 			for slot in g._peep_spawn_slots():
@@ -112,8 +122,10 @@ static func _effect_arg(g: FSRules, op: String) -> Dictionary:
 	var owner: int = int(g.resolving.get("owner", g.current))
 	var arg := {"op": op, "target": owner, "amount": 1}
 	match op:
+		"self_give":
+			arg["target"] = (owner + 1) % g.players.size()
 		"monster_damage":
 			arg["item"] = maxi(0, g.battle)
-		"recharge":
+		"recharge", "take_shop":
 			arg["item"] = 0
 	return arg

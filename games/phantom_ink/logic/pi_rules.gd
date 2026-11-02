@@ -14,6 +14,7 @@ var refreshed: Array = [false, false]
 var votes: Array = [-1, -1]
 var question_votes: Array = [{}, {}]  # команда → место → до двух выбранных вопросов
 var object_card := 0
+var object_words: Array = []
 var object_slot := -1
 var offered: Array = []
 var winner := -1
@@ -42,6 +43,7 @@ func new_game(members: Array, chosen_roles: Array, seed_value: int = 0) -> void:
 	deck = range(PIData.QUESTIONS)
 	_shuffle(deck)
 	object_card = _rng.randi_range(0, PIData.OBJECTS - 1)
+	object_words = preload("res://hub/shared_words.gd").sample(_rng, 6)
 	object_slot = -1
 	_draw(0, 7)
 	_draw(1, 7)
@@ -258,5 +260,6 @@ func get_view(seat: int, _show_all: bool = false) -> Dictionary:
 		"question_votes": counts, "own_question_votes": own_votes,
 		"hand": hands[t].duplicate() if t >= 0 and not spirit else [], "offered": offered.duplicate() if t == team else [],
 		"object_card": object_card if spirit or phase == "game_over" else -1, "object_slot": object_slot if spirit or phase == "game_over" else -1,
+		"object_words": object_words.duplicate() if spirit or phase == "game_over" else [],
 		"votes": votes.duplicate() if spirit else [], "discard": discard.duplicate(), "refreshed": refreshed.duplicate(),
 		"winner": winner, "actor": actor(), "can_act": can_act(seat), "revision": revision}

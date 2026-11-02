@@ -20,6 +20,7 @@ var _cards: Dictionary = {}
 var _hover := ""
 var _preview_token := 0
 const CARD_SIZE := Vector2(96, 140)
+var _laid_out := false
 
 
 func _ready() -> void:
@@ -33,8 +34,11 @@ func _ready() -> void:
 		image.texture = entry.get("texture")
 		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		var material_value := ShaderMaterial.new()
-		material_value.shader = preload("res://hub/card_corners.gdshader")
+		# своя отрисовка карты (напр. ч/б разряженного предмета Four Souls) — entry.material
+		var material_value: ShaderMaterial = entry.get("material", null)
+		if material_value == null:
+			material_value = ShaderMaterial.new()
+			material_value.shader = preload("res://hub/card_corners.gdshader")
 		image.material = material_value
 		var card := K12TableCard.new(key, bool(entry.get("face_up", true)), image, card_size)
 		card.draggable = movable
@@ -65,6 +69,11 @@ func _ready() -> void:
 func _layout() -> void:
 	if not is_inside_tree():
 		return
+	if size.x <= 1.0:
+		return  # контейнер ещё не разложен — ждём resized
+	# первая раскладка — сразу на места: иначе новые карты «прилетают» в руку из угла
+	var first := not _laid_out
+	_laid_out = true
 	var step := minf(
 		64.0 * card_size.x / 96.0,
 		maxf(12.0 * card_size.x / 96.0, (size.x - card_size.x) / maxi(1, order.size() - 1))
@@ -79,7 +88,10 @@ func _layout() -> void:
 		if highlighted:
 			center.y -= 24 * card_size.y / 140.0
 		card.z_index = 50 if highlighted else i
-		card.move_to(center, 0.0 if highlighted else off * 0.012, 1.08 if highlighted else 1.0, 0.12)
+		if first:
+			card.place(center, off * 0.012, 1.0)
+		else:
+			card.move_to(center, 0.0 if highlighted else off * 0.012, 1.08 if highlighted else 1.0, 0.12)
 	_sync_order.call_deferred()
 
 

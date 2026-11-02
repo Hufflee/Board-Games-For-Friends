@@ -12,7 +12,14 @@ func check(ok: bool, message: String) -> void:
 		push_error(message)
 
 func _initialize() -> void:
+	if OS.get_environment("FS_GUI_TRACE") == "1":
+		node_added.connect(_trace_popup)
 	_run.call_deferred()
+
+func _trace_popup(node: Node) -> void:
+	if is_instance_valid(table) and node is Control and node.get_parent() == table and node.z_index == 65:
+		print("FS_POPUP: die=", table._die.state, " center=", table._die.center(), " mouse=", table.get_global_mouse_position())
+		print_stack()
 
 func frames(count: int = 4) -> void:
 	for i in count:
@@ -25,9 +32,25 @@ func mouse(point: Vector2, pressed: bool) -> void:
 	event.button_index = MOUSE_BUTTON_LEFT
 	event.pressed = pressed
 	Input.parse_input_event(event)
+	# Координата снята с движущегося кубика: доставляем событие до следующего шага физики.
+	Input.flush_buffered_events()
 	await frames(2)
 
 func click(button: Control) -> void:
+	# С 31.10 общие действия скрываются за Tab: невидимую кнопку кликать нельзя.
+	var parent := button.get_parent()
+	while parent != null:
+		if parent.is_in_group("top_bar") and not parent.get("_menu_open"):
+			var key := InputEventKey.new()
+			key.keycode = KEY_TAB
+			key.pressed = true
+			Input.parse_input_event(key)
+			key = key.duplicate()
+			key.pressed = false
+			Input.parse_input_event(key)
+			await frames(20)
+			break
+		parent = parent.get_parent()
 	var point := button.get_global_rect().get_center()
 	await mouse(point, true)
 	await mouse(point, false)
@@ -41,11 +64,18 @@ func find_button(text: String) -> Button:
 func roll() -> void:
 	var die: Control = table._die
 	await mouse(die.center(), true)
+	if die.state != "dragging":
+		print("FS_HIT: state=", die.state, " draggable=", die.draggable, " at=", die.center(),
+			" rect=", die.get_global_rect(), " hovered=", root.gui_get_hovered_control(), " popup=", table.get("_popup"))
+		DirAccess.make_dir_recursive_absolute("res://build/shots/fs02")
+		await RenderingServer.frame_post_draw
+		root.get_texture().get_image().save_png("res://build/shots/fs02/blocked_die.png")
 	check(die.state == "dragging", "Кубик захвачен настоящим событием мыши")
 	var motion := InputEventMouseMotion.new()
 	motion.position = die.center() + Vector2(-70, -20)
 	motion.global_position = motion.position
 	Input.parse_input_event(motion)
+	Input.flush_buffered_events()
 	await frames(2)
 	await mouse(motion.position, false)
 

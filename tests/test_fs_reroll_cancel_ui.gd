@@ -130,14 +130,10 @@ func _run() -> void:
 	g._finish_responses()
 	net._push_state()
 	await frames(10)
-	check(g.phase == "effect" and g.resolving.get("kind") == "reward", "Открылась ручная награда450")
+	check(g.phase == "effect" and g.resolving.get("card") == 515, "Автоматическая награда450 вернула исходный Осколок")
 	if await stop_if_errors():
 		return
-	# Напечатанная награда450 —4 монеты; выбранные поля и кнопка настоящей панели.
-	if not await apply_operation("coins", 4):
-		await stop_if_errors()
-		return
-	await click(find_button("Эффект выполнен"))
+	# Напечатанные4монеты уже выданы без ручной операции по карте.
 	g._finish_responses()
 	net._push_state()
 	await frames(10)

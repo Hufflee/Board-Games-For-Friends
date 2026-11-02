@@ -42,7 +42,7 @@ var rng := RandomNumberGenerator.new()
 func new_game(player_list: Array, solo: bool, card_count: int, intro: bool, with_names: bool, seed_value: int = 0, catalog: String = "basic") -> void:
 	players = player_list.duplicate(true)
 	mode = "solo" if solo else "teams"
-	names_on = with_names and not intro
+	names_on = false
 	catalog_mode = "simplified" if catalog == "simplified" else "basic"
 	catalog_order = {}
 	for category in WSData.CATEGORIES:
@@ -122,15 +122,14 @@ func _start_round() -> void:
 
 
 func _roll() -> void:
-	roll = rng.randi_range(1, 6)
-	while roll == 6 and not names_on:
-		roll = rng.randi_range(1, 6)
-	word = card["words"][roll - 1]
+	roll = 1
+	word = str(card["words"][0])
 
 
 func reroll(seat: int) -> bool:
 	if phase != "word" or seat != drawer():
 		return false
+	card["words"] = preload("res://hub/shared_words.gd").sample(rng)
 	_roll()
 	return true
 

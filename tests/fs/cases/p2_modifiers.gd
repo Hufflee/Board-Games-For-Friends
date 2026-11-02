@@ -16,6 +16,6 @@ const CASES := [
 	 "expect": {"monsters.0.hp": 2, "monsters.1.hp": 2}},
 	{"name": "Клещ: первое убийство за ход — лечение и доп. атака", "card": 503,
 	 "setup": {"dlc": true, "current": 0, "character": {0: 908}, "items": {0: [503]}, "monsters": {0: [344, {"dc": 1, "hp": 1}]}, "hp": {0: 2}},
-	 "do": [["roll", 6], ["ok", 0, "attack", {"slot": 0}], ["ok", 0, "roll"], ["close"], ["ok", 0, "effect_done"], ["close"]],
+	 "do": [["roll", 6], ["ok", 0, "attack", {"slot": 0}], ["ok", 0, "roll"], ["close"], ["roll", 2], ["ok", 0, "effect_roll"], ["close"]],
 	 "expect": {"hp.0": 3, "attacked": false}},
 ]

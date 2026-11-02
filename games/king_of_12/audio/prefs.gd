@@ -96,7 +96,7 @@ func apply() -> void:
 		DisplayServer.window_set_vsync_mode(vs)
 	Engine.max_fps = fps_limit
 	var root := get_tree().root
-	var sc: float = SCALE_3D[clampi(graphics, 0, 2)]
+	var sc: float = SCALE_3D[clampi(graphics, 0, 2)] * _render_3d_k()
 	root.scaling_3d_mode = Viewport.SCALING_3D_MODE_FSR if sc < 1.0 else Viewport.SCALING_3D_MODE_BILINEAR
 	root.scaling_3d_scale = sc
 	# сглаживание краёв 3D: высокое — MSAA 4x, среднее — 2x, низкое — дешёвый FXAA
@@ -126,18 +126,26 @@ func _apply_window() -> void:
 		var sz := Vector2i(int(p[0]), int(p[1])).min(area.size - Vector2i(16, 48))
 		DisplayServer.window_set_size(sz)
 		DisplayServer.window_set_position(area.position + (area.size - sz) / 2)
+	# Интерфейс всегда рисуется в полном разрешении экрана от базы 1280×720 (canvas_items):
+	# режим viewport связывает раскладку с растром — при 100 % интерфейс был мельче задуманного,
+	# а масштаб интерфейса уменьшал растр и мылил картинку. Выбранное в полном экране «Разрешение»
+	# снижает только 3D (комната) — см. _render_3d_k.
 	var root := get_tree().root
+	root.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
+	root.content_scale_size = Vector2i(
+		ProjectSettings.get_setting("display/window/size/viewport_width", 1280),
+		ProjectSettings.get_setting("display/window/size/viewport_height", 720))
+
+
+## Во весь экран с выбранным «Разрешением» ниже экрана — 3D рисуется во столько раз меньше.
+func _render_3d_k() -> float:
 	var render_size := _resolution_size(_render_resolution)
-	if not windowed and render_size != Vector2i.ZERO:
-		# Fullscreen-окно остаётся размером с монитор; меняется настоящая
-		# растровая поверхность игры, включая 2D, а не множитель UI.
-		root.content_scale_mode = Window.CONTENT_SCALE_MODE_VIEWPORT
-		root.content_scale_size = render_size
-	else:
-		root.content_scale_mode = Window.CONTENT_SCALE_MODE_CANVAS_ITEMS
-		root.content_scale_size = Vector2i(
-			ProjectSettings.get_setting("display/window/size/viewport_width", 1280),
-			ProjectSettings.get_setting("display/window/size/viewport_height", 720))
+	if window_mode == "windowed" or render_size == Vector2i.ZERO or DisplayServer.get_name().begins_with("headless"):
+		return 1.0
+	var screen := DisplayServer.window_get_size()
+	if screen.y <= 0:
+		return 1.0
+	return clampf(float(render_size.y) / float(screen.y), 0.25, 1.0)
 
 
 func _resolution_size(text: String) -> Vector2i:
@@ -150,9 +158,10 @@ func _resolution_size(text: String) -> Vector2i:
 
 ## Фактическая растровая поверхность игры, а не сохранённый размер окна.
 func current_resolution() -> Vector2i:
-	if get_tree().root.content_scale_mode == Window.CONTENT_SCALE_MODE_CANVAS_ITEMS:
-		return DisplayServer.window_get_size()
-	return get_tree().root.get_texture().get_size()
+	var render_size := _resolution_size(_render_resolution)
+	if window_mode != "windowed" and render_size != Vector2i.ZERO:
+		return render_size.min(DisplayServer.window_get_size())
+	return DisplayServer.window_get_size()
 
 
 ## Счётчик кадров в углу экрана (настройка «Показывать FPS»).

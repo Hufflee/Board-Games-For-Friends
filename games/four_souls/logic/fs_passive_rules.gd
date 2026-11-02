@@ -3,6 +3,10 @@ extends RefCounted
 
 ## Отсутствие условия отношения означает событие любого игрока, как в исходных привязках.
 const REGISTRY := {
+	7: [{"event": "soul_control", "conditions": {"owner_subject": false},
+		"operations": [{"op": "counter_soul", "amount": 1}]}],
+	8: [{"event": "soul_control", "conditions": {"owner_subject": false},
+		"operations": [{"op": "manual_card", "amount": 1}]}],
 	6: [{"event": "coins", "conditions": {"owner_subject": true, "min_amount": 3},
 		"operations": [{"op": "recharge", "amount": 1}]}],
 	18: [{"event": "attack_roll", "conditions": {"owner_subject": true, "count": 3},
@@ -46,7 +50,7 @@ const REGISTRY := {
 	]
 }
 
-const EVENTS := ["coins", "attack_roll", "roll", "monster_death", "turn_end", "damage", "death", "activate", "after_death"]
+const EVENTS := ["coins", "attack_roll", "roll", "monster_death", "turn_end", "damage", "death", "activate", "after_death", "soul_control"]
 
 ## Постоянные модификаторы атаки: свойства суммируются у всех действующих копий.
 ## Защита относится к монстрам в ход владельца; бросок и промах — к самому владельцу.
@@ -77,6 +81,24 @@ static func attack_roll(value: int, modifiers: Dictionary) -> int:
 
 static func attack_hits(value: int, evasion: int, modifiers: Dictionary) -> bool:
 	return value >= evasion and value not in modifiers.miss_faces
+
+## Условия по текущему здоровью не переписывают исходные характеристики монстра.
+const MONSTER_HEALTH_STATS := {
+	345: {"at_most": 2, "dc": -1},
+	354: {"equals": 1, "at": 1},
+	420: {"equals": 1, "dc": 2}
+}
+
+static func monster_health_bonus(monster: Dictionary, stat: String) -> int:
+	var binding: Dictionary = MONSTER_HEALTH_STATS.get(int(monster.id), {})
+	if binding.is_empty():
+		return 0
+	var health: int = int(monster.hp)
+	if binding.has("equals") and health != int(binding.equals):
+		return 0
+	if binding.has("at_most") and health > int(binding.at_most):
+		return 0
+	return int(binding.get(stat, 0))
 
 static func monster_evasion(base: int, entries: Array) -> int:
 	var modifiers: Dictionary = attack_modifiers(entries, 0)

@@ -1,7 +1,7 @@
 class_name RSBBoard
 extends Control
 ## Поле ставок на зелёном сукне: пари (5 карт), ставки на цвет, сетка В ТРОЙКЕ / В ДВОЙКЕ / ПОБЕДА
-## на 9 лошадей и экзотические финиши. Жетоны на ячейках, подсветка допустимых ячеек при перетаскивании.
+## на 9 черепах и экзотические финиши. Жетоны на ячейках, подсветка допустимых ячеек при перетаскивании.
 
 signal spot_clicked(spot: String, at: Vector2)
 signal spot_hovered(spot: String)
@@ -129,7 +129,7 @@ func spot_info(s: String) -> Dictionary:
 			var table: Array = {"s": RSBData.SHOW, "p": RSBData.PLACE, "w": RSBData.WIN}[p[0]]
 			var h := int(p[1])
 			var name: String = {"s": "в тройке (1–3 место)", "p": "в двойке (1–2 место)", "w": "победит"}[p[0]]
-			return {"mult": table[h][int(p[2])][0], "loss": table[h][int(p[2])][1], "title": "Лошадь %s %s" % [RSBData.HORSES[h], name]}
+			return {"mult": table[h][int(p[2])][0], "loss": table[h][int(p[2])][1], "title": "Черепаха %s %s" % [RSBData.HORSES[h], name]}
 		"color", "seven":
 			var c: Dictionary = RSBData.COLOR_BETS[s]
 			return {"mult": c["mult"], "loss": c["loss"], "title": c["name"]}
@@ -200,8 +200,8 @@ func _draw() -> void:
 			draw_line(Vector2(lx, y + 3), Vector2(lx, y + _row_h - 3), Color(COL_COLORS[c], 0.35), 1.0)
 		if h > 0:
 			draw_line(Vector2(PAD, y), Vector2(PAD + gw, y), Color(1, 1, 1, 0.12), 1.0)
-		# лошадь справа
-		var t: Texture2D = RSBStyle.tex("horse_%d" % h)
+		# черепаха справа
+		var t: Texture2D = RSBStyle.tex("turtle_%d" % h)
 		var ih := _row_h * 0.92
 		var iw := ih * t.get_width() / t.get_height()
 		draw_texture_rect(t, Rect2(Vector2(PAD + gw + 6, y + (_row_h - ih) * 0.5), Vector2(iw, ih)), false)
@@ -267,7 +267,7 @@ func _draw_prop(i: int, r: Rect2) -> void:
 	var pr: Dictionary = RSBData.PROPS[v["props"][i]]
 	draw_style_box(RSBStyle.box(Color("2c7a49"), 5, Color("8fd18f"), 2), r)
 	var ih := r.size.y * 0.5
-	var t: Texture2D = RSBStyle.tex("horse_%d" % pr["a"])
+	var t: Texture2D = RSBStyle.tex("turtle_%d" % pr["a"])
 	var iw := ih * t.get_width() / t.get_height()
 	var x := r.position.x + 4
 	var y := r.position.y + 4
@@ -282,11 +282,11 @@ func _draw_prop(i: int, r: Rect2) -> void:
 				hs.append(h)
 		var sh := ih * (0.62 if hs.size() > 2 else 0.8)
 		for k in hs.size():
-			var tt: Texture2D = RSBStyle.tex("horse_%d" % hs[k])
+			var tt: Texture2D = RSBStyle.tex("turtle_%d" % hs[k])
 			var sw := sh * tt.get_width() / tt.get_height()
 			draw_texture_rect(tt, Rect2(x + (k % 2) * sw * 0.8, y + (k / 2) * sh * 0.85 - (2 if hs.size() > 2 else 0), sw, sh), false)
 	else:
-		var tb: Texture2D = RSBStyle.tex("horse_%d" % pr["b"])
+		var tb: Texture2D = RSBStyle.tex("turtle_%d" % pr["b"])
 		draw_texture_rect(tb, Rect2(x, y, iw, ih), false)
 	var mr := Rect2(r.position.x + 4, r.end.y - 22, 34, 18)
 	draw_style_box(RSBStyle.box(Color("1b4d2c"), 3, RSBStyle.GOLD, 1), mr)

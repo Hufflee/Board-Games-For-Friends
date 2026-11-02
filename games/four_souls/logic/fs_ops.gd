@@ -4,6 +4,7 @@ extends RefCounted
 ## "other" — номер у выбранного игрока (обмен). Тест tests/fs/core/core_ops.gd сверяет список с match в _effect.
 
 const MAIN := [
+	["monster_counter", "Жетоны на монстре ±", {"item": "монстра", "amount": true}],
 	["coins", "Монеты ±", {"target": true, "amount": true}],
 	["loot", "Взять лут", {"target": true, "amount": true}],
 	["treasure", "Получить сокровища", {"target": true, "amount": true}],
@@ -50,8 +51,11 @@ const EXTRA := [
 	["swap_items", "Обменяться невечными предметами", {"target": true, "item": "своего предмета", "other": true}],
 	["discard_monster", "Сбросить неатакуемого сейчас монстра", {"item": "монстра"}],
 	["discard_shop", "Сбросить и заменить предмет магазина", {"item": "в магазине"}],
+	["take_shop", "Забрать предмет магазина без покупки", {"target": true, "item": "в магазине"}],
 	["extra_turn", "Дополнительный ход выбранному игроку", {"target": true, "amount": true}],
+	["skip_turn", "Пропустить следующий ход выбранного игрока", {"target": true, "amount": true}],
 	["self_underdeck", "Эту карту лута — под низ колоды", {}],
+	["self_give", "Передать разыгранную карту лута выбранному игроку", {"target": true}],
 	["give_item", "Передать свой предмет выбранному игроку", {"target": true, "item": "своего предмета"}],
 	["peek_hand", "Посмотреть руку выбранного игрока", {"target": true}],
 	["peek_hands", "Посмотреть руки всех игроков", {}],

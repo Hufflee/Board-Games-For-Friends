@@ -36,6 +36,9 @@ func remove_column(deck_index: int, index: int) -> bool:
 	deck.columns.remove_at(index)
 	for row: Dictionary in deck.rows:
 		row.erase(id)
+	for layer: Dictionary in deck.get("face", {}).get("layers", []):
+		if layer.get("field") == id:
+			layer["field"] = ""
 	document.replace(copy, "Удалить свойство карты")
 	return true
 
@@ -108,5 +111,9 @@ func change_column_type(deck_index: int, column_index: int, type: String) -> Str
 				value = "да" if value is bool and value else ("нет" if value is bool else str(value))
 		row[id] = value
 	deck.columns[column_index].type = type
+	if type != "image":
+		for layer: Dictionary in deck.get("face", {}).get("layers", []):
+			if layer.get("kind") == "image" and layer.get("field") == id:
+				layer["field"] = ""
 	document.replace(copy, "Тип свойства карты")
 	return ""

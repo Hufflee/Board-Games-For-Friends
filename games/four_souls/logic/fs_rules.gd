@@ -39,6 +39,8 @@ func tick(delta: float) -> bool:
 	if before == [phase, stack.size(), resolving.size()]:
 		return false
 	revision += 1
+	_check_bonuses()
+	_check_win()
 	_quiet_revision = revision
 	return true
 
@@ -62,11 +64,14 @@ func action(seat: int, kind: String, arg = null) -> bool:
 	if _pending_manual_passives() and kind in ["effect", "effect_done", "effect_roll", "place_bloat"]:
 		if seat != int(resolving.owner):
 			return false
+		var original_effect: Dictionary = resolving
 		_finish_responses()
-		if phase == "effect" and seat == int(resolving.get("owner", -1)):
+		if phase == "effect" and seat == int(resolving.get("owner", -1)) and is_same(original_effect, resolving):
 			return action(seat, kind, arg)
 		# Жест закрыл ответы, но теперь разрешается чужой (вложенный) ручной эффект.
 		revision += 1
+		_check_bonuses()
+		_check_win()
 		return true
 	if phase == "priority" and _after_stack == "starting_continue":
 		if kind != "finish_start" or seat != current:
@@ -110,6 +115,33 @@ func action(seat: int, kind: String, arg = null) -> bool:
 	var a: Dictionary = arg if arg is Dictionary else {}
 	var ok := false
 	match kind:
+		"reward_soul_target":
+			var target: int = int(a.get("target", -1))
+			if phase != "effect" or seat != int(resolving.get("owner", -1)) or target not in resolving.get("reward_soul_targets", []):
+				return false
+			resolving["soul_recipient"] = target
+			resolving.erase("reward_soul_targets")
+			_advance_auto_reward()
+			ok = true
+		"reward_damage":
+			if phase != "effect" or seat != int(resolving.get("owner", -1)) or not bool(resolving.get("reward_damage", false)):
+				return false
+			var chosen := {"zone": str(a.get("zone", "")), "target": int(a.get("target", -1))}
+			if chosen not in _reward_damage_targets():
+				return false
+			resolving["reward_damage_done"] = true
+			resolving.erase("reward_damage")
+			var damage: int = int(resolving.auto_reward.damage_choice) * reward_boost
+			ok = _effect({"op": "damage" if chosen.zone == "player" else "monster_damage", "target": chosen.target if chosen.zone == "player" else seat, "item": chosen.target, "amount": damage})
+			_advance_auto_reward()
+		"reward_winner":
+			var target: int = int(a.get("target", -1))
+			if phase != "effect" or seat != int(resolving.get("owner", -1)) or not resolving.has("reward_winners") or target not in _reward_win_targets():
+				return false
+			resolving["reward_winner"] = target
+			resolving.erase("reward_winners")
+			_advance_auto_reward()
+			ok = true
 		"discard_target":
 			var target: int = int(a.get("target", -1))
 			if phase != "discard_target" or seat != current or target < 0 or target >= players.size():
@@ -204,7 +236,10 @@ func action(seat: int, kind: String, arg = null) -> bool:
 					for item in items[seat]:
 						if str(FSData.card(int(item.id)).key).begins_with("guppy"): guppy += 1
 					if guppy < 2: return false
-				claimed.append(id); souls[recipient] += 1; soul_cards[recipient].append({"id":int(id),"value":1}); _note(name_of(recipient) + " получает " + FSData.title(id)); ok = true
+				claimed.append(id)
+				_gain_soul_card(recipient, {"id": int(id), "value": 1})
+				_note(name_of(recipient) + " получает " + FSData.title(id))
+				ok = true
 		"peek_take":
 			var id: int = int(a.get("card",-1))
 			if phase == "effect" and seat == int(resolving.owner) and int(peek.get("owner",-1)) == seat and id in peek.get("cards",[]):
@@ -241,6 +276,16 @@ func action(seat: int, kind: String, arg = null) -> bool:
 				var resume: String = phase if phase != "priority" else _after_stack
 				_push({"kind":"item","card":int(item.id),"owner":seat},resume); ok = true
 				_emit_passives("activate", {"seat": seat, "card": int(item.id)})
+		"item_trigger":
+			var index: int = int(a.get("item", -1))
+			if phase in ["turn", "priority", "battle_roll", "death"] and index >= 0 and index < items[seat].size():
+				var id: int = int(items[seat][index].id)
+				if not FSData.manual_item_trigger(id):
+					return false
+				# Условие текста подтверждают люди; это не новая активация и не поворот.
+				var resume: String = _after_stack if phase == "priority" else phase
+				_push({"kind": "item", "card": id, "owner": seat, "conditional": true}, resume)
+				ok = true
 		"buy":
 			var slot: int = int(a.get("slot",-2))
 			var valid_slot: bool = a.has("slot") and slot >= -1 and slot < shop.size()
@@ -263,6 +308,10 @@ func action(seat: int, kind: String, arg = null) -> bool:
 				_push({"kind":"attack","owner":seat,"slot":slot,"over":int(a.get("over",0))},"turn"); ok = true
 		"effect_roll":
 			if phase == "effect" and seat == actor():
+				if not resolving.has("reroll_request") and resolving.has("auto_reward") and not bool(resolving.get("requires_reward_roll", false)) and not bool(resolving.get("post_reward_wait", false)) and not (bool(resolving.auto_reward.get("manual_death", false)) and not bool(resolving.get("death_text_done", false))):
+					return false
+				if not resolving.has("reroll_request") and resolving.has("auto_reward") and resolving.has("reward_roll") and not bool(resolving.get("post_reward_wait", false)):
+					return false
 				if resolving.has("spawn_card"):
 					return false
 				var reroll_request: Dictionary = resolving.get("reroll_request", {})
@@ -290,6 +339,23 @@ func action(seat: int, kind: String, arg = null) -> bool:
 			if phase == "effect" and seat == int(resolving.owner): ok = _effect(a)
 		"effect_done":
 			if phase == "effect" and seat == int(resolving.owner):
+				if resolving.has("reward_winners") or resolving.has("reward_soul_targets") or resolving.has("reward_damage"):
+					return false
+				if resolving.has("spawn_card") or resolving.has("reroll_request"):
+					return false
+				if resolving.has("auto_reward") and not bool(resolving.get("reward_ready", false)):
+					if bool(resolving.get("death_text_done", false)) and bool(resolving.get("requires_reward_roll", false)) and not resolving.has("reward_roll"):
+						return false
+					if bool(resolving.get("post_reward_wait", false)):
+						resolving["post_text_done"] = true
+						resolving.erase("post_reward_wait")
+					else:
+						resolving["death_text_done"] = true
+					_advance_auto_reward()
+					revision += 1
+					_check_bonuses()
+					_check_win()
+					return true
 				if bool(resolving.get("requires_reward_roll", false)) and not resolving.has("reward_roll"):
 					return false
 				if resolving.has("spawn_card"):
@@ -300,12 +366,18 @@ func action(seat: int, kind: String, arg = null) -> bool:
 				var effect := resolving.duplicate(); resolving = {}; peek = {}
 				if effect.has("_resume"):
 					_after_stack = str(effect._resume)
-				if effect.kind == "loot" and not bool(effect.get("under_deck", false)):
+				if effect.kind == "loot" and not bool(effect.get("under_deck", false)) and not effect.has("given_to"):
 					discards.loot.append(int(effect.card))
 				if effect.kind == "event" and not bool(effect.get("attached",false)):
 					discards.monster.append(int(effect.card))
 				if effect.kind == "reward":
 					_finish_monster_reward(effect)
+					if effect.has("reward_winner"):
+						winner = int(effect.reward_winner)
+						phase = "game_over"
+						_note("Сердце Мамы: победитель — " + name_of(winner))
+						revision += 1
+						return true
 				if bool(effect.get("refill_monsters", false)):
 					_after_stack = "refill"
 				if bool(effect.get("end_turn_after", false)):
@@ -380,7 +452,9 @@ func clone() -> FSRules:
 			copy.set(key, value)
 	copy._rng.seed = _rng.seed
 	copy._rng.state = _rng.state
-	copy.roll_source = roll_source
+	# Внешнее замыкание нельзя скопировать: оно может расходовать очередь исходной игры.
+	# Все пробные клоны используют собственную копию RNG, включая anyone_can_act и фаззер.
+	copy.roll_source = Callable()
 	return copy
 ## Единый источник «что сейчас можно»: кандидаты, принятые пробным действием на копии.
 func legal_actions(seat: int) -> Array:
@@ -408,6 +482,7 @@ func get_view(seat: int, _show_all: bool = false) -> Dictionary:
 	var off_turn_left := maxf(0.0, OFF_TURN_WINDOW - _turn_time())
 	for i in players.size():
 		public.append({"name":players[i].name,"char":chars[i],"items":items[i].duplicate(true),"hp":hp[i],"max_hp":max_hp[i],"attack":attack[i],"coins":coins[i],"souls":souls[i],"hand_count":hands[i].size(),"souls_cards":soul_cards[i].duplicate(true),"curses":curses[i].duplicate(),"ready":character_ready[i],"dead":dead[i]})
+		public.back()["skipped_turns"] = int(skipped_turns[i])
 		for owner in players.size():
 			if owner != i and _item_count(owner, 128) > 0:
 				public.back()["hand"] = hands[i].duplicate()
@@ -432,7 +507,5 @@ func get_view(seat: int, _show_all: bool = false) -> Dictionary:
 	for entry: Dictionary in visible_monsters:
 		entry["untargetable"] = _untargetable(int(entry.id))
 		entry.dc = _monster_evasion(entry)
-		entry.at = int(entry.at) + _monster_aura("deathshead") + (1 if room == 818 else 0)
-		if curses[current].has(737):
-			entry.at += 1
-	return {"players":public,"seat":seat,"discard_choice":discard_choice.duplicate(true),"battle_player":battle_player,"required_player_attacks":_required_player_remaining(),"player_attack_targets":_player_attack_targets(),"forced_deck_attacks":_forced_deck_remaining(),"spawn_slots":_peep_spawn_slots(),"effect_pending":_pending_manual_passives(),"starting_pending":phase=="priority" and _after_stack=="starting_continue","starting_options":_starting_choices[0].cards.duplicate() if phase=="starting_item" and not _starting_choices.is_empty() and seat==actor() else [],"phase":phase,"current":current,"actor":actor(),"round_no":round_no,"dlc":dlc,"hand":hands[seat].duplicate() if seat >= 0 and seat < players.size() else [],"monsters":visible_monsters,"shop":shop.duplicate(),"shop_price":_purchase_cost(seat if seat >= 0 else current,0),"discard_treasure":int(discards.treasure.back()) if seat >= 0 and _item_count(seat,473)>0 and not discards.treasure.is_empty() else -1,"room":room,"bonuses":bonuses.duplicate(),"bonus_targets":bonus_targets,"bonus_progress":bonus_progress.duplicate(),"claimed":claimed.duplicate(),"stack":visible_stack,"resolving":resolving.duplicate(),"battle":battle,"roll_no":roll_no,"last_roll":last_roll,"log":log.duplicate(),"winner":winner,"free_loot":free_loot,"bought":bought,"attacked":attacked,"counts":counts,"bank":bank,"revision":revision,"peek":peek.duplicate(true) if int(peek.get("owner",-2)) == seat else {},"death_actor":int(_death_queue[0]) if not _death_queue.is_empty() else -1,"discard_limit":_discard_limit,"off_turn_left":off_turn_left,"response_window":RESPONSE_WINDOW}
+		entry.at = _monster_attack(entry)
+	return {"players":public,"seat":seat,"discard_choice":discard_choice.duplicate(true),"battle_player":battle_player,"required_player_attacks":_required_player_remaining(),"player_attack_targets":_player_attack_targets(),"forced_deck_attacks":_forced_deck_remaining(),"spawn_slots":_peep_spawn_slots(),"effect_pending":_pending_manual_passives(),"starting_pending":phase=="priority" and _after_stack=="starting_continue","starting_options":_starting_choices[0].cards.duplicate() if phase=="starting_item" and not _starting_choices.is_empty() and seat==actor() else [],"phase":phase,"current":current,"actor":actor(),"round_no":round_no,"dlc":dlc,"hand":hands[seat].duplicate() if seat >= 0 and seat < players.size() else [],"monsters":visible_monsters,"shop":shop.duplicate(),"shop_price":_purchase_cost(seat if seat >= 0 else current,0),"discard_treasure":int(discards.treasure.back()) if seat >= 0 and _item_count(seat,473)>0 and not discards.treasure.is_empty() else -1,"room":room,"bonuses":bonuses.duplicate(),"bonus_targets":bonus_targets,"bonus_progress":bonus_progress.duplicate(),"claimed":claimed.duplicate(),"stack":visible_stack,"resolving":resolving.duplicate(),"battle":battle,"roll_no":roll_no,"last_roll":last_roll,"log":log.duplicate(),"winner":winner,"free_loot":free_loot,"bought":bought,"attacked":attacked,"counts":counts,"bank":bank,"reward_boost":reward_boost,"revision":revision,"peek":peek.duplicate(true) if int(peek.get("owner",-2)) == seat else {},"death_actor":int(_death_queue[0]) if not _death_queue.is_empty() else -1,"discard_limit":_discard_limit,"off_turn_left":off_turn_left,"response_window":RESPONSE_WINDOW}

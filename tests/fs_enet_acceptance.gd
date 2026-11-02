@@ -15,7 +15,7 @@ func boot() -> void:
 	net = root.get_node("Net")
 	DirAccess.make_dir_recursive_absolute(folder)
 	journal = FileAccess.open(folder + "/" + role + "-states.jsonl", FileAccess.WRITE)
-	net.my_name = "Проверка-хост" if role == "host" else "Проверка-клиент"
+	net.my_name = {"host": "Проверка-хост", "client": "Проверка-клиент", "spectator": "Проверка-зритель"}.get(role, "Проверка-клиент")
 	net.state_changed.connect(on_state)
 	net.chat_received.connect(on_chat)
 	var port := int(OS.get_environment("FS_PORT"))
@@ -51,13 +51,17 @@ func _process(delta: float) -> bool:
 					if role == "host" and net.fours != null and OS.get_environment("FS_PASSIVE_FIXTURE") == "1":
 						prepare_passive_fixture(str(command.arg))
 				"start": print("СТАРТ ", net.start_game())
+				"settings":
+					if role == "host" and command.arg is Dictionary:
+						for key: String in command.arg:
+							net.set_setting(key, command.arg[key])
 				"pause": net.set_paused(bool(command.arg))
 				"chat": net.send_chat(str(command.arg))
 				"leave": net.leave()
 				"join": net.join_enet("127.0.0.1", int(OS.get_environment("FS_PORT")))
 				"quit": quit()
 				_: net.send_action(str(command.kind), integer_arguments(command.get("arg")))
-	var snapshot := {"command":last_command,"in_game":net.in_game,"members":net.members.size(),"view":net.view}
+	var snapshot := {"command":last_command,"in_game":net.in_game,"members":net.members.size(),"view":net.view,"mode":net.mode}
 	if role == "host" and net.fours != null:
 		# Только наблюдение для проверки приватности, без записи в объект правил.
 		snapshot["audit_hands"] = net.fours.hands

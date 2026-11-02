@@ -59,8 +59,10 @@ func progress() -> float:
 
 
 ## Тихая проверка один раз за запуск (звать после добавления в дерево — call_deferred).
-func check() -> void:
-	if state != State.IDLE or not Updater.enabled:
+func check(force: bool = false) -> void:
+	if not Updater.enabled or state in [State.CHECKING, State.DOWNLOADING, State.INSTALLING, State.READY]:
+		return
+	if not force and state != State.IDLE:
 		return
 	if not is_inside_tree():
 		await ready
@@ -71,7 +73,11 @@ func check() -> void:
 	var body := await _get_text(url)
 	var m: Variant = JSON.parse_string(body) if body != "" else null
 	if not (m is Dictionary) or int(m.get("format", 0)) != 1:
-		_set_state(State.NONE)  # нет сети / нет манифеста — молчим
+		if force:
+			error = "Не удалось получить сведения об обновлениях."
+			_set_state(State.FAILED)
+		else:
+			_set_state(State.NONE)  # автоматическая проверка без сети молчит
 		return
 	_manifest = m
 	page = str(m.get("page", RELEASES_PAGE))
@@ -79,6 +85,16 @@ func check() -> void:
 
 
 func _plan() -> void:
+	_queue.clear()
+	_keep.clear()
+	kind = ""
+	target = ""
+	# Сравниваем действующую версию, включая уже загруженные PCK.
+	# Другая контрольная сумма цепочки не повод предлагать ту же версию снова.
+	var latest := str(_manifest.get("version", ""))
+	if latest == "" or Updater.compare(latest, Updater.version) <= 0:
+		_set_state(State.NONE)
+		return
 	var base: Dictionary = _manifest.get("base", {})
 	var mb := str(base.get("version", ""))
 	var patches: Array = _manifest.get("patches", [])
@@ -122,6 +138,9 @@ func start() -> void:
 		OS.shell_open(page)
 		return
 	if state != State.AVAILABLE and state != State.FAILED:
+		return
+	if _queue.is_empty():
+		check(true)
 		return
 	total_bytes = 0
 	for q: Dictionary in _queue:

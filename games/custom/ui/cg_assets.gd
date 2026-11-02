@@ -8,6 +8,34 @@ var textures: Dictionary = {}
 var fonts: Dictionary = {}
 var key := ""
 
+## Текущий черновик может содержать ещё не сохранённые в game.json ассеты.
+func configure_document(definition: Dictionary) -> void:
+	var uuid := str(definition.get("id", ""))
+	var next := uuid + "/draft/" + str(JSON.stringify(definition.get("assets", {})).hash())
+	if next == key:
+		return
+	key = next
+	files = {}
+	textures.clear()
+	fonts.clear()
+	if not Library.uuid_valid(uuid):
+		return
+	var loaded := 0
+	for hash_value: String in definition.get("assets", {}):
+		var entry: Variant = definition.assets[hash_value]
+		if not entry is Dictionary:
+			continue
+		var path := str(entry.get("path", ""))
+		if not Package.path_valid(path) or not path.begins_with("assets/") or path.get_file().get_basename() != hash_value:
+			continue
+		var file := FileAccess.open(Library.folder(uuid) + "/" + path, FileAccess.READ)
+		if file == null or file.get_length() > Package.LIMIT - loaded:
+			continue
+		var supplied := file.get_buffer(file.get_length())
+		if Package.sha(supplied) == hash_value:
+			files[path] = supplied
+			loaded += supplied.size()
+
 func configure(uuid: String, hash_value: String, author: bool) -> void:
 	var next := uuid + "/" + hash_value
 	if next == key:

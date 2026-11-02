@@ -36,8 +36,9 @@ func test_data() -> void:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 1
 	var deck := WSData.build_deck(rng, 21, false)
-	check(deck.size() == 21 and deck[0]["words"].size() == 6, "колода 21 карта по 6 слов")
-	check(WSData.build_deck(rng, 10, true).all(func(c): return c["level"] == "green"), "вводная — зелёные")
+	# 02.11 владелец заменил карты из шести слов единым словарём без имён.
+	check(deck.size() == 21 and deck.all(func(c): return c["words"].size() == 1), "колода 21 случайное слово")
+	check(WSData.build_deck(rng, 10, true).all(func(c): return c["level"] == "shared"), "вводная тоже использует общий словарь")
 	check(WSRules.valid_card("noun:0") and not WSRules.valid_card("noun:999") and not WSRules.valid_card("x:1"), "id карточек")
 
 

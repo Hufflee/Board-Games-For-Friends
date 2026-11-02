@@ -4,6 +4,8 @@ extends Control
 const Style := preload("res://games/custom/ui/cg_style.gd")
 const Assets := preload("res://games/custom/ui/cg_assets.gd")
 const Definition := preload("res://games/custom/logic/cg_def.gd")
+const Session := preload("res://games/custom/logic/cg_session.gd")
+const Layout := preload("res://games/custom/logic/cg_layout.gd")
 var _assets := Assets.new()
 var app: Node
 var _top: TopBar
@@ -55,19 +57,36 @@ func _fit() -> void:
 	if not is_instance_valid(_field):
 		return
 	var zoom := minf(size.x / 1280.0, (size.y - TopBar.HEIGHT) / 672.0)
-	_field.scale = Vector2.ONE * maxf(0.1, zoom)
-	_field.position = Vector2((size.x - 1280.0 * zoom) / 2.0, TopBar.HEIGHT)
+	zoom = maxf(0.1, zoom)
+	var area := Layout.BASE
+	if Layout.adaptive(_view.get("cg_layout", {})):
+		area = Vector2(size.x, maxf(0, size.y - TopBar.HEIGHT)) / zoom
+	var changed := not _field.size.is_equal_approx(area)
+	_field.size = area
+	_field.scale = Vector2.ONE * zoom
+	_field.position = Vector2((size.x - area.x * zoom) / 2.0, TopBar.HEIGHT)
+	if changed and not _view.is_empty() and not _rebuild_queued:
+		_rebuild_queued = true
+		_render_pending.call_deferred()
 
 func _state(view: Dictionary) -> void:
 	if not Net.is_custom_game(str(view.get("game", ""))):
 		return
+	var previous := _view.duplicate()
+	var incoming := view.duplicate()
+	# Часы TopBar обновляются отдельно; служебные метрики не меняют содержимое стола.
+	for key: String in ["turn_left", "personal_stats", "auto_in"]:
+		previous.erase(key)
+		incoming.erase(key)
+	var same_contents := previous == incoming
 	if _seat != int(view.get("seat", -1)) or _view.get("game_id") != view.get("game_id"):
-		_shown = not bool(view.get("hotseat", false))
+		_shown = _author_test() or not bool(view.get("hotseat", false))
 		if _view.get("game_id") != view.get("game_id"):
 			_pages.clear()
 			_sound_id = -1
 	_seat = int(view.get("seat", -1))
 	_view = view
+	_fit()
 	var sound_event: Dictionary = view.get("sound_event", {})
 	if int(sound_event.get("id", -1)) != _sound_id:
 		_sound_id = int(sound_event.get("id", -1))
@@ -78,6 +97,8 @@ func _state(view: Dictionary) -> void:
 		_update_debug()
 	if str(view.get("game", "")).begins_with("custom:"):
 		_assets.configure(str(view.game).trim_prefix("custom:"), str(Net.cg_transfer.manifest.get("hash", "")), Net.is_host())
+	if same_contents:
+		return
 	# Хост может ответить синхронно из сигнала TossDie.thrown. Сначала завершаем input кубика.
 	if not _rebuild_queued:
 		_rebuild_queued = true
@@ -108,10 +129,15 @@ func _show_debug() -> void:
 	_debug_window.title = "Проверка · играть за всех"
 	_debug_window.size = Vector2i(800, 560)
 	_debug_window.theme = Style.theme()
+	Style.window_surface(_debug_window)
 	add_child(_debug_window)
 	var col := Style.column(8)
 	col.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	_debug_window.add_child(col)
+	col.offset_left = 16
+	col.offset_top = 16
+	col.offset_right = -16
+	col.offset_bottom = -16
 	col.add_child(Style.label("Полное состояние доступно автору только в локальной проверке."))
 	var row := Style.row(8)
 	col.add_child(row)
@@ -121,6 +147,10 @@ func _show_debug() -> void:
 	var pause := Style.button("Пауза / продолжить")
 	pause.pressed.connect(func(): Net.set_paused(not Net.paused))
 	row.add_child(pause)
+	for same_seed: bool in [false, true]:
+		var again := Style.button("Тот же расклад" if same_seed else "Заново")
+		again.pressed.connect(func(): _debug_restart(same_seed))
+		row.add_child(again)
 	_debug_text = TextEdit.new()
 	_debug_text.editable = false
 	_debug_text.size_flags_vertical = SIZE_EXPAND_FILL
@@ -137,8 +167,21 @@ func _update_debug() -> void:
 
 func _debug_step_back() -> void:
 	if _author_test() and _debug != null and _debug.back(Net.cg):
-		_shown = false
+		_shown = true
 		Net._push_state()
+
+func _debug_restart(same_seed: bool) -> void:
+	if not _author_test() or _debug == null or Net.cg == null:
+		return
+	if _debug.restart(Net.cg, same_seed):
+		Net.cg_view_seat = 0
+		_shown = true
+		_die_key = ""
+		_sound_id = -1
+		Net.set_paused(false)
+		Net._push_state()
+	else:
+		_update_debug()
 
 func _send(action: Dictionary, value: Variant = null) -> void:
 	var data := action.duplicate(true)
@@ -166,21 +209,23 @@ func _rebuild() -> void:
 	roster.visible = not custom
 	for i in _view.players.size():
 		var p: Dictionary = _view.players[i]
-		var caption := ("● " if int(_view.current) == i else "") + str(p.get("name", "Игрок"))
+		var caption := ("● " if _active_seat(i) else "") + str(p.get("name", "Игрок"))
 		var hand_count := 0
 		for key: String in _view.zones:
 			if key.ends_with("@%d" % i):
 				hand_count += _view.zones[key].size()
 		caption += " · %d карт" % hand_count
+		if _view.get("ready_seats", []).has(i):
+			caption += " · готов"
 		var seat_button := Style.button(caption)
 		seat_button.size_flags_horizontal = SIZE_EXPAND_FILL
 		seat_button.clip_text = true
 		seat_button.disabled = not bool(_view.get("hotseat", false))
 		seat_button.pressed.connect(func(): Net.send_action("view_seat", {"seat": i}))
 		roster.add_child(seat_button)
-		TurnNameGlow.apply(seat_button, int(_view.current) == i)
+		TurnNameGlow.apply(seat_button, _active_seat(i))
 	var phases: Dictionary = _view.get("cg_meta", {}).get("phase_titles", {})
-	var status := Style.label("%s · %s" % [phases.get(str(_view.phase), str(_view.phase)), str(_view.players[int(_view.current)].name)])
+	var status := Style.label(_phase_caption())
 	_at(status, Rect2(32, 72, 600, 32))
 	status.visible = not custom
 	var scoreboard := Style.label(_scores())
@@ -188,7 +233,7 @@ func _rebuild() -> void:
 	_at(scoreboard, Rect2(656, 72, 592, 32))
 	scoreboard.visible = not custom
 	if custom:
-		_top.info.text = "%s · %s" % [phases.get(str(_view.phase), str(_view.phase)), str(_view.players[int(_view.current)].name)]
+		_top.info.text = _phase_caption()
 	var shared := 0
 	for screen: Dictionary in _view.get("cg_layout", {}).get("screens", []):
 		for item: Dictionary in screen.get("items", []):
@@ -245,7 +290,7 @@ func _rebuild() -> void:
 		log_text += "\n" + " · ".join(_view.hints)
 	var journal := Style.label(log_text)
 	journal.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_at(journal, Rect2(32, 608, 1216, 56))
+	_at(journal, Rect2(32, _field.size.y - 64, _field.size.x - 64, 56))
 	journal.visible = not custom or not _view.get("hints", []).is_empty()
 	_present_cards()
 
@@ -260,15 +305,21 @@ func _present_cards() -> void:
 				found = card
 	if found.is_empty():
 		return
-	var fields: Dictionary = found.get("face", found.get("data", {}))
+	var fields: Dictionary = Session.face_fields(_view, found)
 	var preview: Control = Style.TokenFace.new(fields) if fields.get("kind") == "token" else Style.CardFace.new(fields)
 	if preview is Style.CardFace:
+		preview.layer_reader = _assets
 		preview.art_texture = _assets.image(str(fields.get("art", "")))
 		preview.custom_font = _assets.font(str(fields.get("font", "")))
 	preview.mouse_filter = MOUSE_FILTER_IGNORE
 	preview.z_index = 125
 	preview.name = "ShownByRules"
-	_at(preview, Rect2(514, 128, 252, 352))
+	var dimensions := Vector2(192, 192) if fields.get("kind") == "token" else _preview_size(found)
+	_at(preview, Rect2(Vector2((_field.size.x - dimensions.x) * 0.5, 128), dimensions))
+
+func _preview_size(data: Dictionary) -> Vector2:
+	var dimensions := Vector2(Definition.CARD_SIZES[clampi(int(data.get("size", 3)) - 1, 0, 8)])
+	return dimensions * minf(252.0 / dimensions.x, 352.0 / dimensions.y)
 
 func _item_visible(item: Dictionary) -> bool:
 	var visible: Variant = item.get("visible", ["all"])
@@ -296,7 +347,7 @@ func _layout_players(rect: Rect2) -> void:
 	grid.add_theme_constant_override("v_separation", 8)
 	_at(grid, rect)
 	for index in _view.players.size():
-		var button := Style.button(("● " if index == int(_view.current) else "") + str(_view.players[index].name))
+		var button := Style.button(("● " if _active_seat(index) else "") + str(_view.players[index].name) + (" · готов" if _view.get("ready_seats", []).has(index) else ""))
 		button.size_flags_horizontal = SIZE_EXPAND_FILL
 		button.clip_text = true
 		button.disabled = not _view.get("hotseat", false)
@@ -305,10 +356,30 @@ func _layout_players(rect: Rect2) -> void:
 
 func _player_text(seat: int) -> String:
 	var lines: Array[String] = [str(_view.players[seat].name)]
+	if _view.get("ready_seats", []).has(seat):
+		lines[0] += " · готов"
 	for entry: Dictionary in _view.get("cg_vars", []):
 		if entry.get("scope") == "player" and _view.vars.player[seat].has(str(entry.id)):
 			lines.append("%s: %s" % [entry.get("title", entry.id), Style.value_text(_view.vars.player[seat][entry.id])])
 	return "\n".join(lines)
+
+func _phase_caption() -> String:
+	var phases: Dictionary = _view.get("cg_meta", {}).get("phase_titles", {})
+	var caption: String = str(phases.get(str(_view.phase), str(_view.phase)))
+	if _view.get("turn_mode", "circle") == "simultaneous":
+		var alive := 0
+		var ready := 0
+		for seat in _view.players.size():
+			if not _view.players[seat].get("eliminated", false):
+				alive += 1
+				ready += 1 if _view.get("ready_seats", []).has(seat) else 0
+		return "%s · Готовы %d/%d" % [caption, ready, alive]
+	return "%s · %s" % [caption, str(_view.players[int(_view.current)].name)]
+
+func _active_seat(seat: int) -> bool:
+	if _view.get("turn_mode", "circle") == "simultaneous":
+		return not _view.players[seat].get("eliminated", false) and not _view.get("ready_seats", []).has(seat)
+	return seat == int(_view.current)
 
 func _player_panel(seat: int, rect: Rect2, compact: bool = false) -> void:
 	var panel := Panel.new()
@@ -375,8 +446,8 @@ func _has_layout_action(id: String) -> bool:
 func _rect(item: Dictionary, fallback: Rect2) -> Rect2:
 	var rect: Variant = item.get("rect", [])
 	if rect is Array and rect.size() == 4:
-		return Rect2(float(rect[0]), maxf(0, float(rect[1]) - TopBar.HEIGHT), maxf(32, float(rect[2])), maxf(32, float(rect[3])))
-	return fallback
+		fallback = Rect2(float(rect[0]), maxf(0, float(rect[1]) - TopBar.HEIGHT), maxf(32, float(rect[2])), maxf(32, float(rect[3])))
+	return Layout.rect(fallback, item, _field.size)
 
 func _variable(id: String) -> String:
 	if _view.vars.shared.has(id):
@@ -432,10 +503,11 @@ func _zone(key: String, spec: Dictionary, rect: Rect2, own: bool) -> void:
 	for k in count:
 		var index: int = cards.size() - count + k if pile else page * 30 + k
 		var data: Dictionary = cards[index]
-		var fields: Dictionary = data.get("face", data.get("data", {}))
+		var fields: Dictionary = Session.face_fields(_view, data)
 		var token: bool = fields.get("kind") == "token"
 		var face: Control = Style.TokenFace.new(fields) if token else Style.CardFace.new(fields)
 		if not token:
+			face.layer_reader = _assets
 			face.art_texture = _assets.image(str(fields.get("art", "")))
 			face.custom_font = _assets.font(str(fields.get("font", "")))
 		var card_size := Vector2(Definition.CARD_SIZES[clampi(int(data.get("size", 3)) - 1, 0, 8)])
@@ -449,12 +521,14 @@ func _zone(key: String, spec: Dictionary, rect: Rect2, own: bool) -> void:
 			card.set_meta("cg_back", str(data.back))
 		card.base_scale = minf(0.8, (rect.size.y - 56) / card_size.y)
 		card.scale = Vector2.ONE * card.base_scale
-		var x: float = rect.position.x + rect.size.x / 2.0 - 63 + k * 3.0 if pile else rect.position.x + 24 + k * minf(108.0, (rect.size.x - 144) / maxf(1, count - 1))
+		var x: float = rect.position.x + (rect.size.x - card_size.x * card.base_scale) / 2.0 + k * 3.0 if pile else rect.position.x + 24 + k * minf(108.0, (rect.size.x - 144) / maxf(1, count - 1))
 		card.position = Vector2(x, rect.position.y + 40 + (k * 2 if pile else 0))
 		if spec.get("view") == "free":
 			var point: Array = data.get("pos", [float(k % 5) / 4.0, minf(1.0, floorf(k / 5.0) / 5.0)])
 			var available := (rect.size - Vector2(48, 56) - card_size * card.base_scale).max(Vector2.ZERO)
 			card.position = rect.position + Vector2(24, 40) + Vector2(float(point[0]), float(point[1])) * available
+		# Control масштабируется вокруг pivot: заданная точка — видимый левый верхний угол.
+		card.position -= card.pivot_offset * (1.0 - card.base_scale)
 		card.draggable = not data.get("hidden", false) and _has_card_action(str(data.get("id", "")))
 		if data.get("hidden", false) and index == cards.size() - 1:
 			card.draggable = _view.get("legal", []).any(func(action: Dictionary): return action.kind == "manual_place_top" and action.id == key)
@@ -514,7 +588,8 @@ func _flip_top(zone: String) -> void:
 
 func _drop_point(card: K12TableCard, target: Control) -> Array:
 	var available := (target.size - Vector2(48, 56) - card.card_size * card.base_scale).max(Vector2.ONE)
-	var point := (card.position - target.position - Vector2(24, 40)) / available
+	var visible_origin := card.position + card.pivot_offset * (1.0 - card.base_scale)
+	var point := (visible_origin - target.position - Vector2(24, 40)) / available
 	return [clampf(point.x, 0, 1), clampf(point.y, 0, 1)]
 
 func _drop(card: K12TableCard, at: Vector2, source: String) -> void:
@@ -559,16 +634,17 @@ func _hover(data: Dictionary, card: Control, on: bool) -> void:
 		_preview = back
 		_field.add_child(back)
 		return
-	var fields: Dictionary = data.get("face", data.get("data", {}))
+	var fields: Dictionary = Session.face_fields(_view, data)
 	if fields.get("kind") == "token":
 		_preview = Style.TokenFace.new(fields)
 		_preview.size = Vector2(192, 192)
 	else:
 		_preview = Style.CardFace.new(fields)
+		_preview.layer_reader = _assets
 		_preview.art_texture = _assets.image(str(fields.get("art", "")))
 		_preview.custom_font = _assets.font(str(fields.get("font", "")))
-		_preview.size = Vector2(252, 352)
-	_preview.position = Vector2(clampf(card.position.x + 112, 16, 1012), clampf(card.position.y - 160, 72, 280))
+		_preview.size = _preview_size(data)
+	_preview.position = Vector2(clampf(card.position.x + 112, 16, _field.size.x - _preview.size.x - 16), clampf(card.position.y - 160, 72, _field.size.y - _preview.size.y - 40))
 	_preview.z_index = 120
 	_field.add_child(_preview)
 
@@ -576,7 +652,8 @@ func _actions() -> void:
 	var scroll := ScrollContainer.new()
 	scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.mouse_filter = MOUSE_FILTER_IGNORE
-	_at(scroll, Rect2(32, 552, 1216, 48))
+	var has_ready: bool = _view.get("legal", []).any(func(action): return action.kind in ["ready", "unready"])
+	_at(scroll, Rect2(32, _field.size.y - 120, 448 if has_ready else _field.size.x - 64, 48))
 	var actions := Style.row()
 	scroll.add_child(actions)
 	if _view.get("hotseat", false) and _view.get("cg_layout", {}).get("custom", false):
@@ -587,7 +664,12 @@ func _actions() -> void:
 		seat.item_selected.connect(func(index: int): Net.send_action("view_seat", {"seat": index}))
 		actions.add_child(seat)
 	for action: Dictionary in _view.get("legal", []):
-		if action.kind == "button" and not _has_layout_action(str(action.id)):
+		if action.kind in ["ready", "unready"]:
+			var button := Style.primary("Готов") if action.kind == "ready" else Style.button("Изменить решение")
+			button.name = "CustomPhaseReady"
+			button.pressed.connect(func(): _send(action))
+			_at(button, Rect2((_field.size.x - 240) * 0.5, _field.size.y - 120, 240, 56))
+		elif action.kind == "button" and not _has_layout_action(str(action.id)):
 			var button := Style.primary(str(_view.get("cg_meta", {}).get("action_titles", {}).get(str(action.id), str(action.id))))
 			button.pressed.connect(func(): _send(action))
 			actions.add_child(button)
@@ -654,7 +736,7 @@ func _dice() -> void:
 			var compact: bool = values.size() > 3
 			die.scale = Vector2.ONE * (0.5 if compact else 1.0)
 			die.home = origin + Vector2(24 + (index % 6) * 40, 56 + (index / 6) * 32) if compact else Vector2(x + 32, origin.y + 80)
-			die.area = Rect2(24, 112, 1232, 432)
+			die.area = tray
 			_field.add_child(die)
 			if animate:
 				die.throw(Vector2(320, -160), int(face))
@@ -664,8 +746,8 @@ func _dice() -> void:
 			x += 72
 	if rolling:
 		var die := TossDie.new()
-		die.home = Vector2(640, 320)
-		die.area = Rect2(24, 112, 1232, 432)
+		die.home = tray.get_center() if has_tray else Vector2(_field.size.x * 0.5, 320)
+		die.area = tray
 		die.draggable = true
 		die.thrown.connect(func(_velocity: Vector2): _send({"kind": "answer"}))
 		_field.add_child(die)

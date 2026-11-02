@@ -23,6 +23,7 @@ func _run() -> void:
 	g.battle = 0
 	g.monsters = [{"id": 358, "hp": 0, "dc": 3, "at": 1}, {"id": 450, "hp": 3, "dc": 4, "at": 1}]
 	g.decks.monster = [451]
+	var initial_hand: int = g.hands[0].size()
 	g._continue_stack()
 	g._finish_responses()
 	net.fs_switch_seat(0)
@@ -31,8 +32,8 @@ func _run() -> void:
 	await frames(20)
 	table = current_scene.screen
 	await click(find_button("Открыть мою руку"))
-	check(find_button("Эффект выполнен").disabled, "Кнопка не пропускает обязательный бросок")
-	await operation("loot", 1)
+	check(find_button("Эффект выполнен") == null, "Ручное завершение не подменяет обязательный бросок")
+	check(g.hands[0].size() == initial_hand + 1, "Добыча выдана автоматически до броска возвращения")
 	var rng := RandomNumberGenerator.new()
 	for seed_value in range(1, 101):
 		rng.seed = seed_value
@@ -43,9 +44,8 @@ func _run() -> void:
 	await roll()
 	await ready_die()
 	await roll()
-	check(int(g.resolving.get("reward_roll", -1)) == 6, "Настоящий жест разрешил подготовленную шестёрку")
-	check(not find_button("Эффект выполнен").disabled, "После результата кнопка доступна")
-	await click(find_button("Эффект выполнен"))
+	check(g.last_roll == 6, "Настоящий жест разрешил подготовленную шестёрку")
+	check(find_button("Эффект выполнен") == null, "Награда завершилась автоматически после результата")
 	await frames(8)
 	check(g.monsters.any(func(monster): return int(monster.id) == 358), "Возвращённый Тряпочник сразу заполнил свободную ячейку")
 	check(not g.discards.monster.has(358), "Копии Тряпочника в сбросе нет")

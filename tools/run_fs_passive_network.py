@@ -47,7 +47,16 @@ def send(role, kind, arg=None):
     commands[role] += 1
     temporary = OUT / (role + "-command.tmp")
     temporary.write_text(json.dumps({"id": commands[role], "kind": kind, "arg": arg}), encoding="utf-8")
-    temporary.replace(OUT / (role + "-command.json"))
+    # На Windows читающий Godot ненадолго блокирует замену файла даже после подтверждения команды.
+    deadline = time.monotonic() + 3
+    while True:
+        try:
+            temporary.replace(OUT / (role + "-command.json"))
+            break
+        except PermissionError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.01)
     wait_for(lambda: snapshot(role)["command"] == commands[role])
 
 

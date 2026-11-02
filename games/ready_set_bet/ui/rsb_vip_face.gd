@@ -49,7 +49,7 @@ func _draw() -> void:
 			draw_texture_rect(RSBStyle.tex(chip), Rect2(pic_c - Vector2(24, 24), Vector2(48, 48)), false)
 		"fan":
 			var h: int = {"blue": 7, "orange": 6, "red": 3}[v["color"]]
-			var t: Texture2D = RSBStyle.tex("horse_%d" % h)
+			var t: Texture2D = RSBStyle.tex("turtle_%d" % h)
 			draw_texture_rect(t, Rect2(pic_c - Vector2(34, 24), Vector2(68, 48)), false)
 	# текст эффекта — подбираем размер, чтобы влез в низ карты
 	var body := RSBData.vip_text(v)

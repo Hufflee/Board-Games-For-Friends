@@ -15,10 +15,20 @@ const WEIGHTS := {"roll": 6.0, "death": 6.0, "discard": 6.0, "forced_discard": 6
 	"attack": 3.0, "buy": 2.0, "end": 1.5, "attack_player": 3.0, "room": 0.3, "finish_start": 6.0,
 	"loot": 1.0, "activate": 0.8, "effect": 0.25}
 
-static func run(t: FSCheck, games: int, first_seed: int, max_steps: int, write_regress: bool) -> Dictionary:
+static func _store_failure(path: String, evidence: Dictionary) -> void:
+	var temporary := path + ".tmp"
+	var file := FileAccess.open(temporary, FileAccess.WRITE)
+	file.store_string(JSON.stringify(evidence, "\t"))
+	file.close()
+	var status := DirAccess.rename_absolute(ProjectSettings.globalize_path(temporary), ProjectSettings.globalize_path(path))
+	assert(status == OK, "Не удалось сохранить свидетельство фаззера")
+
+static func run(t: FSCheck, games: int, first_seed: int, max_steps: int, write_regress: bool, stop_on_failure: bool = false) -> Dictionary:
 	var classes := {}
 	var stats := {"games": 0, "finished": 0, "steps": 0, "failed": 0}
 	for i in games:
+		if i > 0 and i % 50 == 0:
+			print("FS FUZZ: %d/%d партий, %d действий, %d нарушений" % [i, games, stats.steps, stats.failed])
 		var game_seed: int = first_seed + i
 		var rng := RandomNumberGenerator.new()
 		rng.seed = game_seed * 7919 + 13
@@ -30,17 +40,27 @@ static func run(t: FSCheck, games: int, first_seed: int, max_steps: int, write_r
 		if result.problem == "":
 			continue
 		stats.failed += 1
+		print("FS FUZZ ОШИБКА: seed=%d, мест=%d, DLC=%s · %s" % [game_seed, int(config.players), str(config.dlc), result.problem])
+		var failure_dir := "res://build/fs_tests/fuzz_failures/"
+		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(failure_dir))
+		var evidence := {"config": config, "problem": result.problem, "steps": result.steps, "log": result.log}
+		var evidence_path := failure_dir + "%d.json" % game_seed
+		_store_failure(evidence_path, evidence)
 		var key := _class_of(str(result.problem))
 		if classes.has(key):
 			classes[key].count += 1
 			continue
 		var short: Array = shrink(config, result.log, key)
+		evidence["minimized"] = short
+		_store_failure(evidence_path, evidence)
 		classes[key] = {"count": 1, "config": config, "steps": short.size(), "problem": result.problem}
 		var file := ""
 		if write_regress:
 			file = write_case(config, short, str(result.problem))
 		t.errors.append("Фаззер: %s · сид %d, мест %d, DLC %s · укорочено до %d действий%s" %
 			[result.problem, game_seed, int(config.players), str(config.dlc), short.size(), (" → " + file) if file != "" else ""])
+		if stop_on_failure:
+			break
 	t.checks += int(stats.games)
 	stats["classes"] = classes
 	return stats

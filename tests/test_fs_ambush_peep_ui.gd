@@ -64,7 +64,7 @@ func _run() -> void:
 	check(int(g.monsters[1].id) == 282 and int(g.monsters[1].under.id) == 451, "Кнопка разместила Утопца поверх выбранного монстра")
 	check(g.phase == "effect" and not g.resolving.has("spawn_card"), "Исходная награда осталась открыта")
 	g.decks.treasure = [180]
-	await operation("treasure", 1)
-	check(g.items[0].size() == 1 and g.items[0][0].id == 180, "После размещения награда применена кнопкой")
+	await click(find_button("Эффект выполнен"))
+	check(g.items[0].size() == 1 and g.items[0][0].id == 180, "После размещения сокровище выдано автоматически")
 	print("AMBUSH PEEP UI: ", checks, " проверок, ", errors, " ошибок")
 	quit(1 if errors else 0)

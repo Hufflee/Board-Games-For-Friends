@@ -31,6 +31,8 @@ static func run_case(t: FSCheck, c: Dictionary, file: String, known: Array) -> v
 	var own := FSCheck.new()
 	own.prefix = "%s · %s%s" % [file, ("[%d] " % int(c.card)) if c.has("card") else "", str(c.name)]
 	var s := FSScenario.new(own)
+	if bool(c.get("legacy_manual_rewards", false)):
+		s.rules_type(preload("res://tests/fs/fs_legacy_manual_reward_rules.gd"))
 	var setup: Dictionary = c.get("setup", {})
 	s.players(int(setup.get("players", 2))).dlc(bool(setup.get("dlc", false))).with_seed(int(setup.get("seed", 77)))
 	for seat in setup.get("character", {}): s.character(int(seat), int(setup.character[seat]))

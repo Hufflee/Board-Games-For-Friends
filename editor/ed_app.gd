@@ -3,6 +3,8 @@ extends Control
 
 const Style := preload("res://games/custom/ui/cg_style.gd")
 const Document := preload("res://editor/ed_document.gd")
+const Help := preload("res://editor/ed_help.gd")
+const FaceEditor := preload("res://editor/ed_card_face.gd")
 const Library := preload("res://games/custom/logic/cg_library.gd")
 const Assets := preload("res://editor/ed_assets.gd")
 const Csv := preload("res://editor/ed_csv.gd")
@@ -32,16 +34,30 @@ var _layout_selected := -1
 var _layout_canvas: Control
 var _layout_zoom := 1.0
 var _layout_pan := Vector2.ZERO
+var _layout_guides := true
 var _logic_chain := -1
 var _logic_path: Array = []
 var _logic_target: Array = []
 var _logic_phase := ""
+var _logic_scroll := 0
+var _logic_zoom := 1.0
+var _logic_collapsed := {}
+var _logic_phase_tools := false
 var _box_view: Control
 var _box_face := "front"
 var _box_mode_3d := true
 var _box_layer := -1
 var _saving := false
 var _baked_signature := ""
+var _help := Help.new()
+var _help_tab := -1
+var _tab_tip := ""
+var _help_done: LinkButton
+var _face_edit := false
+var _face_layer := -1
+var _face_row := 0
+var _face_zoom := 1.0
+var _face_pan := Vector2.ZERO
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(PRESET_FULL_RECT)
@@ -74,6 +90,21 @@ func _ready() -> void:
 		_editing = true
 		_message = document.last_error
 	_render()
+
+func _reset_logic_navigation() -> void:
+	_logic_chain = -1
+	_logic_path = []
+	_logic_target = []
+	_logic_phase = ""
+	_logic_scroll = 0
+	_logic_zoom = 1.0
+	_logic_collapsed.clear()
+	_logic_phase_tools = false
+	_face_edit = false
+	_face_layer = -1
+	_face_row = 0
+	_face_zoom = 1.0
+	_face_pan = Vector2.ZERO
 
 func _render() -> void:
 	if is_instance_valid(_layout_canvas):
@@ -131,9 +162,11 @@ func _render() -> void:
 	body.size_flags_vertical = SIZE_EXPAND_FILL
 	_shell.add_child(body)
 	var tool_scroll := ScrollContainer.new()
-	tool_scroll.custom_minimum_size.x = 176
+	tool_scroll.custom_minimum_size.x = 208
+	tool_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	body.add_child(tool_scroll)
 	var tools := Style.column(8)
+	tools.size_flags_horizontal = SIZE_EXPAND_FILL
 	tools.custom_minimum_size.x = 160
 	tool_scroll.add_child(tools)
 	var center := Style.column(16)
@@ -153,7 +186,30 @@ func _render() -> void:
 		2: _logic(tools, center, properties)
 		3: _elements(tools, center, properties)
 	_status = Style.label("")
-	_shell.add_child(_status)
+	var status_row := Style.row(8)
+	_shell.add_child(status_row)
+	_status.size_flags_horizontal = SIZE_EXPAND_FILL
+	_status.clip_text = true
+	status_row.add_child(_status)
+	if _help_tab != _tab:
+		_help_tab = _tab
+		_tab_tip = _help.tip(_tab)
+	_help_done = LinkButton.new()
+	_help_done.name = "EditorHintDone"
+	_help_done.text = "Понятно"
+	_help_done.pressed.connect(_dismiss_help)
+	status_row.add_child(_help_done)
+	var help := LinkButton.new()
+	help.name = "EditorHelpButton"
+	help.text = "Справка"
+	help.tooltip_text = "Как пользоваться этой вкладкой"
+	help.pressed.connect(func(): _help.show(self, _tab, _dismiss_help))
+	status_row.add_child(help)
+	_status_text()
+
+func _dismiss_help() -> void:
+	_help.dismiss(_tab)
+	_tab_tip = ""
 	_status_text()
 
 func _library() -> void:
@@ -168,6 +224,7 @@ func _library() -> void:
 	create.pressed.connect(func():
 		if document.create(["blank", "card_race", "higher_lower", "dice_bid"][template.selected]):
 			_editing = true
+			_reset_logic_navigation()
 			_deck = 0
 			_tab = 3
 			_render())
@@ -198,6 +255,7 @@ func _library() -> void:
 		button.pressed.connect(func():
 			if document.open(str(game.uuid)):
 				_editing = true
+				_reset_logic_navigation()
 				_message = document.last_error
 				_deck = 0
 				_render())
@@ -256,7 +314,7 @@ func _number(parent: Node, caption: String, path: Array, minimum: float, maximum
 
 func _layout(tools: VBoxContainer, center: VBoxContainer, properties: VBoxContainer) -> void:
 	center.add_child(Style.heading("РАСКЛАДКА СТОЛА"))
-	center.add_child(Style.label("Колесо — масштаб · ПКМ — панорама · угол рамки — размер · сетка 8 px"))
+	center.add_child(Style.label("Колесо — масштаб · ПКМ — панорама · угол — размер · Alt — без направляющих"))
 	var view := OptionButton.new()
 	var perspectives: Array = ["all", "spectator"]
 	var perspective_labels: Array = ["Смотреть как: все роли", "Зритель"]
@@ -265,16 +323,31 @@ func _layout(tools: VBoxContainer, center: VBoxContainer, properties: VBoxContai
 		perspective_labels.append(str(role.get("name", role.id)))
 	for caption: String in perspective_labels:
 		view.add_item(caption)
-	center.add_child(view)
+	var view_tools := HBoxContainer.new()
+	view_tools.add_theme_constant_override("separation", 8)
+	view.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	view_tools.add_child(view)
+	center.add_child(view_tools)
+	var guides := CheckButton.new()
+	guides.text = "Направляющие"
+	guides.tooltip_text = "Привязка к краям и центрам видимых элементов. Alt временно отключает её; сетка 8 px сохраняется."
+	guides.button_pressed = _layout_guides
+	view_tools.add_child(guides)
 	if document.data.layout.get("screens", []).is_empty():
 		document.set_value(["layout", "screens"], [{"id": "main", "items": []}], "Создать экран")
 	_layout_canvas = Canvas.new()
 	_layout_canvas.zoom = _layout_zoom
 	_layout_canvas.pan = _layout_pan
+	_layout_canvas.guides_enabled = _layout_guides
 	_layout_canvas.items = document.data.layout.screens[0].get("items", []).duplicate(true)
 	_layout_selected = mini(_layout_selected, _layout_canvas.items.size() - 1)
 	_layout_canvas.selection = _layout_selected
 	center.add_child(_layout_canvas)
+	guides.toggled.connect(func(enabled: bool):
+		_layout_guides = enabled
+		_layout_canvas.guides_enabled = enabled
+		_layout_canvas._guides.clear()
+		_layout_canvas.queue_redraw())
 	view.item_selected.connect(func(index: int):
 		_layout_canvas.perspective = perspectives[index]
 		_layout_canvas.queue_redraw())
@@ -330,6 +403,7 @@ func _add_layout(kind: String, title: String) -> void:
 
 func _layout_properties(properties: VBoxContainer) -> void:
 	Style.clear(properties)
+	_clipboard_controls(properties, "layout", ["layout", "screens", 0, "items"], _layout_selected)
 	if _layout_selected < 0 or _layout_selected >= document.data.layout.screens[0].items.size():
 		properties.add_child(Style.label("Выберите элемент на холсте"))
 		return
@@ -362,6 +436,24 @@ func _layout_properties(properties: VBoxContainer) -> void:
 		col.add_child(number)
 		grid.add_child(col)
 	var visibility_labels: Array = ["Всем", "Зрителю", "Никому"]
+	var anchor_toggle := CheckButton.new()
+	anchor_toggle.text = "Якоря окна"
+	anchor_toggle.tooltip_text = "Сохранять отступ от края или центра в широком/высоком окне. Координаты задаются для1280×720."
+	anchor_toggle.button_pressed = item.get("anchors") is Dictionary
+	anchor_toggle.toggled.connect(func(enabled: bool):
+		var copy: Dictionary = document.data.duplicate(true)
+		var target: Dictionary = copy.layout.screens[0].items[_layout_selected]
+		if enabled:
+			target.anchors = {"x": "center", "y": "top"}
+		else:
+			target.erase("anchors")
+		copy.layout["custom"] = true
+		document.replace(copy, "Якоря элемента")
+		_render.call_deferred())
+	properties.add_child(anchor_toggle)
+	if item.get("anchors") is Dictionary:
+		_choice(properties, "По горизонтали", path + ["anchors", "x"], ["Слева", "По центру", "Справа", "Растянуть"], ["left", "center", "right", "stretch"])
+		_choice(properties, "По вертикали", path + ["anchors", "y"], ["Сверху", "По центру", "Снизу", "Растянуть"], ["top", "center", "bottom", "stretch"])
 	var visibility_values: Array = [["all"], ["spectator"], []]
 	for role: Dictionary in document.data.rules.get("roles", []):
 		visibility_labels.append(str(role.get("name", role.id)))
@@ -430,6 +522,23 @@ func _logic(tools: VBoxContainer, center: VBoxContainer, properties: VBoxContain
 	logic.setup(self, tools, center, properties)
 
 func _elements(tools: VBoxContainer, center: VBoxContainer, properties: VBoxContainer) -> void:
+	var face_decks: Array = document.data.elements.get("decks", [])
+	if _face_edit and _category == "decks" and not face_decks.is_empty():
+		_deck = clampi(_deck, 0, face_decks.size() - 1)
+		FaceEditor.new().setup(self, tools, center, properties, _deck)
+		return
+	var dictionary := CheckBox.new()
+	dictionary.text = "Словарь · 1000 слов"
+	dictionary.tooltip_text = "Подключить общий словарь ответов к текстовым гнёздам логики."
+	dictionary.button_pressed = document.data.rules.get("dictionary", "") == "shared"
+	dictionary.toggled.connect(func(on: bool):
+		document.set_value(["rules", "dictionary"], "shared" if on else "", "Словарь игры")
+		_render.call_deferred())
+	tools.add_child(dictionary)
+	if dictionary.button_pressed:
+		var help := Style.label("Логика → текстовое гнездо → Случайное слово. Сохраните его в текстовую переменную, чтобы всем досталось одно слово.")
+		help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		tools.add_child(help)
 	for entry: Array in [["decks", "Колоды"], ["dice", "Кубики"], ["tokens", "Жетоны"], ["resources", "Ресурсы"]]:
 		var category := Style.button(entry[1])
 		category.pressed.connect(func():
@@ -441,6 +550,7 @@ func _elements(tools: VBoxContainer, center: VBoxContainer, properties: VBoxCont
 		_components(tools, center, properties)
 		return
 	var decks: Array = document.data.elements.get("decks", [])
+	_clipboard_controls(tools, "decks", ["elements", "decks"], _deck)
 	tools.add_child(Style.heading("КОЛОДЫ"))
 	for index in decks.size():
 		var button := Style.button(str(decks[index].get("title", decks[index].id)))
@@ -461,10 +571,20 @@ func _elements(tools: VBoxContainer, center: VBoxContainer, properties: VBoxCont
 		return
 	_deck = clampi(_deck, 0, decks.size() - 1)
 	var deck: Dictionary = decks[_deck]
+	var face_editor := Style.button("Редактор лица карты")
+	face_editor.pressed.connect(func():
+		_face_edit = true
+		_face_layer = -1
+		_render.call_deferred())
+	tools.add_child(face_editor)
 	center.add_child(Style.heading(str(deck.get("title", "КАРТЫ"))))
 	if not deck.rows.is_empty():
 		var display := Faces.fields(deck.rows[0], deck)
 		var card := Style.CardFace.new(display)
+		if display.has("layers"):
+			var reader = load("res://games/custom/ui/cg_assets.gd").new()
+			reader.configure_document(document.data)
+			card.layer_reader = reader
 		var card_size := Vector2(Definition.CARD_SIZES[clampi(int(deck.get("size", 3)) - 1, 0, 8)])
 		card.custom_minimum_size = card_size * minf(192.0 / card_size.y, 224.0 / card_size.x)
 		card.size_flags_horizontal = SIZE_SHRINK_CENTER
@@ -657,6 +777,7 @@ func _elements(tools: VBoxContainer, center: VBoxContainer, properties: VBoxCont
 func _components(tools: VBoxContainer, center: VBoxContainer, properties: VBoxContainer) -> void:
 	var resources := _category == "resources"
 	var entries: Array = document.data.rules.get("vars", []) if resources else document.data.elements.get(_category, [])
+	_clipboard_controls(tools, "resources" if resources else _category, ["rules", "vars"] if resources else ["elements", _category], _deck)
 	var add := Style.button("+ Ресурс" if resources else ("+ Набор d6" if _category == "dice" else "+ Жетоны"))
 	add.pressed.connect(_add_component)
 	tools.add_child(add)
@@ -721,6 +842,66 @@ func _components(tools: VBoxContainer, center: VBoxContainer, properties: VBoxCo
 		_status_text())
 	properties.add_child(free)
 
+func _clipboard_entries(path: Array) -> Array:
+	var entries: Variant = document.data
+	for key: Variant in path:
+		if entries is Dictionary:
+			entries = entries.get(key, [])
+		elif entries is Array and key is int and key >= 0 and key < entries.size():
+			entries = entries[key]
+		else:
+			return []
+	return entries if entries is Array else []
+
+func _clipboard_controls(parent: Node, kind: String, path: Array, index: int, paste_path: Array = []) -> void:
+	var clipboard: GDScript = load("res://editor/ed_clipboard.gd")
+	var entries: Array = _clipboard_entries(path)
+	var row := Style.column(8)
+	parent.add_child(row)
+	var copy := Style.button("Копировать")
+	if kind in ["chain", "block"]:
+		copy.tooltip_text = "Копируется вся вложенная структура. Ссылки на зоны и ресурсы сохраняются."
+	copy.disabled = index < 0 or index >= entries.size()
+	copy.pressed.connect(func():
+		# Поле свойства могло заменить document.data после отрисовки этой кнопки.
+		var current: Array = _clipboard_entries(path)
+		if index < 0 or index >= current.size():
+			_message = "Выбранный элемент больше не существует."
+			_status_text()
+			return
+		var text: String = clipboard.encode(document, kind, current[index])
+		if text.is_empty():
+			_message = "Не удалось скопировать: ассет недоступен или размер больше 16 МБ."
+		else:
+			DisplayServer.clipboard_set(text)
+			_message = "Элемент скопирован в буфер обмена."
+		_status_text())
+	row.add_child(copy)
+	var paste := Style.button("Вставить")
+	if kind in ["chain", "block"]:
+		paste.tooltip_text = "Для вставки в другую игру нужны зоны, ресурсы и кнопки с теми же именами."
+	paste.pressed.connect(func():
+		var payload: Dictionary = clipboard.decode(DisplayServer.clipboard_get())
+		var destination: Array = path if paste_path.is_empty() else paste_path
+		var result: String = clipboard.paste(document, payload, kind, destination)
+		if result.is_empty() and kind == "chain":
+			_logic_chain = document.data.rules.chains.size() - 1
+			_logic_path = []
+			_logic_target = []
+			_logic_phase = ""
+		elif result.is_empty() and kind == "block":
+			var entries_after: Variant = document.data
+			for key: Variant in destination:
+				entries_after = entries_after[key]
+			_logic_chain = int(destination[2])
+			_logic_target = destination.duplicate()
+			_logic_path = destination + [entries_after.size() - 1]
+		elif result.is_empty() and kind == "face_layer":
+			_face_layer = document.data.elements.decks[_deck].face.layers.size() - 1
+		_message = "Элемент вставлен." if result.is_empty() else result
+		_render.call_deferred())
+	row.add_child(paste)
+
 func _choice(parent: Node, caption: String, path: Array, labels: Array, values: Array) -> void:
 	parent.add_child(Style.label(caption))
 	var target: Variant = document.data
@@ -773,6 +954,10 @@ func _status_text() -> void:
 		return
 	var errors: Array = document.issues().errors
 	_status.text = _message if not _message.is_empty() else ("Есть изменения" if document.dirty else ("Черновик сохранён" if document.draft else "Сохранено"))
+	if _message.is_empty() and not _tab_tip.is_empty():
+		_status.text = _tab_tip
+	if is_instance_valid(_help_done):
+		_help_done.visible = _message.is_empty() and not _tab_tip.is_empty()
 	_status.text += " · Ошибок: %d" % errors.size()
 	var warnings: Array = document.issues().warnings
 	if not warnings.is_empty():
@@ -832,6 +1017,7 @@ func _show_issues() -> void:
 	window.title = "Проверка проекта"
 	window.size = Vector2i(640, 480)
 	window.theme = Style.theme()
+	Style.window_surface(window)
 	add_child(window)
 	var content := TextEdit.new()
 	content.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
@@ -869,6 +1055,7 @@ func _play() -> void:
 
 func _dialog(filters: PackedStringArray, many: bool, callback: Callable) -> void:
 	var dialog := FileDialog.new()
+	dialog.use_native_dialog = true
 	dialog.access = FileDialog.ACCESS_FILESYSTEM
 	dialog.file_mode = FileDialog.FILE_MODE_OPEN_FILES if many else FileDialog.FILE_MODE_OPEN_FILE
 	dialog.filters = filters
@@ -988,9 +1175,14 @@ func _columns_dialog() -> void:
 	popup.title = "Свойства карт"
 	popup.size = Vector2i(560, 480)
 	popup.theme = Style.theme()
+	Style.window_surface(popup)
 	add_child(popup)
 	var scroll := ScrollContainer.new()
 	scroll.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	scroll.offset_left = 16
+	scroll.offset_top = 16
+	scroll.offset_right = -16
+	scroll.offset_bottom = -16
 	popup.add_child(scroll)
 	var col := Style.column(12)
 	col.size_flags_horizontal = SIZE_EXPAND_FILL

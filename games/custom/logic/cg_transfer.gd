@@ -3,6 +3,7 @@ extends Node
 
 const Package := preload("res://games/custom/logic/cg_package.gd")
 const Library := preload("res://games/custom/logic/cg_library.gd")
+const Partial := preload("res://games/custom/logic/cg_partial.gd")
 var net: Node
 var manifest: Dictionary = {}
 var verified: Dictionary = {}
@@ -79,15 +80,20 @@ func receive_manifest(data: Dictionary) -> void:
 			error = "Идентификатор игры не совпадает с пакетом."
 			return
 		verified[net.multiplayer.get_unique_id()] = str(data.hash)
+		Partial.discard(str(data.hash), size_value)
 		_rpc_ready.rpc_id(1, str(data.hash))
 		return
-	if _incoming_hash != data.hash:
-		_incoming.clear()
+	if _incoming_hash != data.hash or _incoming.is_empty():
+		_incoming = Partial.restore(str(data.hash), size_value)
 		_incoming_hash = str(data.hash)
 	if _incoming.size() > size_value:
 		_incoming.clear()
 	_requested = true
 	_idle = 0.0
+	progress[1] = _incoming.size()
+	if _incoming.size() == size_value:
+		_finish_incoming(str(data.hash))
+		return
 	_rpc_request.rpc_id(1, str(data.hash), _incoming.size())
 
 @rpc("any_peer", "reliable")
@@ -114,19 +120,21 @@ func _rpc_chunk(hash_value: String, offset: int, total: int, bytes: PackedByteAr
 	_idle = 0.0
 	net.lobby_changed.emit()
 	if _incoming.size() == total:
-		var cached := Library.put_cache(hash_value, _incoming)
-		_requested = false
-		if not str(cached.error).is_empty():
-			error = str(cached.error)
-			_incoming.clear()
-		elif cached.definition.get("id") != manifest.get("uuid"):
-			error = "Идентификатор игры не совпадает с пакетом."
-			_incoming.clear()
-		else:
-			verified[net.multiplayer.get_unique_id()] = hash_value
-			_incoming.clear()
-			_rpc_ready.rpc_id(1, hash_value)
-		net.lobby_changed.emit()
+		_finish_incoming(hash_value)
+
+func _finish_incoming(hash_value: String) -> void:
+	var cached := Library.put_cache(hash_value, _incoming)
+	_requested = false
+	Partial.discard(hash_value, int(manifest.size))
+	if not str(cached.error).is_empty():
+		error = str(cached.error)
+	elif cached.definition.get("id") != manifest.get("uuid"):
+		error = "Идентификатор игры не совпадает с пакетом."
+	else:
+		verified[net.multiplayer.get_unique_id()] = hash_value
+		_rpc_ready.rpc_id(1, hash_value)
+	_incoming.clear()
+	net.lobby_changed.emit()
 
 func accept_chunk(hash_value: String, offset: int, total: int, bytes: PackedByteArray) -> bool:
 	if manifest.is_empty() or not _requested or hash_value != manifest.get("hash") or total != int(manifest.get("size", 0)):
@@ -134,6 +142,8 @@ func accept_chunk(hash_value: String, offset: int, total: int, bytes: PackedByte
 	if offset != _incoming.size() or offset < 0 or total > Package.LIMIT or bytes.is_empty() or bytes.size() != mini(Package.CHUNK, total - offset):
 		return false
 	_incoming.append_array(bytes)
+	# Ошибка диска не ломает текущую передачу: остаётся прежняя докачка в памяти.
+	Partial.save(hash_value, total, _incoming, offset)
 	progress[1] = _incoming.size()
 	return true
 

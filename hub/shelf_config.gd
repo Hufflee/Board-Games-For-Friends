@@ -464,7 +464,28 @@ static func load_state(
 		config.width = float(config.width) + (sizes["shelf_andy"] as Vector3).x
 	for id in sizes:
 		poses[id] = clampi(int(poses.get(id, 1)), 0, 1 if id == "perudo" else 3)
+	# Новая авторская коробка не должна сбрасывать всю личную расстановку.
+	# Сначала подбираем для неё позу по существующей высоте, затем свободную ячейку.
+	var existing: Array = []
+	for row: Array in rows:
+		existing.append_array(row)
+	for id: String in sizes:
+		if not id.begins_with("custom:") or existing.has(id):
+			continue
+		for pose in [1, 2, 3, 0]:
+			var ext := item_occupied(id, sizes[id], pose)
+			if ext.y <= float(config.height) and ext.z <= CELL_DEPTH:
+				poses[id] = pose
+				break
 	var result := solve(config, rows, sizes, poses, int(config.get("cols", 1)))
+	if not result.ok and sizes.keys().any(func(id): return str(id).begins_with("custom:") and not existing.has(id)):
+		# Расширяем в ширину, сохраняя предпочтения старых ячеек и все позы.
+		var expanded := config.duplicate(true)
+		for step in range(1, 25):
+			expanded.width = float(config.width) + step * 0.04
+			result = solve(expanded, rows, sizes, poses, int(config.get("cols", 1)))
+			if result.ok:
+				break
 	if not result.ok:
 		result = solve(default_config, default_rows, sizes, {}, 1)
 	return result

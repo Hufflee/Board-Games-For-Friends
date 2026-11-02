@@ -12,12 +12,14 @@ func run(t: FSCheck) -> void:
 	# Детерминированный бросок: 6 — попадание, 1 — промах.
 	s.roll(6)
 	s.ok(0, "attack", {"slot": 0}, "атака монстра")
+	s.g.legal_actions(0)
 	s.ok(0, "roll", null, "бросок 6")
 	t.equal(s.g.last_roll, 6, "Грань из очереди")
 	s.close()
 	s.expect("monsters.0.hp", 1, "Попадание снимает 1")
 	# Клон независим.
 	var copy := s.g.clone()
+	t.check(not copy.roll_source.is_valid(), "Клон не держит внешний источник бросков оригинала")
 	copy.coins[0] = 99
 	t.check(int(s.g.coins[0]) != 99, "Клон не меняет оригинал")
 	# Инварианты видят порчу.

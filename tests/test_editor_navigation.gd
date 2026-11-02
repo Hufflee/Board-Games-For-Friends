@@ -109,6 +109,7 @@ func _run() -> void:
 	check(net.view.zones.table.size() == 5, "Созданные в редакторе жетоны появились на столе")
 	await process_frame
 	var table: Control = current_scene._screen
+	check(table._shown, "В авторской проверке рука сразу открыта")
 	table._shown = true
 	table._rebuild()
 	await process_frame
@@ -129,9 +130,13 @@ func _run() -> void:
 	check(is_instance_valid(table._debug_window) and table._debug_text.text.contains("ПЕРЕМЕННЫЕ"), "Проверка автора открывает отладчик полного состояния")
 	table._debug_step_back()
 	check(net.cg.get_var("resource_1", 0) == 0, "Отладчик вернул ресурс до предыдущего действия")
+	var previous_random: int = net.cg.rng.seed
+	table._debug_restart(true)
+	check(net.cg.rng.seed == previous_random and net.cg.state.zones["hand@0"].size() == 3, "Тот же расклад перезапустил настоящую проверочную партию")
 	table._debug_window.hide()
 	net.send_action("view_seat", {"seat": 1})
 	await process_frame
+	check(table._shown, "Авторское переключение места не закрывает руку")
 	await process_frame
 	check(not table._field.find_children("*", "Label", true, false).any(func(label: Label): return label.text == "Только ведущему"), "Игрок другой роли не видит элемент ведущего")
 	current_scene.back_to_hub()

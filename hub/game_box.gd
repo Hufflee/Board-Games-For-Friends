@@ -226,17 +226,6 @@ func _build_box() -> void:
 	if game.get("custom", false) or str(game.get("id", "")) in ["stillion", "gloom", "gloomier", "ready_set_bet", "brodilka", "the_mind"]:
 		# Та же боковина сверху. Верх букв направлен к −X, от лицевой стороны +X.
 		_face("top", Vector3(0, size.y / 2.0 + 0.0008, 0), Vector3(-PI / 2.0, 0, PI), Vector2(size.x - inset, size.z - inset), false)
-	if game.get("custom", false):
-		var mark := Label3D.new()
-		mark.text = "СВОЯ ИГРА"
-		mark.font = HubStyle.font("regular")
-		mark.font_size = 24
-		mark.pixel_size = 0.0005
-		mark.modulate = Color("d9cbe8")
-		mark.no_depth_test = false
-		mark.position = Vector3(size.x / 2.0 + 0.002, -size.y * 0.40, 0)
-		mark.rotation = Vector3(0, PI / 2.0, 0)
-		add_child(mark)
 	# неоновый ореол при наведении (его подхватывает glow окружения)
 	_halo = MeshInstance3D.new()
 	var hm := SphereMesh.new()  # шейдер переносит вершины на скруглённую коробку

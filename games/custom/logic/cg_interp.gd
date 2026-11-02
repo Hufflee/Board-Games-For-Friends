@@ -47,6 +47,8 @@ static func value(r: Object, expression: Variant, ctx: Dictionary, depth: int = 
 		b = value(r, expression.b, ctx, depth + 1)
 	match op:
 		"literal": return expression.get("value")
+		"dictionary_word":
+			return preload("res://hub/shared_words.gd").pick(r.rng)
 		"actor": return int(ctx.get("actor", 0))
 		"current": return int(r.state.current)
 		"leader": return int(r.state.leader)
@@ -273,13 +275,17 @@ static func run(r: Object, frames: Array) -> String:
 				if op == "phase":
 					var end: Array = r.frames_for("phase_exit", sub)
 					r.state.phase = str(block.phase)
+					r.state["ready_seats"] = []
 					r.reset_clock()
 					frames.append_array(r.frames_for("phase_enter", sub))
 					frames.append_array(end)
 				else:
+					if r.definition.rules.get("turn_mode", "circle") == "simultaneous":
+						r.last_error = "В одновременной фазе используйте готовность всех вместо передачи хода."
+						continue
 					var end: Array = r.frames_for("turn_end", sub)
 					var old := int(r.state.current)
-					r.state.current = int(number(r, block.get("player", {"op": "next"}), ctx))
+					r.state.current = int(r.state.leader) if r.definition.rules.get("turn_mode", "circle") == "leader_only" else int(number(r, block.get("player", {"op": "next"}), ctx))
 					for distance in range(1, r.players.size() + 1):
 						var passed := posmod(old + distance, r.players.size())
 						r.state.skips.erase(str(passed))
@@ -292,7 +298,8 @@ static func run(r: Object, frames: Array) -> String:
 					r.state.turn_no = int(r.state.turn_no) + 1
 					sub.actor = int(r.state.current)
 					frames.append_array(r.frames_for("turn_start", sub))
-					if int(r.state.current) <= old:
+					var origin: int = int(r.state.leader) if r.definition.rules.get("turn_mode", "circle") == "leader_start" else 0
+					if posmod(int(r.state.current) - origin, r.players.size()) <= posmod(old - origin, r.players.size()):
 						r.state.round = int(r.state.round) + 1
 						frames.append_array(r.frames_for("round_start", sub))
 					frames.append_array(end)
@@ -300,8 +307,15 @@ static func run(r: Object, frames: Array) -> String:
 				var who := int(number(r, block.player, ctx))
 				if who < 0 or who >= r.players.size():
 					r.last_error = "Игрок блока не найден."
-				elif op == "leader": r.state.leader = who
-				elif op == "eliminate": r.players[who].eliminated = true
+				elif op == "leader":
+					r.state.leader = who
+					if r.definition.rules.get("turn_mode", "circle") == "leader_only":
+						r.state.current = who
+				elif op == "eliminate":
+					r.players[who].eliminated = true
+					if r.definition.rules.get("turn_mode", "circle") == "leader_only" and int(r.state.leader) == who:
+						r.state.leader = r.next_player(who)
+						r.state.current = int(r.state.leader)
 				elif who == int(r.state.current):
 					r.state.current = r.next_player(who)
 					r.reset_clock()

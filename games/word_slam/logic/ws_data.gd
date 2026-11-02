@@ -87,6 +87,14 @@ static func standard_cards(players: int) -> int:
 
 ## Колода карт-ответов: каждая — 5 слов одной сложности + «имя». intro — только зелёные.
 static func build_deck(rng: RandomNumberGenerator, count: int, intro: bool) -> Array:
+	var words: Array = preload("res://hub/shared_words.gd").sample(rng, count)
+	var result: Array = []
+	for word: String in words:
+		result.append({"level": "shared", "words": [word]})
+	return result
+
+## Исторический состав карт, только для происхождения словаря.
+static func _source_deck(rng: RandomNumberGenerator, count: int, intro: bool) -> Array:
 	var pools := {}
 	for k in ANSWERS:
 		var arr: Array = ANSWERS[k].duplicate()

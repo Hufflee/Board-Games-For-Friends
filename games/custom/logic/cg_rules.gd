@@ -4,6 +4,7 @@ extends RefCounted
 
 const Definition := preload("res://games/custom/logic/cg_def.gd")
 const Interp := preload("res://games/custom/logic/cg_interp.gd")
+const TurnOrder := preload("res://games/custom/logic/cg_turn_order.gd")
 var definition: Dictionary = {}
 var state: Dictionary = {}
 var players: Array = []
@@ -39,6 +40,7 @@ func new_game(seats: Array, options: Dictionary = {}) -> String:
 		"dice": {}, "reveals": {}, "hints": [], "skips": {}, "pending": {}, "log": [], "trace": [], "winners": [], "rng_seed": str(rng.seed), "rng_state": str(rng.state),
 		"turn_seconds": clampf(float(options.get("turn_time", 0)), 0, 3600), "timer_left": clampf(float(options.get("turn_time", 0)), 0, 3600), "timed_out": false}
 	state.leader = clampi(int(options.get("leader", 0)), 0, players.size() - 1)
+	TurnOrder.initialize(self)
 	for s in players.size():
 		state.vars.player.append({})
 	for v: Dictionary in definition.rules.get("vars", []):
@@ -99,7 +101,7 @@ func new_game(seats: Array, options: Dictionary = {}) -> String:
 			state.zones[destination].append(id)
 	last_error = ""
 	steps = 0
-	var context := {"actor": 0, "depth": 0}
+	var context := {"actor": int(state.current), "depth": 0}
 	var frames: Array = [{"event": "turn_start", "initial": true, "context": context.duplicate()}, {"event": "round_start", "initial": true, "context": context.duplicate()}]
 	frames.append_array(frames_for("start", context))
 	var error := Interp.run(self, frames)
@@ -276,7 +278,9 @@ func act(seat: int, kind: String, data: Dictionary) -> bool:
 		for action: Dictionary in legal_actions(seat):
 			if not _same_action(action, kind, data):
 				continue
-			if kind in ["manual_place", "manual_place_top"]:
+			if kind in ["ready", "unready"]:
+				ok = TurnOrder.mark(self, seat, kind == "ready")
+			elif kind in ["manual_place", "manual_place_top"]:
 				if _point(data.get("pos")):
 					var id := str(action.card) if kind == "manual_place" else str(state.zones[str(action.id)].back())
 					state.cards[id]["pos"] = data.pos.duplicate()
@@ -316,6 +320,8 @@ func act(seat: int, kind: String, data: Dictionary) -> bool:
 				var context := {"actor": seat, "id": data.get("id", ""), "card": data.get("card", ""), "depth": 0}
 				ok = fire(kind, context).is_empty()
 			break
+	if ok and last_error.is_empty():
+		ok = TurnOrder.complete(self)
 	if not ok or not last_error.is_empty():
 		state = before
 		players = state.players
@@ -356,6 +362,9 @@ func _legal_actions(seat: int) -> Array:
 	if not state.pending.is_empty():
 		if int(state.pending.get("seat", -1)) == seat:
 			out.append({"kind": "answer", "pending": state.pending.get("kind"), "options": state.pending.get("options", []).duplicate(true)})
+		return out
+	out.append_array(TurnOrder.readiness(self, seat))
+	if not TurnOrder.can_begin(self, seat):
 		return out
 	for chain: Dictionary in definition.rules.get("chains", []):
 		var event: Dictionary = chain.get("event", {})
@@ -459,6 +468,7 @@ func get_view(seat: int) -> Dictionary:
 	return {"players": players.duplicate(true), "seat": seat, "zones": zones, "vars": vars, "dice": dice, "phase": phase,
 		"hints": hints, "show_cards": shown, "sound_event": state.get("sound_event", {}).duplicate(true),
 		"current": state.get("current", 0), "leader": state.get("leader", 0), "round": state.get("round", 1),
+		"turn_mode": TurnOrder.mode(self), "ready_seats": state.get("ready_seats", []).duplicate(),
 		"turn_no": turn_no, "revision": state.get("revision", 0), "pending": pending, "legal": legal_actions(seat),
 		"log": state.get("log", []).duplicate(), "winners": state.get("winners", []).duplicate(), "clock": float(state.get("turn_seconds", 0)) > 0}
 
@@ -532,6 +542,14 @@ func restore(data: Dictionary) -> String:
 	for player: Variant in snapshot.players:
 		if not player is Dictionary or not player.get("name", "") is String or not player.get("eliminated", false) is bool:
 			return "Повреждён игрок в снимке."
+	if snapshot.has("ready_seats"):
+		if not snapshot.ready_seats is Array:
+			return "Повреждена готовность игроков."
+		var ready_seen := {}
+		for seat: Variant in snapshot.ready_seats:
+			if not Definition._number(seat) or float(int(seat)) != float(seat) or seat < 0 or seat >= snapshot.players.size() or ready_seen.has(int(seat)):
+				return "Неверное место в списке готовности."
+			ready_seen[int(seat)] = true
 	for key: String in ["current", "leader"]:
 		var value: Variant = snapshot.get(key)
 		if not Definition._number(value) or value < 0 or value >= snapshot.players.size() or float(int(value)) != float(value):

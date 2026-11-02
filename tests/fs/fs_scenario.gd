@@ -18,11 +18,16 @@ var _dlc := false
 var _seed := 77
 var _ops: Array[Callable] = []
 var _faces: Array = []
+var _rules_type: GDScript = preload("res://games/four_souls/logic/fs_rules.gd")
 
 func _init(check: FSCheck = null) -> void:
 	t = check if check != null else FSCheck.new()
 
 # --- построение ---
+
+func rules_type(script: GDScript) -> FSScenario:
+	_rules_type = script
+	return self
 
 func players(count: int) -> FSScenario:
 	_n = count; return self
@@ -135,14 +140,18 @@ func setup(callback: Callable) -> FSScenario:
 	return self
 
 func build() -> FSScenario:
-	g = FSRules.new()
+	g = _rules_type.new()
 	var members: Array = []
 	for i in _n:
 		members.append({"name": ["Первый", "Второй", "Третий", "Четвёртый", "Пятый", "Шестой", "Седьмой", "Восьмой"][i]})
 	g.new_game(members, _dlc, _seed)
-	g.roll_source = func() -> int: return int(_faces.pop_front()) if not _faces.is_empty() else g._rng.randi_range(1, 6)
+	# Замыкание не удерживает Scenario → игру → то же замыкание.
+	var faces := _faces
+	var random := g._rng
+	g.roll_source = func() -> int: return int(faces.pop_front()) if not faces.is_empty() else random.randi_range(1, 6)
 	_finish_start()
 	for op in _ops: op.call()
+	_ops.clear()
 	g._refresh_passive_stats()
 	g._turn_allowances()
 	if g.phase == "priority" and g.next_action.is_empty():

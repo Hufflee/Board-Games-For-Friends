@@ -52,17 +52,34 @@ static func create_definition(parsed: Dictionary, players: Array, options: Dicti
 
 static func view(rules: Object, seat: int, hotseat: bool) -> Dictionary:
 	var out: Dictionary = rules.get_view(seat)
+	var templates := {}
 	for cards: Array in out.zones.values():
 		for card: Dictionary in cards:
 			if card.get("hidden", false):
 				continue
 			for deck: Dictionary in rules.definition.elements.get("decks", []):
 				if str(deck.id) == str(card.deck):
-					card["face"] = Faces.fields(card.data, deck)
+					if deck.get("face", {}).get("layers") is Array:
+						# Общий шаблон передаётся один раз, а не вместе с каждой картой руки.
+						if not templates.has(str(deck.id)):
+							templates[str(deck.id)] = {"face": deck.face.duplicate(true), "size": int(deck.get("size", 3))}
+						card["face"] = {"template": str(deck.id)}
+					else:
+						card["face"] = Faces.fields(card.data, deck)
 					card["size"] = int(deck.get("size", 3))
 					break
 	out["cg_meta"] = rules.definition.meta.duplicate(true)
 	out["cg_layout"] = rules.definition.layout.duplicate(true)
 	out["cg_vars"] = rules.definition.rules.get("vars", []).duplicate(true)
+	out["cg_card_templates"] = templates
 	out["hotseat"] = hotseat
 	return out
+
+static func face_fields(view_data: Dictionary, card: Dictionary) -> Dictionary:
+	if card.get("hidden", false):
+		return {}
+	var face: Dictionary = card.get("face", {})
+	if face.has("template"):
+		var template: Dictionary = view_data.get("cg_card_templates", {}).get(str(face.template), {})
+		return Faces.fields(card.get("data", {}), template) if not template.is_empty() else {}
+	return card.get("face", card.get("data", {}))

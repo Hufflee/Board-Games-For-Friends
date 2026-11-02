@@ -12,10 +12,12 @@ func select_seat(seat: int) -> void:
 
 func try_forbidden_grab(g: FSRules, label: String) -> void:
 	var before: int = g.roll_no
+	var had_popup: bool = is_instance_valid(table._popup)
 	await mouse(table._die.center(), true)
 	check(table._die.state != "dragging", label + ": реальный ввод не захватывает кубик")
 	await mouse(table._die.center(), false)
 	check(g.roll_no == before, label + ": бросок не отправлен")
+	check(had_popup or not is_instance_valid(table._popup), label + ": клик по кубику не открыл карту под ним")
 
 func _run() -> void:
 	root.size = Vector2i(1280, 720)

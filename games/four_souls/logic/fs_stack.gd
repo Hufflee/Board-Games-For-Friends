@@ -32,6 +32,23 @@ func _resolve_passive(effect: Dictionary) -> void:
 		var amount: int = operation.amount
 		match str(operation.op):
 			"counter": effect.source.counters = maxi(0, int(effect.source.counters) + amount)
+			"counter_soul":
+				if not _source_item_in_play(effect.source):
+					continue
+				effect.source.counters = int(effect.source.counters) + amount
+				if int(effect.source.counters) >= 3:
+					# Источник мог перейти другому игроку после постановки триггера.
+					for holder in players.size():
+						for index in items[holder].size():
+							if is_same(items[holder][index], effect.source):
+								var item := _remove_item(holder, index)
+								_gain_soul_card(holder, {"id": int(item.id), "value": 1})
+								_note("Друг: третий жетон превращает карту в душу")
+								break
+			"manual_card":
+				# У обязательного триггера свой владелец; это не новый розыгрыш после10с.
+				_begin_resolving({"kind": "item", "card": int(effect.card), "owner": seat})
+				return
 			"coins": _gain_coins(seat, amount)
 			"give_coin":
 				var giver: int = operation["from"]
@@ -95,6 +112,8 @@ func _push(effect: Dictionary, resume: String) -> void:
 	stack.append(effect); phase = "priority"; priority = (int(effect.owner) + 1) % players.size(); passes = 0
 	_note(name_of(int(effect.owner)) + " → " + FSData.effect_title(effect))
 func _continue_stack() -> void:
+	if phase == "game_over":
+		return
 	# Маркер вложенного эффекта не ждёт ответов: внешний ручной эффект продолжается сразу
 	# (если никто не умер — смерть разрешается раньше).
 	if resolving.is_empty() and not stack.is_empty() and bool(stack.back().get("nested", false)) and _death_queue.is_empty() and not _new_death():
@@ -102,6 +121,7 @@ func _continue_stack() -> void:
 		return
 	if _after_stack == "effect" and not resolving.is_empty():
 		phase = "priority" if stack.size() > _resolving_base else "effect"
+		_advance_auto_reward()
 		return
 	# Ответ после объявления смерти может спасти игрока до оплаты штрафа.
 	if _after_stack == "death":
@@ -150,6 +170,7 @@ func _resolve_top() -> void:
 		peek = effect.previous.peek
 		# Ответы, лежавшие над внешним эффектом до вложенного, ещё ждут закрытия.
 		phase = "priority" if stack.size() > _resolving_base else "effect"
+		_advance_auto_reward()
 		return
 	if effect.kind == "passive":
 		_resolve_passive(effect)
@@ -157,11 +178,28 @@ func _resolve_top() -> void:
 	if effect.kind == "monster_death":
 		var slot: int = int(effect.slot)
 		if slot >= 0 and slot < monsters.size() and int(monsters[slot].id) == int(effect.card) and int(monsters[slot].hp) <= 0:
+			if _replace_monster_death(slot):
+				_continue_stack()
+				return
 			# Каменюка и Голова смерти гибнут от смерти другого открытого монстра.
 			for other in monsters.size():
 				if other != slot and _dies_with_other_monster(int(monsters[other].id)):
 					monsters[other].hp = 0
-			_begin_resolving({"kind":"reward","card":int(effect.card),"owner":current,"slot":slot})
+			var reward := {"kind": "reward", "card": int(effect.card), "owner": current, "slot": slot}
+			var printed := _printed_monster_reward(int(effect.card))
+			if not printed.is_empty():
+				for resource: String in ["coins", "loot"]:
+					if printed.has(resource + "_per_counter"):
+						printed[resource] = int(printed[resource + "_per_counter"]) * int(monsters[slot].get("counters", 0))
+				reward["auto_reward"] = printed
+				reward["reward_step"] = 0
+				reward["resource_recipient"] = int(monsters[slot].get("slayer", current)) if bool(printed.get("recipient_slayer", false)) else current
+				reward["death_text_done"] = not bool(printed.get("manual_death", false))
+				if (printed.has("roll") or bool(printed.get("return_roll", false))) and bool(reward.death_text_done):
+					reward["requires_reward_roll"] = true
+				if bool(printed.get("double_lethal_six", false)) and int(monsters[slot].get("lethal_attack_roll", 0)) == 6:
+					reward["reward_multiplier"] = 2
+			_begin_resolving(reward)
 			if int(effect.card) == 429:
 				_prepare_peep_spawn()
 			if int(effect.card) == 358:
@@ -172,6 +210,7 @@ func _resolve_top() -> void:
 			if int(monsters[slot].get("slayer", current)) == current:
 				_turn_kills += 1
 			_emit_passives("monster_death", {"seat": int(monsters[slot].get("slayer", current)), "card": int(effect.card)})
+			_advance_auto_reward()
 		else:
 			if slot >= 0 and slot < monsters.size(): monsters[slot]["death_pending"] = false
 			_continue_stack()
@@ -235,9 +274,11 @@ func _resolve_top() -> void:
 					stack[index]["attack_passives_pending"] = true
 		var previous: Dictionary = paused_effects.pop_back()
 		var restored: Dictionary = previous.effect
-		if restored.get("kind", "") == "reward" and int(restored.get("card", -1)) == 358:
+		if restored.get("kind", "") == "reward" and (int(restored.get("card", -1)) == 358 or bool(restored.get("auto_reward", {}).get("return_roll", false))):
 			restored["reward_roll"] = last_roll
 			restored["return_to_deck"] = last_roll in [1, 6]
+		elif restored.has("auto_reward") and bool(restored.get("requires_reward_roll", false)):
+			restored["reward_roll"] = last_roll
 		_after_stack = str(previous.resume)
 		if stack.size() > stack_before:
 			# Триггеры броска разрешаются первыми; эффект вернёт маркер (resolving пока пуст).
@@ -282,7 +323,7 @@ func _resolve_top() -> void:
 		if int(m.id) == 281:
 			hit = hit and last_roll > int(m.get("last_attack_roll", 0))
 			m["last_attack_roll"] = last_roll
-		var damage: int = int(attack[current]) if hit else int(m.at) + _monster_aura("deathshead") + (1 if curses[current].has(737) else 0) + (1 if room == 818 else 0)
+		var damage: int = int(attack[current]) if hit else _monster_attack(m)
 		if not hit and last_roll == 1 and FSData.card(int(m.id)).get("key", "") == "leaper":
 			damage *= 2
 		_push({"kind":"combat","owner":current,"card":int(m.id),"hit":hit,"damage":damage,"value":last_roll},"battle_roll")
@@ -299,12 +340,24 @@ func _resolve_top() -> void:
 		return
 	var card := FSData.card(int(effect.card))
 	var kind: String = str(card.lua.get("type", ""))
-	if effect.kind == "loot" and kind in ["1c", "2c", "3c", "4c", "5c"]:
-		_gain_coins(int(effect.owner),int(kind.left(1)))
+	if effect.kind == "loot" and int(effect.card) == 528:
+		if bool(effect.get("boost_pending", false)):
+			reward_boost = mini(1073741824, reward_boost * 2)
+			discards.loot.append(528)
+			_note("Счастливая монета: награды ×%d до конца хода" % reward_boost)
+		else:
+			# Монета сначала даёт ресурс; вложенные пассивы не теряют саму карту.
+			var continuation := effect.duplicate(true)
+			continuation["boost_pending"] = true
+			continuation["nested"] = true
+			stack.append(continuation)
+			_gain_coins(int(effect.owner), 1)
+		_continue_stack()
+	elif effect.kind == "loot" and FSData.coin_loot_value(int(effect.card)) > 0:
+		_gain_coins(int(effect.owner), FSData.coin_loot_value(int(effect.card)))
 		discards.loot.append(int(effect.card)); _continue_stack()
 	elif effect.kind == "loot" and kind == "lsoul":
-		souls[int(effect.owner)] += 1
-		soul_cards[int(effect.owner)].append({"id":int(effect.card),"value":1})
+		_gain_soul_card(int(effect.owner), {"id": int(effect.card), "value": 1})
 		_refresh_passive_stats()
 		_continue_stack()
 	elif effect.kind == "loot" and kind == "trinkets":
@@ -333,6 +386,7 @@ func _finish_responses() -> void:
 	# Ответы на ручной эффект закрыты — возвращаемся к нему, не трогая внешний стек.
 	if phase == "priority" and _response_floor() > 0 and stack.size() <= _resolving_base:
 		phase = "effect"
+	_advance_auto_reward()
 	if phase in ["effect","death","priority","discard_target","forced_discard"]: return
 	var followup := next_action.duplicate(true)
 	next_action = {}
@@ -352,7 +406,7 @@ func _cancel_unresolved() -> void:
 			pending_effects.append(pending.previous.effect)
 	var discarded := {}
 	for pending: Dictionary in pending_effects:
-		if pending.get("kind", "") == "loot" and not bool(pending.get("under_deck", false)):
+		if pending.get("kind", "") == "loot" and not bool(pending.get("under_deck", false)) and not pending.has("given_to"):
 			var id: int = pending.card
 			if not discarded.has(id):
 				discards.loot.append(id)
@@ -374,6 +428,24 @@ func _cancel_unresolved() -> void:
 	next_action = {}
 	peek = {}
 	battle = -1
+## При немедленной победе ручные реакции больше не ждём, но полученная карта уже должна покинуть ряд.
+func _cleanup_reward_cards() -> void:
+	var pending: Array = stack.duplicate()
+	if not resolving.is_empty():
+		pending.append(resolving)
+	for paused: Dictionary in paused_effects:
+		pending.append(paused.effect)
+	var seen := {}
+	while not pending.is_empty():
+		var effect: Dictionary = pending.pop_back()
+		if effect.get("kind", "") == "resume_effect" and effect.has("previous"):
+			pending.append(effect.previous.effect)
+		if effect.get("kind", "") != "reward" or seen.has(int(effect.card)):
+			continue
+		if bool(effect.get("kept_as_soul", false)) or bool(effect.get("kept_as_item", false)):
+			seen[int(effect.card)] = true
+			_finish_monster_reward(effect)
+
 func _pending_manual_passives() -> bool:
 	return (
 		phase == "priority"
@@ -447,3 +519,43 @@ func _roll_passives(value: int, roller: int = -1) -> void:
 	for seat in players.size():
 		if not dead[seat]:
 			_damage_player(seat, tumors)
+
+## Замещение проверяется при разрешении смерти, до награды/души и триггеров убийства.
+## 264 — именно Summer of Isaac: смертельный бросок6 убивает, иной источник спасает.
+func _replace_monster_death(slot: int) -> bool:
+	var monster: Dictionary = monsters[slot]
+	var id: int = int(monster.id)
+	if id == 299 or (id == 284 and int(monster.get("counters", 0)) < 2):
+		monster["counters"] = int(monster.get("counters", 0)) + 1
+		monster.hp = _monster_hp(id)
+		monster.death_pending = false
+		monster.erase("lethal_attack_roll")
+		if id == 299 and int(monster.counters) >= 6:
+			_finish_monster_reward({"card": id, "owner": current, "slot": slot})
+		_queue_passive(current, id, {}, [PassiveRules.operation("treasure" if id == 284 else "coins", 1 if id == 284 else 6)])
+		_note("Смерть предотвращена: %s · жетонов%d" % [FSData.title(id), int(monster.counters)])
+		return true
+	if id == 362 and int(monster.get("death_saved_turn", -1)) != turn_serial:
+		monster["death_saved_turn"] = turn_serial
+		monster.hp = 2
+		monster.death_pending = false
+		monster.erase("lethal_attack_roll")
+		monster.dc = int(monster.dc) - 1
+		monster.at = int(monster.at) - 1
+		monster["temporary_dc"] = int(monster.get("temporary_dc", 0)) - 1
+		monster["temporary_at"] = int(monster.get("temporary_at", 0)) - 1
+		_note("Всадник: первая смерть хода предотвращена,2HP и−1защиты/атаки до конца хода")
+		return true
+	if int(monster.id) != 264 or int(monster.get("lethal_attack_roll", 0)) == 6:
+		return false
+	monster.hp = _monster_hp(264)
+	monster.death_pending = false
+	monster.erase("lethal_attack_roll")
+	monster.dc = int(monster.dc) + 1
+	monster.at = int(monster.at) + 1
+	monster["temporary_dc"] = int(monster.get("temporary_dc", 0)) + 1
+	monster["temporary_at"] = int(monster.get("temporary_at", 0)) + 1
+	_note("Всадник без головы: смерть предотвращена, полное здоровье, +1 защиты/атаки до конца хода")
+	# Душевая ценность карты выдаётся при настоящей смерти, не входит в эту награду.
+	_queue_passive(current, 264, monster, [PassiveRules.operation("treasure", 1)])
+	return true

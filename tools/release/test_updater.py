@@ -40,6 +40,9 @@ def manifest(name: str, base: dict, patches: list, version: str) -> None:
 
 def run(stage: str, url: str = "", extra: dict | None = None) -> bool:
 	env = dict(os.environ, PW_UPDATER="1", UPD_STAGE=stage, UPD_DIR=str(WORK), APPDATA=str(APPDATA))
+	base_ver = next(l.split('"')[1] for l in (ROOT / "project.godot").read_text(encoding="utf-8").splitlines() if l.startswith("config/version="))
+	major, minor, patch = map(int, base_ver.split('.'))
+	env.update(UPD_TEST_BASE=base_ver, UPD_TEST_PATCH1=f"{major}.{minor}.{patch+1}", UPD_TEST_PATCH2=f"{major}.{minor}.{patch+2}")
 	if url:
 		env["PW_UPDATE_URL"] = f"http://127.0.0.1:{PORT}/{url}"
 	env.update(extra or {})
@@ -51,6 +54,8 @@ def run(stage: str, url: str = "", extra: dict | None = None) -> bool:
 
 
 def main() -> None:
+	for target in (WORK, APPDATA):
+		assert target.resolve().is_relative_to((ROOT / "build").resolve()), target
 	shutil.rmtree(WORK, ignore_errors=True)
 	shutil.rmtree(APPDATA, ignore_errors=True)
 	WORK.mkdir(parents=True, exist_ok=True)
@@ -58,10 +63,12 @@ def main() -> None:
 	ok = run("prep")
 	# База — та же, что у проекта (0.8.8 из project.godot), поэтому предлагаются патчи.
 	base_ver = next(l.split('"')[1] for l in (ROOT / "project.godot").read_text(encoding="utf-8").splitlines() if l.startswith("config/version="))
+	major, minor, patch = map(int, base_ver.split('.'))
+	v1, v2 = f"{major}.{minor}.{patch+1}", f"{major}.{minor}.{patch+2}"
 	(WORK / "fake-base.zip").write_bytes(b"not used")
 	base = entry(base_ver, "fake-base.zip")
-	manifest("latest.json", base, [entry("0.8.9", "patch-0.8.9.pck"), entry("0.8.10", "patch-0.8.10.pck")], "0.8.10")
-	manifest("latest_bad.json", base, [entry("0.8.9", "patch-0.8.9.pck", "0" * 64)], "0.8.9")
+	manifest("latest.json", base, [entry(v1, f"patch-{v1}.pck"), entry(v2, f"patch-{v2}.pck")], v2)
+	manifest("latest_bad.json", base, [entry(v2, f"patch-{v2}.pck", "0" * 64)], v2)
 	# Новая база 0.9.0: zip с «exe» и «dll» в папке (проверка снятия общего префикса).
 	with zipfile.ZipFile(WORK / "PartyWorld-0.9.0-Windows.zip", "w") as z:
 		z.writestr("PartyWorld/PartyWorld.exe", "new exe")

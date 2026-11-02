@@ -76,6 +76,10 @@ func _run() -> void:
 		check(debug.describe(rules).contains("ПРОЙДЕННЫЕ БЛОКИ") and debug.describe(rules).contains("Очки") == false, "Отладка показывает трассу и значения по стабильным ID")
 		check(debug.back(rules) and rules.phase != "game_over" and rules.state.vars.shared[score] == 0 and rules.rng.state == initial_random, "Шаг назад восстанавливает значения, фазу и RNG")
 		check(not rules.act(0, str(action.kind), action), "Старое действие после шага назад отвергается")
+		check(debug.restart(rules, true) and rules.rng.state == initial_random and rules.state.vars.shared[score] == 0, "Тот же расклад запускает партию с исходным seed")
+		check(debug.history.size() == 1 and not debug.back(rules), "Перезапуск создаёт новую историю отладки")
+		var old_seed: int = rules.rng.seed
+		check(debug.restart(rules, false) and rules.rng.seed != old_seed, "Заново выбирает новый seed")
 	# Для каждого пункта палитры обязательные гнёзда существуют ещё до редактирования.
 	for op: String in Blocks.OPS:
 		var block := model.default_block(op)

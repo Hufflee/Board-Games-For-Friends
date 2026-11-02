@@ -61,6 +61,8 @@ static func import_image(id: String, path: String, source: String = "") -> Dicti
 	var result := _store(id, image.save_webp_to_buffer(false), "webp", source)
 	result["resized"] = resized
 	result["dimensions"] = [image.get_width(), image.get_height()]
+	if str(result.get("error", "")).is_empty():
+		result.asset["name"] = path.get_file()
 	return result
 
 static func import_font(id: String, path: String, source: String = "") -> Dictionary:
@@ -74,7 +76,10 @@ static func import_font(id: String, path: String, source: String = "") -> Dictio
 	font.data = bytes
 	if font.get_glyph_index(16, 0x0410, 0) == 0 or font.get_glyph_index(16, 0x044f, 0) == 0:
 		return {"error": "В шрифте не найдены русские буквы А/я."}
-	return _store(id, bytes, extension, source)
+	var result := _store(id, bytes, extension, source)
+	if str(result.get("error", "")).is_empty():
+		result.asset["name"] = path.get_file()
+	return result
 
 static func grid(id: String, asset: Dictionary, columns: int, rows: int, count: int) -> Dictionary:
 	if columns < 1 or columns > 30 or rows < 1 or rows > 30 or count < 1 or count > 300 or count > columns * rows:

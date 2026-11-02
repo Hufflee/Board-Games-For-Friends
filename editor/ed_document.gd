@@ -31,6 +31,8 @@ func create(template: String = "blank") -> bool:
 			last_error = "Не удалось открыть шаблон."
 			return false
 		initial = parser.data
+	if not initial.has("assets"):
+		initial.assets = {}
 	var result := Library.create(initial)
 	last_error = str(result.error)
 	if not last_error.is_empty():
@@ -44,6 +46,8 @@ func open(id: String) -> bool:
 	if data.is_empty():
 		last_error = "Не удалось прочитать игру."
 		return false
+	if not data.has("assets"):
+		data.assets = {}
 	_clear_history()
 	var path := Library.folder(id) + "/draft.json"
 	if FileAccess.file_exists(path):

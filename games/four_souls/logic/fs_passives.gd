@@ -5,6 +5,8 @@ const SimpleRules := preload("res://games/four_souls/logic/fs_passive_rules.gd")
 const ATTACK := {16: 1, 28: 1, 41: 1, 108: 1, 124: 3, 143: 2, 230: 1, 234: 1, 254: 1, 471: 1, 652: 1}
 const HEALTH := {39: 1, 79: 1, 88: 2, 112: 1, 147: 2, 174: 1, 249: 1}
 const AUTOMATIC_OPS := {
+	518: ["counter"], 867: ["counter", "loot"],
+	7: ["counter", "item_to_soul"],
 	503: ["heal", "extra_attack"],
 	34: ["temporary_monster_dc"], 36: ["roll"],
 	18: ["attack", "temporary_attack"],
@@ -37,6 +39,9 @@ static func attack_hits(value: int, evasion: int, modifiers: Dictionary) -> bool
 static func monster_evasion(base: int, entries: Array) -> int:
 	return SimpleRules.monster_evasion(base, entries)
 
+static func monster_health_bonus(monster: Dictionary, stat: String) -> int:
+	return SimpleRules.monster_health_bonus(monster, stat)
+
 ## Только однозначные обязательные эффекты. Выбор цели и необязательные действия остаются панелью.
 static func event_ops(game: RefCounted, owner: int, item: Dictionary, event: String, data: Dictionary) -> Array:
 	var id: int = item.id
@@ -46,6 +51,8 @@ static func event_ops(game: RefCounted, owner: int, item: Dictionary, event: Str
 		"turn_start":
 			if owner != game.current:
 				return result
+			if id == 867:
+				result.append(operation("counter"))
 			if id == 45:
 				var next: int = int(item.counters) + 1
 				result.append(operation("counter"))
@@ -66,6 +73,9 @@ static func event_ops(game: RefCounted, owner: int, item: Dictionary, event: Str
 		"turn_end":
 			if owner != game.current:
 				return result
+			if id == 867 and int(item.counters) >= 3:
+				result.append(operation("counter", -int(item.counters)))
+				result.append(operation("loot", 3))
 			if FSData.end_turn_recharge(id):
 				result.append(operation("recharge"))
 			if id == 161 and int(game.coins[owner]) == 0:

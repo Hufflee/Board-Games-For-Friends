@@ -233,7 +233,7 @@ func _on_state(v: Dictionary) -> void:
 			Sfx.play("card_flip", -6)
 			if phase == "word":
 				_shown_roll = roll_key
-				_show_roll(int(v["roll"]))
+				_rolling = false
 	if phase == "play" and prev_phase == "word":
 		Sfx.play("chips_big", -4)  # «ВОРД!» — «СЛЭМ!»
 	if v["guesses"].size() > prev_guesses:
@@ -409,34 +409,11 @@ func _update_word_panel() -> void:
 		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(l)
 		return
-	var card: Dictionary = _v["card"]
-	if _rolling:
-		row.add_child(HCStyle.label("Бросаем кубик — какое слово достанется?", HCStyle.BODY, HCStyle.MUTED, HORIZONTAL_ALIGNMENT_LEFT, "medium"))
-		return
-	var die := PerudoDieView.new(int(_v["roll"]), 44)
-	row.add_child(die)
 	var col := HCStyle.vbox(0)
 	col.add_child(HCStyle.caption("Ваше слово" + ((" · за %s" % _name(_seat())) if _hotseat() else "")))
 	col.add_child(HCStyle.label(str(_v["word"]).to_upper(), HCStyle.H1, HCStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "title"))
 	row.add_child(col)
-	var words := HCStyle.vbox(0)
-	words.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var parts := []
-	for i in card.get("words", []).size():
-		parts.append(("%d — %s" % [i + 1, card["words"][i]]) if i + 1 != int(_v["roll"]) else "[b]%d — %s[/b]" % [i + 1, card["words"][i]])
-	var rt := RichTextLabel.new()
-	rt.bbcode_enabled = true
-	rt.fit_content = true
-	rt.scroll_active = false
-	rt.custom_minimum_size.x = 320  # иначе при первой раскладке строка переносится по букве и растягивает панель
-	rt.add_theme_font_size_override("normal_font_size", 11)
-	rt.add_theme_font_size_override("bold_font_size", 11)
-	rt.add_theme_color_override("default_color", HCStyle.MUTED)
-	rt.text = "   ".join(parts)
-	var lvl := HCStyle.caption({"green": "Вводная карта", "yellow": "Жёлтая карта", "red": "Красная карта"}.get(card.get("level", ""), ""), LEVEL_COLORS.get(card.get("level", ""), HCStyle.MUTED))
-	words.add_child(lvl)
-	words.add_child(rt)
-	row.add_child(words)
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if phase == "word":
 		var i: int = _v["storytellers"].find(_seat())
 		var ready := HCStyle.primary("ВОРД!" if i == 0 else "СЛЭМ!", HCStyle.BODY, 110)

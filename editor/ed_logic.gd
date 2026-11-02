@@ -5,6 +5,8 @@ const Style := preload("res://games/custom/ui/cg_style.gd")
 const Model := preload("res://editor/ed_logic_model.gd")
 const Socket := preload("res://editor/ed_socket.gd")
 const Blocks := preload("res://games/custom/logic/cg_blocks.gd")
+const Minimap := preload("res://editor/ed_logic_map.gd")
+const Canvas := preload("res://editor/ed_logic_canvas.gd")
 var app: Control
 var document: RefCounted
 var model: RefCounted
@@ -12,6 +14,7 @@ var tools: VBoxContainer
 var center: VBoxContainer
 var properties: VBoxContainer
 var _palette: VBoxContainer
+var _map: Control
 
 func setup(owner: Control, left: VBoxContainer, middle: VBoxContainer, right: VBoxContainer) -> void:
 	app = owner
@@ -26,7 +29,16 @@ func _refresh() -> void:
 	app._status_text()
 	app._render.call_deferred()
 
+func _selected(button: Button) -> void:
+	# Цвет выбранного блока сохраняет контраст с обычным текстом в обеих темах.
+	for state: String in ["normal", "hover", "pressed"]:
+		var amount := 0.24 if state == "normal" else 0.32
+		button.add_theme_stylebox_override(state, Style.box(Style.panel().lerp(Style.accent(), amount)))
+
 func _build() -> void:
+	var data: Array = document.data.rules.get("chains", [])
+	if app._logic_chain >= data.size():
+		app._logic_chain = data.size() - 1
 	var event := MenuButton.new()
 	event.text = "+ Событие"
 	event.custom_minimum_size.y = 40
@@ -38,6 +50,8 @@ func _build() -> void:
 		app._logic_target = []
 		_refresh())
 	tools.add_child(event)
+	tools.add_child(Style.label("Буфер цепочек"))
+	app._clipboard_controls(tools, "chain", ["rules", "chains"], app._logic_chain)
 	var search := LineEdit.new()
 	search.placeholder_text = "Найти блок"
 	search.text_changed.connect(_blocks_palette)
@@ -50,13 +64,24 @@ func _build() -> void:
 	tools.add_child(resources)
 	center.add_child(Style.heading("ЛОГИКА ИГРЫ"))
 	_phases()
+	_canvas_tools()
+	var workspace := Style.row(8)
+	workspace.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	center.add_child(workspace)
 	var scroll := ScrollContainer.new()
+	scroll.name = "LogicCanvasScroll"
+	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	center.add_child(scroll)
+	workspace.add_child(scroll)
 	var chains := Style.column(16)
 	chains.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(chains)
-	var data: Array = document.data.rules.get("chains", [])
+	var canvas := Canvas.new()
+	scroll.add_child(canvas)
+	canvas.setup(chains, app._logic_zoom)
+	_map = Minimap.new()
+	workspace.add_child(_map)
+	_map.setup(scroll, canvas)
+	_restore_scroll(scroll, app._logic_scroll)
 	if data.is_empty():
 		chains.add_child(Style.label("Добавьте событие, затем выберите действия слева."))
 	for index in data.size():
@@ -76,11 +101,39 @@ func _build() -> void:
 			app._logic_target = []
 			_refresh())
 		if app._logic_chain == index:
-			hat.add_theme_stylebox_override("normal", Style.box(Style.accent().darkened(0.55)))
-		col.add_child(hat)
-		_rows(col, ["rules", "chains", index, "blocks"], 0)
-	if app._logic_chain >= data.size():
-		app._logic_chain = data.size() - 1
+			_selected(hat)
+		var header := Style.row(8)
+		col.add_child(header)
+		var fold := Style.button("▸" if app._logic_collapsed.has(index) else "▾")
+		fold.name = "LogicFold%d" % index
+		fold.tooltip_text = "Развернуть цепочку" if app._logic_collapsed.has(index) else "Свернуть цепочку"
+		fold.custom_minimum_size.x = 40
+		fold.pressed.connect(func():
+			if app._logic_collapsed.has(index):
+				app._logic_collapsed.erase(index)
+			else:
+				app._logic_collapsed[index] = true
+			if app._logic_chain == index:
+				app._logic_path = []
+				app._logic_target = []
+			_refresh())
+		header.add_child(fold)
+		hat.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		header.add_child(hat)
+		_map.register(hat, app._logic_chain == index and app._logic_path.is_empty())
+		var comment_text := str(chain.get("comment", ""))
+		if not comment_text.is_empty():
+			var note := PanelContainer.new()
+			note.name = "LogicComment%d" % index
+			note.add_theme_stylebox_override("panel", Style.box(Style.panel().lerp(Style.accent(), 0.1)))
+			var caption := Style.label(comment_text)
+			caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			caption.max_lines_visible = 8
+			caption.tooltip_text = comment_text
+			note.add_child(caption)
+			col.add_child(note)
+		if not app._logic_collapsed.has(index):
+			_rows(col, ["rules", "chains", index, "blocks"], 0)
 	if app._logic_chain < 0:
 		properties.add_child(Style.label("Выберите или добавьте событие"))
 		return
@@ -89,6 +142,49 @@ func _build() -> void:
 		_block_properties(selected)
 	else:
 		_event_properties(data[app._logic_chain])
+
+func _canvas_tools() -> void:
+	var row := Style.row(8)
+	center.add_child(row)
+	for direction: int in [-1, 1]:
+		var button := Style.button("−" if direction < 0 else "+")
+		button.name = "LogicZoomOut" if direction < 0 else "LogicZoomIn"
+		button.tooltip_text = "Уменьшить цепочки" if direction < 0 else "Увеличить цепочки"
+		button.custom_minimum_size.x = 40
+		button.disabled = app._logic_zoom <= 0.6 if direction < 0 else app._logic_zoom >= 1.5
+		button.pressed.connect(func():
+			var previous: float = app._logic_zoom
+			app._logic_zoom = clampf(snappedf(previous + direction * 0.1, 0.1), 0.6, 1.5)
+			app._logic_scroll = roundi(app._logic_scroll * app._logic_zoom / previous)
+			_refresh())
+		row.add_child(button)
+		if direction < 0:
+			var reset := Style.button("%d%%" % roundi(app._logic_zoom * 100))
+			reset.name = "LogicZoomReset"
+			reset.tooltip_text = "Вернуть масштаб 100%"
+			reset.pressed.connect(func():
+				app._logic_scroll = roundi(app._logic_scroll / app._logic_zoom)
+				app._logic_zoom = 1.0
+				_refresh())
+			row.add_child(reset)
+
+func _restore_scroll(scroll: ScrollContainer, position: int) -> void:
+	var restore := {"pending": true, "changed": false}
+	# Слушаем сразу: пользователь может прокрутить поле до отложенной раскладки.
+	scroll.get_v_scroll_bar().value_changed.connect(func(value: float):
+		if scroll.is_inside_tree():
+			if bool(restore.pending):
+				restore.changed = true
+			app._logic_scroll = roundi(value))
+	# До раскладки max_value равен нулю и Godot обрезает сохранённую позицию.
+	var tree := scroll.get_tree()
+	await tree.process_frame
+	await tree.process_frame
+	if not is_instance_valid(scroll) or not scroll.is_inside_tree():
+		return
+	if not bool(restore.changed):
+		scroll.scroll_vertical = position
+	restore.pending = false
 
 func _blocks_palette(query: String) -> void:
 	Style.clear(_palette)
@@ -135,8 +231,9 @@ func _rows(parent: VBoxContainer, path: Array, depth: int) -> void:
 			app._logic_target = path.duplicate()
 			_refresh())
 		if app._logic_path == block_path:
-			button.add_theme_stylebox_override("normal", Style.box(Style.accent().darkened(0.55)))
+			_selected(button)
 		row.add_child(button)
+		_map.register(button, app._logic_path == block_path)
 		parent.add_child(row)
 		for key: String in ["then", "else", "body"]:
 			if not block.has(key):
@@ -158,11 +255,30 @@ func _phases() -> void:
 		var name_value := str(document.data.meta.get("phase_titles", {}).get(phase, phase))
 		var button := Style.button("Все фазы" if phase.is_empty() else name_value)
 		if phase == app._logic_phase:
-			button.add_theme_stylebox_override("normal", Style.box(Style.accent().darkened(0.55)))
+			_selected(button)
 		button.pressed.connect(func():
 			app._logic_phase = phase
+			app._logic_scroll = 0
+			var chains: Array = document.data.rules.get("chains", [])
+			if app._logic_chain >= 0 and app._logic_chain < chains.size() and not phase.is_empty() and chains[app._logic_chain].get("event", {}).get("phase", "") not in ["", phase]:
+				app._logic_chain = -1
+				app._logic_path = []
+				app._logic_target = []
+				for index in chains.size():
+					if chains[index].get("event", {}).get("phase", "") in ["", phase]:
+						app._logic_chain = index
+						break
 			_refresh())
 		row.add_child(button)
+	var settings := Style.button("Фазы…")
+	settings.name = "LogicPhaseTools"
+	settings.tooltip_text = "Добавить, переименовать или переставить фазы"
+	settings.pressed.connect(func():
+		app._logic_phase_tools = not app._logic_phase_tools
+		_refresh())
+	row.add_child(settings)
+	if not app._logic_phase_tools:
+		return
 	if not app._logic_phase.is_empty():
 		var edit := Style.row(8)
 		center.add_child(edit)
@@ -235,6 +351,8 @@ func _socket(caption: String, path: Array, kind: String, fallback: Variant = nul
 func _event_properties(chain: Dictionary) -> void:
 	var path: Array = ["rules", "chains", app._logic_chain]
 	properties.add_child(Style.heading("СОБЫТИЕ"))
+	properties.add_child(Style.label("Буфер блоков"))
+	app._clipboard_controls(properties, "block", path + ["blocks"], -1)
 	var event: Dictionary = chain.get("event", {})
 	var labels: Array = ["Все игроки", "Текущий игрок", "Ведущий"]
 	var values: Array = ["all", "current", "leader"]
@@ -277,6 +395,32 @@ func _event_properties(chain: Dictionary) -> void:
 				document.set_value(path + ["event", "id"], value, "Кнопка события")
 				app._status_text())
 	_socket("Разрешено, если", path + ["guard"], "bool", true)
+	properties.add_child(Style.label("Комментарий к цепочке"))
+	var comment := TextEdit.new()
+	comment.name = "LogicCommentEditor"
+	comment.placeholder_text = "Зачем нужна эта цепочка; что проверить при изменении"
+	comment.text = str(chain.get("comment", ""))
+	comment.wrap_mode = TextEdit.LINE_WRAPPING_BOUNDARY
+	comment.custom_minimum_size.y = 128
+	properties.add_child(comment)
+	var comment_limit := Style.label("До4096символов · не влияет на правила")
+	properties.add_child(comment_limit)
+	var apply_comment := Style.button("Сохранить комментарий")
+	apply_comment.name = "LogicCommentApply"
+	apply_comment.disabled = true
+	comment.text_changed.connect(func():
+		apply_comment.disabled = comment.text == str(chain.get("comment", "")) or comment.text.length() > 4096
+		comment_limit.text = "%d / 4096 · не влияет на правила" % comment.text.length())
+	apply_comment.pressed.connect(func():
+		var copy: Dictionary = document.data.duplicate(true)
+		var target: Dictionary = Model.at(copy, path)
+		if comment.text.strip_edges().is_empty():
+			target.erase("comment")
+		else:
+			target.comment = comment.text
+		document.replace(copy, "Комментарий цепочки")
+		_refresh())
+	properties.add_child(apply_comment)
 	var remove := Style.button("Удалить событие")
 	remove.pressed.connect(func():
 		model.remove(path)
@@ -289,6 +433,8 @@ func _block_properties(block: Dictionary) -> void:
 	var path: Array = app._logic_path
 	var op := str(block.op)
 	properties.add_child(Style.heading(Blocks.label(op)))
+	var destination: Array = app._logic_target if not app._logic_target.is_empty() else path.slice(0, path.size() - 1)
+	app._clipboard_controls(properties, "block", path.slice(0, path.size() - 1), int(path.back()), destination)
 	var order := Style.row()
 	for direction: int in [-1, 1]:
 		var button := Style.button("↑ Выше" if direction < 0 else "↓ Ниже")
@@ -330,7 +476,7 @@ func _block_properties(block: Dictionary) -> void:
 		enter.pressed.connect(func():
 			app._logic_target = path + [key]
 			app._message = "Следующее действие будет добавлено в выбранную ветвь."
-			app._status_text())
+			_refresh())
 		properties.add_child(enter)
 	var root := Style.button("К шапке события")
 	root.pressed.connect(func():
@@ -351,13 +497,31 @@ func _resources() -> void:
 	popup.title = "Переменные и роли"
 	popup.size = Vector2i(640, 560)
 	popup.theme = Style.theme()
+	Style.window_surface(popup)
 	app.add_child(popup)
 	var scroll := ScrollContainer.new()
 	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	scroll.offset_left = 16
+	scroll.offset_top = 16
+	scroll.offset_right = -16
+	scroll.offset_bottom = -16
 	popup.add_child(scroll)
 	var col := Style.column(16)
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(col)
+	col.add_child(Style.heading("ПОРЯДОК ХОДОВ"))
+	var turn_mode := OptionButton.new()
+	turn_mode.name = "LogicTurnMode"
+	for caption: String in ["По кругу", "По кругу от ведущего", "Одновременно · готовность всех", "Только ведущий"]:
+		turn_mode.add_item(caption)
+	turn_mode.select(maxi(0, Blocks.TURN_MODES.find(str(document.data.rules.get("turn_mode", "circle")))))
+	turn_mode.item_selected.connect(func(index: int):
+		model.set_turn_mode(Blocks.TURN_MODES[index])
+		app._status_text())
+	col.add_child(turn_mode)
+	var turn_hint := Style.label("В одновременном режиме «Готов» ждёт всех и переключает фазу. Блок «Передать ход» недоступен.")
+	turn_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(turn_hint)
 	col.add_child(Style.heading("ПЕРЕМЕННЫЕ"))
 	for index in document.data.rules.vars.size():
 		var entry: Dictionary = document.data.rules.vars[index]

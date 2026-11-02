@@ -32,7 +32,30 @@ func back(rules: RefCounted) -> bool:
 	bytes -= int(history.pop_back().bytes)
 	# Старые кнопки и перетаскивания не должны стать допустимыми после отката.
 	rules.state.revision = revision
+	bytes -= int(history.back().bytes)
 	history.back().snapshot.state.revision = revision
+	history.back().bytes = JSON.stringify(history.back().snapshot).to_utf8_buffer().size()
+	bytes += int(history.back().bytes)
+	return true
+
+func restart(rules: RefCounted, same_seed: bool) -> bool:
+	var snapshot: Dictionary = rules.save_state()
+	var seed_value: int = rules.rng.seed if same_seed else randi()
+	if not same_seed and seed_value == rules.rng.seed:
+		seed_value += 1
+	var leader := 0
+	for index in rules.players.size():
+		if rules.players[index].get("role") == "leader":
+			leader = index
+	var options := {"seed": seed_value, "leader": leader, "turn_time": float(rules.state.get("turn_seconds", 0))}
+	last_error = rules.new_game(rules.players.duplicate(true), options)
+	if not last_error.is_empty():
+		rules.restore(snapshot)
+		return false
+	rules.state.revision = int(snapshot.state.revision) + 1
+	history.clear()
+	bytes = 0
+	capture(rules)
 	return true
 
 func describe(rules: RefCounted) -> String:

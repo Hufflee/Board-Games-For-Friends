@@ -149,6 +149,18 @@ class PanicCard extends Control:
 		draw_string(TMStyle.HEAD, Vector2(0, 18 * k), "ПАНИКА", HORIZONTAL_ALIGNMENT_CENTER, size.x, int(12 * k), TMStyle.GREEN)
 
 class Background extends Control:
+	const PARALLAX := 12.0  # картинка закусочной чуть двигается за курсором (настройка «Двигающийся фон»)
+	var _art: TextureRect
+	var _motion := Vector2.ZERO
+	func _process(delta: float) -> void:
+		if not is_instance_valid(_art):
+			return
+		_motion = preload("res://hub/cursor_parallax.gd").step(self, _motion, delta, PARALLAX)
+		# запас PARALLAX с каждой стороны — края картинки при сдвиге не видны
+		_art.offset_left = -PARALLAX + _motion.x
+		_art.offset_right = PARALLAX + _motion.x
+		_art.offset_top = -PARALLAX + _motion.y
+		_art.offset_bottom = PARALLAX + _motion.y
 	func _ready() -> void:
 		mouse_filter = MOUSE_FILTER_IGNORE
 		set_anchors_and_offsets_preset(PRESET_FULL_RECT)
@@ -161,6 +173,7 @@ class Background extends Control:
 			art.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 			art.mouse_filter = MOUSE_FILTER_IGNORE
 			add_child(art)
+			_art = art
 			if not TMStyle.dark():
 				var veil := ColorRect.new()
 				veil.color = Color(TMStyle.PAPER, 0.9)

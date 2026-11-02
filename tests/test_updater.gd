@@ -9,6 +9,9 @@ var Client: GDScript
 var _fails := 0
 var _dir := OS.get_environment("UPD_DIR")
 var _updater: Node
+var _base_version := OS.get_environment("UPD_TEST_BASE")
+var _v1 := OS.get_environment("UPD_TEST_PATCH1")
+var _v2 := OS.get_environment("UPD_TEST_PATCH2")
 
 
 func check(cond: bool, msg: String) -> void:
@@ -41,8 +44,8 @@ func _run() -> void:
 
 ## Два патча цепочки: первый добавляет _probe.txt = «one», второй меняет его на «two» и добавляет _probe2.txt.
 func _prep() -> void:
-	_pack("patch-0.8.9.pck", {"res://hub/update/_probe.txt": "one"})
-	_pack("patch-0.8.10.pck", {"res://hub/update/_probe.txt": "two", "res://hub/update/_probe2.txt": "x"})
+	_pack("patch-%s.pck" % _v1, {"res://hub/update/_probe.txt": "one"})
+	_pack("patch-%s.pck" % _v2, {"res://hub/update/_probe.txt": "two", "res://hub/update/_probe2.txt": "x"})
 
 
 func _pack(name: String, files: Dictionary) -> void:
@@ -67,7 +70,7 @@ func _download() -> void:
 	var c := _client()
 	await c.check()
 	check(c.state == Client.State.AVAILABLE, "доступно обновление (состояние %d)" % c.state)
-	check(c.kind == "patch" and c.target == "0.8.10", "патч до 0.8.10, а не %s %s" % [c.kind, c.target])
+	check(c.kind == "patch" and c.target == _v2, "патч до %s, а не %s %s" % [_v2, c.kind, c.target])
 	check(c._queue.size() == 2, "в очереди два патча")
 	await c.start()
 	check(c.state == Client.State.READY, "скачано и готово к перезапуску (%d %s)" % [c.state, c.error])
@@ -76,10 +79,10 @@ func _download() -> void:
 
 
 func _verify() -> void:
-	check(_updater.loaded == ["0.8.9", "0.8.10"], "подключены оба патча по порядку: %s" % [_updater.loaded])
-	check(_updater.version == "0.8.10", "действующая версия 0.8.10")
-	check(str(ProjectSettings.get_setting("application/config/version")) == "0.8.10", "версия в ProjectSettings подменена")
-	check(_updater.base_version == "0.8.8", "базовая версия exe не изменилась")
+	check(_updater.loaded == [_v1, _v2], "подключены оба патча по порядку: %s" % [_updater.loaded])
+	check(_updater.version == _v2, "Действующая версия последнего патча")
+	check(str(ProjectSettings.get_setting("application/config/version")) == _v2, "версия в ProjectSettings подменена")
+	check(_updater.base_version == _base_version, "базовая версия exe не изменилась")
 	check(FileAccess.get_file_as_string("res://hub/update/_probe.txt") == "two", "второй патч перекрыл первый")
 	check(FileAccess.file_exists("res://hub/update/_probe2.txt"), "файл из второго патча виден")
 	var st: Dictionary = _updater.read_json(_updater.STATE)
@@ -102,10 +105,10 @@ func _arm_rollback() -> void:
 
 
 func _rollback() -> void:
-	check(_updater.rolled_back == "0.8.10", "снят пробный 0.8.10: «%s»" % _updater.rolled_back)
-	check(_updater.loaded == ["0.8.9"], "остался только первый патч: %s" % [_updater.loaded])
+	check(_updater.rolled_back == _v2, "снят пробный патч: «%s»" % _updater.rolled_back)
+	check(_updater.loaded == [_v1], "остался только первый патч: %s" % [_updater.loaded])
 	check(FileAccess.get_file_as_string("res://hub/update/_probe.txt") == "one", "содержимое — из первого патча")
-	check(not FileAccess.file_exists(_updater.DIR + "patch-0.8.10.pck"), "файл снятого патча удалён")
+	check(not FileAccess.file_exists(_updater.DIR + "patch-%s.pck" % _v2), "файл снятого патча удалён")
 
 
 ## Манифест с другой цепочкой и неверной суммой: качаем, сумма не сходится — ошибка, установленное не тронуто.
@@ -116,7 +119,7 @@ func _corrupt() -> void:
 	await c.start()
 	check(c.state == Client.State.FAILED and c.error.contains("контрольная"), "ошибка контрольной суммы: %d %s" % [c.state, c.error])
 	check(_updater.chain().size() == 1, "установленная цепочка не тронута")
-	check(not FileAccess.file_exists(_updater.DIR + "patch-0.8.9.pck.part"), "недокачанный файл убран")
+	check(not FileAccess.file_exists(_updater.DIR + "patch-%s.pck.part" % _v2), "недокачанный файл убран")
 
 
 ## Новая база: zip с exe/dll ставится в PW_UPDATE_INSTALL_DIR, старые файлы → *.old; затем откат.

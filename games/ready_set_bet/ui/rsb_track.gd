@@ -1,7 +1,7 @@
 class_name RSBTrack
 extends Control
 ## Беговая дорожка: 9 дорожек × 15 клеток, стартовые ворота с бонусами, красная линия после 9-й клетки,
-## клетчатый финиш. Лошади плавно скачут к своим клеткам; бонусный ход — всплывающее «+N!».
+## клетчатый финиш. Черепахи плавно бегут к своим клеткам; бонусный ход — всплывающее «+N!».
 
 const GATE := 100.0  # ширина стартовых ворот
 const FINISH_W := 26.0
@@ -133,9 +133,9 @@ func _draw() -> void:
 			draw_circle(p, 10, RSBStyle.INK_ART)
 			draw_circle(p, 8.5, col)
 			draw_string(tfont, p + Vector2(-8, 5), marks[h], HORIZONTAL_ALIGNMENT_CENTER, 16, 13, RSBStyle.INK_ART)
-	# лошади
+	# черепахи
 	for h in 9:
-		var t: Texture2D = RSBStyle.tex("horse_%d" % h)
+		var t: Texture2D = RSBStyle.tex("turtle_%d" % h)
 		var hh := lh * 1.05
 		var w := hh * t.get_width() / t.get_height()
 		var p := horse_point(h, _disp[h])

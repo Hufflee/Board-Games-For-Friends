@@ -4,6 +4,8 @@ extends "res://games/four_souls/logic/fs_turn.gd"
 ## Отдельно не используется: состояние и вызовы общие через self.
 
 func _effect(a: Dictionary) -> bool:
+	if resolving.has("reward_winners") or resolving.has("reward_soul_targets") or resolving.has("reward_damage"):
+		return false
 	if resolving.has("spawn_card"):
 		return false
 	if resolving.has("reroll_request"):
@@ -11,6 +13,9 @@ func _effect(a: Dictionary) -> bool:
 	var target: int = int(a.get("target",resolving.owner))
 	var amount: int = clampi(int(a.get("amount",1)),-99,99)
 	var op: String = str(a.get("op",""))
+	if resolving.has("auto_reward") and op in ["coins", "loot", "treasure", "souls"] and (op == "souls" or target == int(resolving.owner)) and (op != "coins" or amount >= 0):
+		_note("Напечатанную награду выдаёт игра; повторное ручное начисление запрещено")
+		return false
 	if target < 0 or target >= players.size(): return false
 	# Эти две операции адресуют кубик/монстра, а не игрока target: смена target не обходит защиту источника.
 	var own_operation: bool = target == int(resolving.owner) or op in ["temporary_monster_dc", "roll"]
@@ -18,6 +23,12 @@ func _effect(a: Dictionary) -> bool:
 		_note("Этот эффект карты уже выполняется автоматически")
 		return false
 	match op:
+		"monster_counter":
+			var index: int = int(a.get("item", -1))
+			if index < 0 or index >= monsters.size():
+				return false
+			monsters[index]["counters"] = maxi(0, int(monsters[index].get("counters", 0)) + amount)
+			_note("Жетоны: %s · %d" % [FSData.title(int(monsters[index].id)), int(monsters[index].counters)])
 		"pay_coins":
 			if target != int(resolving.owner) or amount <= 0:
 				return false
@@ -29,11 +40,21 @@ func _effect(a: Dictionary) -> bool:
 		"extra_turn":
 			for i in clampi(amount, 1, 10):
 				extra_turns.append(target)
+		"skip_turn":
+			if amount <= 0:
+				return false
+			skipped_turns[target] = int(skipped_turns[target]) + mini(amount, 10)
+			_note("%s пропустит следующих ходов: %d" % [name_of(target), int(skipped_turns[target])])
 		"self_underdeck":
-			if resolving.kind != "loot" or bool(resolving.get("under_deck", false)):
+			if resolving.kind != "loot" or bool(resolving.get("under_deck", false)) or resolving.has("given_to"):
 				return false
 			decks.loot.push_front(int(resolving.card))
 			resolving["under_deck"] = true
+		"self_give":
+			if resolving.kind != "loot" or target == int(resolving.owner) or resolving.has("given_to") or bool(resolving.get("under_deck", false)):
+				return false
+			hands[target].append(int(resolving.card))
+			resolving["given_to"] = target
 		"give_item":
 			var owner: int = int(resolving.owner)
 			var index: int = int(a.get("item", -1))
@@ -68,8 +89,8 @@ func _effect(a: Dictionary) -> bool:
 			if resolving.kind != "reward" or bool(resolving.get("kept_as_soul", false)):
 				_note("Душа без карты не начисляется: карту души даёт награда монстра")
 				return false
-			souls[target] = int(souls[target]) + amount
-			soul_cards[target].append({"id":int(resolving.card),"value":amount}); resolving["kept_as_soul"] = true
+			resolving["kept_as_soul"] = true
+			_gain_soul_card(target, {"id": int(resolving.card), "value": amount})
 		"destroy_soul":
 			var index: int = int(a.get("item", -1))
 			if index < 0 or index >= soul_cards[target].size():
@@ -90,8 +111,8 @@ func _effect(a: Dictionary) -> bool:
 			var i: int = int(a.get("item",-1))
 			if i < 0 or i >= soul_cards[target].size() or target == int(resolving.owner): return false
 			var card: Dictionary = soul_cards[target].pop_at(i)
-			souls[target] = maxi(0,int(souls[target])-int(card.value)); souls[int(resolving.owner)] += int(card.value)
-			soul_cards[int(resolving.owner)].append(card)
+			souls[target] = maxi(0, int(souls[target]) - int(card.value))
+			_gain_soul_card(int(resolving.owner), card)
 		"attach_curse":
 			if resolving.kind != "event" or str(FSData.card(int(resolving.card)).lua.get("type","")) != "curse" or bool(resolving.get("attached",false)): return false
 			curses[target].append(int(resolving.card)); resolving["attached"] = true
@@ -216,8 +237,7 @@ func _effect(a: Dictionary) -> bool:
 			if i < 0 or i >= items[target].size() or items[target][i].eternal or room == 779 or curses[target].has(744):
 				return false
 			var item := _remove_item(target, i)
-			souls[target] += 1
-			soul_cards[target].append({"id": int(item.id), "value": 1})
+			_gain_soul_card(target, {"id": int(item.id), "value": 1})
 		"temporary_monster_dc":
 			var i: int = int(a.get("item", -1))
 			if i < 0 or i >= monsters.size():
@@ -226,10 +246,18 @@ func _effect(a: Dictionary) -> bool:
 			monsters[i]["temporary_dc"] = int(monsters[i].get("temporary_dc", 0)) + amount
 		"discard_shop":
 			var i: int = int(a.get("item", -1))
-			if i < 0 or i >= shop.size():
+			if i < 0 or i >= shop.size() or int(shop[i]) < 0:
 				return false
 			discards.treasure.append(int(shop[i]))
 			shop[i] = _draw("treasure")
+		"take_shop":
+			var i: int = int(a.get("item", -1))
+			if i < 0 or i >= shop.size() or int(shop[i]) < 0:
+				return false
+			var id: int = shop[i]
+			shop[i] = _draw("treasure")
+			_gain_item(target, id)
+			_note("%s забирает из магазина без покупки: %s" % [name_of(target), FSData.title(id)])
 		"discard_monster":
 			var i: int = int(a.get("item", -1))
 			if i < 0 or i >= monsters.size() or i == battle:
@@ -249,6 +277,8 @@ func _effect(a: Dictionary) -> bool:
 		"monster_hp":
 			var i: int = int(a.get("item",battle))
 			if i < 0 or i >= monsters.size(): return false
+			if int(monsters[i].hp) > 0 or int(monsters[i].hp) + amount > 0:
+				monsters[i].erase("lethal_attack_roll")
 			monsters[i].hp = int(monsters[i].hp)+amount
 		"monster_damage":
 			var i: int = int(a.get("item",battle))
@@ -256,11 +286,14 @@ func _effect(a: Dictionary) -> bool:
 			var damage := maxi(0, amount)
 			if int(monsters[i].id) == 281:
 				damage = mini(1, damage)
+			if int(monsters[i].hp) > 0 and int(monsters[i].hp) - damage <= 0:
+				monsters[i]["lethal_attack_roll"] = 0
 			monsters[i].hp = int(monsters[i].hp) - damage
 			monsters[i]["slayer"] = int(resolving.owner)
 		_:
 			return false
 	var manual_titles := {
+		"monster_counter": "жетоны монстра",
 		"extra_turn": "дополнительный ход",
 		"self_underdeck": "разыгранная карта под низ колоды",
 		"give_item": "передача своего предмета",

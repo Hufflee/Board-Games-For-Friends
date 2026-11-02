@@ -56,7 +56,7 @@ func _build() -> void:
 		add_child(raw)
 		return
 	if kind == "value":
-		var selected := "bool" if value is bool else ("text" if value is String else "number")
+		var selected := "bool" if value is bool else ("text" if value is String or value is Dictionary and value.get("op") == "dictionary_word" else "number")
 		_select(["Число / выражение", "Текст", "Да / нет"], ["number", "text", "bool"], selected, func(next: String): _emit(0 if next == "number" else (false if next == "bool" else ""), true))
 		var inner = load("res://editor/ed_socket.gd").new()
 		add_child(inner)
@@ -65,13 +65,18 @@ func _build() -> void:
 		return
 	if kind == "text":
 		var op := str(value.get("op", "literal")) if value is Dictionary else "literal"
-		_select(["Текст", "Текст из переменной", "Ответ игрока"], ["literal", "var", "answer"], op, func(next: String):
+		var labels: Array = ["Текст", "Текст из переменной", "Ответ игрока"]
+		var modes: Array = ["literal", "var", "answer"]
+		if definition.get("rules", {}).get("dictionary", "") == "shared":
+			labels.append("Случайное слово · 1000 слов")
+			modes.append("dictionary_word")
+		_select(labels, modes, op, func(next: String):
 			_emit("" if next == "literal" else {"op": next, "id": "", "player": {"op": "actor"}}, true))
 		if op == "var":
 			_nested("variable_text", "id", "")
 			_nested("player", "player", {"op": "actor"})
 			return
-		if op == "answer":
+		if op in ["answer", "dictionary_word"]:
 			return
 		var field := LineEdit.new()
 		field.text = str(value.get("value", "")) if value is Dictionary else str(value if value != null else "")

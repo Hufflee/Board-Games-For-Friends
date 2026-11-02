@@ -152,16 +152,11 @@ func _rebuild() -> void:
 			var ss: int = sec
 			b.pressed.connect(func(): Net.set_setting("ws_time", ss))
 			r2.add_child(b)
-		var names := CheckBox.new()
-		names.text = "Имена (фильмы, книги, люди)"
-		names.button_pressed = s.get("ws_names", true)
-		names.toggled.connect(func(on): Net.set_setting("ws_names", on))
-		r2.add_child(names)
 		_body.add_child(r2)
 	else:
 		_body.add_child(HCStyle.label("Слова: " + ("упрощённый · по порядку" if s.get("ws_catalog", "basic") == "simplified" else "базовый · перемешивать после «Слэм»"), HCStyle.CAP, HCStyle.MUTED))
 		var turn := "без ограничения времени" if int(s.get("ws_time", 60)) <= 0 else "на ход %d с" % int(s.get("ws_time", 60))
-		_body.add_child(HCStyle.label("%s · %d карт · %s%s" % ["Один рассказчик" if solo else "Две команды", count, turn, " · с именами" if s.get("ws_names", true) else ""], HCStyle.BODY))
+		_body.add_child(HCStyle.label("%s · %d карт · %s" % ["Один рассказчик" if solo else "Две команды", count, turn], HCStyle.BODY))
 
 	var start_row := HCStyle.hbox(12)
 	if host:

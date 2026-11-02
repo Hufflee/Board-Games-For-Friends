@@ -4,6 +4,18 @@ extends RefCounted
 static var _data: Dictionary = {}
 static var _textures: Dictionary = {}
 static var _responses: Array = []
+const Support := preload("res://games/four_souls/logic/fs_support.gd")
+## У этих монет есть дополнительный текст: неполная Lua-метка не делает их обычными монетами.
+const MANUAL_COIN_LOOT := [476, 506, 528, 544]
+
+static func coin_loot_value(id: int) -> int:
+	if id in MANUAL_COIN_LOOT:
+		return 0
+	if id == 649:
+		return 10
+	var kind: String = str(card(id).get("lua", {}).get("type", ""))
+	return int(kind.left(1)) if kind in ["1c", "2c", "3c", "4c", "5c"] else 0
+
 static func data() -> Dictionary:
 	if _data.is_empty():
 		_data = JSON.parse_string(FileAccess.get_file_as_string("res://games/four_souls/art/manifest.json"))
@@ -35,7 +47,12 @@ static func response_kind(id: int) -> String:
 		_responses = JSON.parse_string(FileAccess.get_file_as_string("res://games/four_souls/art/response_catalog.json")).cards
 	return str(_responses[id].response_kind) if id>=0 and id<_responses.size() else "none"
 static func item_response_kind(id: int) -> String:
-	return "passive" if card(id).get("kind","")=="loot" else response_kind(id)
+	return "passive" if card(id).get("kind", "") in ["loot", "monster"] else response_kind(id)
+
+## Только ручная часть условного текста; полностью автоматические предметы повторно не вызываются.
+## У Неопределённого70 есть отдельная пассивная часть помимо поворотной.
+static func manual_item_trigger(id: int) -> bool:
+	return Support.status(id) != "auto" and (id == 70 or item_response_kind(id) in ["passive", "conditional"])
 
 ## Напечатанная вечность сохраняется при любом способе получения предмета.
 ## Мошна Хранителя и Клещ не входят в колоду вечных стартовых предметов.

@@ -4,7 +4,14 @@ extends RefCounted
 
 const EVENTS := ["start", "round_start", "turn_start", "turn_end", "phase_enter", "phase_exit", "button", "card", "move", "rolled", "timeout"]
 const SOUNDS := ["click", "card_place", "card_flip", "shuffle", "chip", "chips_win"]
-const EXPRESSIONS := ["literal", "actor", "current", "leader", "next", "player", "players_count", "team", "round", "turn", "index", "answer", "card", "top", "zone", "count", "property", "var", "random", "add", "sub", "mul", "div", "min", "max", "eq", "ne", "lt", "le", "gt", "ge", "and", "or", "not", "has", "dice_sum", "dice_count", "dice_value"]
+const TURN_MODES := ["circle", "leader_start", "simultaneous", "leader_only"]
+## Поля со ссылками на зоны: строки и выражения проходят одну проверку при вставке/загрузке.
+const ZONE_FIELDS := {
+	"shuffle": ["zone"], "deal": ["from", "to"], "draw": ["from", "to"],
+	"move": ["to"], "collect": ["to"], "ask_card": ["zone"], "each_card": ["zone"],
+	"top": ["zone"], "count": ["zone"], "has": ["zone"],
+}
+const EXPRESSIONS := ["literal", "actor", "current", "leader", "next", "player", "players_count", "team", "round", "turn", "index", "answer", "card", "top", "zone", "count", "property", "var", "random", "dictionary_word", "add", "sub", "mul", "div", "min", "max", "eq", "ne", "lt", "le", "gt", "ge", "and", "or", "not", "has", "dice_sum", "dice_count", "dice_value"]
 ## Значения — обязательные поля; типизированные гнёзда UI строятся по этим именам.
 const OPS := {
 	"shuffle": ["zone"], "deal": ["from", "to", "count"], "draw": ["from", "to", "count"],

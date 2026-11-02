@@ -9,6 +9,8 @@ var selection := -1
 var perspective := "all"
 var zoom := 1.0
 var pan := Vector2.ZERO
+var guides_enabled := true
+var _guides: Array[Dictionary] = []
 var _drag := ""
 var _start := Vector2.ZERO
 var _original := Rect2()
@@ -84,7 +86,50 @@ func _draw() -> void:
 		draw_rect(rect.grow(2), Style.accent(), false, 3)
 		draw_rect(Rect2(rect.end - Vector2(8, 8), Vector2(16, 16)), Style.accent())
 	draw_rect(Rect2(0, 0, 1280, 720), Color(Style.ink(), 0.3), false, 2)
+	for guide: Dictionary in _guides:
+		var coordinate: float = guide.value
+		if guide.axis == 0:
+			draw_line(Vector2(coordinate, 48), Vector2(coordinate, 720), Style.accent(), 1.0 / _factor())
+		else:
+			draw_line(Vector2(0, coordinate), Vector2(1280, coordinate), Style.accent(), 1.0 / _factor())
 	draw_set_transform(Vector2.ZERO)
+
+## Края/центры видимых соседей и рабочего поля; расстояние задаётся в пикселях экрана.
+func _snap_guides(rect: Rect2, resizing: bool) -> Rect2:
+	var targets: Array[Array] = [[0.0, 640.0, 1280.0], [48.0, 384.0, 720.0]]
+	for index: int in items.size():
+		if index == selection or not _visible(items[index]):
+			continue
+		var other := item_rect(index)
+		for axis: int in 2:
+			targets[axis].append_array([other.position[axis], other.get_center()[axis], other.end[axis]])
+	for axis: int in 2:
+		var anchors: Array = [rect.end[axis]] if resizing else [rect.position[axis], rect.get_center()[axis], rect.end[axis]]
+		var distance := minf(16.0, 6.0 / _factor())
+		var adjustment := 0.0
+		var target_value := 0.0
+		var found := false
+		for anchor: float in anchors:
+			for target: float in targets[axis]:
+				var delta := target - anchor
+				if absf(delta) < distance:
+					distance = absf(delta)
+					adjustment = delta
+					target_value = target
+					found = true
+		if found:
+			if resizing:
+				var extent := rect.size[axis] + adjustment
+				if extent < 32 or rect.position[axis] + extent > (1280 if axis == 0 else 720):
+					continue
+				rect.size[axis] = extent
+			else:
+				var position_value := rect.position[axis] + adjustment
+				if position_value < (0 if axis == 0 else 48) or position_value + rect.size[axis] > (1280 if axis == 0 else 720):
+					continue
+				rect.position[axis] = position_value
+			_guides.append({"axis": axis, "value": target_value})
+	return rect
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseButton and event.pressed:
@@ -98,6 +143,7 @@ func _gui_input(event: InputEvent) -> void:
 			accept_event()
 			return
 		if event.button_index in [MOUSE_BUTTON_MIDDLE, MOUSE_BUTTON_RIGHT]:
+			_guides.clear()
 			_drag = "pan"
 			accept_event()
 			return
@@ -129,6 +175,7 @@ func _input(event: InputEvent) -> void:
 	if _drag.is_empty():
 		return
 	if event is InputEventMouseMotion:
+		_guides.clear()
 		if _drag == "pan":
 			pan += event.relative
 		else:
@@ -142,10 +189,13 @@ func _input(event: InputEvent) -> void:
 			else:
 				_draft.size = (_original.size + offset).snapped(Vector2(8, 8)).max(Vector2(32, 32))
 				_draft.size = _draft.size.min(Vector2(1280, 720) - _draft.position)
+			if guides_enabled and not event.alt_pressed:
+				_draft = _snap_guides(_draft, _drag == "resize")
 		queue_redraw()
 	elif event is InputEventMouseButton and not event.pressed:
 		var kind := _drag
 		_drag = ""
+		_guides.clear()
 		if kind in ["move", "resize"] and selection >= 0 and _draft != _original:
 			changed.emit(selection, _draft)
 		queue_redraw()

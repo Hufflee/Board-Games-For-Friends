@@ -25,6 +25,8 @@ func act(r: RefCounted, seat: int, kind: String, data: Dictionary = {}) -> bool:
 
 func focus(r: RefCounted) -> void:
 	for i in r.players.size():
+		if r.hands[i].is_empty():
+			continue
 		check(act(r, i, "ready"), "Готовность места %d" % i)
 
 func _init() -> void:

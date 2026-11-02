@@ -178,6 +178,10 @@ func _init_steam() -> void:
 	steam_ok = ok
 	if not ok:
 		return
+	# Дать нестабильному каналу восстановиться до разрыва самого транспорта.
+	if steam.has_method("setGlobalConfigValueInt32"):
+		steam.setGlobalConfigValueInt32(24, 30000) # NETWORKING_CONFIG_TIMEOUT_INITIAL
+		steam.setGlobalConfigValueInt32(25, 45000) # NETWORKING_CONFIG_TIMEOUT_CONNECTED
 	my_name = steam.getPersonaName()
 	my_steam_id = steam.getSteamID()
 	player_stats = PlayerStatsStore.new("user://player_statistics_%d_v1.json"%my_steam_id)
@@ -602,6 +606,7 @@ func _on_join_requested(id: int, _friend_id: int) -> void:
 
 func _on_connected_to_server() -> void:
 	_dbg("connected")
+	_configure_enet_timeout(1)
 	_rpc_hello.rpc_id(1, my_name, my_steam_id)
 
 
@@ -632,8 +637,17 @@ func rejoin() -> void:
 			join_enet(str(last_join["ip"]))
 
 
-func _on_peer_connected(_id: int) -> void:
-	pass  # ждём _rpc_hello с именем
+func _on_peer_connected(id: int) -> void:
+	_configure_enet_timeout(id)
+	# Данные участника придут отдельно через _rpc_hello.
+
+
+func _configure_enet_timeout(id: int) -> void:
+	var peer := multiplayer.multiplayer_peer
+	if peer is ENetMultiplayerPeer:
+		var remote: ENetPacketPeer = peer.get_peer(id)
+		if remote != null:
+			remote.set_timeout(32, 20000, 45000)
 
 
 func _on_peer_disconnected(id: int) -> void:
@@ -1415,6 +1429,8 @@ func _process(delta: float) -> void:
 			_push_state()
 		return
 	if mind != null:
+		if mind.tick(delta):
+			_push_state()
 		return
 	if pkr != null:
 		if pkr.tick(delta):

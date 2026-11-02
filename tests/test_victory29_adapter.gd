@@ -21,7 +21,7 @@ func _run() -> void:
 		var view := {"players": players, "phase": "game_over", "winner": 1, "winners": [1], "won": true,
 			"roles": [0, 1, 2, 3, 0, 1, 2, 3, 0, 1], "mode": "teams"}
 		var expected: Array = [1]
-		if id in ["tip_top", "tip_top_18", "the_gang"]:
+		if id in ["the_mind", "tip_top", "tip_top_18", "the_gang"]:
 			expected = range(10)
 		elif id in ["dangerous_words", "wavelength", "word_slam"]:
 			expected = [1, 3, 5, 7, 9]
@@ -32,7 +32,7 @@ func _run() -> void:
 		check(out.winners.size() + out.others.size() == 10, "%s: все участники учтены ровно один раз" % id)
 		view.phase = "play"
 		check(not adapter.resolve(id, view).finished, "%s: не показывать промежуточный результат" % id)
-	for id: String in ["tip_top", "tip_top_18", "the_gang", "hues_and_cues"]:
+	for id: String in ["the_mind", "tip_top", "tip_top_18", "the_gang", "hues_and_cues"]:
 		var out: Dictionary = adapter.resolve(id, {"players": players, "phase": "game_over", "won": false, "winners": [], "coop": true})
 		check(out.winners.is_empty() and out.others.size() == 10, "%s: кооперативный проигрыш" % id)
 	var pi: Dictionary = adapter.resolve("phantom_ink", {"players": players, "phase": "game_over", "winner": -1, "roles": [0, 1, 2, 3]})
