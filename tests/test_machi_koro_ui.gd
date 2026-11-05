@@ -71,6 +71,18 @@ func _run() -> void:
 	await shot("mk_table_light")
 	check(app.screen.city_panel.get_global_rect().end.y <= 720 and app.screen.landmark_panel.get_global_rect().end.y <= 720, "нижние панели в 720 px")
 	check(app.screen.market_grid.columns >= 5, "рынок имеет читаемую сетку")
+	var art_script: Script = load("res://games/machi_koro/ui/mk_art.gd")
+	var data_script: Script = load("res://games/machi_koro/logic/mk_data.gd")
+	var checked_types := {}
+	for definition: Dictionary in data_script.catalog().values():
+		var kind := str(definition.icon)
+		if not checked_types.has(kind):
+			var icon: Texture2D = art_script.type_icon(kind)
+			check(icon != null and icon.get_image().get_used_rect().has_area(), "видимый значок типа «%s»" % kind)
+			checked_types[kind] = true
+	for card: Control in app.screen.market_grid.get_children():
+		check(card.find_child("EnterpriseIcon", true, false) is TextureRect, "значок на карте рынка «%s»" % card.id)
+	check(app.screen.city_cards.get_child(0).find_child("EnterpriseIcon", true, false) is TextureRect, "значок на мини-карте города")
 	check(app.screen.side_col.get_child(1).icon != null, "игрок обозначен общей цветной точкой")
 	await click(button("2 кубика"))
 	check(app.screen.dice_count == 2, "выбор двух кубиков мышью")

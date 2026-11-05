@@ -72,7 +72,30 @@ func _ready() -> void:
 	info.clip_text = true
 	info.mouse_filter = MOUSE_FILTER_IGNORE
 	info.add_theme_color_override("font_color", color.lightened(0.25) if Style.dark() else color)
-	col.add_child(info)
+	var kind := str(definition.get("icon", ""))
+	var icon_texture := Art.type_icon(kind)
+	if icon_texture == null:
+		col.add_child(info)
+	else:
+		var details := Style.row(6)
+		details.alignment = BoxContainer.ALIGNMENT_CENTER
+		details.mouse_filter = MOUSE_FILTER_IGNORE
+		var badge := PanelContainer.new()
+		badge.add_theme_stylebox_override("panel", Style.box(Color("f5efdf"), 3))
+		badge.size_flags_vertical = SIZE_SHRINK_CENTER
+		badge.mouse_filter = MOUSE_FILTER_IGNORE
+		var icon := TextureRect.new()
+		icon.name = "EnterpriseIcon"
+		icon.texture = icon_texture
+		icon.custom_minimum_size = Vector2.ONE * (26 if large else 18)
+		icon.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		icon.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		icon.mouse_filter = MOUSE_FILTER_IGNORE
+		badge.add_child(icon)
+		details.add_child(badge)
+		info.clip_text = false
+		details.add_child(info)
+		col.add_child(details)
 	if large:
 		var text := Style.label(str(definition.text), 18)
 		text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
