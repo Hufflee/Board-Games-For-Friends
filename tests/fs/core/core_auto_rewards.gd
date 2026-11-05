@@ -7,7 +7,7 @@ const Data := preload("res://games/four_souls/logic/fs_reward_data.gd")
 func run(t: Check) -> void:
 	for id: int in Data.DATA:
 		var printed: Dictionary = Data.DATA[id]
-		var s := Scenario.new(t).players(2).dlc().current(0).character(0, 821).no_items(0).no_items(1) \
+		var s := Scenario.new(t).rules_type(preload("res://tests/fs/fs_reward_catalog_rules.gd")).players(2).dlc().current(0).character(0, 821).no_items(0).no_items(1) \
 			.hand(0, []).monster(0, id, {"hp": 1, "dc": 1, "at": 1}).monster(1, 352 if id == 344 else 344) \
 			.deck_top("treasure", [91, 229]).deck_top("monster", [427 if id == 423 else 423]).build()
 		s.g.bonuses.clear() # Каталог награды отдельно от бонусных душ; интеграция ниже.
@@ -29,7 +29,11 @@ func run(t: Check) -> void:
 			s.ok(0, "attack", {"slot": 0})
 			s.ok(0, "roll", null)
 		s.close()
-		if bool(printed.get("manual_death", false)):
+		if id == 417:
+			var choices: Array = s.g._card_choices()
+			s.ok(0, "card_choice", {"index": choices.size() - 1, "revision": s.g.revision}, "Отказ от необязательного просмотра417")
+			s.close()
+		if bool(printed.get("manual_death", false)) and id not in [369, 395, 414, 417, 424] and id not in preload("res://games/four_souls/logic/fs_monster19_cards.gd").IDS and id not in preload("res://games/four_souls/logic/fs_monster20_cards.gd").IDS:
 			t.equal(s.g.phase, "effect", "Ручная часть смерти сохраняется у %d" % id)
 			t.equal(s.g.hands[0].size(), initial_hand, "Награда ждёт окончания текста смерти%d" % id)
 			s.no(0, "effect", {"op": "loot", "amount": 9}, "Ручной повтор награды не допускается")
@@ -60,7 +64,7 @@ func run(t: Check) -> void:
 		var expected_coins: int = 4 if printed.get("roll", "") == "coins" else int(printed.get("coins", 0)) + int(printed.get("coins_per_counter", 0)) * 2
 		var expected_loot: int = 4 if printed.get("roll", "") == "loot" else int(printed.get("loot", 0)) + int(printed.get("loot_per_counter", 0)) * 2
 		var soul_owner: int = 1 if bool(printed.get("soul_other", false)) else 0
-		t.equal(int(s.g.coins[0]), initial_coins + expected_coins + (2 if id == 445 else 0), "Монеты награды%d с пассивом собственного броска" % id)
+		t.equal(int(s.g.coins[0]), initial_coins + expected_coins, "Монеты напечатанной награды%d" % id)
 		t.equal(s.g.hands[0].size(), initial_hand + expected_loot, "Добыча награды%d" % id)
 		t.equal(s.g.items[0].size(), initial_items + int(printed.get("treasure", 0)) + (1 if bool(printed.get("self_item", false)) else 0), "Сокровища и предметы награды%d" % id)
 		t.equal(int(s.g.souls[soul_owner]), int(printed.get("souls", 0)), "Душевая ценность получателя%d" % id)

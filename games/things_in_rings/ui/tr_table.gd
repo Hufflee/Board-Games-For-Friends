@@ -173,7 +173,8 @@ func _rebuild() -> void:
 		b.tooltip_text = nick.text
 		b.add_child(nick)
 		nick.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-		TurnNameGlow.apply(nick, waiting.has(seat) if phase == "blind" else seat == active and phase not in ["postgame", "game_over"])
+		var judging_author: int = int(view.get("pending", {}).get("by", -1)) if phase == "judge" else -1
+		TurnNameGlow.apply(nick, waiting.has(seat) if phase == "blind" else (seat == active or seat == judging_author) and phase not in ["postgame", "game_over"])
 	_left.add_child(Style.label("З — знающий%s · карт: %d" % [" · ✓ — поставил" if blind_mode else "", view.deck_left], 12, Style.muted()))
 	_left.add_child(Style.label("Передайте экран и нажмите своё имя." if view.get("hotseat", false) else "Ваши карты видны только вам.", 12, Style.muted()))
 	_margin.add_theme_constant_override("margin_bottom", 16 if phase in ["choose_rules", "judge", "postgame", "game_over"] else 152)
@@ -472,6 +473,8 @@ func preview_card(id: int) -> void:
 	_show_preview_now(id)
 
 func _show_preview_now(id: int) -> void:
+	if preload("res://hub/card_magnifier.gd").offer(self):
+		return
 	_preview_generation += 1
 	_picture.texture = Data.texture(id)
 	_picture.get_node("CardOutline").show()

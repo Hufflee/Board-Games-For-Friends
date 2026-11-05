@@ -122,6 +122,17 @@ func _start_round() -> void:
 
 
 func _roll() -> void:
+	if catalog_mode == "basic":
+		for category: String in WSData.CATEGORIES:
+			var indices := range(WSData.story_pool(category).size())
+			for index: int in range(indices.size() - 1, 0, -1):
+				var other := rng.randi_range(0, index)
+				var previous: int = indices[index]
+				indices[index] = indices[other]
+				indices[other] = previous
+			catalog_order[category] = []
+			for index: int in indices.slice(0, WSData.STORY[category].size()):
+				catalog_order[category].append("%s:%d" % [category, index])
 	roll = 1
 	word = str(card["words"][0])
 
@@ -173,6 +184,8 @@ func set_holders(seat: int, rows: Array) -> bool:
 				continue
 			if not valid_card(str(id)) or seen.has(str(id)):
 				return false
+			if not catalog_order.get(str(id).get_slice(":", 0), []).has(str(id)):
+				return false
 			seen[str(id)] = true
 			r.append(str(id))
 		while not r.is_empty() and r.back() == "":
@@ -187,12 +200,12 @@ static func valid_card(id: String) -> bool:
 	if p.size() != 2 or not WSData.STORY.has(p[0]):
 		return false
 	var i := int(p[1])
-	return i >= 0 and i < WSData.STORY[p[0]].size() and p[1] == str(i)
+	return i >= 0 and i < WSData.story_pool(p[0]).size() and p[1] == str(i)
 
 
 static func card_word(id: String) -> String:
 	var p := id.split(":")
-	return WSData.STORY[p[0]][int(p[1])]
+	return WSData.story_pool(p[0])[int(p[1])]
 
 
 func point(seat: int, id: String) -> bool:

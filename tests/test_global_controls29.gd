@@ -82,11 +82,11 @@ func _run() -> void:
 	chat._input.grab_focus()
 	chat._input.text = "Проверка глобальных контролов"
 	await enter()
-	check(chat.expanded and not chat._input.has_focus(), "Submit отпустил фокус и сохранил чат")
+	check(chat.expanded and chat._input.has_focus(), "Submit сохранил фокус для следующего сообщения")
 	check(chat._input.text.is_empty(), "Submit очистил поле")
 	check(chat._log.get_parsed_text().contains("Проверка глобальных контролов"), "Сообщение доставлено")
 	await enter()
-	check(not chat.expanded, "Следующий Enter закрывает чат")
+	check(chat.expanded and chat._input.has_focus(), "Пустой Enter не отнимает фокус чата")
 	await enter()
 	check(chat.expanded and chat._input.has_focus(), "Enter открывает закрытый чат и фокусирует поле")
 	chat.expanded = false

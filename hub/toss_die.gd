@@ -21,6 +21,12 @@ var draggable := false:
 var state := "idle"  # idle, waiting, dragging, flying, settled, returning
 
 var _die: PerudoDie
+var max_face := 6:
+	set(v):
+		max_face = 8 if v == 8 else 6
+		if is_instance_valid(_die):
+			_die.sides = max_face
+			_die.value = clampi(_die.value, 1, max_face)
 var _vel := Vector2.ZERO
 var _spin := 0.0
 var _result := 0
@@ -79,7 +85,7 @@ func throw(vel: Vector2, result: int = 0) -> void:
 
 
 func set_result(f: int) -> void:
-	_result = clampi(f, 1, 6)
+	_result = clampi(f, 1, max_face)
 
 
 func _gui_input(e: InputEvent) -> void:
@@ -111,7 +117,7 @@ func _input(e: InputEvent) -> void:
 		_samples.append([Time.get_ticks_msec(), m, rotation])
 		while _samples.size() > 2 and Time.get_ticks_msec() - int(_samples[0][0]) > 90:
 			_samples.pop_front()
-		_die.value = randi_range(1, 6) if randf() < 0.15 else _die.value
+		_die.value = randi_range(1, max_face) if randf() < 0.15 else _die.value
 	elif e is InputEventMouseButton and e.button_index == MOUSE_BUTTON_LEFT and not e.pressed:
 		var a: Array = _samples[0]
 		var b: Array = _samples[_samples.size() - 1]
@@ -151,7 +157,7 @@ func _process(delta: float) -> void:
 	_flick += delta * clampf(speed / 60.0, 2.0, 24.0)
 	if _flick >= 1.0:
 		_flick = 0.0
-		_die.value = randi_range(1, 6)
+		_die.value = randi_range(1, max_face)
 	if speed < 40.0:
 		_rest += delta
 		if _result > 0 and _rest > 0.15:

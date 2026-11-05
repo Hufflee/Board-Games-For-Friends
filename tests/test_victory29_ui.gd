@@ -130,6 +130,7 @@ func _run() -> void:
 				await shot(id + "-" + theme)
 		await click(screen._buttons.get_node("ShowTable"))
 		check(not screen._surface.visible and screen._return.visible, id + ": реальный клик показывает стол")
+		check(not screen._burst.is_visible_in_tree(), id + ": процедурная вспышка тоже скрыта при просмотре стола")
 		if id in ["perudo", "stillion", "brodilka"]:
 			var layer: Control = table.get("_overlay") if id == "perudo" else table.get("_over") if id == "stillion" else table.get_node("FinalResults")
 			check(not layer.visible, id + ": известный старый финальный слой скрыт")
@@ -137,6 +138,7 @@ func _run() -> void:
 			await shot("not_a_hat-open-table")
 		await click(screen._return)
 		check(screen._surface.visible and not screen._return.visible, id + ": реальный возврат к результатам")
+		check(screen._burst.is_visible_in_tree() == not screen.outcome.get("winners", []).is_empty(), id + ": процедурная вспышка возвращается для любого числа победителей")
 		if id in ["perudo", "stillion", "brodilka"]:
 			var layer: Control = table.get("_overlay") if id == "perudo" else table.get("_over") if id == "stillion" else table.get_node("FinalResults")
 			check(layer.visible, id + ": старый слой восстановлен")

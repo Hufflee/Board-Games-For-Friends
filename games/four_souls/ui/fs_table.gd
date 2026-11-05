@@ -100,6 +100,8 @@ func _can_roll_die() -> bool:
 	if int(_v.seat) < 0:
 		return false
 	if _v.phase == "effect" or bool(_v.get("effect_pending", false)):
+		if bool(_v.get("card_automated", false)) and not bool(_v.get("card_roll_wait", false)) and not _v.resolving.has("reroll_request"):
+			return false
 		if _v.resolving.has("auto_reward") and not _v.resolving.has("reroll_request"):
 			if _v.resolving.has("reward_roll") and not bool(_v.resolving.get("post_reward_wait", false)):
 				return false
@@ -111,7 +113,7 @@ func _can_roll_die() -> bool:
 	if _pending_effect_roll():
 		return _v.seat == _v.stack.filter(func(e): return e.kind == "effect_roll").back().owner
 	return (
-		_v.seat == _v.current
+		_v.seat == int(_v.get("battle_roller15", _v.current))
 		and (
 			_v.phase == "battle_roll"
 			or (
@@ -158,6 +160,9 @@ func _exit_tree() -> void:
 func _changed(view: Dictionary, received: bool = true) -> void:
 	if view.is_empty():
 		return
+	if is_instance_valid(_popup) and _popup.has_meta("card_choice_revision") and int(_popup.get_meta("card_choice_revision")) != int(view.revision):
+		_popup.queue_free()
+		_popup = null
 	_drag_resume = _drag_entry
 	_end_card_drag()
 	# За одним компьютером: начался ход другого игрока — экран сам переходит к нему (через экран
@@ -267,6 +272,10 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 			button.add_theme_stylebox_override(state, compact)
 		button.pressed.connect(func(): _inventory(i))
 		details.add_child(button)
+		if int(player.get("eggs", 0)) > 0:
+			_note(details, "Жетоны-яйца: %d" % int(player.eggs))
+		if bool(player.get("respawn_egg17", false)):
+			_note(details, "Яйцо: возвращает монстра после смерти")
 		if int(player.get("skipped_turns", 0)) > 0:
 			_note(details, "Пропуск ходов: %d" % int(player.skipped_turns))
 		var health := HealthBar.new(int(player.hp), int(player.max_hp))
@@ -304,6 +313,8 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 						and view.seat == view.current
 						and view.battle < 0
 						and not view.attacked
+						and not bool(view.get("blind_only17", false))
+						and (view.get("forced_monster_slots", []).is_empty() or i in view.forced_monster_slots)
 						and int(view.get("forced_deck_attacks", 0)) == 0
 						and int(view.get("required_player_attacks", 0)) == 0
 						and not bool(m.get("untargetable", false))
@@ -317,12 +328,19 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 		var stats := "%d+ · ⚔%d" % [m.dc, m.at]
 		if int(m.get("counters", 0)) > 0:
 			stats += " · ●%d" % int(m.counters)
+		if int(m.get("eggs", 0)) > 0:
+			stats += " · яйца:%d" % int(m.eggs)
 		var stats_label := FSStyle.label(stats, FSStyle.CAP)
 		stats_label.tooltip_text = "Жетоны на монстре: %d" % int(m.get("counters", 0))
 		group.add_child(stats_label)
 	_note(center, "МАГАЗИН · каждое сокровище %d¢" % int(view.get("shop_price", 10)), FSStyle.BODY)
+	var market_scroll := ScrollContainer.new()
+	market_scroll.custom_minimum_size.y = 160
+	market_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	market_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	center.add_child(market_scroll)
 	var shop_row := FSStyle.hbox(8)
-	center.add_child(shop_row)
+	market_scroll.add_child(shop_row)
 	for i in view.shop.size():
 		var id: int = int(view.shop[i])
 		if id >= 0:
@@ -345,6 +363,11 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 						)
 					)
 			)
+	if int(view.get("loot_top20", -1)) >= 0:
+		var loot_col := FSStyle.vbox(4)
+		shop_row.add_child(loot_col)
+		_note(loot_col, "ВЕРХ ДОБЫЧИ")
+		_card(loot_col, int(view.loot_top20), Vector2(80, 104), func(): _card_dialog(int(view.loot_top20), "Сыграть верхнюю добычу", "loot_top20", {"card": int(view.loot_top20)}, bool(view.get("can_top_loot20", false)) and _can_play_hand()))
 	if view.room >= 0:
 		var room_col := FSStyle.vbox(4)
 		shop_row.add_child(room_col)
@@ -362,6 +385,12 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 					view.phase == "turn" and view.seat == view.current
 				)
 		)
+	for index in view.get("extra_rooms20", []).size():
+		var source: Dictionary = view.extra_rooms20[index]
+		var room_col := FSStyle.vbox(4)
+		shop_row.add_child(room_col)
+		_note(room_col, "КОМНАТА %d" % (index + 2))
+		_card(room_col, int(source.id), Vector2(80, 104), func(): _room_dialog20(index))
 	var bonus_row := FSStyle.hbox(4)
 	center.add_child(bonus_row)
 	for id in view.bonuses:
@@ -408,13 +437,19 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 	_die.draggable = _can_roll_die() and _die.state in ["idle", "waiting"]
 	if _die.draggable and _die.state == "idle":
 		_die.wait_for_roll()
+	if _last_roll < 0 and _die.state in ["idle", "waiting"]:
+		_die.max_face = int(view.get("die_sides20", 6))
 	if int(view.roll_no) > _last_roll:
 		if _last_roll >= 0 and int(view.last_roll) > 0:
+			_die.max_face = int(view.get("last_die_sides20", 6))
+			var face: int = int(view.get("last_raw_die20", view.last_roll)) if _die.max_face == 8 else int(view.last_roll)
 			if _die.state == "flying":
-				_die.set_result(int(view.last_roll))
+				_die.set_result(face)
 			else:
-				_die.throw(Vector2(-800, -250), int(view.last_roll))
+				_die.throw(Vector2(-800, -250), face)
 		_last_roll = int(view.roll_no)
+	elif _die.state in ["idle", "waiting"]:
+		_die.max_face = int(view.get("die_sides20", 6))
 
 
 ## Окно своих карт в чужой ход (первые 10 с хода): сколько осталось по часам хоста.
@@ -441,7 +476,7 @@ func _can_play_hand() -> bool:
 	if _v.seat < 0: return false
 	if not _off_turn_ok(): return false
 	if _v.phase == "discard": return _v.seat == _v.current
-	return _v.phase in ["turn","priority","battle_roll","death"] and not _v.players[int(_v.seat)].dead and (bool(_v.players[int(_v.seat)].ready) or _v.seat == _v.current and int(_v.free_loot) > 0)
+	return _v.phase in ["turn","priority","battle_roll","death"] and not _v.players[int(_v.seat)].dead and (bool(_v.get("unlimited_loot",false)) or bool(_v.players[int(_v.seat)].ready) or int(_v.get("bonus_loot_plays", 0)) > 0 or _v.seat == _v.current and int(_v.free_loot) > 0)
 func _hands(view: Dictionary) -> void:
 	var row := FSStyle.hbox(20); row.name="PersonalCards"; _body.add_child(row)
 	if view.seat != view.current:
@@ -449,6 +484,7 @@ func _hands(view: Dictionary) -> void:
 		var player: Dictionary = view.players[int(view.current)]
 		_note(opponent,"%s · открытые предметы и закрытая рука" % player.name)
 		var public_row := FSStyle.hbox(4); opponent.add_child(public_row)
+		_card(public_row, int(player.char), Vector2(64, 86), func(): _card_dialog(int(player.char), "Закрыть просмотр", "", null, false), "c:%d" % int(view.current))
 		for item: Dictionary in player.items:
 			_card(public_row,int(item.id),Vector2(64,86),func(): _card_dialog(int(item.id),"Закрыть просмотр","",null,false),"i:%d:%d" % [int(view.current), int(item.id)])
 		var backs: Array = []
@@ -462,10 +498,13 @@ func _hands(view: Dictionary) -> void:
 	var own := FSStyle.vbox(2); own.size_flags_horizontal=Control.SIZE_EXPAND_FILL; own.size_flags_stretch_ratio=1.35; row.add_child(own)
 	_note(own,"ВАШИ КАРТЫ" if view.seat==view.current else "ВАШИ ОТВЕТНЫЕ КАРТЫ · лут и способности")
 	var entries: Array = []
+	entries.append({"key": "character:%d" % int(view.seat), "id": int(view.players[int(view.seat)].char), "character": true, "texture": FSData.texture(int(view.players[int(view.seat)].char)), "material": _charge_material("c:%d" % int(view.seat))})
 	for i in view.players[int(view.seat)].items.size():
 		var item: Dictionary = view.players[int(view.seat)].items[i]
-		if view.seat != view.current and FSData.item_response_kind(int(item.id)) in ["passive","none"]: continue
-		entries.append({"key":"item:%d"%item.id,"id":int(item.id),"item":i,"texture":FSData.texture(int(item.id)),"material":_charge_material("i:%d:%d" % [int(view.seat), int(item.id)])})
+		if view.seat != view.current and _item_kind20(item) in ["passive","none"]: continue
+		entries.append({"key":"item:%d"%item.id,"id":int(item.id),"item":i,"starting":bool(item.eternal),"texture":FSData.texture(int(item.id)),"material":_charge_material("i:%d:%d" % [int(view.seat), int(item.id)])})
+	if bool(view.get("can_top_loot20", false)) and int(view.get("loot_top20", -1)) >= 0:
+		entries.append({"key": "top_loot:%d" % int(view.loot_top20), "id": int(view.loot_top20), "top_loot20": true, "texture": FSData.texture(int(view.loot_top20))})
 	for id in view.hand:
 		if view.seat!=view.current and FSData.response_kind(int(id))=="own_turn": continue
 		entries.append({"key":"loot:%d"%id,"id":int(id),"texture":FSData.texture(int(id))})
@@ -496,10 +535,23 @@ func _fan(parent: Control, entries: Array, key: String, movable: bool) -> Privat
 		fan.drag_ended.connect(_end_card_drag)
 		fan.drop_action = _drop_card
 	fan.order = (_hand_orders.get(key, []) as Array).duplicate()
+	if movable:
+		var character_key := "character:%d" % int(_v.seat)
+		fan.order.erase(character_key)
+		var beside := 0
+		for entry: Dictionary in entries:
+			if bool(entry.get("starting", false)):
+				beside = maxi(0, fan.order.find(str(entry.key)))
+				break
+		fan.order.insert(beside, character_key)
 	fan.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	fan.chosen.connect(
 		func(entry):
-			if entry.has("item"):
+			if bool(entry.get("character", false)):
+				_character_dialog()
+			elif bool(entry.get("top_loot20", false)):
+				_card_dialog(int(entry.id), "Сыграть верхнюю добычу", "loot_top20", {"card": int(entry.id)}, bool(_v.get("can_top_loot20", false)) and _can_play_hand())
+			elif entry.has("item"):
 				_item_dialog(int(entry.item))
 			else:
 				_card_dialog(
@@ -558,6 +610,10 @@ func _layout_play_zone() -> void:
 func _can_drop_entry(entry: Dictionary) -> bool:
 	if entry.is_empty() or _v.is_empty() or Net.paused or bool(_v.get("game_paused", false)):
 		return false
+	if bool(entry.get("character", false)):
+		return _can_use_character()
+	if bool(entry.get("top_loot20", false)):
+		return int(entry.id) == int(_v.get("loot_top20", -1)) and bool(_v.get("can_top_loot20", false)) and _can_play_hand()
 	if entry.has("item"):
 		var index: int = int(entry.item)
 		if int(_v.seat) < 0:
@@ -565,7 +621,7 @@ func _can_drop_entry(entry: Dictionary) -> bool:
 		var items: Array = _v.players[int(_v.seat)].items
 		if index < 0 or index >= items.size():
 			return false
-		var ability := FSData.item_response_kind(int(items[index].id))
+		var ability := _item_kind20(items[index])
 		if _can_trigger_item(int(items[index].id)):
 			return true
 		if not _can_use_item():
@@ -603,9 +659,13 @@ func _drop_card(entry: Dictionary, screen: Vector2) -> bool:
 	):
 		return false
 	_end_card_drag()
-	if entry.has("item"):
+	if bool(entry.get("character", false)):
+		_send("character", null)
+	elif bool(entry.get("top_loot20", false)):
+		_send("loot_top20", {"card": int(entry.id)})
+	elif entry.has("item"):
 		var item: Dictionary = _v.players[int(_v.seat)].items[int(entry.item)]
-		var ability := FSData.item_response_kind(int(item.id))
+		var ability := _item_kind20(item)
 		if ability in ["hybrid", "conditional", "passive"] or int(item.id) == 70:
 			_item_dialog(int(entry.item))
 		else:
@@ -617,6 +677,20 @@ func _drop_card(entry: Dictionary, screen: Vector2) -> bool:
 
 func _can_use_item() -> bool:
 	return _v.seat >= 0 and _off_turn_ok() and not _v.players[int(_v.seat)].dead and _v.phase in ["turn","priority","battle_roll","death"]
+func _item_kind20(item: Dictionary) -> String:
+	if int(item.id) == 1:
+		return "tap" if item.get("prototype_texts20", []).any(func(text): return int(text.begin) == 2) else "passive"
+	return FSData.item_response_kind(int(item.id))
+func _can_use_character() -> bool:
+	return _can_use_item() and bool(_v.players[int(_v.seat)].ready)
+func _character_dialog() -> void:
+	var col := _card_dialog(int(_v.players[int(_v.seat)].char), "Повернуть персонажа → ещё один розыгрыш добычи", "character", null, _can_use_character())
+	if _v.players[int(_v.seat)].items.any(func(item): return int(item.id) == 5):
+		var mushroom := _button(col, "Повернуть персонажа → жетон Волшебного гриба", "mushroom_counter20", null)
+		mushroom.disabled = not _can_use_character()
+	if int(_v.get("spider_tokens15", 0)) > 0:
+		var remove := _button(col, "Повернуть персонажа → убрать жетон паука", "remove_spider15", null)
+		remove.disabled = not _can_use_character()
 func _can_trigger_item(id: int) -> bool:
 	return _v.seat >= 0 and _v.phase in ["turn", "priority", "battle_roll", "death"] and FSData.manual_item_trigger(id)
 func _item_condition_button(parent: Control, index: int, id: int) -> Button:
@@ -626,10 +700,30 @@ func _item_condition_button(parent: Control, index: int, id: int) -> Button:
 	return button
 func _item_dialog(index: int) -> void:
 	var item: Dictionary = _v.players[int(_v.seat)].items[index]
-	var ability := FSData.item_response_kind(int(item.id))
+	var ability := _item_kind20(item)
 	var col := _card_dialog(int(item.id),"Повернуть → эффект","activate",{"item":index,"tap":true},_can_use_item() and not item.tapped and ability in ["tap","hybrid","conditional"])
-	var use := _item_condition_button(col, index, int(item.id))
-	col.move_child(use,col.get_child_count()-2)
+	if int(item.id) == 173:
+		var inspect := _button(col, "Посмотреть верхнее сокровище", "inspect_item13")
+		inspect.disabled = _v.seat != _v.current or _v.phase not in ["turn","priority","battle_roll","death"]
+		col.move_child(inspect, col.get_child_count()-2)
+	if int(item.id) == 248:
+		var kill := _button(col, "Сбросить 3 жетона → убить", "activate", {"item": index, "ability": "kill"})
+		kill.disabled = not _can_use_item() or int(item.counters) < 3
+		col.move_child(kill, col.get_child_count() - 2)
+	elif ability in ["paid", "hybrid"] or FSData.manual_item_trigger(int(item.id)):
+		var use := _item_condition_button(col, index, int(item.id))
+		col.move_child(use, col.get_child_count()-2)
+func _room_dialog20(index: int) -> void:
+	var source: Dictionary = _v.extra_rooms20[index]
+	var ability := _item_kind20(source) if bool(source.get("room_item20", false)) else "passive"
+	var can_activate: bool = _v.seat == _v.current and _can_use_item() and ability in ["tap", "paid", "hybrid", "conditional"] and (ability == "paid" or not bool(source.get("tapped", false)))
+	var col := _card_dialog(int(source.id), "Применить способность комнаты", "room_activate20", {"item": index}, can_activate)
+	var replace := _button(col, "Сменить эту комнату", "room", {"index": index})
+	replace.disabled = _v.seat != _v.current or _v.phase != "turn"
+	col.move_child(replace, col.get_child_count() - 2)
+	if source.has("counters"):
+		_note(col, "Жетонов: %d" % int(source.counters))
+
 func _switch(seat: int) -> void:
 	_unlocked = -2; Net.fs_switch_seat(seat)
 func _card(parent: Control,id: int,dimensions: Vector2,callback: Callable,charge_key: String = "") -> void:
@@ -710,6 +804,8 @@ func _schedule_preview(id: int) -> void:
 
 
 func _show_preview(id: int) -> void:
+	if preload("res://hub/card_magnifier.gd").offer(self):
+		return
 	if Net.paused or bool(_v.get("game_paused", false)):
 		return
 	_hide_preview()
@@ -758,8 +854,14 @@ func _inventory(seat: int) -> void:
 		var group := FSStyle.vbox(4); item_row.add_child(group)
 		_card(group,int(item.id),Vector2(104,144),func(): _show_preview(int(item.id)),"i:%d:%d" % [seat, int(item.id)])
 		_note(group,("Вечный · " if item.eternal else "") + ("Повёрнут" if item.tapped else "Готов") + " · %d" % int(item.counters))
+		if not item.get("stored_cards20", []).is_empty():
+			_note(group, "Карты под предметом")
+			var stored := FSStyle.hbox(4)
+			group.add_child(stored)
+			for id in item.stored_cards20:
+				_card(stored, int(id), Vector2(56, 76), func(): _show_preview(int(id)))
 		if seat == _v.seat:
-			var ability := FSData.item_response_kind(int(item.id))
+			var ability := _item_kind20(item)
 			var use := _button(group,"Повернуть → эффект","activate",{"item":i,"tap":true})
 			use.disabled = item.tapped or not _can_use_item() or not ability in ["tap","hybrid","conditional"]
 			_item_condition_button(group, i, int(item.id))
@@ -816,6 +918,9 @@ func _controls(col: Control) -> void:
 		# свои карты в чужой ход — только первые 10 с хода
 		var left := _off_turn_left()
 		_note(col, "Свои карты в чужой ход: ещё %d с" % ceili(left) if left > 0.0 else "Свои карты в чужой ход — только в первые 10 с хода")
+	if _v.seat >= 0 and int(_v.get("spider_tokens15", 0)) > 0 and _v.phase in ["turn", "priority", "battle_roll", "death"]:
+		var spider := _button(col, "Повернуть персонажа → убрать паука", "remove_spider15")
+		spider.disabled = not bool(_v.players[int(_v.seat)].ready) or not _off_turn_ok()
 	if _v.phase == "priority":
 		for e in _v.stack:
 			_note(col,FSData.effect_title(e))
@@ -835,18 +940,26 @@ func _controls(col: Control) -> void:
 			_effect_controls(col)
 		return
 	if _v.phase in ["turn","priority"] and _v.seat == _v.current and _v.battle < 0 and int(_v.get("battle_player", -1)) < 0:
+		if bool(_v.get("blind_only17", false)):
+			_note(col, "Добавочная атака доступна только против колоды монстров.")
 		_note(col,"Лут за ход: %d · персонаж %s" % [int(_v.free_loot),"готов" if _v.players[int(_v.seat)].ready else "повёрнут"])
 		var required: int = int(_v.get("forced_deck_attacks", 0))
 		var player_required: int = int(_v.get("required_player_attacks", 0))
-		if player_required > 0:
-			_note(col, "Завоеватель: выберите игрока. Защита цели4+.")
+		for index in _v.get("familiar_targets15", []).size():
+			var target: Dictionary = _v.familiar_targets15[index]
+			var familiar := _button(col, "Атаковать: " + FSData.title(int(target.card)) + " · " + str(_v.players[int(target.seat)].name), "attack_familiar15", {"index": index})
+			familiar.disabled = _v.attacked or bool(_v.get("blind_only17", false)) or required > 0 or player_required > 0 or not _v.get("forced_monster_slots", []).is_empty()
+		if not _v.get("player_attack_targets", []).is_empty() and _v.get("forced_monster_slots", []).is_empty():
+			_note(col, "Атака игрока: выберите цель.")
 			for target: int in _v.get("player_attack_targets", []):
-				_button(col, "Атаковать игрока: " + str(_v.players[target].name), "attack_player", {"target": target})
+				_button(col, "Атаковать игрока: " + str(_v.players[target].name) + " · %d+" % int(_v.get("player_attack_defense16", {}).get(target, 4)), "attack_player", {"target": target})
 		if required > 0:
 			_note(col, "Засада: ещё атак верха колоды — %d" % required)
-		_button(col,"Закончить ход","end",null,true).disabled = required > 0 or player_required > 0
+		if not _v.get("forced_monster_slots", []).is_empty():
+			_note(col, "Обязательная атака: выберите отмеченного монстра в ряду.")
+		_button(col,"Закончить ход","end",null,true).disabled = required > 0 or player_required > 0 or not _v.get("forced_monster_slots", []).is_empty()
 		var blind_attack := FSStyle.button("Атаковать верх колоды",FSStyle.CAP)
-		blind_attack.disabled = _v.attacked or (player_required > 0 and required == 0)
+		blind_attack.disabled = not _v.get("forced_monster_slots", []).is_empty() or (_v.attacked and not bool(_v.get("gold_deck_attacks", false))) or (player_required > 0 and required == 0)
 		blind_attack.pressed.connect(_choose_top_attack); col.add_child(blind_attack)
 		_button(col,"Купить вслепую · 10¢","buy",{"slot":-1}).disabled = _v.bought
 		if int(_v.get("discard_treasure", -1)) >= 0:
@@ -884,6 +997,13 @@ func _spawn_controls(col: Control) -> void:
 		_button(col, "Выложить Утопца · ячейка %d" % (slot + 1), "place_bloat", {"slot": slot})
 
 func _effect_controls(col: Control) -> void:
+	if bool(_v.get("card_automated", false)):
+		_note(col, "Эффект выполняет игра. Выберите цель или вариант." if not _v.get("card_choices", []).is_empty() else "Бросьте кубик мышью." if bool(_v.get("card_roll_wait", false)) or _v.resolving.has("reroll_request") else "Эффект выполняется автоматически.")
+		if not _v.get("card_choices", []).is_empty():
+			var choose := FSStyle.primary("Выбрать цель / вариант")
+			choose.pressed.connect(_card_choice_dialog)
+			col.add_child(choose)
+		return
 	if _v.resolving.has("reward_soul_targets"):
 		_note(col, "Выберите другого игрока: он получит эту карту души. Сокровища уже выданы активному игроку.")
 		for target: int in _v.resolving.reward_soul_targets:
@@ -973,6 +1093,42 @@ func _effect_controls(col: Control) -> void:
 			peek_card.mouse_entered.connect(func(): _show_preview(int(id))); peek_card.mouse_exited.connect(_hide_preview)
 			var row := FSStyle.hbox(4); col.add_child(row)
 			for entry in [["↑","top"],["↓","bottom"],["Рука","hand"],["Предмет","item"],["Сброс","discard"]]: _button(row,entry[0],"peek_take",{"card":int(id),"dest":entry[1]})
+## Выбор в отдельном окне: кнопки не прячутся под нижней рукой.
+func _card_choice_dialog() -> void:
+	var col := _dialog()
+	_popup.set_meta("card_choice_revision", int(_v.revision))
+	_note(col, FSData.title(int(_v.resolving.card)), FSStyle.BODY)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.custom_minimum_size = Vector2(468, minf(440, maxf(160, size.y - 216)))
+	col.add_child(scroll)
+	var options := FSStyle.vbox(8)
+	options.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(options)
+	for index in _v.get("card_choices", []).size():
+		var option := _button(options, str(_v.card_choices[index]), "card_choice", {"index": index, "revision": int(_v.revision)})
+		option.clip_text = true
+		option.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		var card_id: int = int(_v.get("card_choice_previews", [])[index]) if index < _v.get("card_choice_previews", []).size() else -1
+		if card_id >= 0:
+			option.mouse_entered.connect(func(): _show_preview(card_id))
+			option.mouse_exited.connect(_hide_preview)
+	for revealed: Dictionary in _v.peek.get("hands", []):
+		_note(options, str(_v.players[int(revealed.seat)].name))
+		for id in revealed.cards:
+			var card := FSStyle.button(FSData.title(int(id)), FSStyle.CAP)
+			options.add_child(card)
+			card.mouse_entered.connect(func(): _show_preview(int(id)))
+			card.mouse_exited.connect(_hide_preview)
+	for id in _v.peek.get("cards", []):
+		if int(id) in _v.get("card_choice_previews", []):
+			continue
+		var card := FSStyle.button(FSData.title(int(id)), FSStyle.CAP)
+		options.add_child(card)
+		card.mouse_entered.connect(func(): _show_preview(int(id)))
+		card.mouse_exited.connect(_hide_preview)
+	_close_button(col)
+
 func _death_controls(col: Control) -> void:
 	_note(col,"До принятия штрафа игроки могут ответить лутом или способностью.")
 	_note(col,"Потеряйте 1¢, одну карту лута и один невечный предмет.")
@@ -982,13 +1138,16 @@ func _death_controls(col: Control) -> void:
 	var item := OptionButton.new()
 	for i in _v.players[int(_v.seat)].items.size():
 		var data: Dictionary = _v.players[int(_v.seat)].items[i]
-		if not data.eternal: item.add_item(FSData.title(int(data.id)),i)
+		if not data.eternal and (int(_v.get("shadow_item15", -1)) < 0 or i == int(_v.shadow_item15)):
+			item.add_item(FSData.title(int(data.id)), i)
 	col.add_child(item)
 	var pay := FSStyle.primary("Принять штраф")
 	pay.pressed.connect(func(): _send("death",{"loot":loot.get_selected_id() if loot.item_count else -1,"item":item.get_selected_id() if item.item_count else -1})); col.add_child(pay)
 
 ## Неизвестные пассивы монстра выполняются вручную по его тексту, как в TTS.
 func _add_monster_trigger(slot: int, col: Control) -> void:
+	if Support.status(int(_v.monsters[slot].id)) == "auto":
+		return
 	var trigger := _button(col, "Срабатывание монстра · вручную", "monster_trigger", {"slot": slot})
 	trigger.disabled = not _can_use_item()
 	col.move_child(trigger, col.get_child_count() - 2)

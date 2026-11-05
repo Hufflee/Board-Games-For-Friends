@@ -303,6 +303,8 @@ func _add_card(parent: Control, id: int, dimensions: Vector2) -> void:
 
 
 func _show_preview(texture: Texture2D, card: Control) -> void:
+	if preload("res://hub/card_magnifier.gd").offer(self):
+		return
 	TGStyle.clear(_preview)
 	var image := TextureRect.new()
 	image.texture = texture

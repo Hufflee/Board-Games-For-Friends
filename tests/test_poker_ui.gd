@@ -109,6 +109,11 @@ func _run() -> void:
 			pre.pressed.emit()
 			await settle(2)
 			check((find("Pre_call") as Button).button_pressed, "премув отмечен")
+			(find("Pre_call") as Button).pressed.emit()
+			await settle(2)
+			check(table()._premove.is_empty() and not (find("Pre_call") as Button).button_pressed, "Повторное нажатие отменяет премув")
+			(find("Pre_call") as Button).pressed.emit()
+			await settle(2)
 			await shot("premove")
 			var me_name := str(net.pkr.players[0].name)
 			var log_from: int = net.pkr.log.size()
@@ -134,6 +139,17 @@ func _run() -> void:
 		await process_frame
 	await settle(4)
 	check(net.pkr.phase == "showdown", "раздача закончилась")
+	if not bool(net.pkr.result.get("fold_win", false)):
+		check(table()._win_delay > 0 and table()._disp_t == 0, "Перед перелётом фишек есть время рассмотреть комбинации")
+	net.pkr.shown[0] = [false, false]
+	net._push_state()
+	await settle(4)
+	var reveal_button := find("RevealCards") as Button
+	check(reveal_button != null, "На вскрытии есть отдельная кнопка открыть карты")
+	if reveal_button != null:
+		reveal_button.pressed.emit()
+		await settle(4)
+		check((net.pkr.shown[0] as Array).all(func(value): return bool(value)), "Нажатие открывает обе карты всем через сервер")
 	await shot("showdown")
 	# итоги сессии
 	net.pkr.hand_no = 12
@@ -152,4 +168,7 @@ func _run() -> void:
 	check(find("SessionOverlay") != null and (find("SessionOverlay") as Control).visible, "окно итогов сессии")
 	await shot("session")
 	print("ИТОГ: проверок %d, ошибок %d" % [checks, errors])
-	quit(1 if errors > 0 else 0)
+	app.queue_free()
+	net.leave()
+	await settle(8)
+	await root.get_node("Sfx").request_quit(1 if errors > 0 else 0)

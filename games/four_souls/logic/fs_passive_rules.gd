@@ -55,6 +55,7 @@ const EVENTS := ["coins", "attack_roll", "roll", "monster_death", "turn_end", "d
 ## Постоянные модификаторы атаки: свойства суммируются у всех действующих копий.
 ## Защита относится к монстрам в ход владельца; бросок и промах — к самому владельцу.
 const ATTACK_MODIFIERS := {
+	24: {"roll_bonus": 1, "ordinals": [1]},
 	34: {"monster_evasion": -1, "miss_faces": [1, 6]},
 	36: {"roll_bonus": 1, "ordinals": [1, 3, 5]},
 	118: {"monster_evasion": 1},
@@ -66,6 +67,7 @@ const ATTACK_MODIFIERS := {
 static func attack_modifiers(entries: Array, ordinal: int) -> Dictionary:
 	var result: Dictionary = {"monster_evasion": 0, "roll_bonus": 0, "miss_faces": []}
 	for entry: Dictionary in entries:
+		if int(entry.id) == 158 and int(entry.counters) >= 1 and ordinal == 1: result.roll_bonus += 2
 		var binding: Dictionary = ATTACK_MODIFIERS.get(int(entry.id), {})
 		result.monster_evasion += int(binding.get("monster_evasion", 0))
 		if ordinal in binding.get("ordinals", []):
@@ -84,8 +86,10 @@ static func attack_hits(value: int, evasion: int, modifiers: Dictionary) -> bool
 
 ## Условия по текущему здоровью не переписывают исходные характеристики монстра.
 const MONSTER_HEALTH_STATS := {
+	297: {"at_most": 2, "dc": -1},
 	345: {"at_most": 2, "dc": -1},
 	354: {"equals": 1, "at": 1},
+	385: {"equals": 1, "at": 1},
 	420: {"equals": 1, "dc": 2}
 }
 

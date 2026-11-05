@@ -13,7 +13,7 @@ func _index(s, seat: int, card: int) -> int:
 	return -1
 
 func run(t: Check) -> void:
-	var friend := Scenario.new(t).players(2).dlc().current(1).item(0, 7).hand(1, [475]).build()
+	var friend := Scenario.new(t).rules_type(preload("res://tests/fs/fs_legacy_manual_reward_rules.gd")).players(2).dlc().current(1).item(0, 7).hand(1, [475]).build()
 	friend.ok(1, "loot", {"card": 475})
 	friend.close()
 	t.equal(friend.g.items[0][_index(friend, 0, 7)].counters, 1, "Чужая Потерянная душа добавляет жетон Другу")
@@ -21,18 +21,18 @@ func run(t: Check) -> void:
 	_manual(friend, 0, 7)
 	friend.no(0, "effect", {"op": "counter", "target": 0, "item": _index(friend, 0, 7), "amount": 1}, "Автоматический жетон нельзя повторить вручную")
 	friend.no(0, "effect", {"op": "item_to_soul", "target": 0, "item": _index(friend, 0, 7)}, "Автоматическое превращение нельзя повторить вручную")
-	var own := Scenario.new(t).players(2).dlc().current(0).item(0, 7).hand(0, [475]).build()
+	var own := Scenario.new(t).rules_type(preload("res://tests/fs/fs_legacy_manual_reward_rules.gd")).players(2).dlc().current(0).item(0, 7).hand(0, [475]).build()
 	own.ok(0, "loot", {"card": 475})
 	own.close()
 	t.equal(own.g.items[0][_index(own, 0, 7)].counters, 0, "Собственная душа не добавляет жетон")
-	var third := Scenario.new(t).players(2).dlc().current(1).item(0, 7, {"counters": 2}).hand(1, [475]).build()
+	var third := Scenario.new(t).rules_type(preload("res://tests/fs/fs_legacy_manual_reward_rules.gd")).players(2).dlc().current(1).item(0, 7, {"counters": 2}).hand(1, [475]).build()
 	third.ok(1, "loot", {"card": 475})
 	third.close()
 	t.equal(third.zone_of(7), "soul:0", "Третий жетон переносит самого Друга в души")
 	t.equal(third.g.souls[0], 1, "Друг дал одну душу")
 	t.equal(_index(third, 0, 7), -1, "Превратившийся Друг перестал быть предметом")
 	third.inv("После автоматического превращения")
-	var moved := Scenario.new(t).players(3).dlc().current(2).item(0, 7).item(2, 13).soul(1, 475).build()
+	var moved := Scenario.new(t).rules_type(preload("res://tests/fs/fs_legacy_manual_reward_rules.gd")).players(3).dlc().current(2).item(0, 7).item(2, 13).soul(1, 475).build()
 	_manual(moved, 2, 13)
 	moved.effect(2, "steal_soul", {"target": 1, "item": 0})
 	moved.close()
@@ -40,7 +40,7 @@ func run(t: Check) -> void:
 	t.equal(moved.zone_of(475), "soul:2", "Душа не скопирована при краже")
 	t.equal(moved.g.souls[1], 0, "Прежний владелец больше не считает душу")
 	# Обязательная Карма сама открывает ручную панель, даже когда новое применение карт закрыто.
-	var karma := Scenario.new(t).players(3).dlc().current(1).item(0, 8).item(1, 243).build()
+	var karma := Scenario.new(t).rules_type(preload("res://tests/fs/fs_legacy_manual_reward_rules.gd")).players(3).dlc().current(1).item(0, 8).item(1, 243).build()
 	karma.g.tick(11.0)
 	t.check(not karma.g.off_turn_open(0), "У владельца Кармы истекло окно10с")
 	_manual(karma, 1, 243)
@@ -73,24 +73,24 @@ func run(t: Check) -> void:
 	reward.ok(1, "roll", null)
 	reward.close()
 	t.equal(reward.g.resolving.card, 8, "Награда монстра вызывает вложенную Карму")
-	reward.effect(0, "take_shop", {"target": 1, "item": 0})
-	reward.effect(0, "loot", {"target": 1, "amount": 1})
-	reward.effect(0, "take_shop", {"target": 2, "item": 1})
-	reward.effect(0, "loot", {"target": 2, "amount": 1})
-	reward.ok(0, "effect_done", null)
-	t.equal(reward.zone_of(345), "soul:1", "Автоматическое продолжение сохранило получение карты в души")
+	reward.choose(0, "karma_first20", {"target": 1})
+	reward.choose(0, "karma_second20", {"target": 2})
+	reward.close()
+	reward.choose(1, "take_shop", {"item": 0})
+	reward.close()
+	reward.choose(2, "take_shop", {"item": 1})
 	reward.close()
 	t.equal(reward.zone_of(345), "soul:1", "Награда не положила ту же карту ещё и в сброс")
 	reward.inv("Награда после Кармы")
 	for automatic: bool in [false, true]:
-		var bonus := Scenario.new(t).players(2).dlc().current(1).item(0, 7).coins(1, 25).build()
+		var bonus := Scenario.new(t).rules_type(preload("res://tests/fs/fs_legacy_manual_reward_rules.gd")).players(2).dlc().current(1).item(0, 7).coins(1, 25).build()
 		if not bonus.g.bonuses.has(689):
 			bonus.g.bonuses.append(689)
 		bonus.ok(1, "end" if automatic else "claim", null if automatic else {"card": 689})
 		bonus.close()
 		t.equal(bonus.g.items[0][_index(bonus, 0, 7)].counters, 1, "Бонусная душа вызывает Друга: автоматическая=%s" % automatic)
 		t.equal(bonus.zone_of(689), "soul:1", "Бонусная карта получена физически")
-	var removed := Scenario.new(t).players(2).dlc().current(1).item(0, 7, {"counters": 2}).hand(1, [475]).build()
+	var removed := Scenario.new(t).rules_type(preload("res://tests/fs/fs_legacy_manual_reward_rules.gd")).players(2).dlc().current(1).item(0, 7, {"counters": 2}).hand(1, [475]).build()
 	removed.ok(1, "loot", {"card": 475})
 	# Между постановкой пассива и разрешением источник может покинуть стол.
 	removed.g._destroy_item(0, _index(removed, 0, 7))
@@ -98,7 +98,7 @@ func run(t: Check) -> void:
 	t.equal(removed.zone_of(7), "discard:treasure", "Ушедший источник не превратился задним числом")
 	t.equal(removed.g.souls[0], 0, "Отложенный триггер не создал вторую копию уничтоженного Друга")
 	# Проверка выигрыша должна выполняться и при тихом разрешении, без нового клика.
-	var win := Scenario.new(t).players(2).dlc().current(1).item(0, 7, {"counters": 2}) \
+	var win := Scenario.new(t).rules_type(preload("res://tests/fs/fs_legacy_manual_reward_rules.gd")).players(2).dlc().current(1).item(0, 7, {"counters": 2}) \
 		.soul(0, 344).soul(0, 345).soul(0, 346).hand(1, [475]).build()
 	win.ok(1, "loot", {"card": 475})
 	for i in 5:
@@ -108,7 +108,7 @@ func run(t: Check) -> void:
 	# Extended RulebookP4: одна физическая карта ценностью2 учитывается как две души для триггеров.
 	# На полном изображении312 напечатано+2души; переносится всё равно одна карта.
 	for trigger: int in [7, 8]:
-		var double := Scenario.new(t).players(3).dlc().current(2).item(0, trigger).item(2, 13).soul(1, 312).build()
+		var double := Scenario.new(t).rules_type(preload("res://tests/fs/fs_legacy_manual_reward_rules.gd")).players(3).dlc().current(2).item(0, trigger).item(2, 13).soul(1, 312).build()
 		double.g.soul_cards[1][0].value = 2
 		double.g.souls[1] = 2
 		_manual(double, 2, 13)
@@ -126,7 +126,7 @@ func run(t: Check) -> void:
 		t.equal(double.g.souls[2], 2, "Получатель считает полную душевую ценность")
 		double.inv("Карта с двойной душевой ценностью")
 	# Контроль источника может смениться после постановки обязательного триггера.
-	var transferred := Scenario.new(t).players(3).dlc().current(1).item(0, 7, {"counters": 2}).build()
+	var transferred := Scenario.new(t).rules_type(preload("res://tests/fs/fs_legacy_manual_reward_rules.gd")).players(3).dlc().current(1).item(0, 7, {"counters": 2}).build()
 	var source: Dictionary = transferred.g.items[0][_index(transferred, 0, 7)]
 	transferred.g._queue_passive(0, 7, source, [{"op": "counter_soul", "amount": 1}])
 	transferred.g.items[2].append(transferred.g._remove_item(0, _index(transferred, 0, 7)))

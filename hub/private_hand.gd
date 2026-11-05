@@ -84,7 +84,7 @@ func _layout() -> void:
 			continue
 		var off := float(i) - float(order.size() - 1) * 0.5
 		var center := Vector2(size.x * 0.5 + off * step, card_size.y * 0.5 + 10 + minf(off * off, 16) * 0.5)
-		var highlighted: bool = order[i] == _hover
+		var highlighted: bool = order[i] == _hover and get_node("/root/Prefs").card_preview_mode != "magnifier"
 		if highlighted:
 			center.y -= 24 * card_size.y / 140.0
 		card.z_index = 50 if highlighted else i
@@ -115,6 +115,8 @@ func _on_hover(card: K12TableCard, on: bool, entry: Dictionary) -> void:
 	preview_closed.emit()
 	_layout()
 	if on and bool(entry.get("face_up", true)):
+		if preload("res://hub/card_magnifier.gd").offer(card):
+			return
 		var token := _preview_token
 		await get_tree().create_timer(preview_delay).timeout
 		if is_instance_valid(card) and token == _preview_token and _hover == card.card and not card.dragging:

@@ -17,5 +17,7 @@ void fragment() {
 	float glow = exp(-pow((radius - 0.68) / 0.22, 2.0)) * warmth;
 	vec3 ray_color = mix(accent.rgb, gold.rgb, 0.22 + 0.42 * mod(floor(section), 2.0));
 	vec3 color = mix(ray_color, gold.rgb, glow / max(0.001, glow + rays));
-	COLOR = vec4(color, min(0.6, rays * 0.34 + glow) * reveal);
+	float edge = min(min(UV.x, 1.0 - UV.x), min(UV.y, 1.0 - UV.y));
+	float bounds_fade = smoothstep(0.0, 0.08, edge);
+	COLOR = vec4(color, min(0.6, rays * 0.34 + glow) * reveal * bounds_fade);
 }

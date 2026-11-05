@@ -614,6 +614,8 @@ func _drop(card: K12TableCard, at: Vector2, source: String) -> void:
 	_rebuild()
 
 func _hover(data: Dictionary, card: Control, on: bool) -> void:
+	if on and preload("res://hub/card_magnifier.gd").offer(card):
+		return
 	if is_instance_valid(_preview):
 		_preview.queue_free()
 		_preview = null

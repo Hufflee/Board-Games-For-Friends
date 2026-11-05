@@ -1,6 +1,6 @@
 extends Control
 ## Рисованная победная вспышка: геометрия наклейки, объём, лампочки и искры.
-## Первый этап — один победитель. PNG не используется; всё окрашивается акцентом игры.
+## Одиночный, командный и многострочный финал. PNG не используется; акцент игры сохраняется.
 
 const Aura := preload("res://hub/victory_burst.gdshader")
 const GOLD := Color("efb52f")
@@ -11,6 +11,7 @@ var _accent := GOLD
 var _dark := false
 var _center := Vector2.ZERO
 var _outline := PackedVector2Array()
+var _extent := Vector2.ZERO
 var _highlight: Array[PackedVector2Array] = []
 var _shade: Array[PackedVector2Array] = []
 var _aura: ColorRect
@@ -35,11 +36,13 @@ func configure(points: PackedVector2Array, center: Vector2, accent: Color, dark:
 	_accent = accent
 	_dark = dark
 	_outline.clear()
+	_extent = Vector2.ZERO
 	# Неровность задаётся геометрией, не шумом/текстурой; одинаковая при каждом открытии.
 	for i: int in points.size():
 		var relative := points[i] - center
 		var wobble := 1.0 + 0.004 * sin(i * 2.3) + 0.003 * cos(i * 4.1)
 		_outline.append(relative * wobble)
+		_extent = _extent.max((relative * wobble).abs())
 	var below := PackedVector2Array()
 	var above := PackedVector2Array()
 	for point: Vector2 in _outline:
@@ -98,8 +101,12 @@ func _draw() -> void:
 	_material.set_shader_parameter("elapsed", time if movement else 0.0)
 	_material.set_shader_parameter("reveal", reveal)
 	_material.set_shader_parameter("warmth", 0.26 if _dark else 0.10)
-	_aura.position = _center - Vector2(368, 228)
-	_aura.size = Vector2(736, 456)
+	var area := get_parent_control().size
+	var aura_half := Vector2(368, 228)
+	if _extent.x > 240:
+		aura_half.x = minf(area.x * 0.5 - 8, _extent.x * 1.2 + 16)
+	_aura.position = _center - aura_half
+	_aura.size = aura_half * 2
 	var face := GOLD.lerp(_accent, 0.38)
 	face.s = clampf(face.s * 1.15, 0.5, 0.86)
 	face.v = 0.92 if _dark else 0.82
@@ -130,7 +137,7 @@ func _draw() -> void:
 	# Одно кольцо лампочек по краю: спокойный центр остаётся портрету и нику.
 	for i: int in 36:
 		var angle := TAU * i / 36.0
-		var point := _center + Vector2(cos(angle) * 234, sin(angle) * 128) * pop * SINGLE_FIT
+		var point := _center + Vector2(cos(angle) * _extent.x * 0.835, sin(angle) * _extent.y * 0.736) * pop
 		var lamp := face.lightened(0.62) if i % 3 != 0 else GOLD.lightened(0.18)
 		draw_circle(point + Vector2(0, 1.5), 2.6 * pop, Color(edge, 0.5))
 		draw_circle(point, 2.1 * pop, lamp)
@@ -140,7 +147,10 @@ func _draw() -> void:
 	for i: int in places.size():
 		var pulse := 0.6 + 0.4 * sin(time * 2.6 - i * 0.9) if movement else 0.85
 		var radius := (6.0 + (i % 3) * 2.0) * pulse
-		var center: Vector2 = _center + places[i]
+		var spread := Vector2.ONE if _extent.x < 240 else _extent / Vector2(280 * SINGLE_FIT, 174 * SINGLE_FIT)
+		var center: Vector2 = _center + places[i] * spread
+		center.x = clampf(center.x, 16, area.x - 16)
+		center.y = clampf(center.y, 64, area.y - 72)
 		var spark := PackedVector2Array()
 		for j: int in 8:
 			var angle := j * TAU / 8.0 - PI / 2

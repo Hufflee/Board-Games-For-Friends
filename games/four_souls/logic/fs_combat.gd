@@ -4,11 +4,14 @@ extends "res://games/four_souls/logic/fs_stack.gd"
 ## Отдельно не используется: состояние и вызовы общие через self.
 
 func _damage_player(seat: int, amount: int, context: Dictionary = {}) -> void:
+	if bool(context.get("prepared", false)):
+		_finish_player_damage(seat, amount, context)
+		return
 	_refresh_passive_stats()
 	var combat: bool = context.get("combat", false)
 	var face: int = context.get("value", 0)
 	var immune := false
-	for item: Dictionary in items[seat]:
+	for item: Dictionary in _ability_items20(seat):
 		var id: int = item.id
 		if (id == 514 and not combat) or (id == 72 and seat != current):
 			immune = true
@@ -16,6 +19,14 @@ func _damage_player(seat: int, amount: int, context: Dictionary = {}) -> void:
 			immune = true
 	if immune or amount <= 0:
 		return
+	if combat and not _turn_combat_seen.has(seat):
+		_turn_combat_seen[seat] = true
+		if _card_automation_enabled() and _item_count(seat, 26) > 0:
+			_note("Мамины туфли предотвратили первое событие боевого урона")
+			return
+	if not bool(_turn_damage_taken[seat]) and _item_count(seat, 478) > 0:
+		amount = maxi(0, amount - 1)
+	_turn_damage_taken[seat] = true
 	amount += _item_count(seat, 214)
 	if combat and face == 1:
 		for i in _item_count(seat, 74):
@@ -29,20 +40,37 @@ func _damage_player(seat: int, amount: int, context: Dictionary = {}) -> void:
 			item.counters = int(item.counters) - prevented
 			amount -= prevented
 			_note("Мёртвый кот предотвратил %d урона" % prevented)
+	if amount > 0 and _card_automation_enabled():
+		for item: Dictionary in items[seat]:
+			if int(item.id) == 653:
+				_queue_passive(seat, 653, item, [{"op": "trinket_automation", "amount": 1, "context": "incoming_damage", "data": {"amount": amount, "context": context.duplicate(true)}}])
+				return
+	_finish_player_damage(seat, amount, context)
+
+func _finish_player_damage(seat: int, amount: int, context: Dictionary) -> void:
+	amount = _absorb_next_hit("player", seat, amount)
 	var blocked := mini(maxi(0, amount), int(damage_shields[seat]))
 	damage_shields[seat] -= blocked
 	hp[seat] = maxi(0, int(hp[seat]) - (maxi(0, amount) - blocked))
 	if maxi(0, amount) > blocked:
-		_emit_passives("damage", {"seat": seat, "amount": maxi(0, amount) - blocked})
+		_last_player_killer[seat] = int(context.get("attacker", -1))
+		var data := context.duplicate(true)
+		data["seat"] = seat
+		data["amount"] = maxi(0, amount) - blocked
+		_emit_passives("damage", data)
 	if blocked > 0:
 		_note("Предотвращён урон: %s · %d" % [name_of(seat), blocked])
 func _purchase_cost(seat: int, slot: int) -> int:
+	if _credit_free and slot != -1:
+		return 0
+	if _card_automation_enabled() and slot != -1 and seat == current and _shop_buys_turn == 0 and _item_count(seat, 76) > 0:
+		return 0
 	if slot == -1:
 		return 10
 	# Скидки: 229 −5, 473/76 −1, Членская карта 91 −4, Сделка Хранителя 889 −3, комната 771 −5.
-	if room == 782 and int(souls[seat]) == int(souls.min()):
+	if _room_has20(782) and seat == current and slot >= 0 and int(souls[seat]) == int(souls.min()):
 		return 0
-	return maxi(0, 10 - 5 * _item_count(seat, 229) - _item_count(seat, 473) - _item_count(seat, 76) - 4 * _item_count(seat, 91) - 3 * _item_count(seat, 889) - (5 if room == 771 else 0))
+	return maxi(0, 10 - 5 * _item_count(seat, 229) - _item_count(seat, 473) - _item_count(seat, 76) - 4 * _item_count(seat, 91) - 3 * _item_count(seat, 889) - (5 if _room_has20(771) and seat == current and slot >= 0 else 0) - (3 if seat == current and slot >= 0 and monsters.any(func(m): return int(m.id) == 279 and int(m.hp) > 0) else 0))
 ## Ауры учитывают только открытых живых монстров, а не накрытые карты.
 func _monster_aura(key: String) -> int:
 	var count := 0
@@ -51,22 +79,27 @@ func _monster_aura(key: String) -> int:
 			count += 1
 	return count
 func _untargetable(id: int) -> bool:
-	return id == 272 or _dies_with_other_monster(id)
+	return id == 272 or monsters.any(func(monster): return int(monster.id) == id and bool(monster.get("curse_slot16", false))) or _dies_with_other_monster(id)
 ## Запрет атаки сам по себе не означает гибель вслед за другим монстром.
 func _dies_with_other_monster(id: int) -> bool:
 	return FSData.card(id).get("key", "") in ["deathshead", "stoney"]
 ## Одна формула для видимой защиты и проверки попадания, без изменения исходного dc.
 func _monster_evasion(monster: Dictionary) -> int:
-	var base: int = int(monster.dc) + _monster_aura("stoney") + (1 if curses[current].has(705) else 0) + (1 if room == 765 else 0)
+	var base: int = int(monster.dc) + _monster_aura("stoney") + (1 if curses[current].has(705) else 0) + (1 if _room_has20(765) else 0)
+	if battle >= 0 and battle < monsters.size() and int(monsters[battle].id) == int(monster.id):
+		base += int(_turn_monster_dc[current])
 	base += PassiveRules.monster_health_bonus(monster, "dc")
 	# Опознавательный знак: −X, где X — отставание владельца по душам от лидера.
 	if _item_count(current, 75) > 0:
 		base -= _item_count(current, 75) * maxi(0, int(souls.max()) - int(souls[current]))
-	return PassiveRules.monster_evasion(base, items[current])
+	return PassiveRules.monster_evasion(base, items[_battle_roller15()])
 
 ## Одна формула для урона промаха и показанной атаки, без залипания бонуса после лечения.
 func _monster_attack(monster: Dictionary) -> int:
-	return int(monster.at) + PassiveRules.monster_health_bonus(monster, "at") + _monster_aura("deathshead") + (1 if curses[current].has(737) else 0) + (1 if room == 818 else 0)
+	var modifier := 0
+	if battle >= 0 and battle < monsters.size() and int(monsters[battle].id) == int(monster.id):
+		modifier = int(_turn_monster_attack[current])
+	return int(monster.at) + int(monster.get("attack_tokens15", 0)) + (curses[current].size() if int(monster.id) == 277 else int(monster.get("counters", 0)) if int(monster.id) == 286 else 0) + PassiveRules.monster_health_bonus(monster, "at") + _monster_aura("deathshead") + (1 if curses[current].has(737) else 0) + (1 if _room_has20(818) else 0) + modifier + (_egg_count("monster", int(monster.id)) if _global_item_count(101) > 0 else 0)
 ## Подтверждённая смерть или явная отмена заканчивает бой, сохраняя прочие способности стека.
 ## Не вызывать при одном лишь объявлении смерти: до её разрешения ещё возможно спасение.
 func _end_battle() -> void:
@@ -76,7 +109,9 @@ func _end_battle() -> void:
 	_after_stack = "turn"
 func _apply_combat(effect: Dictionary) -> void:
 	if battle < 0 or battle >= monsters.size() or dead[current] or hp[current] <= 0:
-		_continue_stack(); return
+		_team_after_combat15(int(effect.owner))
+		_continue_stack()
+		return
 	var monster: Dictionary = monsters[battle]
 	if int(monster.id) != int(effect.card): _continue_stack(); return
 	var value: int = int(effect.get("value", last_roll))
@@ -86,35 +121,56 @@ func _apply_combat(effect: Dictionary) -> void:
 	if bool(effect.hit) and int(monster.id) in [428, 441] and value == 6:
 		effect.damage = 0
 		_note("Шестёрка не наносит боевой урон этому монстру")
-	stats_risks.append({"seat":current,"error":not bool(effect.hit) and int(effect.damage)>0})
+	stats_risks.append({"seat":int(effect.owner),"error":not bool(effect.hit) and int(effect.damage)>0})
 	if bool(effect.hit):
 		if int(effect.get("value", last_roll)) == 6:
 			# Проклятый глаз: шестёрка — +3 боевого урона (до удвоений).
-			effect.damage = int(effect.damage) + 3 * _item_count(current, 144)
-			for i in _item_count(current, 74):
+			effect.damage = int(effect.damage) + 3 * _item_count(int(effect.owner), 144)
+			for i in _item_count(int(effect.owner), 74):
 				effect.damage = int(effect.damage) * 2
+		# Запрет боевого урона относится и к увеличенному предметами урону.
+		if (int(monster.id) in [428, 441] and value == 6) or (_card_automation_enabled() and ((int(monster.id) == 411 and value in [4, 5]) or (int(monster.id) == 364 and value == 6))):
+			effect.damage = 0
 		if int(monster.id) == 281:
 			effect.damage = mini(1, int(effect.damage))
+		effect.damage = _absorb_next_hit("monster", int(monster.id), int(effect.damage))
 		var before_hp: int = monster.hp
 		monster.hp = int(monster.hp) - int(effect.damage)
+		if int(effect.damage) > 0:
+			if monster.has("virtual_zone15"):
+				_emit_passives("object_damage20", {"seat": int(effect.owner), "card": int(monster.id), "amount": int(effect.damage), "zone": str(monster.virtual_zone15), "combat": true, "value": value})
+			else:
+				_emit_passives("monster_damage", {"seat": int(effect.owner), "card": int(monster.id), "amount": int(effect.damage), "physical_id20": int(monster.get("physical_id20", monster.id))})
+				_emit_passives("combat_monster_damage", {"seat": int(effect.owner), "card": int(monster.id), "amount": int(effect.damage), "value": value, "physical_id20": int(monster.get("physical_id20", monster.id))})
 		if before_hp > 0 and int(monster.hp) <= 0:
 			monster["lethal_attack_roll"] = value
 			monster["slayer"] = int(effect.owner)
 		# Соевое молоко: боевой урон монстру — ещё 1 урон каждому другому монстру.
-		if int(effect.damage) > 0 and _item_count(current, 118) > 0:
+		if int(effect.damage) > 0 and not monster.has("virtual_zone15") and _item_count(int(effect.owner), 118) > 0:
 			for other: Dictionary in monsters:
-				if not is_same(other, monster):
-					if int(other.hp) > 0 and int(other.hp) - _item_count(current, 118) <= 0:
+				if not is_same(other, monster) and not other.has("virtual_zone15"):
+					var secondary_damage := _absorb_next_hit("monster", int(other.id), _item_count(int(effect.owner), 118))
+					if int(other.hp) > 0 and int(other.hp) - secondary_damage <= 0:
 						other["lethal_attack_roll"] = 0
 					other["slayer"] = int(effect.owner)
-					other.hp = int(other.hp) - _item_count(current, 118)
-		if int(effect.damage) > 0 and FSData.card(int(monster.id)).get("key", "") == "lust":
-			_damage_player(current, 1)
+					other.hp = int(other.hp) - secondary_damage
+					if secondary_damage > 0:
+						_emit_passives("monster_damage", {"seat": int(effect.owner), "card": int(other.id), "amount": secondary_damage, "physical_id20": int(other.get("physical_id20", other.id))})
+		if int(effect.damage) > 0 and FSData.card(int(monster.id)).get("key", "") == "lust" and not (_card_automation_enabled() and int(monster.id) == 433):
+			_damage_player(int(effect.owner), 1)
 		_note("Попадание · урон %d" % int(effect.damage))
 	else:
-		_damage_player(current, int(effect.damage), {"combat": true, "value": int(effect.get("value", last_roll))})
+		var context := {"combat": true, "value": int(effect.get("value", last_roll))}
+		if monster.has("virtual_zone15"):
+			context[str(monster.virtual_zone15)] = int(monster.id)
+			context["attacker"] = int(monster.virtual_owner15)
+		else:
+			context["monster"] = int(monster.id)
+			context["source_physical20"] = int(monster.get("physical_id20", monster.id))
+		_damage_player(int(effect.owner), int(effect.damage), context)
 		_note("Промах · получен урон %d" % int(effect.damage))
 	_after_stack = "battle_roll"
+	_team_after_combat15(int(effect.owner))
 	_continue_stack()
 func _player_attack_targets() -> Array:
 	var targets: Array = []
@@ -123,24 +179,29 @@ func _player_attack_targets() -> Array:
 			targets.append(seat)
 	return targets
 func _required_player_remaining() -> int:
-	return required_player_attacks if not _player_attack_targets().is_empty() else 0
+	if int(coins[current]) < _attack_tax(current): return 0
+	return (required_player_attacks if not _player_attack_targets().is_empty() else 0) + _lust_pending.filter(func(seat): return int(seat) != current and not dead[int(seat)] and hp[int(seat)] > 0).size()
 func _apply_player_combat(effect: Dictionary) -> void:
+	var roller: int = int(effect.owner)
 	if battle_player < 0 or int(effect.target) != battle_player:
+		_team_after_combat15(roller)
 		_continue_stack()
 		return
 	if dead[current] or hp[current] <= 0 or battle_player not in _player_attack_targets():
+		_team_after_combat15(roller)
 		_continue_stack()
 		return
-	var victim: int = battle_player if bool(effect.hit) else current
+	var victim: int = battle_player if bool(effect.hit) else roller
 	var damage: int = int(effect.damage)
 	var value: int = int(effect.value)
 	if bool(effect.hit) and value == 6:
-		for i in _item_count(current, 74):
+		for i in _item_count(roller, 74):
 			damage *= 2
-	stats_risks.append({"seat": current, "error": not bool(effect.hit) and damage > 0})
-	_damage_player(victim, damage, {"combat": true, "value": value})
+	stats_risks.append({"seat": roller, "error": not bool(effect.hit) and damage > 0})
+	_damage_player(victim, damage, {"combat": true, "value": value, "attacker": roller if bool(effect.hit) else battle_player})
 	_note("PvP: %s · %s · урон %d" % ["попадание" if bool(effect.hit) else "промах", name_of(victim), damage])
 	_after_stack = "battle_roll"
+	_team_after_combat15(roller)
 	_continue_stack()
 ## Награда ищет свою карту: за время вложенного эффекта ряд мог сдвинуться или источник накрыли.
 ## Автоматические шаги фиксируются до операции; пассивы прерывают их и возвращают тот же resolving.
@@ -185,7 +246,7 @@ func _advance_auto_reward() -> void:
 			amount *= int(resolving.get("reward_multiplier", 1)) * reward_boost
 		if op == "treasure":
 			# Остаток уже умножен: возвращение из пассива не удваивает его повторно.
-			amount = int(resolving.get("treasure_remaining", amount))
+			amount = int(resolving.get("treasure_remaining", _treasure_amount21(int(resolving.get("resource_recipient", resolving.owner)), amount)))
 		var seat: int = int(resolving.owner) if op == "souls" else int(resolving.get("resource_recipient", resolving.owner))
 		if op == "souls":
 			seat = int(resolving.get("soul_recipient", seat))
@@ -210,7 +271,7 @@ func _advance_auto_reward() -> void:
 				else:
 					resolving.reward_step = step + 1
 			"souls":
-				if room != 779 and not curses[seat].has(744) and not bool(resolving.get("return_to_deck", false)):
+				if not _room_has20(779) and not curses[seat].has(744) and not bool(resolving.get("return_to_deck", false)):
 					resolving["kept_as_soul"] = true
 					_gain_soul_card(seat, {"id": int(resolving.card), "value": amount})
 		_check_bonuses()
@@ -221,8 +282,8 @@ func _advance_auto_reward() -> void:
 		return
 	if bool(resolving.auto_reward.get("victory_most_souls", false)) and not resolving.has("reward_winner"):
 		var candidates := _reward_win_targets()
-		if candidates.size() == 1 or int(souls[int(resolving.owner)]) >= 4:
-			resolving["reward_winner"] = int(resolving.owner) if int(souls[int(resolving.owner)]) >= 4 else int(candidates[0])
+		if candidates.size() == 1:
+			resolving["reward_winner"] = int(candidates[0])
 		else:
 			resolving["reward_winners"] = candidates
 			return
@@ -237,7 +298,7 @@ func _finish_monster_reward(effect: Dictionary) -> void:
 		var entry: Dictionary = monsters[index]
 		var previous: Dictionary = {}
 		while not entry.is_empty():
-			if int(entry.id) == int(effect.card):
+			if (effect.has("monster_ref20") and is_same(entry, effect.monster_ref20)) or (not effect.has("monster_ref20") and int(entry.id) == int(effect.card)):
 				slot = index
 				parent = previous
 				dying = entry
@@ -251,7 +312,13 @@ func _finish_monster_reward(effect: Dictionary) -> void:
 		_note("Награда: карта уже снята со стола — " + FSData.title(int(effect.card)))
 		return
 	if not bool(effect.get("kept_as_soul", false)) and not bool(effect.get("kept_as_item", false)):
-		if bool(effect.get("return_to_deck", false)):
+		if bool(dying.get("ambush_return20", false)):
+			_put_monster20(dying, "discard")
+		elif int(effect.card) == 467:
+			_put_monster20(dying, "discard")
+		elif int(effect.card) in [270, 400] and _card_automation_enabled():
+			decks.monster.insert(maxi(0, decks.monster.size() - (4 if int(effect.card) == 270 else 6)), int(effect.card))
+		elif bool(effect.get("return_to_deck", false)):
 			decks.monster.append(int(effect.card))
 			_note("Тряпочник возвращён на верх колоды")
 		else:
@@ -276,20 +343,26 @@ func _finish_monster_reward(effect: Dictionary) -> void:
 	if covered.is_empty():
 		_after_stack = "refill"
 func _start_attack(effect: Dictionary) -> void:
+	_turn_attacks_started += 1
 	var slot: int = int(effect.slot)
+	var from_deck: bool = slot == -1
 	if slot == -1:
 		var id := _draw("monster")
 		if id < 0: _continue_stack(); return
 		if FSData.card(id).kind == "event":
 			_after_stack = "turn"; _push({"kind":"event","card":id,"owner":current},"turn"); return
 		var fresh := {"id":id,"hp":_monster_hp(id),"dc":FSData.stat(id,"dc",4),"at":FSData.stat(id,"at",1)}
-		if monsters.is_empty():
+		_monster_entered15(fresh)
+		if monsters.is_empty() or (_card_automation_enabled() and id in [272, 279, 299, 312, 913, 914]):
 			# Пустой ряд монстров: открытая карта занимает новую ячейку, накрывать нечего.
 			monsters.append(fresh)
-			slot = 0
+			slot = monsters.size() - 1
+			monster_slots = maxi(monster_slots, monsters.size())
 		else:
 			var over: int = clampi(int(effect.get("over",0)),0,monsters.size()-1)
-			fresh["under"] = monsters[over].duplicate(true)
+			var covered := _cover_monster20(monsters[over])
+			if not covered.is_empty():
+				fresh["under"] = covered.duplicate(true)
 			monsters[over] = fresh
 			slot = over
 	if slot < 0 or slot >= monsters.size(): _continue_stack(); return
@@ -297,7 +370,10 @@ func _start_attack(effect: Dictionary) -> void:
 		_continue_stack()
 		return
 	battle = slot; phase = "battle_roll"; _after_stack = "battle_roll"
-	if int(monsters[slot].id) == 396:
+	_emit_passives("attack_start", {"seat": current, "card": int(monsters[slot].id)})
+	if from_deck:
+		_attack_target18(monsters[slot], int(effect.get("attack_token", 0)))
+	if int(monsters[slot].id) == 396 and not _card_automation_enabled():
 		discard_choice = {"card": 396, "owner": current, "amount": 2}
 		phase = "discard_target"
 func _complete_purchase(effect: Dictionary) -> void:
@@ -307,12 +383,16 @@ func _complete_purchase(effect: Dictionary) -> void:
 	if coins[seat] >= price:
 		var id: int = _draw("treasure") if slot == -1 else (int(discards.treasure.pop_back()) if slot == -2 else int(shop[slot]))
 		if id >= 0:
+			if slot != -1:
+				_credit_free = false
+				_shop_buys_turn += 1
 			coins[seat] -= price
 			bank += price
 			_gain_item(seat, id)
 			if slot >= 0: shop[slot] = _draw("treasure")
 			if _item_count(seat, 76) > 0:
 				_queue_passive(seat, 76, {}, [PassiveRules.operation("coins", _item_count(seat, 76))])
+			_emit_passives("purchase", {"seat": seat, "slot": slot, "cost": price})
 			_note(name_of(seat) + " покупает " + FSData.title(id))
 	_continue_stack()
 func _fill_monster(initial: bool = false, slot: int = -1) -> void:
@@ -326,6 +406,7 @@ func _fill_monster(initial: bool = false, slot: int = -1) -> void:
 		_push({"kind":"event", "card":id, "owner":current}, "refill")
 		return
 	var monster := {"id":id, "hp":_monster_hp(id), "dc":FSData.stat(id,"dc",4), "at":FSData.stat(id,"at",1)}
+	_monster_entered15(monster)
 	if slot >= 0 and slot < monsters.size(): monsters[slot] = monster
 	else: monsters.append(monster)
 func _expire_monster_modifiers(monster: Dictionary) -> void:
@@ -338,6 +419,7 @@ func _expire_monster_modifiers(monster: Dictionary) -> void:
 	if monster.has("under"):
 		_expire_monster_modifiers(monster.under)
 func _forced_deck_remaining() -> int:
+	if int(coins[current]) < _attack_tax(current): return 0
 	if decks.monster.is_empty() and discards.monster.is_empty():
 		return 0
 	return maxi(0, required_deck_attacks - deck_attacks)

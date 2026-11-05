@@ -51,6 +51,9 @@ var _fx: Control  # летящие фишки и «+N»
 var _disp: Array[float] = []  # показанный стек (плавно догоняет настоящий)
 var _disp_from: Array[float] = []
 var _disp_t := 1.0  # 0..1 — ход анимации стека
+var _win_delay := 0.0
+var _win_delay_hand := -1
+var _board_ready_at := 0
 var _stack_labels: Array = []  # [Label, место, вид] — обновляются во время анимации
 var _prev: Dictionary = {}  # прошлое состояние (для анимаций перехода)
 var _last_revision := -1
@@ -194,7 +197,11 @@ func _process(delta: float) -> void:
 		return
 	if str(view.phase) == "hand" and int(view.to_act) >= 0:
 		_timer_bar.queue_redraw()
-	if _disp_t < 1.0:
+	if _win_delay > 0:
+		_win_delay = maxf(0, _win_delay - delta)
+		if _win_delay == 0 and str(view.phase) == "showdown" and int(view.hand_no) == _win_delay_hand:
+			_fly_win()
+	elif _disp_t < 1.0:
 		_disp_t = minf(1.0, _disp_t + delta / WIN_COUNT)
 		var k := ease(_disp_t, -2.0)
 		for seat: int in _disp.size():
@@ -556,6 +563,7 @@ func _sync_board() -> void:
 		tw.tween_property(card, "scale", Vector2.ONE, DEAL_TIME).set_delay(delay)
 		# все доехали — переворачиваем по одной, слева направо
 		var flip_at := (count - 1) * DEAL_GAP + DEAL_TIME + 0.1 + j * (FLIP_TIME + 0.08)
+		_board_ready_at = Time.get_ticks_msec() + int((flip_at + FLIP_TIME) * 1000.0)
 		var id := int(board[i])
 		tw.chain().tween_callback(func():
 			card.position = _board_slot(i)
@@ -660,6 +668,9 @@ func _add_eye(plate: Control) -> void:
 
 ## Показанные стеки: на вскрытии стек победителя растёт плавно, а фишки слетаются к нему.
 func _sync_disp() -> void:
+	if _win_delay > 0 and (str(view.phase) != "showdown" or int(view.hand_no) != _win_delay_hand):
+		_win_delay = 0
+		_disp_t = 1
 	var n: int = view.stacks.size()
 	if _disp.size() != n:
 		_disp.clear()
@@ -672,7 +683,14 @@ func _sync_disp() -> void:
 	if win:
 		_disp_from = _disp.duplicate()
 		_disp_t = 0.0
-		_fly_win.call_deferred()
+		var dealt: int = maxi(0, view.board.size() - _prev.get("board", []).size())
+		var board_remaining := maxf(0, float(_board_ready_at - Time.get_ticks_msec()) / 1000.0)
+		if dealt > 0:
+			board_remaining = maxf(board_remaining, (dealt - 1) * DEAL_GAP + DEAL_TIME + 0.1 + (dealt - 1) * (FLIP_TIME + 0.08) + FLIP_TIME)
+		_win_delay = 0.0 if bool(view.result.get("fold_win", false)) else maxf(3.0, maxf(board_remaining, float(view.get("reveal_in", 0))) + 2.0)
+		_win_delay_hand = int(view.hand_no)
+		if _win_delay == 0:
+			_fly_win.call_deferred()
 	elif _disp_t >= 1.0:
 		for seat: int in n:
 			_disp[seat] = float(view.stacks[seat])
@@ -760,6 +778,8 @@ func _fly_chip(from: Vector2, target: Vector2, delay: float) -> void:
 
 
 func _show_preview(card: TextureRect) -> void:
+	if preload("res://hub/card_magnifier.gd").offer(self):
+		return
 	_preview.texture = card.texture
 	var r := card.get_global_rect()
 	var x := r.end.x + 12.0
@@ -836,6 +856,11 @@ func _build_action() -> void:
 		return
 	var text := _status_text()
 	_action_row.add_child(Style.label(text, 16))
+	if me >= 0 and phase == "showdown" and not mine.is_empty() and not (view.get("open", [])[me] as Array).all(func(value): return bool(value)):
+		var reveal := Style.button("Открыть карты", 16)
+		reveal.name = "RevealCards"
+		reveal.pressed.connect(func(): Net.send_action("show", {"card": -1}))
+		_action_row.add_child(reveal)
 	_build_premoves()
 	if me >= 0 and bool(mine.get("can_rebuy", false)) and phase != "hand":
 		var rebuy := Style.button("Сесть заново · 100 BB")
@@ -1014,13 +1039,15 @@ func _build_premoves() -> void:
 		b.toggle_mode = true
 		b.button_pressed = _premove == item[0]
 		Style.pick(b, _premove == item[0])
-		b.tooltip_text = "Отметить заранее: сработает, когда придёт ваш ход. Нажмите ещё раз — снять отметку"
-		b.pressed.connect(func():
-			_premove = "" if _premove == item[0] else str(item[0])
-			_premove_hand = int(view.hand_no)
-			Sfx.play("chip", -14)
-			_layout())
+		b.tooltip_text = "Повторное нажатие отменяет выбор"
+		b.pressed.connect(_toggle_premove.bind(str(item[0])))
 		_action_row.add_child(b)
+
+func _toggle_premove(kind: String) -> void:
+	_premove = "" if _premove == kind else kind
+	_premove_hand = int(view.hand_no)
+	Sfx.play("chip", -14)
+	_layout()
 
 
 ## Мой ход и есть отметка — выполнить, если действие ещё допустимо (иначе просто снять отметку).

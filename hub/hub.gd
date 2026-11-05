@@ -324,6 +324,11 @@ func _party_panel() -> Control:
 			row.add_child(eye)
 		if m["kind"] == "host":
 			row.add_child(HubStyle.label("хост", 12, HubStyle.YELLOW))
+		elif Net.is_host() and peer > 1:
+			var kick := HubStyle.button("Исключить", 12)
+			kick.tooltip_text = "Исключить участника из пати"
+			LeaveGuard.hold(kick, Net.kick_peer.bind(peer), "Исключить участника из пати")
+			row.add_child(kick)
 		v.add_child(row)
 		var sid := str(m.get("suggest", ""))
 		if sid != "":

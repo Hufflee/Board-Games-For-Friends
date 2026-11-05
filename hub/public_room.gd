@@ -64,6 +64,21 @@ static func clean(value: Variant) -> Dictionary:
 					return {}
 				config[field][id] = {"surface": entry.surface, "x": float(fraction)}
 	var allowed: Array = ["shelf_girl", "shelf_andy"]
+	var custom: Dictionary = {}
+	var entries: Variant = value.get("custom", {})
+	if not entries is Dictionary or entries.size() > 24:
+		return {}
+	for id: String in entries:
+		if not id.begins_with("custom:") or not preload("res://games/custom/logic/cg_library.gd").uuid_valid(id.trim_prefix("custom:")):
+			return {}
+		var entry: Variant = entries[id]
+		if not entry is Dictionary or not entry.get("title") is String or entry.title.length() > 64 or not entry.get("size") is Array or entry.size.size() != 3:
+			return {}
+		for extent: Variant in entry.size:
+			if not (extent is int or extent is float) or not is_finite(float(extent)) or float(extent) < 0.02 or float(extent) > 0.6:
+				return {}
+		custom[id] = {"title": entry.title, "size": entry.size.duplicate()}
+		allowed.append(id)
 	for game in preload("res://hub/games.gd").LIST:
 		allowed.append(str(game.id))
 	var placements: Array = value.placements
@@ -79,6 +94,8 @@ static func clean(value: Variant) -> Dictionary:
 			seen[id] = true
 	if seen.is_empty() or seen.size() > 48:
 		return {}
+	for id: String in custom.keys():
+		if not seen.has(id): custom.erase(id)
 	var poses: Dictionary = {}
 	for id in value.poses:
 		if not allowed.has(id) or not value.poses[id] is int or value.poses[id] < 0 or value.poses[id] > 3:
@@ -88,7 +105,7 @@ static func clean(value: Variant) -> Dictionary:
 	var selected: Variant = value.get("selected", "")
 	if not selected is String or (selected != "" and (not allowed.has(selected) or selected in ["shelf_girl", "shelf_andy"])) or not value.get("editor", false) is bool:
 		return {}
-	return {"config": config, "placements": placements.duplicate(true), "poses": poses, "selected": selected, "editor": value.get("editor", false)}
+	return {"config": config, "placements": placements.duplicate(true), "poses": poses, "selected": selected, "editor": value.get("editor", false), "custom": custom}
 
 static func _bounded(value: Variant, depth: int, budget: Array = [512]) -> bool:
 	if depth == 0:

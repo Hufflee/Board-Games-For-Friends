@@ -47,12 +47,11 @@ func _player_dies_by_itself(t: FSCheck) -> void:
 
 func _heal_applies_by_itself(t: FSCheck) -> void:
 	# небоевой урон через панель эффекта: после «Эффект выполнен» смерть объявляется и разрешается сама
-	var s := FSScenario.new(t).players(2).current(0).character(0, 821).hand(0, [497]).build()
+	var s := FSScenario.new(t).players(2).current(0).character(0, 821).hand(0, [497]).hp(1, 1).build()
 	s.ok(0, "loot", {"card": 497}, "лут")
 	_wait(s, 5.5)
 	t.equal(s.g.phase, "effect", "Карта лута дошла до эффекта без ручного закрытия ответов")
-	s.effect(0, "damage", {"target": 1, "amount": 9})
-	s.ok(0, "effect_done", null, "эффект выполнен")
+	s.choose(0, "damage", {"target": 1})
 	_wait(s, 5.5)
 	t.equal(s.g.phase, "death", "Смерть второго игрока — сама после тихого окна")
 	t.equal(s.g.actor(), 1, "Штраф выбирает погибший (место 1)")

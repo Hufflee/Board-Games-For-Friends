@@ -5,7 +5,7 @@ const Check := preload("res://tests/fs/fs_check.gd")
 
 func run(t: Check) -> void:
 	for kind: String in ["effect", "effect_done"]:
-		var s := Scenario.new(t).players(3).dlc().current(0).character(0, 821).no_items(0).no_items(1).no_items(2) \
+		var s := Scenario.new(t).rules_type(preload("res://tests/fs/fs_legacy_manual_reward_rules.gd")).players(3).dlc().current(0).character(0, 821).no_items(0).no_items(1).no_items(2) \
 			.item(0, 13).item(0, 8).item(1, 243).build()
 		s.g._begin_resolving({"kind": "item", "card": 13, "owner": 0})
 		var chest := -1

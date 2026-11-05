@@ -72,25 +72,35 @@ static func _cards(g: FSRules) -> Array[String]:
 		for id in g.discards[key]: add.call(id, "сброс " + key)
 	for seat in g.players.size():
 		for id in g.hands[seat]: add.call(id, "рука %d" % seat)
-		for entry: Dictionary in g.items[seat]: add.call(entry.id, "предметы %d" % seat)
+		for entry: Dictionary in g.items[seat]:
+			add.call(entry.get("physical_id13", entry.id), "предметы %d" % seat)
+			for id in entry.get("stored_cards20", []):
+				add.call(id, "под предметом %d" % int(entry.id))
 		for entry: Dictionary in g.soul_cards[seat]: add.call(entry.id, "души %d" % seat)
 		for id in g.curses[seat]: add.call(id, "проклятия %d" % seat)
 	for slot in g.monsters.size():
 		var entry: Dictionary = g.monsters[slot]
 		var depth := 0
 		while not entry.is_empty():
-			add.call(entry.id, "монстр %d/%d" % [slot, depth])
+			if not entry.has("virtual_zone15"):
+				add.call(entry.get("physical_id20", entry.id), "монстр %d/%d" % [slot, depth])
 			entry = entry.get("under", {})
 			depth += 1
 	for id in g.shop: add.call(id, "магазин")
 	if g.room >= 0: add.call(g.room, "комната")
+	for entry: Dictionary in g._extra_rooms20:
+		add.call(entry.get("physical_id13", entry.id), "дополнительная комната")
+		for id in entry.get("stored_cards20", []):
+			add.call(id, "под дополнительной комнатой")
 	for choice: Dictionary in g._starting_choices:
 		for id in choice.cards: add.call(id, "выбор Эдема")
 	# Карты внутри эффектов: лут в стеке и событие — физически вне колод.
 	var held := {}
 	for effect: Dictionary in _effects(g):
 		var kind: String = str(effect.get("kind", ""))
-		if kind == "loot" and not bool(effect.get("under_deck", false)) and not effect.has("given_to"):
+		if effect.get("automation_data", {}).has("pending_soul16"):
+			add.call(effect.automation_data.pending_soul16.id, "выбор получателя души")
+		if kind == "loot" and not bool(effect.get("loot_copy14", false)) and not bool(effect.get("under_deck", false)) and not effect.has("given_to") and not bool(effect.get("kept_as_item", false)) and not bool(effect.get("deployed_monster20", false)):
 			held[int(effect.card)] = true
 		elif kind == "event" and not bool(effect.get("attached", false)):
 			held[int(effect.card)] = true
@@ -137,7 +147,8 @@ static func _privacy(g: FSRules) -> Array[String]:
 		var view: Dictionary = g.get_view(seat)
 		if view.hand != g.hands[seat]:
 			out.append("Приватность: место %d видит не свою руку" % seat)
-		if not view.peek.is_empty() and int(view.peek.get("owner", -1)) != seat:
+		var public_reveal: bool = bool(g.peek.get("public", false)) and (int(g.resolving.get("card", -1)) in [106, 148, 151, 245, 725] or int(g.peek.get("source_card20", -1)) == 4) and not g.peek.has("hands")
+		if not view.peek.is_empty() and int(view.peek.get("owner", -1)) != seat and not public_reveal:
 			out.append("Приватность: место %d видит чужой просмотр" % seat)
 		for other in g.players.size():
 			if other == seat or not view.players[other].has("hand"):

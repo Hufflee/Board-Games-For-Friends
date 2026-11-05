@@ -20,6 +20,12 @@ var ui_scale := 1.0  # масштаб интерфейса (content_scale_factor
 const UI_SCALE_MIN := 0.8
 const UI_SCALE_MAX := 1.4
 var parallax := true  # двигающийся за мышью задний фон во всех играх и в хабе
+var card_preview_mode := "card"
+var pointer_position := Vector2.ZERO
+
+func _input(event: InputEvent) -> void:
+	if event is InputEventMouseMotion or event is InputEventMouseButton:
+		pointer_position = event.position
 var _render_resolution := ""  # только явно выбранная растровая поверхность fullscreen
 var tutorial_seen := false
 var graphics := 2  # качество графики: 0 — низкое, 1 — среднее, 2 — высокое
@@ -58,6 +64,8 @@ func _ready() -> void:
 		fullscreen = cfg.get_value("video", "fullscreen", fullscreen)
 		ui_scale = clampf(float(cfg.get_value("video", "ui_scale", ui_scale)), UI_SCALE_MIN, UI_SCALE_MAX)
 		parallax = cfg.get_value("video", "parallax", parallax)
+		card_preview_mode = str(cfg.get_value("video", "card_preview_mode", "card"))
+		if card_preview_mode not in ["card", "magnifier"]: card_preview_mode = "card"
 		tutorial_seen = cfg.get_value("game", "tutorial_seen", tutorial_seen)
 		graphics = cfg.get_value("video", "graphics", graphics)
 		show_fps = cfg.get_value("video", "show_fps", show_fps)
@@ -200,6 +208,7 @@ func save() -> void:
 	cfg.set_value("video", "fullscreen", fullscreen)
 	cfg.set_value("video", "ui_scale", ui_scale)
 	cfg.set_value("video", "parallax", parallax)
+	cfg.set_value("video", "card_preview_mode", card_preview_mode)
 	cfg.set_value("game", "tutorial_seen", tutorial_seen)
 	cfg.set_value("video", "graphics", graphics)
 	cfg.set_value("video", "show_fps", show_fps)

@@ -1,0 +1,36 @@
+extends RefCounted
+## Пакет11: сорок событий и комнат. Тексты сверены с исходными областями правил.
+const EVENTS := [697, 698, 699, 701, 702, 704, 710, 712, 713, 714, 715, 717, 718, 720, 721, 722, 725, 726, 728, 731, 732, 733, 734, 735, 738, 739, 740, 741, 742, 743]
+const ROOMS := [779, 803, 804, 807, 810, 811, 813, 814, 815, 817]
+const IDS := EVENTS + ROOMS
+
+static func plan(id: int, context: String) -> Array:
+	match id:
+		697: return [{"op": "encounter_shop", "amount": 2}, {"op": "extra_attack"}]
+		698, 720, 733: return [{"op": "damage", "amount": 2}]
+		699, 701, 702, 704, 713, 714, 722, 726: return [{"op": "auto_roll"}, {"op": "encounter_result"}]
+		710: return [{"op": "devil_deal", "targets": "devil_deals"}]
+		712: return [{"op": "encounter_damage_all", "amount": 2}]
+		715: return [{"op": "ambush"}]
+		717: return [{"op": "expand_monsters"}, {"op": "extra_attack"}]
+		718: return [{"op": "peek_deck", "deck": "loot", "amount": 6}, {"op": "order_peek"}, {"op": "loot"}]
+		721: return [{"op": "discard_loot", "targets": "own_hand", "amount": 2}]
+		725: return [{"op": "boss_rush_reveal"}, {"op": "boss_rush_place", "targets": "boss_rush_slots"}, {"op": "boss_rush_place", "targets": "boss_rush_slots"}]
+		728: return [{"op": "attach_curse", "targets": "players"}] if context == "" else [{"op": "recharge", "targets": "limited_recharges"}, {"op": "recharge_finish_start"}]
+		735: return [{"op": "attach_curse", "targets": "players"}] if context == "" else [{"op": "coins", "amount": -1}, {"op": "discard_loot", "targets": "own_hand"}]
+		731: return [{"op": "pitfall"}]
+		732: return [{"op": "replay_chosen", "targets": "replay_items", "optional": true}]
+		734: return [{"op": "overflow_start"}]
+		738: return [{"op": "betray_target", "targets": "other_players"}, {"op": "auto_roll"}, {"op": "betray_result"}]
+		739: return [{"op": "shadow_kill"}, {"op": "event_bury", "amount": 6}]
+		740: return [{"op": "damage", "targets": "players", "amount": 2}, {"op": "event_bury", "amount": 4}]
+		741: return [{"op": "lust_target", "targets": "other_living"}]
+		742: return [{"op": "double_treasure", "targets": "other_players"}]
+		743: return [{"op": "barrel_target", "targets": "barrel_entities"}, {"op": "auto_roll"}, {"op": "barrel_result"}]
+		803: return [{"op": "treasure", "targets": "planetarium_yes", "optional": true}]
+		810: return [{"op": "goals_reward"}]
+		811: return [{"op": "encounter_kill", "targets": "other_living"}]
+		813: return [{"op": "destroy", "targets": "war_destroy"}]
+		815: return [{"op": "recharge", "targets": "limited_recharges"}, {"op": "recharge_finish_start"}]
+		817: return [{"op": "splash_left"}]
+	return []

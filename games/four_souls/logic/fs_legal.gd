@@ -31,7 +31,15 @@ static func anyone_can_act(g: FSRules) -> bool:
 		for candidate: Dictionary in candidates(g, seat):
 			if g.clone().action(seat, str(candidate.kind), candidate.get("arg")):
 				return true
-	return false
+	# Когда все ресурсы ответов исчерпаны, штатные часы хоста всё равно закрывают окно.
+	# Это не клиентское действие и не право досрочно пропустить оставшиеся секунды.
+	return advance_clock(g.clone())
+
+static func advance_clock(g: FSRules) -> bool:
+	if g.phase != "priority" or g.stack.is_empty() or g._after_stack == "starting_continue":
+		return false
+	g.tick(0.0)
+	return g.tick(g.RESPONSE_WINDOW + 0.01)
 
 static func _a(kind: String, arg = null) -> Dictionary:
 	return {"kind": kind, "arg": arg}
@@ -41,6 +49,11 @@ static func candidates(g: FSRules, seat: int) -> Array:
 	if seat < 0 or seat >= g.players.size() or g.phase == "game_over":
 		return out
 	var is_current: bool = seat == g.current
+	if g.phase in ["turn", "priority", "battle_roll", "death"] and not g.dead[seat] and bool(g.character_ready[seat]):
+		out.append(_a("character"))
+		if g._item_count(seat, 5) > 0:
+			out.append(_a("mushroom_counter20"))
+	if is_current and g._item_count(seat,173)>0: out.append(_a("inspect_item13"))
 	match g.phase:
 		"starting_item":
 			if not g._starting_choices.is_empty():
@@ -58,6 +71,8 @@ static func candidates(g: FSRules, seat: int) -> Array:
 		"death":
 			out.append(_a("death", _death_choice(g, seat)))
 		"effect":
+			for index in g._card_choices().size():
+				out.append(_a("card_choice", {"index": index, "revision": g.revision}))
 			for target in g.resolving.get("reward_soul_targets", []):
 				out.append(_a("reward_soul_target", {"target": target}))
 			if bool(g.resolving.get("reward_damage", false)):
@@ -86,24 +101,37 @@ static func candidates(g: FSRules, seat: int) -> Array:
 				out.append(_a("end"))
 				for slot in range(-1, g.monsters.size()):
 					out.append(_a("attack", {"slot": slot}))
+				for index in g._familiar_targets15().size():
+					out.append(_a("attack_familiar15", {"index": index}))
 				for slot in range(-2, g.shop.size()):
 					out.append(_a("buy", {"slot": slot}))
-				for target in g._player_attack_targets():
+				for target in g._permitted_player_attack_targets():
 					out.append(_a("attack_player", {"target": target}))
 				if g.dlc:
 					out.append(_a("room"))
+					for index in g._extra_rooms20.size():
+						out.append(_a("room", {"index": index}))
 			_add_responses(g, seat, out)
 		"battle_roll":
-			if is_current:
+			if seat == g.actor():
 				out.append(_a("roll"))
 			_add_responses(g, seat, out)
 	return out
 
 ## Ответы, доступные в любой открытой фазе: лут и активация предметов.
 static func _add_responses(g: FSRules, seat: int, out: Array) -> void:
+	if int(g._top_loot20.get(seat, -1)) == g.turn_serial and not g.decks.loot.is_empty():
+		out.append(_a("loot_top20"))
+	if int(g._spider_tokens15.get(seat, 0)) > 0:
+		out.append(_a("remove_spider15"))
 	for id in g.hands[seat]:
 		out.append(_a("loot", {"card": int(id)}))
+	if seat == g.current:
+		for index in g._extra_rooms20.size():
+			out.append(_a("room_activate20", {"item": index}))
 	for index in g.items[seat].size():
+		if int(g.items[seat][index].id) == 248:
+			out.append(_a("activate", {"item": index, "ability": "kill"}))
 		if not bool(g.items[seat][index].tapped):
 			out.append(_a("activate", {"item": index}))
 

@@ -340,6 +340,7 @@ func _question_button(col: Control, q: int, callback: Callable) -> Button:
 	return b
 
 func _show_card(kind: String, id: int) -> void:
+	if preload("res://hub/card_magnifier.gd").offer(self): return
 	_hide_preview()
 	var image := TextureRect.new()
 	image.texture = PIData.card(kind, id)

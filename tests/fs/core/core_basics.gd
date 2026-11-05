@@ -8,7 +8,7 @@ func run(t: FSCheck) -> void:
 	var s := FSScenario.new(t).players(2).current(0).no_items(0).monster(0, 344, {"hp": 2, "dc": 3}).build()
 	t.equal(s.g.current, 0, "Текущий — место 0")
 	t.check(not s.g.legal_actions(0).is_empty(), "У текущего игрока есть законные действия")
-	t.check(s.g.legal_actions(1).all(func(a): return a.kind in ["loot", "activate"]), "У второго в начале хода — только ответы")
+	t.check(s.g.legal_actions(1).all(func(a): return a.kind in ["character", "mushroom_counter20", "loot_top20", "loot", "activate"]), "У второго в начале хода — только ответы")
 	# Детерминированный бросок: 6 — попадание, 1 — промах.
 	s.roll(6)
 	s.ok(0, "attack", {"slot": 0}, "атака монстра")

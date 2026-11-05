@@ -2,7 +2,7 @@ class_name FSPassives
 extends RefCounted
 ## Напечатанные постоянные свойства. Состояние и события применяет только хост FSRules.
 const SimpleRules := preload("res://games/four_souls/logic/fs_passive_rules.gd")
-const ATTACK := {16: 1, 28: 1, 41: 1, 108: 1, 124: 3, 143: 2, 230: 1, 234: 1, 254: 1, 471: 1, 652: 1}
+const ATTACK := {16: 1, 28: 1, 41: 1, 108: 1, 124: 3, 143: 2, 230: 1, 234: 1, 471: 1, 479: 1}
 const HEALTH := {39: 1, 79: 1, 88: 2, 112: 1, 147: 2, 174: 1, 249: 1}
 const AUTOMATIC_OPS := {
 	518: ["counter"], 867: ["counter", "loot"],
@@ -13,7 +13,7 @@ const AUTOMATIC_OPS := {
 	24: ["extra_attack"], 25: ["extra_attack"], 26: ["extra_attack"], 42: ["counter"],
 	69: ["coins"], 77: ["coins"], 105: ["extra_buy"], 117: ["extra_attack"], 121: ["loot"],
 	173: ["extra_buy"], 196: ["loot"], 200: ["loot"], 221: ["extra_loot"], 226: ["extra_loot"],
-	254: ["attack", "extra_attack"], 877: ["extra_attack"], 838: ["treasure"],
+	254: ["extra_attack"], 877: ["extra_attack"], 838: ["treasure"],
 	16: ["attack", "loot"], 45: ["counter", "coins", "loot", "treasure"],
 	47: ["counter"], 55: ["counter"], 56: ["counter"], 58: ["counter", "loot"],
 	85: ["counter"], 90: ["loot"], 161: ["coins"], 165: ["coins"],
@@ -46,6 +46,8 @@ static func monster_health_bonus(monster: Dictionary, stat: String) -> int:
 static func event_ops(game: RefCounted, owner: int, item: Dictionary, event: String, data: Dictionary) -> Array:
 	var id: int = item.id
 	var result: Array = SimpleRules.event_ops(id, owner, int(game.current), event, data)
+	if id == 8 and game._card_automation_enabled():
+		return []
 	# Динамические значения и условия по состоянию остаются отдельными обработчиками.
 	match event:
 		"turn_start":
@@ -78,6 +80,8 @@ static func event_ops(game: RefCounted, owner: int, item: Dictionary, event: Str
 				result.append(operation("loot", 3))
 			if FSData.end_turn_recharge(id):
 				result.append(operation("recharge"))
+			if id == 39:
+				result.append(operation("ready_character"))
 			if id == 161 and int(game.coins[owner]) == 0:
 				result.append(operation("coins", 6))
 			if (id == 240 and game.hands[owner].size() >= 8) or (id == 250 and game.hands[owner].is_empty()) or (id == 58 and game.hands[owner].size() < int(item.counters)):
@@ -92,6 +96,10 @@ static func event_ops(game: RefCounted, owner: int, item: Dictionary, event: Str
 		"coins":
 			if id == 137 and owner != int(data.seat):
 				result.append({"op": "give_coin", "from": int(data.seat), "amount": 1})
+		"purchase":
+			if id == 62 and owner != int(data.seat) and int(data.slot) != -1:
+				result.append(operation("coins", 2))
+				result.append(operation("loot"))
 	return result
 
 ## Проклятия текущего игрока: обязательные срабатывания начала/конца его хода (через стек).
@@ -117,14 +125,39 @@ static func curse_ops(game: RefCounted, owner: int, id: int, event: String) -> A
 static func room_ops(game: RefCounted, room_id: int, event: String, data: Dictionary) -> Array:
 	var out: Array = []
 	match room_id:
+		764:
+			if event == "turn_end":
+				out.append([game.current, [operation("coins", -2)]])
 		777:
 			if event == "death":
 				for seat in game.players.size():
-					if seat != int(data.get("seat", -1)) and not game.dead[seat]:
+					if seat != int(data.get("seat", -1)):
 						out.append([seat, [operation("loot")]])
+		796:
+			if event == "turn_end":
+				var minimum: int = game.hands.map(func(hand: Array): return hand.size()).min()
+				if game.hands[game.current].size() == minimum:
+					out.append([game.current, [operation("damage")]])
+		798:
+			if event == "death":
+				for seat in game.players.size():
+					if seat != int(data.get("seat", -1)):
+						out.append([seat, [operation("coins", 4)]])
+		799:
+			if event == "loot_draw":
+				out.append([int(data.seat), [operation("damage")]])
+		800:
+			if event == "turn_end":
+				out.append([game.current, [operation("discard_loot")]])
 		802:
 			if event == "turn_end":
 				out.append([game.current, [operation("tap_character")]])
+		806:
+			if event == "soul_gain":
+				out.append([int(data.seat), [operation("skip_turn")]])
+		812:
+			if event == "activate":
+				out.append([int(data.seat), [operation("damage")]])
 		816:
 			if event == "turn_end" and not game.bought and not game.hands[game.current].is_empty():
 				out.append([game.current, [{"op": "discard_loot", "amount": game.hands[game.current].size()}]])
@@ -135,6 +168,10 @@ static func character_health(id: int) -> int:
 
 static func stat_bonus(id: int, entry: Dictionary, hand_size: int, meat_cubes: int) -> Vector2i:
 	var bonus := Vector2i(int(ATTACK.get(id, 0)), int(HEALTH.get(id, 0)))
+	if id == 64 and int(entry.counters) >= 4:
+		bonus.x += 1
+	if id == 158 and int(entry.counters) >= 10:
+		bonus.x += 1
 	if id == 228 and hand_size == 0:
 		bonus.x += 1
 	if id == 30 and meat_cubes >= 2:
@@ -145,4 +182,6 @@ static func stat_bonus(id: int, entry: Dictionary, hand_size: int, meat_cubes: i
 		bonus.y += 1
 	if id == 867:
 		bonus.y += int(entry.counters)
+	if id == 93 and int(entry.counters) == 2:
+		bonus.x += 1
 	return bonus

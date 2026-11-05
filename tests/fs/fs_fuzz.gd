@@ -83,7 +83,7 @@ static func play(config: Dictionary, rng: RandomNumberGenerator, max_steps: int)
 			problem = "Зависание: ни у одного места нет принятого действия (фаза %s)" % g.phase
 			break
 		faces.clear()
-		var accepted := g.action(int(choice.seat), str(choice.kind), choice.get("arg"))
+		var accepted := perform(g, int(choice.seat), str(choice.kind), choice.get("arg"))
 		steps += 1
 		if not accepted:
 			continue
@@ -129,7 +129,13 @@ static func _pick(g: FSRules, rng: RandomNumberGenerator) -> Dictionary:
 		trial.roll_source = func() -> int: return 3
 		if trial.action(int(chosen.seat), str(chosen.kind), chosen.get("arg")):
 			return chosen
+	if Legal.advance_clock(g.clone()):
+		return {"seat": g.current, "kind": "_clock", "arg": null}
 	return {}
+
+## Служебные часы стенда не отправляются в сетевой action().
+static func perform(g: FSRules, seat: int, kind: String, arg) -> bool:
+	return Legal.advance_clock(g) if kind == "_clock" else g.action(seat, kind, arg)
 
 ## Повтор журнала с записанными гранями. Возвращает класс первой ошибки или "".
 static func replay(config: Dictionary, log: Array) -> String:
@@ -138,8 +144,9 @@ static func replay(config: Dictionary, log: Array) -> String:
 	var queue: Array = []
 	g.roll_source = func() -> int: return int(queue.pop_front()) if not queue.is_empty() else 3
 	for entry: Array in log:
-		queue = entry[3].duplicate()
-		if not g.action(int(entry[0]), str(entry[1]), entry[2]):
+		queue.clear()
+		queue.append_array(entry[3])
+		if not perform(g, int(entry[0]), str(entry[1]), entry[2]):
 			continue
 		var found := FSInvariants.check(g, false)
 		if not found.is_empty():
@@ -181,8 +188,9 @@ static func _accepted_only(config: Dictionary, log: Array) -> Array:
 	g.roll_source = func() -> int: return int(queue.pop_front()) if not queue.is_empty() else 3
 	var out: Array = []
 	for entry: Array in log:
-		queue = entry[3].duplicate()
-		if g.action(int(entry[0]), str(entry[1]), entry[2]):
+		queue.clear()
+		queue.append_array(entry[3])
+		if perform(g, int(entry[0]), str(entry[1]), entry[2]):
 			out.append(entry)
 			if not FSInvariants.check(g, false).is_empty():
 				break

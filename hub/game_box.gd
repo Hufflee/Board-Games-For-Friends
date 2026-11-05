@@ -308,6 +308,10 @@ static func _edge_color(t: Texture2D) -> Color:
 
 
 static func cover_texture(id: String, part: String) -> Texture2D:
+	if id == "blood_on_the_clocktower":
+		return load("res://games/blood_on_the_clocktower/ui/bc_art.gd").cover(part)
+	if id == "machi_koro":
+		return load("res://games/machi_koro/ui/mk_art.gd").cover(part)
 	if id.begins_with("custom:"):
 		return preload("res://games/custom/logic/cg_library.gd").cover_texture(id.trim_prefix("custom:"), part)
 	if part == "top" and id in ["gloom", "gloomier", "ready_set_bet", "brodilka"]:

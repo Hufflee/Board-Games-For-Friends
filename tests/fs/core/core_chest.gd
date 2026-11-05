@@ -10,7 +10,7 @@ func _index(s, seat: int, id: int) -> int:
 	return -1
 
 func run(t: Check) -> void:
-	var s := Scenario.new(t).players(2).dlc().current(0).no_items(0).item(0, 243).item(1, 7).build()
+	var s := Scenario.new(t).rules_type(preload("res://tests/fs/fs_legacy_manual_reward_rules.gd")).players(2).dlc().current(0).no_items(0).item(0, 243).item(1, 7).build()
 	s.g._begin_resolving({"kind": "item", "card": 13, "owner": 0})
 	s.effect(0, "destroy", {"target": 0, "item": _index(s, 0, 243)})
 	s.close()
@@ -19,7 +19,7 @@ func run(t: Check) -> void:
 	t.equal(_index(s, 0, 243), -1, "Сундук перестал быть предметом")
 	t.equal(s.g.items[1][_index(s, 1, 7)].counters, 1, "Превращение вызывает чужого Друга")
 	s.inv("Сундук после уничтожения")
-	var death := Scenario.new(t).players(2).dlc().current(0).character(0, 821).no_items(0).no_items(1) \
+	var death := Scenario.new(t).rules_type(preload("res://tests/fs/fs_legacy_manual_reward_rules.gd")).players(2).dlc().current(0).character(0, 821).no_items(0).no_items(1) \
 		.item(0, 243).item(0, 91).item(1, 7).hand(0, [497]).monster(0, 344, {"hp": 5, "dc": 6, "at": 9}).build()
 	death.roll(1)
 	death.ok(0, "attack", {"slot": 0})
@@ -34,7 +34,7 @@ func run(t: Check) -> void:
 	t.equal(death.g.items[1][_index(death, 1, 7)].counters, 1, "Смерть не теряет вызванный Сундуком пассив")
 	death.inv("Сундук после штрафа смерти")
 	# Тот же перенос во время штрафа может открыть чужую обязательную ручную Карму.
-	var karma := Scenario.new(t).players(2).dlc().current(0).character(0, 821).no_items(0).no_items(1) \
+	var karma := Scenario.new(t).rules_type(preload("res://tests/fs/fs_legacy_manual_reward_rules.gd")).players(2).dlc().current(0).character(0, 821).no_items(0).no_items(1) \
 		.item(0, 243).item(1, 8).hand(0, [497]).shop(0, 91).shop(1, 229) \
 		.monster(0, 344, {"hp": 5, "dc": 6, "at": 9}).build()
 	karma.roll(1)

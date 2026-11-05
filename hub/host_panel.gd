@@ -128,6 +128,9 @@ func _rebuild() -> void:
 		c.queue_free()
 	var info: Dictionary = Net.host_tools.info()
 	_section("game", "Игра", _game_rows(info))
+	if Net.fours != null:
+		var fs_panel: Script = load("res://games/four_souls/ui/fs_host_effects.gd")
+		_section("fs_effects", "Айзек · аварийные операции", [fs_panel.make()])
 	for p: Dictionary in info.players:
 		_section(p.seat, str(p.name) + ("  · бот" if p.bot else ""), _player_rows(p, info))
 	_fit.call_deferred()
@@ -143,6 +146,8 @@ func _section(key: Variant, title: String, rows: Array) -> void:
 		_rebuild())
 	_body.add_child(head)
 	if not open:
+		for row: Control in rows:
+			row.free() # Переданные строки ещё не в дереве: закрытая секция должна их освободить.
 		return
 	var box := _vbox(8)
 	var margin := MarginContainer.new()
@@ -179,6 +184,8 @@ func _game_rows(info: Dictionary) -> Array:
 	timer_row.add_theme_constant_override("separation", 8)
 	var on := CheckBox.new()
 	on.text = "Таймер"
+	on.disabled = not bool(info.get("timer_supported", true))
+	if Net.phantom != null: on.text = "Таймер обсуждения"
 	on.tooltip_text = "Выключен — время хода не ограничено"
 	on.button_pressed = bool(info.timer_on)
 	on.add_theme_color_override("font_color", INK)
@@ -188,7 +195,7 @@ func _game_rows(info: Dictionary) -> Array:
 	timer_row.add_child(on)
 	var secs := _spin(int(info.timer), 5, 900, 5)
 	secs.suffix = "с"
-	secs.editable = bool(info.timer_on)
+	secs.editable = bool(info.timer_on) and bool(info.get("timer_supported", true))
 	timer_row.add_child(secs)
 	on.toggled.connect(func(v: bool): Net.host_tools.set_timer(v, int(secs.value)))
 	secs.value_changed.connect(func(v: float): Net.host_tools.set_timer(true, int(v)))

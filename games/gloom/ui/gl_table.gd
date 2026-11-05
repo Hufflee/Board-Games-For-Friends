@@ -865,6 +865,8 @@ func _on_hand_hover(card: int, on: bool) -> void:
 
 
 func _show_preview(near: Control, drawer: Callable) -> void:
+	if preload("res://hub/card_magnifier.gd").offer(self):
+		return
 	if Net.paused or bool(_v.get("game_paused", false)):
 		return
 	for ch in _preview.get_children():

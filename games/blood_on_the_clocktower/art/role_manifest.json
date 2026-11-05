@@ -1,0 +1,506 @@
+[
+  {
+    "id": "washerwoman",
+    "book": "trouble_brewing",
+    "page": 2,
+    "xref": 9,
+    "sha256": "45a802a057992dbd3b6f2b62e655b8b5669314720854b5570b9b62841fb3fa9f"
+  },
+  {
+    "id": "librarian",
+    "book": "trouble_brewing",
+    "page": 3,
+    "xref": 36,
+    "sha256": "8e9e5f622738ba9d52fe7f193ddd42c4460b9a497975bb1f597f081403cf60d2"
+  },
+  {
+    "id": "investigator",
+    "book": "trouble_brewing",
+    "page": 3,
+    "xref": 38,
+    "sha256": "4b3450f90fc725c8c1daba500bfe63c5c41564033f0504454c02e7bcc838ed72"
+  },
+  {
+    "id": "chef",
+    "book": "trouble_brewing",
+    "page": 4,
+    "xref": 44,
+    "sha256": "a237069b85d442748d68cb57a5da60961e4aa034004ebfdda821edaff454b01c"
+  },
+  {
+    "id": "empath",
+    "book": "trouble_brewing",
+    "page": 4,
+    "xref": 42,
+    "sha256": "f661570f861074a34a34227c425fc58784ab1798bac7aa3ec39bce7be9756e3f"
+  },
+  {
+    "id": "fortune_teller",
+    "book": "trouble_brewing",
+    "page": 5,
+    "xref": 50,
+    "sha256": "1e72d8ad2c2e53d89056d7732f4558cf6030c3c68f39cb87ce6f6325d388faf7"
+  },
+  {
+    "id": "undertaker",
+    "book": "trouble_brewing",
+    "page": 5,
+    "xref": 52,
+    "sha256": "27d41375b6c183c85f8a5b896def36df4dc6d423b1170123fcc8423da1460c8a"
+  },
+  {
+    "id": "monk",
+    "book": "trouble_brewing",
+    "page": 6,
+    "xref": 58,
+    "sha256": "748f706a95688eff9da04e52c499ad7a3956e493cfd955aa84f6584d304034be"
+  },
+  {
+    "id": "ravenkeeper",
+    "book": "trouble_brewing",
+    "page": 6,
+    "xref": 56,
+    "sha256": "d024b286f15714357b5776c5b43a0c88b7852dc5f9bdce9c32b4020b6efb7030"
+  },
+  {
+    "id": "virgin",
+    "book": "trouble_brewing",
+    "page": 7,
+    "xref": 62,
+    "sha256": "cd904dfd20bfba10f332372d41c7e9301d1499392262859bca561d56b69dd7be"
+  },
+  {
+    "id": "slayer",
+    "book": "trouble_brewing",
+    "page": 7,
+    "xref": 64,
+    "sha256": "23624909e05c0d3c504ea4c51bd8c3c5305ef2be70021351041a8f9ddfee6a14"
+  },
+  {
+    "id": "soldier",
+    "book": "trouble_brewing",
+    "page": 8,
+    "xref": 68,
+    "sha256": "3ac1f4182eefeae5ff2a8ebb538dc4be564cf1840a4c7198fd8395b671977b3d"
+  },
+  {
+    "id": "mayor",
+    "book": "trouble_brewing",
+    "page": 8,
+    "xref": 70,
+    "sha256": "99adf228adb4fbecb911ba454ba7ce22d9e5af168d96625b2d77f6bf5045958d"
+  },
+  {
+    "id": "butler",
+    "book": "trouble_brewing",
+    "page": 9,
+    "xref": 76,
+    "sha256": "bf1103abcad0f6887ac24716ee80fed161133c1b652d5b9e6c5701740a491989"
+  },
+  {
+    "id": "drunk",
+    "book": "trouble_brewing",
+    "page": 9,
+    "xref": 74,
+    "sha256": "8e4c87e70b76558b6f4692888b4bc89963d9d734dbca9cf5b41e564e22ea6d4d"
+  },
+  {
+    "id": "recluse",
+    "book": "trouble_brewing",
+    "page": 10,
+    "xref": 80,
+    "sha256": "e5c5345d09a5fa101aac63b82308cb0d62cf2e93a8e373dc733b345f5de64067"
+  },
+  {
+    "id": "saint",
+    "book": "trouble_brewing",
+    "page": 10,
+    "xref": 82,
+    "sha256": "697db712fe0e37b57bcb9ac141b7bb308d487df1f52c71cab6587d71184e70b3"
+  },
+  {
+    "id": "poisoner",
+    "book": "trouble_brewing",
+    "page": 11,
+    "xref": 86,
+    "sha256": "0b6eaca29a399d39bb29dccc5b5b2eb2467cbc2afb77c0aa6e9291f6cb199873"
+  },
+  {
+    "id": "spy",
+    "book": "trouble_brewing",
+    "page": 11,
+    "xref": 88,
+    "sha256": "e9a4f8f006c1b2fb27609f1890492f345e2bbe6ce637feed4b27852ee97ba528"
+  },
+  {
+    "id": "baron",
+    "book": "trouble_brewing",
+    "page": 12,
+    "xref": 92,
+    "sha256": "479f42db5adf0fe52948de8aa4fb4e9cad4c64f42dfbb2096376333d5e55fe4b"
+  },
+  {
+    "id": "scarlet_woman",
+    "book": "trouble_brewing",
+    "page": 12,
+    "xref": 94,
+    "sha256": "626c6bc65c2fff48fadabb2e8734262b478d26895cd612ec8135d9cde4254555"
+  },
+  {
+    "id": "imp",
+    "book": "trouble_brewing",
+    "page": 13,
+    "xref": 98,
+    "sha256": "451dfb3fb5e99b0818c7377e8e9f957513e3a42f1ac8434d2278330a70e3d671"
+  },
+  {
+    "id": "grandmother",
+    "book": "bad_moon_rising",
+    "page": 2,
+    "xref": 12,
+    "sha256": "8043f538994421366248aee11e6c8de44c60dc6aac83ecab41a9d563a5d8020f"
+  },
+  {
+    "id": "sailor",
+    "book": "bad_moon_rising",
+    "page": 3,
+    "xref": 37,
+    "sha256": "63ddb72578c1a34415753befe9d43d830b3ecf56d8a427bbf6c06d942515b684"
+  },
+  {
+    "id": "chambermaid",
+    "book": "bad_moon_rising",
+    "page": 3,
+    "xref": 39,
+    "sha256": "2cff141ed04829e3d825bdbeb10d0a6550441621384e4add00ba750c85e8f071"
+  },
+  {
+    "id": "exorcist",
+    "book": "bad_moon_rising",
+    "page": 4,
+    "xref": 43,
+    "sha256": "e624b84b3c1b59dceca88c46509bdc8d1d73dbc508080bd54010356c93e279ae"
+  },
+  {
+    "id": "innkeeper",
+    "book": "bad_moon_rising",
+    "page": 4,
+    "xref": 45,
+    "sha256": "4e9f0721abd5d601ce8b81713d8b8fefba96eebf7e01c6654a84650828547090"
+  },
+  {
+    "id": "gambler",
+    "book": "bad_moon_rising",
+    "page": 5,
+    "xref": 49,
+    "sha256": "d7a23eaa5085c753b03ba5d34a987b2d9dce8ef58503baf2e84fe06fd9f0ea40"
+  },
+  {
+    "id": "gossip",
+    "book": "bad_moon_rising",
+    "page": 5,
+    "xref": 51,
+    "sha256": "0b61675d511a34620e9e9bd8b8a102034d7e15cc10b961e4968df210b421e402"
+  },
+  {
+    "id": "courtier",
+    "book": "bad_moon_rising",
+    "page": 6,
+    "xref": 57,
+    "sha256": "e5756d3aa87fa2d850aed8fb4fdba85813c7526fc1e4e88f2de042a443bce2de"
+  },
+  {
+    "id": "professor",
+    "book": "bad_moon_rising",
+    "page": 6,
+    "xref": 55,
+    "sha256": "b647aaee1b56d71f7f86b23e692e0a39a4fc4aa3336d4b41d562f231322e2eb6"
+  },
+  {
+    "id": "minstrel",
+    "book": "bad_moon_rising",
+    "page": 7,
+    "xref": 61,
+    "sha256": "dc2f4fcdd54b0a4e24116a6192a2e56e703903ba752be2f92b5f37561dac06f7"
+  },
+  {
+    "id": "tea_lady",
+    "book": "bad_moon_rising",
+    "page": 7,
+    "xref": 63,
+    "sha256": "963270cc700978e6be40a40938a86981ee8ca98834c47d60857ada999398e17c"
+  },
+  {
+    "id": "pacifist",
+    "book": "bad_moon_rising",
+    "page": 8,
+    "xref": 67,
+    "sha256": "70c3e811ed753a4d272de072f4ab4b2e0b90c570229857308a5ef8fc3001fc84"
+  },
+  {
+    "id": "fool",
+    "book": "bad_moon_rising",
+    "page": 8,
+    "xref": 69,
+    "sha256": "0cb27ae823334c4c5b5692eb28059c3917f4943139260a374c14e98dd1b7144b"
+  },
+  {
+    "id": "tinker",
+    "book": "bad_moon_rising",
+    "page": 9,
+    "xref": 75,
+    "sha256": "d2b85793ed1ad57625bcafa418b52efac85eaca5e586b89c6854a17b6c08f50f"
+  },
+  {
+    "id": "moonchild",
+    "book": "bad_moon_rising",
+    "page": 9,
+    "xref": 77,
+    "sha256": "d9dc80bbeab28c9268c6f2d531d7e11052785d5552470c4cd125b7ef12dae8c6"
+  },
+  {
+    "id": "goon",
+    "book": "bad_moon_rising",
+    "page": 10,
+    "xref": 83,
+    "sha256": "c68f719112cb5cdd9a0fcfa7966a375ec7a72b7e384011f4deffea936c8b7545"
+  },
+  {
+    "id": "lunatic",
+    "book": "bad_moon_rising",
+    "page": 10,
+    "xref": 81,
+    "sha256": "d4af224e2decb70b3ccd5ec295b810fd61c4c037d0e130465ccf86dec80b28bb"
+  },
+  {
+    "id": "godfather",
+    "book": "bad_moon_rising",
+    "page": 11,
+    "xref": 89,
+    "sha256": "d39af2d7a80a165750145e30f8b98b6b099c3b49622dd67eb3f81fe2824ae0e3"
+  },
+  {
+    "id": "devils_advocate",
+    "book": "bad_moon_rising",
+    "page": 11,
+    "xref": 87,
+    "sha256": "18358fd926f3969e8d1615ff48685659b5729aba3ee3aff9c84e9569a115ed17"
+  },
+  {
+    "id": "assassin",
+    "book": "bad_moon_rising",
+    "page": 12,
+    "xref": 93,
+    "sha256": "f6dcf817b01e3f3e4f8e5cbd281e9eff925f46ad7444eee37ae8dc993430536b"
+  },
+  {
+    "id": "mastermind",
+    "book": "bad_moon_rising",
+    "page": 12,
+    "xref": 95,
+    "sha256": "e98a50e7e28c1c02ab4f50ae26ad1160ddefc372ee775d2463a352484b6bb0e7"
+  },
+  {
+    "id": "zombuul",
+    "book": "bad_moon_rising",
+    "page": 13,
+    "xref": 101,
+    "sha256": "f172c8e35f4120c602f41ea68aef3e12ed13c82b9185d4b8106322e98bfc3616"
+  },
+  {
+    "id": "pukka",
+    "book": "bad_moon_rising",
+    "page": 13,
+    "xref": 99,
+    "sha256": "df1e0eda57b9406aeab66475bab4362603cfa4ccc8114e92b395b6378348fbb0"
+  },
+  {
+    "id": "shabaloth",
+    "book": "bad_moon_rising",
+    "page": 14,
+    "xref": 107,
+    "sha256": "48d62305e2d895c2face41dba8ab1c9ed3f8d0599fe1d03b9464b61e8a2d0078"
+  },
+  {
+    "id": "po",
+    "book": "bad_moon_rising",
+    "page": 14,
+    "xref": 105,
+    "sha256": "bb78e29fe0addf2ca30645c20cdabfe757cbd92d9509209277cd16f1ee38e3ca"
+  },
+  {
+    "id": "clockmaker",
+    "book": "sects_and_violets",
+    "page": 2,
+    "xref": 33,
+    "sha256": "a317f25b470a09db32500feae764e082c286cc2bff12cd0527097101059be944"
+  },
+  {
+    "id": "dreamer",
+    "book": "sects_and_violets",
+    "page": 3,
+    "xref": 39,
+    "sha256": "dd4978a9c0aceb42a674af66d749d47c23b38493fd7bfa867815ef747fe567d7"
+  },
+  {
+    "id": "snake_charmer",
+    "book": "sects_and_violets",
+    "page": 3,
+    "xref": 41,
+    "sha256": "fdef1027d8f868e84d59c17d9a90bd00ccfad7116ef517caea07b8c17f1933dd"
+  },
+  {
+    "id": "mathematician",
+    "book": "sects_and_violets",
+    "page": 4,
+    "xref": 47,
+    "sha256": "c4aee89118ea9ca227120c9c218d6a710343a8ea12e0ca13566459e357b868b8"
+  },
+  {
+    "id": "flowergirl",
+    "book": "sects_and_violets",
+    "page": 4,
+    "xref": 45,
+    "sha256": "76cabaca07f80cb704db5360ba56bcdc50cc18015def420cbcce1dd7c9fc0160"
+  },
+  {
+    "id": "town_crier",
+    "book": "sects_and_violets",
+    "page": 5,
+    "xref": 53,
+    "sha256": "036c60b33aacc2e726bcd5ada5a8fd4e1623de852c692748bac94caa14938343"
+  },
+  {
+    "id": "oracle",
+    "book": "sects_and_violets",
+    "page": 5,
+    "xref": 51,
+    "sha256": "51f184fda6daa5074b009a8469b2a96be981eead963a9e770bdefac10f0e66ef"
+  },
+  {
+    "id": "savant",
+    "book": "sects_and_violets",
+    "page": 6,
+    "xref": 57,
+    "sha256": "e4eb6a9465bf9f598522fd120d424f60df75dc2acb94f7e76078bf1859e9359d"
+  },
+  {
+    "id": "seamstress",
+    "book": "sects_and_violets",
+    "page": 6,
+    "xref": 59,
+    "sha256": "d1b10ed8927b261b48c23594d0a71b3ff5ab0e8566c5c582fc9cb5e35c967cba"
+  },
+  {
+    "id": "philosopher",
+    "book": "sects_and_violets",
+    "page": 7,
+    "xref": 63,
+    "sha256": "be74040009fad7dca73dd8fdefc22f2dc497015abc2b6320c3bd07595f14f7a4"
+  },
+  {
+    "id": "artist",
+    "book": "sects_and_violets",
+    "page": 7,
+    "xref": 65,
+    "sha256": "bcfd6c1729ff8065d34bd3246100c14cabb54599758c7f6ff81d40814501ccbf"
+  },
+  {
+    "id": "juggler",
+    "book": "sects_and_violets",
+    "page": 8,
+    "xref": 69,
+    "sha256": "db2724fe88048ee61a65b2b85058f4d6adb5357f1515d01207554537530c600b"
+  },
+  {
+    "id": "sage",
+    "book": "sects_and_violets",
+    "page": 8,
+    "xref": 71,
+    "sha256": "c174fda7e703e7e51298c27847043cfda0293508e845f508ef058921082a5ebd"
+  },
+  {
+    "id": "mutant",
+    "book": "sects_and_violets",
+    "page": 9,
+    "xref": 75,
+    "sha256": "afb87b12add3218a835140c797b07000f49d1ada319c14eda7774d3143d2bba7"
+  },
+  {
+    "id": "sweetheart",
+    "book": "sects_and_violets",
+    "page": 9,
+    "xref": 77,
+    "sha256": "147dbf31bd8f1d663b1d004ed1d4bbf18ded8049bca79a0cf2f737d5761c1ac7"
+  },
+  {
+    "id": "barber",
+    "book": "sects_and_violets",
+    "page": 10,
+    "xref": 81,
+    "sha256": "85e80284b07087f05923c3ec23da7f6be903f7af23567559ca27c35203456f24"
+  },
+  {
+    "id": "klutz",
+    "book": "sects_and_violets",
+    "page": 10,
+    "xref": 83,
+    "sha256": "e6f923215ff794c784d1b02af41baa1ee1793e0f636b731c838d8524c2e0e3c5"
+  },
+  {
+    "id": "evil_twin",
+    "book": "sects_and_violets",
+    "page": 11,
+    "xref": 87,
+    "sha256": "64327f41422edcfd818b97bc3195db0a74dae4c1710df1ac697d2106252d38b3"
+  },
+  {
+    "id": "witch",
+    "book": "sects_and_violets",
+    "page": 11,
+    "xref": 89,
+    "sha256": "368a40041352f8864c8bb5fa4b0c9286dc85079cce8792c9096ed6332b63487a"
+  },
+  {
+    "id": "cerenovus",
+    "book": "sects_and_violets",
+    "page": 12,
+    "xref": 95,
+    "sha256": "0b889d0d1fd553f631c6b4236d9799eb8e818d16c81facb16fcdc637018e623b"
+  },
+  {
+    "id": "pit_hag",
+    "book": "sects_and_violets",
+    "page": 12,
+    "xref": 93,
+    "sha256": "a335402c4bc1a5ed0decc05a8f39e51c5a57a5009de024a788b46424b8092062"
+  },
+  {
+    "id": "fang_gu",
+    "book": "sects_and_violets",
+    "page": 13,
+    "xref": 101,
+    "sha256": "eeaff63d50d8e804c03520a845eef04269dee79d719af25acd781a270ddb0f9a"
+  },
+  {
+    "id": "vigormortis",
+    "book": "sects_and_violets",
+    "page": 13,
+    "xref": 99,
+    "sha256": "750aac8e63bc46ae9fdd80c00dff648d88dfc6a78cb51e2dedfdbf35885cc162"
+  },
+  {
+    "id": "no_dashii",
+    "book": "sects_and_violets",
+    "page": 14,
+    "xref": 105,
+    "sha256": "60df6ffc44b5015a817b1a17ce2c26acf403e13627a9bb0b13b57c8c0323ba65"
+  },
+  {
+    "id": "vortox",
+    "book": "sects_and_violets",
+    "page": 14,
+    "xref": 107,
+    "sha256": "057c8aa4c2501e5b94e9a5d1c4078ce80f814a1acd641e1ca851d32619555eb7"
+  }
+]

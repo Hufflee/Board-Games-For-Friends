@@ -134,17 +134,17 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 	t._drawer.add_theme_constant_override("separation", 6)
 	overlay.add_child(t._drawer)
 	var right := t._drawer
-	t._chat_btn = t._btn("Чат", "Чат и быстрые фразы (Enter)")
+	t._chat_btn = t._btn("Чат", "Enter")
 	t._chat_btn.pressed.connect(func(): t.chat.expanded = not t.chat.expanded)
 	right.add_child(t._chat_btn)
-	t._invite_btn = t._btn("Пригласить", "Позвать друзей в пати")
+	t._invite_btn = t._btn("Пригласить", "")
 	t._invite_btn.pressed.connect(t._invite)
 	right.add_child(t._invite_btn)
 	t._spec_btn = t._btn("Зритель", "Выйти из-за стола и смотреть: за ваше место будет играть бот. Вернуть может хост через «Паузу».")
 	t._spec_btn.pressed.connect(func():
 		LeaveGuard.ask(t._spec_btn, "Стать зрителем?", "За ваше место будет играть бот. Вы увидите стол как обычный игрок; вернуть за стол может хост через «Паузу».", "Смотреть", Net.become_spectator, "Остаться в игре"))
 	right.add_child(t._spec_btn)
-	t._pause_btn = t._btn("Пауза", "Поставить игру на паузу (только хост). Здесь же — посадить друзей за стол и пригласить новых.")
+	t._pause_btn = t._btn("Пауза", "Только хост")
 	var pic := PlayPauseIcon.attach(t._pause_btn, Net.paused)
 	t._pause_icon = pic
 	t._pause_btn.pressed.connect(func():

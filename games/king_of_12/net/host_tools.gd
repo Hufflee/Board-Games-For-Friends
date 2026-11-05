@@ -32,17 +32,20 @@ func reset() -> void:
 
 
 func can_undo() -> bool:
-	return not _undo.is_empty()
+	return net.get("bc") == null and not _undo.is_empty()
 
 
 func can_redo() -> bool:
-	return not _redo.is_empty()
+	return net.get("bc") == null and not _redo.is_empty()
 
 
 # --- история ---------------------------------------------------------------
 
 ## Перед действием игрока (Net._handle_action).
 func before_action(kind: String) -> void:
+	# Скрытую информацию нельзя «разучить» отменой; история Clocktower отключена.
+	if net.get("bc") != null:
+		return
 	if restoring or kind in ["view_seat"]:
 		return
 	var g: Object = net._game_obj()
@@ -215,8 +218,12 @@ func info() -> Dictionary:
 			"stats": g.call("host_stats", seat) if g != null and g.has_method("host_stats") else [],
 			"cards": g != null and g.has_method("host_give_card"),
 		})
-	var limit := int(net.settings.get(_timer_key(), 60))
+	var limit := int(net.settings.get(_timer_key(), 0 if net.phantom != null else 60))
+	if g != null and "turn_time" in g: limit = int(g.get("turn_time"))
+	if net.cg != null: limit = int(net.cg.state.turn_seconds)
+	if net.khr != null: limit = int(net.khr.timer)
 	return {
+		"timer_supported": net.get("bc") == null and net.get("mk") == null and net.mind == null and net.fours == null and net.stillion == null and net.rsb == null,
 		"undo": can_undo(),
 		"redo": can_redo(),
 		"timer_on": limit > 0,
@@ -224,19 +231,27 @@ func info() -> Dictionary:
 		"theme": g != null and g.has_method("host_new_theme"),
 		"game_stats": g.call("host_game_stats") if g != null and g.has_method("host_game_stats") else [],
 		"players": players,
-		"spectate": net.mode != "offline",
+		"spectate": net.mode != "offline" and net.get("bc") == null,
 	}
 
 
 func set_timer(on: bool, seconds: int) -> void:
+	if net.get("bc") != null:
+		return
 	seconds = clampi(seconds, 5, 900)
 	net.settings["host_last_turn_time"] = seconds
 	net.settings[_timer_key()] = seconds if on else 0
 	var g: Object = net._game_obj()
 	if g != null and "turn_time" in g:
 		g.set("turn_time", float(seconds) if on else 0.0)  # покер считает время хода сам
-		if "time_left" in g and str(g.get("phase")) == "hand":
-			g.set("time_left", float(seconds))  # текущий ход — заново с новым временем
+		if "time_left" in g:
+			g.set("time_left", float(seconds) if on else 0.0)
+	if net.cg != null:
+		net.cg.state.turn_seconds = float(seconds) if on else 0.0
+		net.cg.reset_clock()
+	if net.khr != null:
+		net.khr.timer = seconds if on else 0
+		net.khr.time_left = float(seconds) if on else 0.0
 	net._system_chat("Хост изменил время на ход: %s." % ("%d с" % seconds if on else "без ограничения"))
 	net._phase_time = 0.0
 	net._stamp_turn = true
@@ -245,7 +260,11 @@ func set_timer(on: bool, seconds: int) -> void:
 
 ## Things in Rings хранит время хода отдельно (tr_timer), остальные — общий turn_time.
 func _timer_key() -> String:
-	return "tr_timer" if net.tir != null else "turn_time"
+	if net.tir != null: return "tr_timer"
+	if net.phantom != null: return "pi_time"
+	if net.wslam != null: return "ws_time"
+	if net.khr != null: return "kh_timer"
+	return "turn_time"
 
 
 func new_theme() -> bool:
@@ -260,6 +279,21 @@ func new_theme() -> bool:
 	net._push_state()
 	return true
 
+
+## Локальный аварийный ввод: клиентского RPC для обхода карточного исполнителя нет.
+func four_souls_effect(kind: String, argument: Dictionary) -> bool:
+	if not net.is_host() or net.fours == null or net.fours.resolving.is_empty() or kind not in ["effect", "effect_done", "effect_roll", "peek_take"]:
+		return false
+	before_action("host")
+	var game: Object = net.fours
+	game._host_manual = true
+	var accepted: bool = game.action(int(game.resolving.owner), kind, argument)
+	game._host_manual = false
+	if accepted:
+		net._push_state()
+	else:
+		_pending = null
+	return accepted
 
 func set_stat(seat: int, key: String, value: int) -> bool:
 	var g: Object = net._game_obj()

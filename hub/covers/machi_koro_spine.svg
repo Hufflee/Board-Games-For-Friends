@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="640" viewBox="0 0 128 640">
+<rect width="128" height="640" rx="6" fill="#278c93"/>
+<path d="M12 34H116M12 606H116" stroke="#e4dac4" stroke-width="3"/>
+<text x="320" y="78" transform="rotate(90 64 64)" text-anchor="middle" font-family="sans-serif" font-weight="700" font-size="40" fill="#f5efdf">МАЧИ КОРО</text>
+<path d="M20 550V510H42V550M48 550V490H72V550M80 550V518H106V550" fill="#e4dac4"/>
+</svg>

@@ -11,6 +11,6 @@ const CASES := [
 	 "expect": {"hp.0": 1}},
 	{"name": "Небоевой урон не предотвращается", "card": 893,
 	 "setup": {"dlc": true, "current": 0, "character": {0: 821}, "items": {0: [893]}, "hand": {0: [497]}},
-	 "do": [["ok", 0, "loot", {"card": 497}], ["close"], ["effect", 0, "damage", {"target": 0, "amount": 1}], ["ok", 0, "effect_done"], ["close"]],
+	 "do": [["ok", 0, "loot", {"card": 497}], ["close"], ["choose", 0, "damage", {"target": 0}], ["close"]],
 	 "expect": {"hp.0": 1}},
 ]

@@ -212,7 +212,7 @@ func _avatar_texture(texture: Texture2D) -> Texture2D:
 
 ## Фон этих игр тёмный в любой теме (таверна, ночь, готика…): надписи финала — светлые.
 const DARK_BACKDROPS := ["the_gang", "king_of_12", "perudo", "dangerous_words", "gloom", "gloomier",
-	"four_souls", "phantom_ink", "tip_top_18", "brodilka", "poker"]
+	"four_souls", "phantom_ink", "tip_top_18", "brodilka", "poker", "blood_on_the_clocktower"]
 
 func _dark() -> bool:
 	return Prefs.dark_theme() or game in DARK_BACKDROPS
@@ -230,7 +230,7 @@ func _add_person(seat: int, winner: bool) -> void:
 	_cards.append(card)
 	var avatar := TextureRect.new()
 	avatar.name = "Avatar"
-	avatar.texture = _avatar_texture(Net.avatar(int(players[seat].get("steam_id", 0))))
+	avatar.texture = PlayerTag.dot(Net.color_of(int(players[seat].get("color", seat))), 64) if game in ["machi_koro", "blood_on_the_clocktower"] else _avatar_texture(Net.avatar(int(players[seat].get("steam_id", 0))))
 	avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	var mask := ShaderMaterial.new()
@@ -437,7 +437,7 @@ func _layout() -> void:
 		_like_button.position = _leader_card.position + leader_avatar.position + Vector2(leader_avatar.size.x + 12, leader_avatar.size.y - _like_button.size.y)
 	_surface.queue_redraw()
 	_backdrop.queue_redraw()
-	_burst.visible = win_count == 1
+	_burst.visible = win_count > 0
 	if _burst.visible:
 		_burst.configure(star_polygon(), Vector2(size.x * 0.5, center_y), accent, _dark())
 
@@ -473,6 +473,14 @@ func _layout_leader(card: Control) -> void:
 ## Фон самой игры, без поля и карт: отдельный экземпляр того же задника, что под столом.
 func _game_backdrop() -> Control:
 	match game:
+		"blood_on_the_clocktower":
+			var backdrop := Control.new()
+			preload("res://games/blood_on_the_clocktower/ui/bc_art.gd").backdrop(backdrop)
+			return backdrop
+		"machi_koro":
+			var backdrop := ColorRect.new()
+			backdrop.color = load("res://games/machi_koro/ui/mk_style.gd").background()
+			return backdrop
 		"the_mind":
 			return preload("res://games/the_mind/ui/tm_style.gd").Background.new()
 		"brodilka":
@@ -523,13 +531,6 @@ func _draw_backdrop() -> void:
 
 func _draw_surface() -> void:
 	var dark := _dark()
-	# Широкие варианты пока прежние: сначала владелец выбирает оформление одиночной победы.
-	if outcome.get("winners", []).size() > 1:
-		var points := star_polygon()
-		var bounds := Rect2(points[0], Vector2.ZERO)
-		for point: Vector2 in points:
-			bounds = bounds.expand(point)
-		_surface.draw_texture_rect(preload("res://hub/art/victory_burst_20261102.png"), bounds, false)
 	var font := ThemeDB.fallback_font
 	var heading: String = outcome.get("title", "")
 	var ink := Color("f9edd8") if dark else Color("312d29")
@@ -552,8 +553,8 @@ func star_polygon() -> PackedVector2Array:
 	var center := Vector2(size.x * 0.5, size.y * 0.40)
 	var wide := team_win and count > 5
 	var radius := Vector2(
-		minf(size.x * 0.48, count * 110.0) if wide else minf(size.x * 0.46, maxf(280, mini(count, 5) * 110)),
-		218 if count > 5 and not team_win else 174)
+		minf(size.x * 0.44, count * 110.0) if wide else minf(size.x * 0.44, maxf(280, mini(count, 5) * 110)),
+		192 if count > 5 and not team_win else 174)
 	if count == 1:
 		radius *= Burst.SINGLE_FIT
 	var points := PackedVector2Array()
@@ -568,7 +569,8 @@ func _draw_person(card: Control) -> void:
 	var avatar := card.get_node("Avatar") as TextureRect
 	var rect := Rect2(avatar.position, avatar.size)
 	# рамка вплотную к аватарке и на 1 px заходит под неё: сглаженный край маски ложится на обводку, а не на тёмный фон
-	card.draw_style_box(_avatar_box(), rect.grow(2))
+	if not game in ["machi_koro", "blood_on_the_clocktower"]:
+		card.draw_style_box(_avatar_box(), rect.grow(2))
 	if card.has_meta("leader"):
 		var font := ThemeDB.fallback_font
 		var caption := "Ведущий"

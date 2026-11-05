@@ -1,0 +1,150 @@
+extends "res://tests/fs/core/core_automation_batch18.gd"
+## Сорок текстов409–451: полный пакет до единственного общего прогона.
+func run(t: Check) -> void:
+	t.equal(preload("res://games/four_souls/logic/fs_monster19_cards.gd").IDS.size(), 40, "Пакет19: сорок полных текстов")
+	for id in [409, 412, 415, 422, 423, 425, 426, 427, 430, 431, 450, 451]:
+		var vanilla = _monster(t, id)
+		var rewards: Dictionary = {409: {"coins": 1}, 412: {"coins": 5}, 415: {"loot": 2, "souls": 1}, 422: {"coins": 6}, 423: {"coins": 1}, 425: {"loot": 2}, 426: {"loot": 1}, 427: {"loot": 1}, 430: {"loot": 1}, 431: {"loot": 1}, 450: {"coins": 4}, 451: {"loot": 2}}
+		t.equal(vanilla.g._printed_monster_reward(id), rewards[id], "%d только напечатанная награда" % id)
+	var thief = _monster(t, 410)
+	thief.g.battle = 0
+	_trigger(thief, "attack_roll", {"seat": 0, "value": 3})
+	t.check(thief.g.get_view(0).card_choices.all(func(choice): return not str(choice).contains("482")), "410 выбор жертвы не раскрывает её руку")
+	thief.choose(0, "random_loot19", {"target": 1})
+	t.equal(thief.g.hands[0].size(), 4, "410 случайная карта передана атакующему")
+	t.equal(thief.g.hands[1].size(), 1, "410 потеря жертвы ровно одна")
+	for face in [4, 5]:
+		var immune = _monster(t, 411, {"hp": 6})
+		_attack_roll17(immune, face)
+		t.equal(int(immune.g.monsters[0].hp), 6, "411 результат%d не наносит боевого урона" % face)
+	var low = _monster(t, 413, {"hp": 2})
+	var before: int = low.g._monster_evasion(low.g.monsters[0])
+	low.g.monsters[0].hp = 3
+	t.equal(before, low.g._monster_evasion(low.g.monsters[0]) + 1, "413 защита повышается только при2HPили меньше")
+	var boss = _monster(t, 416)
+	boss.g.max_hp[0] = 8
+	boss.g.hp[0] = 8
+	_attack_roll17(boss, 1)
+	t.equal(boss.g.hp[0], 8 - 2 * boss.g._monster_attack(boss.g.monsters[0]), "416 единица удваивает боевой урон")
+	_trigger(boss, "monster_death", {"seat": 0, "card": 416})
+	t.equal(boss.g.monster_slots, 3, "416 смерть расширяет ряд на1")
+	var steal = _monster(t, 418)
+	_item(steal, 1, 143)
+	_trigger(steal, "monster_death", {"seat": 0, "card": 418})
+	t.check(steal.g._card_choices().all(func(choice): return str(choice.arg.op) == "skip_choice" or int(choice.arg.target) != 0), "418 кража ограничена чужими предметами")
+	steal.choose(0, "steal", {"target": 1, "item": 1})
+	t.check(steal.g.items[0].any(func(item): return int(item.id) == 143), "418 выбранный предмет передан автоматически")
+	var cancel = _monster(t, 419)
+	cancel.g.battle = 0
+	_trigger(cancel, "attack_roll", {"seat": 0, "value": 6})
+	cancel.close()
+	t.equal(cancel.g.current, 1, "419 собственная шестёрка завершает ход")
+	var one = _monster(t, 420, {"hp": 1})
+	var defense: int = one.g._monster_evasion(one.g.monsters[0])
+	one.g.monsters[0].hp = 2
+	t.equal(defense, one.g._monster_evasion(one.g.monsters[0]) + 2, "420 при1HP защита+2")
+	var heal = _monster(t, 421, {"hp": 1})
+	_trigger(heal, "damage", {"seat": 0, "monster": 421, "amount": 1})
+	t.equal(int(heal.g.monsters[0].hp), 2, "421 нанесённый урон лечит1")
+	for id in [428, 441]:
+		var six = _monster(t, id, {"hp": 5})
+		_item(six, 0, 144)
+		_attack_roll17(six, 6)
+		t.equal(int(six.g.monsters[0].hp), 5, "%d иммунитет шестёрки включает бонус урона предмета" % id)
+	var peep = _monster(t, 429)
+	var bloat := -1
+	for id in peep.g.decks.monster:
+		if FSData.card(int(id)).get("key", "") == "bloat":
+			bloat = int(id)
+			break
+	t.check(bloat >= 0, "429 в колоде есть Утопец")
+	_trigger(peep, "monster_death", {"seat": 0, "card": 429})
+	peep.choose(0, "bloat_place19", {"item": 1})
+	t.equal(int(peep.g.monsters[1].id), bloat, "429 Утопец помещён в выбранный неатакуемый слот")
+	t.check(bloat not in peep.g.decks.monster, "429 физическая карта снята из колоды")
+	var extra = _monster(t, 432)
+	_trigger(extra, "monster_death", {"seat": 0, "card": 432})
+	t.equal(extra.g._forced_regular16, 1, "432 обязательная добавочная атака")
+	t.equal(extra.g._printed_monster_reward(432), {"coins": 3}, "432 награда3монеты по оригиналу")
+	var reflect = _monster(t, 433, {"hp": 4})
+	reflect.g.max_hp[0] = 5
+	reflect.g.hp[0] = 5
+	_attack_roll17(reflect, 6)
+	reflect.close()
+	t.equal(reflect.g.hp[0], 4, "433 именно боевой урон повреждает атакующего")
+	t.equal(reflect.g._printed_monster_reward(433), {"loot": 2, "souls": 1}, "433 две добычи по оригиналу")
+	var ghost = _monster(t, 434)
+	var dc: int = int(ghost.g.monsters[0].dc)
+	_trigger(ghost, "monster_damage", {"seat": 0, "card": 434, "amount": 1})
+	t.equal(int(ghost.g.monsters[0].dc), dc, "434 первый урон без бонуса")
+	_trigger(ghost, "monster_damage", {"seat": 0, "card": 434, "amount": 1})
+	t.equal(int(ghost.g.monsters[0].dc), dc + 1, "434 второй урон даёт+1защиты")
+	ghost.g._expire_monster_modifiers(ghost.g.monsters[0])
+	ghost.g.turn_serial += 1
+	_trigger(ghost, "monster_damage", {"seat": 0, "card": 434, "amount": 1})
+	t.equal(int(ghost.g.monsters[0].dc), dc, "434 новый ход сбрасывает счёт и бонус")
+	var poor = _monster(t, 435)
+	_trigger(poor, "roll", {"seat": 1, "value": 1})
+	t.equal(poor.g.coins[1], 7, "435 единица чужого игрока теряет2монеты")
+	var end = _monster(t, 436)
+	_trigger(end, "roll", {"seat": 1, "value": 6})
+	t.equal(end.g.current, 0, "436 чужая шестёрка не завершает ход")
+	_trigger(end, "roll", {"seat": 0, "value": 6})
+	end.close()
+	t.equal(end.g.current, 1, "436 любой бросок активного6завершает ход")
+	var attack_all = _monster(t, 437)
+	_trigger(attack_all, "roll", {"seat": 2, "value": 4})
+	t.equal(int(attack_all.g.monsters[0].at), 2, "437 собственная атака повышена")
+	t.equal(int(attack_all.g.monsters[1].at), 2, "437 остальные монстры тоже усилены")
+	var activate = _monster(t, 438)
+	_trigger(activate, "activate", {"seat": 2, "card": 84})
+	t.equal(activate.g.hp[2], 1, "438 чужая активация вне боя повреждает её владельца")
+	var discard = _monster(t, 439)
+	_trigger(discard, "roll", {"seat": 1, "value": 5})
+	t.equal(discard.g._card_choice_owner(), 1, "439 карту выбирает бросавший")
+	discard.choose(1, "discard_victim_card16", {"item": 0})
+	t.equal(discard.g.hands[1].size(), 1, "439 выбранная карта сброшена")
+	var hurt = _monster(t, 440)
+	hurt.g.max_hp[2] = 4
+	hurt.g.hp[2] = 4
+	_trigger(hurt, "roll", {"seat": 2, "value": 2})
+	t.equal(hurt.g.hp[2], 2, "440 два урона бросавшему")
+	t.equal(hurt.g._printed_monster_reward(440), {"coins": 3}, "440 три монеты по оригиналу")
+	var ready = _monster(t, 442)
+	_item(ready, 0, 84)
+	_item(ready, 1, 85)
+	ready.g.items[0][0].tapped = true
+	ready.g.items[0][1].tapped = true
+	ready.g.items[1][1].tapped = true
+	_trigger(ready, "monster_death", {"seat": 0, "card": 442})
+	t.check(ready.g.items[0].all(func(item): return not bool(item.tapped)), "442 все свои предметы перезаряжены")
+	t.check(bool(ready.g.items[1][1].tapped), "442 чужой предмет не затронут")
+	var bees = _monster(t, 443)
+	bees.g.battle = 0
+	_trigger(bees, "attack_roll", {"seat": 0, "value": 5})
+	t.equal(bees.g.hp[0], 1, "443 пятый результат повреждает атакующего")
+	var devil = _monster(t, 444)
+	devil.g.battle = 0
+	_trigger(devil, "attack_roll", {"seat": 0, "value": 6})
+	devil.choose(0, "kill_player16", {"target": 2})
+	t.equal(devil.g.hp[2], 0, "444 выбранный живой игрок умирает")
+	var rich = _monster(t, 445)
+	_trigger(rich, "roll", {"seat": 1, "value": 4})
+	t.equal(rich.g.coins[1], 11, "445 две монеты бросавшему")
+	var heart = _monster(t, 446)
+	heart.g.hp[1] = 1
+	_trigger(heart, "roll", {"seat": 1, "value": 6})
+	t.equal(heart.g.hp[1], 2, "446 шестёрка лечит бросавшего")
+	var penny = _monster(t, 447)
+	_trigger(penny, "roll", {"seat": 2, "value": 1})
+	t.equal(penny.g.coins[2], 9, "447 единица даёт бросавшему1монету")
+	var recharge = _monster(t, 448)
+	_item(recharge, 0, 84)
+	recharge.g.items[0][1].tapped = true
+	_trigger(recharge, "roll", {"seat": 2, "value": 2})
+	t.equal(recharge.g._card_choice_owner(), 2, "448 перезарядку выбирает бросавший")
+	recharge.choose(2, "recharge", {"target": 0, "item": 1})
+	t.check(not bool(recharge.g.items[0][1].tapped), "448 можно перезарядить чужой предмет")
+	var loot = _monster(t, 449)
+	_trigger(loot, "roll", {"seat": 2, "value": 5})
+	t.equal(loot.g.hands[2].size(), 2, "449 пятый результат даёт добычу бросавшему")

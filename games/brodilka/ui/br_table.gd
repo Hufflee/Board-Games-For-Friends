@@ -813,6 +813,7 @@ func _update_log() -> void:
 ## Наведение на карту — она показывается крупно рядом (как в Gloom). Берётся текстура самой карты.
 func _hoverable(tr: TextureRect) -> void:
 	tr.mouse_entered.connect(func():
+		if preload("res://hub/card_magnifier.gd").offer(tr): return
 		if tr.texture == null:
 			return
 		var h := minf(size.y * 0.6, 440.0)

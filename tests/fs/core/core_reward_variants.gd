@@ -13,11 +13,15 @@ func _game(t: Check, id: int, health: int = 0) -> RefCounted:
 
 func run(t: Check) -> void:
 	var duke := _game(t, 284)
+	# Новый обязательный урон284 проверяется отдельно; здесь изолируется контракт награды.
+	duke.g.max_hp = [8, 8, 8]
+	duke.g.hp = [8, 8, 8]
 	var initial_items: int = duke.g.items[0].size()
 	for count in 2:
 		duke.g.monsters[0].hp = 0
 		duke.g._continue_stack()
 		duke.close()
+		duke.close() # После отдельного обязательного текста284 закрывается очередь сокровища.
 		t.equal(duke.g.monsters[0].id, 284, "Герцог остаётся монстром после предотвращения")
 		t.equal(duke.g.monsters[0].counters, count + 1, "Предотвращение добавляет ровно один жетон")
 		t.equal(duke.g.monsters[0].hp, 4, "Предотвращение полностью лечит Герцога")
@@ -46,7 +50,7 @@ func run(t: Check) -> void:
 	horse.g._continue_stack()
 	horse.close()
 	t.equal(horse.g.monsters[0].hp, 2, "Первое спасение Всадника оставляет2HP")
-	t.equal(horse.g.monsters[0].dc, 2, "Всадник теряет одну защиту")
+	t.equal(horse.g.monsters[0].dc, 4, "Всадник получает+1защиты по оригиналу")
 	t.equal(horse.g.monsters[0].at, 1, "Всадник теряет одну атаку")
 	t.equal(horse.g.souls[0], 0, "Спасение обычного Всадника не даёт душу")
 	horse.ok(0, "end")
@@ -85,11 +89,13 @@ func run(t: Check) -> void:
 	t.equal(final_blow.g.coins[1], 3, "Несмертельная чужая бомба не крадёт награду последнего удара")
 	final_blow.inv("Последний удар после чужой бомбы")
 	var counters := _game(t, 279, 5)
+	counters.g._host_manual = true # Аварийная операция хоста, не способность случайной карты.
 	counters.g._begin_resolving({"kind": "item", "card": int(counters.g.items[0][0].id), "owner": 0})
 	counters.effect(0, "monster_counter", {"item": 0, "amount": 3})
 	counters.no(1, "effect", {"op": "monster_counter", "item": 0, "amount": 1}, "Чужой игрок не управляет жетонами эффекта")
 	counters.no(0, "effect", {"op": "monster_counter", "item": -1, "amount": 1}, "Отрицательный индекс монстра")
 	counters.ok(0, "effect_done")
+	counters.g._host_manual = false
 	counters.g.monsters[0].hp = 0
 	counters.g._continue_stack()
 	counters.close()

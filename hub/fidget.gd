@@ -96,6 +96,9 @@ const TEXTURES := {
 	"khorom_secret": [COINS + "khorom_secret_coin.png", COINS + "khorom_secret_coin.png"],
 	"khorom_dark": [COINS + "khorom_dark_coin.png", COINS + "khorom_dark_coin.png"],
 	"khorom_dark_secret": [COINS + "khorom_dark_secret_coin.png", COINS + "khorom_dark_secret_coin.png"],
+	# «Кровь на часовой башне» — только тёмная готика: tools/coin_blood_on_the_clocktower.py (согласована 06.11)
+	"blood_on_the_clocktower": [COINS + "blood_on_the_clocktower_coin.png", COINS + "blood_on_the_clocktower_coin.png"],
+	"blood_on_the_clocktower_secret": [COINS + "blood_on_the_clocktower_secret_coin.png", COINS + "blood_on_the_clocktower_secret_coin.png"],
 }
 ## Области сторон на листах. Круглая отрисовка отсекает фон за ободком.
 const COIN_REGIONS := {
@@ -124,18 +127,20 @@ const COIN_REGIONS := {
 	"khorom_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
 	"khorom_dark": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
 	"khorom_dark_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"blood_on_the_clocktower": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"blood_on_the_clocktower_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
 }
 ## Листы, где монета нарисована целиком (с гуртом и выступами): рисуем по альфе листа, без круглой маски.
 const FULL_ART := ["the_mind", "the_mind_dark", "the_mind_secret", "the_mind_dark_secret", "the_gang", "things_in_rings", "things_in_rings_secret", "poker", "poker_secret",
 	"khorom", "khorom_secret", "khorom_dark", "khorom_dark_secret", "phantom_ink", "phantom_ink_secret",
 	"four_souls", "four_souls_secret", "stillion", "stillion_secret", "gloom_secret",
-	"hues_and_cues", "hues_and_cues_dark", "hues_and_cues_secret", "hues_and_cues_dark_secret"]
+	"hues_and_cues", "hues_and_cues_dark", "hues_and_cues_secret", "hues_and_cues_dark_secret", "blood_on_the_clocktower", "blood_on_the_clocktower_secret"]
 ## Игры со своей монетой (кроме Перудо) и есть ли у неё вариант для тёмной темы.
 ## Порядок важен: tip_top_18 раньше tip_top.
 const GAME_COINS := [["phantom_ink", false], ["four_souls", false], ["stillion", false], ["tip_top_18", false], ["tip_top", false], ["king_of_12", false], ["dangerous_words", false],
 	["ready_set_bet", true], ["word_slam", true], ["wavelength", true], ["not_a_hat", false],
 	["hues_and_cues", true], ["brodilka", false], ["gloom", false], ["the_gang", false], ["things_in_rings", false],
-	["poker", false], ["khorom", true], ["the_mind", true]]
+	["poker", false], ["khorom", true], ["the_mind", true], ["blood_on_the_clocktower", false]]
 static var _tex_cache := {}
 
 var _vel := Vector2.ZERO

@@ -5,6 +5,8 @@ extends RefCounted
 static var _cards: Dictionary = {}
 
 static func entry(id: int) -> Dictionary:
+	if id in [913, 914]:
+		return {"status": "auto", "hint": "Дополнительная карта Догмы: обязательная атака, превращение и броски выполняются игрой."}
 	if _cards.is_empty():
 		var data = JSON.parse_string(FileAccess.get_file_as_string("res://games/four_souls/art/card_support.json"))
 		_cards = data.cards if data is Dictionary else {"_": {}}

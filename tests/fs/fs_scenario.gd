@@ -166,6 +166,14 @@ func _finish_start() -> void:
 			g.action(seat, "choose_starting_item", {"card": int(g._starting_choices[0].cards[0])})
 		elif g.phase == "priority":
 			g._finish_responses()
+		elif g.phase == "effect" and g._card_automation_active():
+			if str(g._card_step().get("op", "")) == "auto_roll":
+				g.action(g.actor(), "effect_roll")
+			else:
+				var choices: Array = g._card_choices()
+				if choices.is_empty():
+					return
+				g.action(g._card_choice_owner(), "card_choice", {"index": 0, "revision": g.revision})
 		else:
 			return
 
@@ -200,7 +208,7 @@ func roll(face: int, more: Array = []) -> FSScenario:
 
 func ok(seat: int, kind: String, arg = null, message: String = "") -> bool:
 	var before: int = g.revision
-	var accepted := g.action(seat, kind, arg)
+	var accepted: bool = preload("res://games/four_souls/logic/fs_legal.gd").advance_clock(g) if kind == "_clock" else g.action(seat, kind, arg)
 	var passed := t.check(accepted and g.revision != before, "%s: действие %s места %d принято%s" % [_label(message, kind), kind, seat, "" if accepted else " (отклонено, фаза " + g.phase + ")"])
 	inv(_label(message, kind))
 	return passed
@@ -223,6 +231,24 @@ func effect(seat: int, op: String, fields: Dictionary = {}, message: String = ""
 	var arg := {"op": op}
 	arg.merge(fields, true)
 	return ok(seat, "effect", arg, message if message != "" else "операция " + op)
+
+## Выбрать только существующий серверный вариант, не передавая клиентские числа/операции.
+func choose(seat: int, op: String, fields: Dictionary = {}) -> bool:
+	var choices: Array = g._card_choices()
+	for index in choices.size():
+		var arg: Dictionary = choices[index].arg
+		if str(arg.get("op", "")) != op:
+			continue
+		var matches := true
+		for key in fields:
+			matches = matches and arg.get(key) == fields[key]
+		if matches:
+			return ok(seat, "card_choice", {"index": index, "revision": g.revision}, "выбор " + op)
+	return t.check(false, "Нет допустимого варианта " + op + " " + str(fields))
+
+## Изолированный стенд операции, а не притворное исполнение произвольной способности Бомбы.
+func operation_panel(seat: int = 0) -> void:
+	g._begin_resolving({"kind": "test_operation", "card": -1, "owner": seat})
 
 func expect(path: String, value, message: String = "") -> bool:
 	return t.equal(value_at(path), value, message if message != "" else path)

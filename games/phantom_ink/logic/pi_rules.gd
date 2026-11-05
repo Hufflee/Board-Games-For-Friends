@@ -21,6 +21,8 @@ var winner := -1
 var _rng := RandomNumberGenerator.new()
 var _letter_time := 0.0
 var revision := 0
+var turn_time := 0.0
+var time_left := 0.0
 
 func new_game(members: Array, chosen_roles: Array, seed_value: int = 0) -> void:
 	players = members.duplicate(true)
@@ -183,6 +185,7 @@ func action(seat: int, kind: String, arg = null) -> bool:
 					_end_turn()
 				ok = true
 	if ok:
+		time_left = turn_time
 		revision += 1
 	return ok
 
@@ -201,6 +204,11 @@ func _reveal(row: Dictionary) -> void:
 		row.complete = true
 
 func tick(delta: float) -> bool:
+	if phase not in ["object", "writing", "game_over"] and turn_time > 0 and time_left > 0:
+		var before := ceili(time_left)
+		time_left = maxf(0, time_left - maxf(0, delta))
+		if ceili(time_left) != before:
+			return true
 	if phase != "writing":
 		return false
 	_letter_time += maxf(0.0, delta)

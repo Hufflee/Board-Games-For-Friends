@@ -43,7 +43,7 @@ func _run() -> void:
 		table._show_preview(727)
 		await frames(4)
 		var hint: Label = table._preview.find_child("CardSupportHint", true, false)
-		check(hint != null and hint.text.contains("Атаковать верх колоды"), "Просмотр объясняет ручной выбор карты")
+		check(hint != null and hint.text.contains("Эффект выполняет игра"), "Просмотр объясняет автоматический выбор карты727")
 		check(Rect2(Vector2.ZERO, root.size).encloses(hint.get_global_rect()), "Подсказка полностью внутри1280×720")
 		DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path("res://build/shots/fs02"))
 		await process_frame

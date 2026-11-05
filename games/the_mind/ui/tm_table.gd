@@ -382,6 +382,8 @@ func _run_fx() -> void:
 	_rebuild()
 
 func _show_preview(entry: Dictionary) -> void:
+	if preload("res://hub/card_magnifier.gd").offer(self):
+		return
 	_close_preview()
 	_preview = Style.face(int(entry.value))
 	_preview.z_index = 85

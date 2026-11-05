@@ -1,9 +1,11 @@
-extends "res://games/four_souls/logic/fs_turn.gd"
+extends "res://games/four_souls/logic/fs_copy21_automation.gd"
 ## Four Souls, модуль правил: Ручные операции панели эффекта (_effect).
 ## Часть цепочки fs_state → fs_stack → fs_combat → fs_turn → fs_effects → fs_rules (FSRules — фасад).
 ## Отдельно не используется: состояние и вызовы общие через self.
 
 func _effect(a: Dictionary) -> bool:
+	if _intercept_effect_damage16(a):
+		return true
 	if resolving.has("reward_winners") or resolving.has("reward_soul_targets") or resolving.has("reward_damage"):
 		return false
 	if resolving.has("spawn_card"):
@@ -46,12 +48,12 @@ func _effect(a: Dictionary) -> bool:
 			skipped_turns[target] = int(skipped_turns[target]) + mini(amount, 10)
 			_note("%s пропустит следующих ходов: %d" % [name_of(target), int(skipped_turns[target])])
 		"self_underdeck":
-			if resolving.kind != "loot" or bool(resolving.get("under_deck", false)) or resolving.has("given_to"):
+			if bool(resolving.get("loot_copy14", false)) or resolving.kind != "loot" or bool(resolving.get("under_deck", false)) or resolving.has("given_to"):
 				return false
 			decks.loot.push_front(int(resolving.card))
 			resolving["under_deck"] = true
 		"self_give":
-			if resolving.kind != "loot" or target == int(resolving.owner) or resolving.has("given_to") or bool(resolving.get("under_deck", false)):
+			if bool(resolving.get("loot_copy14", false)) or resolving.kind != "loot" or target == int(resolving.owner) or resolving.has("given_to") or bool(resolving.get("under_deck", false)):
 				return false
 			hands[target].append(int(resolving.card))
 			resolving["given_to"] = target
@@ -77,14 +79,14 @@ func _effect(a: Dictionary) -> bool:
 			damage_shields[target] += maxi(0, amount)
 		"coins": _gain_coins(target,amount)
 		"loot": _draw_loot(target,clampi(amount,0,20))
-		"damage": _damage_player(target, amount)
+		"damage": _damage_player(target, amount, {"attacker": int(resolving.owner)} if not _card_automation_enabled() else {"monster": int(resolving.card)} if _damage_owner18() < 0 else {"attacker": _damage_owner18()})
 		"heal": hp[target] = mini(int(max_hp[target]),int(hp[target])+maxi(0,amount))
 		"souls":
 			# Душа — всегда карта: +души только забирают карту награды, −души — «Уничтожить карту души».
 			if amount < 0:
 				_note("Для потери карты души выберите «Уничтожить карту души» и её индекс")
 				return false
-			if room == 779 or curses[target].has(744):
+			if _room_has20(779) or curses[target].has(744):
 				return false
 			if resolving.kind != "reward" or bool(resolving.get("kept_as_soul", false)):
 				_note("Душа без карты не начисляется: карту души даёт награда монстра")
@@ -112,7 +114,7 @@ func _effect(a: Dictionary) -> bool:
 			if i < 0 or i >= soul_cards[target].size() or target == int(resolving.owner): return false
 			var card: Dictionary = soul_cards[target].pop_at(i)
 			souls[target] = maxi(0, int(souls[target]) - int(card.value))
-			_gain_soul_card(int(resolving.owner), card)
+			_gain_soul_card(int(resolving.owner), card, false)
 		"attach_curse":
 			if resolving.kind != "event" or str(FSData.card(int(resolving.card)).lua.get("type","")) != "curse" or bool(resolving.get("attached",false)): return false
 			curses[target].append(int(resolving.card)); resolving["attached"] = true
@@ -124,7 +126,11 @@ func _effect(a: Dictionary) -> bool:
 		"temporary_attack": attack[target] = maxi(0,int(attack[target])+amount); temporary_attack.append([target,amount])
 		"extra_attack": attack_left += maxi(0,amount); attacked = attack_left <= 0
 		"extra_buy": buy_left += maxi(0,amount); bought = buy_left <= 0
-		"extra_loot": free_loot += maxi(0,amount)
+		"extra_loot":
+			if target == current:
+				free_loot += maxi(0, amount)
+			else:
+				_bonus_loot_plays[target] = int(_bonus_loot_plays[target]) + maxi(0, amount)
 		"max_hp":
 			if target == int(resolving.owner) and PassiveRules.HEALTH.has(int(resolving.card)):
 				_note("Постоянный бонус здоровья этой карты уже учтён")
@@ -137,10 +143,7 @@ func _effect(a: Dictionary) -> bool:
 			monster_slots += amount
 			resolving["refill_monsters"] = true
 		"treasure":
-			for i in clampi(amount,0,10):
-				var id := _draw("treasure")
-				if id >= 0:
-					_gain_item(target, id)
+			_give_treasures21(target, clampi(amount, 0, 10))
 		"roll":
 			var found := false
 			for i in range(stack.size()-1,-1,-1):
@@ -150,7 +153,8 @@ func _effect(a: Dictionary) -> bool:
 			if stack.is_empty() or not stack.back().kind in ["loot","item","event","passive"]: return false
 			var canceled: Dictionary = stack.pop_back()
 			_resolving_base = mini(_resolving_base, stack.size())
-			if canceled.get("kind") == "loot": discards.loot.append(int(canceled.card))
+			if canceled.get("kind") == "loot" and not bool(canceled.get("loot_copy14", false)):
+				discards.loot.append(int(canceled.card))
 		"peek_loot", "peek_treasure", "peek_monster":
 			var deck: String = op.trim_prefix("peek_")
 			peek = {"owner":int(resolving.owner),"deck":deck,"cards":decks[deck].slice(maxi(0,decks[deck].size()-clampi(amount,1,10)))}
@@ -195,6 +199,8 @@ func _effect(a: Dictionary) -> bool:
 				return false
 			items[target][i].tapped = true
 		"discard_loot", "give_loot":
+			if op == "discard_loot" and _item_count(target, 523) > 0:
+				return false
 			var owner: int = resolving.owner
 			var i: int = int(a.get("item", -1))
 			if i < 0 or i >= hands[owner].size() or (op == "give_loot" and target == owner):
@@ -234,9 +240,9 @@ func _effect(a: Dictionary) -> bool:
 			items[target].insert(other_index, own)
 		"item_to_soul":
 			var i: int = int(a.get("item", -1))
-			if i < 0 or i >= items[target].size() or items[target][i].eternal or room == 779 or curses[target].has(744):
+			if i < 0 or i >= items[target].size() or items[target][i].eternal or _room_has20(779) or curses[target].has(744):
 				return false
-			var item := _remove_item(target, i)
+			var item := _remove_item(target, i, true)
 			_gain_soul_card(target, {"id": int(item.id), "value": 1})
 		"temporary_monster_dc":
 			var i: int = int(a.get("item", -1))
@@ -248,6 +254,8 @@ func _effect(a: Dictionary) -> bool:
 			var i: int = int(a.get("item", -1))
 			if i < 0 or i >= shop.size() or int(shop[i]) < 0:
 				return false
+			_eternal_shop15.erase(int(shop[i]))
+			_shop_counters20.erase(int(shop[i]))
 			discards.treasure.append(int(shop[i]))
 			shop[i] = _draw("treasure")
 		"take_shop":
@@ -262,7 +270,8 @@ func _effect(a: Dictionary) -> bool:
 			var i: int = int(a.get("item", -1))
 			if i < 0 or i >= monsters.size() or i == battle:
 				return false
-			discards.monster.append(int(monsters[i].id))
+			_put_monster20(monsters[i], "discard")
+			_eggs_monsters.erase(int(monsters[i].id))
 			if monsters[i].has("under"):
 				monsters[i] = monsters[i].under
 			else:
@@ -284,12 +293,17 @@ func _effect(a: Dictionary) -> bool:
 			var i: int = int(a.get("item",battle))
 			if i < 0 or i >= monsters.size(): return false
 			var damage := maxi(0, amount)
+			if _card_automation_enabled() and damage > 0 and _damage_owner18() >= 0:
+				damage += _item_count(_damage_owner18(), 17)
 			if int(monsters[i].id) == 281:
 				damage = mini(1, damage)
+			damage = _absorb_next_hit("monster", int(monsters[i].id), damage)
 			if int(monsters[i].hp) > 0 and int(monsters[i].hp) - damage <= 0:
 				monsters[i]["lethal_attack_roll"] = 0
 			monsters[i].hp = int(monsters[i].hp) - damage
 			monsters[i]["slayer"] = int(resolving.owner)
+			if damage > 0:
+				_emit_passives("monster_damage", {"seat": _damage_owner18(), "card": int(monsters[i].id), "amount": damage, "physical_id20": int(monsters[i].get("physical_id20", monsters[i].id))})
 		_:
 			return false
 	var manual_titles := {

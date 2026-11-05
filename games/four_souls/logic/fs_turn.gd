@@ -16,8 +16,22 @@ func _begin_turn() -> void:
 		_note("%s пропускает ход" % name_of(current))
 		_advance_turn_order()
 	turn_serial += 1  # новый ход — часы чужих карт с нуля (FSRules.tick)
+	_room_extra_attack = 0
+	_room_extra_attack_used = false
+	_card_delayed.clear()
+	_turn_damage_taken.fill(false)
 	reward_boost = 1
 	_turn_attack_rolls.clear()
+	_turn_die_throws.clear()
+	_turn_attacks_started = 0
+	_turn_combat_seen.clear()
+	_shop_buys_turn = 0
+	_room_activations.clear()
+	_room_loot_plays.clear()
+	_forced_bosses.clear()
+	_lust_pending.clear()
+	_lust_victims.clear()
+	_last_player_killer.fill(-1)
 	_turn_faces.clear()
 	_turn_kills = 0
 	battle_player = -1
@@ -33,13 +47,29 @@ func _begin_turn() -> void:
 	character_ready[current] = _item_count(current, 138) == 0
 	_turn_allowances()
 	# Комната 809 — обязательная атака верха колоды.
-	if room == 809:
+	if _room_has20(809):
 		required_deck_attacks = 1
+	var recharge_candidates: Array = []
 	for item: Dictionary in items[current]:
-		if int(item.id) != 44:
-			item.tapped = false
-	_draw_loot(current, 1 + _has_item(current, "guppystail") + _has_item(current, "momscoinpurse") + _has_item(current, "momspurse") + (1 if room == 772 else 0), "step")
-	if room == 766:
+		if bool(item.get("skip_recharge_once", false)):
+			item.erase("skip_recharge_once")
+			continue
+		if int(item.id) != 44 and bool(item.tapped): recharge_candidates.append(int(item.id))
+	if _card_automation_enabled() and recharge_candidates.size() > _recharge_limit(current):
+		var source: int = 728 if curses[current].has(728) else 815
+		_queue_passive(current, source, {}, [{"op": "trinket_automation", "amount": 1, "context": "recharge", "data": {"allowed": recharge_candidates}}])
+		return
+	else:
+		for item: Dictionary in items[current]:
+			if int(item.id) in recharge_candidates: item.tapped = false
+	_complete_turn_start()
+
+## Добор и начало хода ждут выбора ограниченной перезарядки.
+func _complete_turn_start() -> void:
+	if phase == "effect" and _refill_pending:
+		resolving["refill_monsters"] = true
+	_draw_loot(current, 1 + _has_item(current, "guppystail") + _has_item(current, "momscoinpurse") + _has_item(current, "momspurse") + (1 if _room_has20(772) else 0), "step")
+	if _room_has20(766):
 		_queue_passive(current, room, {}, [PassiveRules.operation("coins", 3)])
 	# Ячейка, освобождённая прерванной наградой (_cancel_unresolved), добирается в начале хода.
 	if _refill_pending and monsters.size() < monster_slots and phase == "turn":
@@ -63,7 +93,8 @@ func _emit_curses(event: String) -> void:
 
 ## Проклятие кровожадности: нельзя закончить ход, пока атака возможна.
 func _must_attack() -> bool:
-	if not (curses[current].has(723) or room == 781) or attacked or attack_left <= 0 or battle >= 0:
+	if int(coins[current]) < _attack_tax(current): return false
+	if not (curses[current].has(723) or _room_has20(781)) or attacked or attack_left <= 0 or battle >= 0:
 		return false
 	if not decks.monster.is_empty() or not discards.monster.is_empty():
 		return true
@@ -76,11 +107,13 @@ func _must_attack() -> bool:
 func _turn_allowances() -> void:
 	free_loot = 1 + _item_count(current, 221) + _item_count(current, 226)
 	buy_left = 1 + _item_count(current, 105) + _item_count(current, 173)
-	attack_left = 99 if _item_count(current, 117) > 0 else 1
+	attack_left = 99 if _item_count(current, 117) > 0 or items[current].any(func(item): return int(item.id) == 158 and int(item.counters) >= 25) else 1
 	for id in [24, 25, 26, 254, 877]:
 		attack_left += _item_count(current, id)
-	if room == 781:
+	if _room_has20(781):
 		attack_left += 1
+	_room_extra_attack = 1 if _room_has20(808) and not _room_extra_attack_used and int(souls[current]) == int(souls.min()) else 0
+	attack_left += _room_extra_attack
 func _end_turn() -> void:
 	if not _ending_turn:
 		_ending_turn = true
@@ -92,18 +125,71 @@ func _end_turn() -> void:
 			return
 	if not _end_discard_prepared:
 		_end_discard_prepared = true
-		_discard_limit = mini(10, maxi(0, hands[current].size() - _has_item(current, "guppystail")))
+		_discard_limit = mini(10, maxi(0, hands[current].size() - (_has_item(current, "guppystail") if _item_count(current, 523) == 0 else 0)))
 		if curses[current].has(729):
 			_discard_limit = mini(2, _discard_limit)
+		_discard_limit = _maximum_hand20(current, _discard_limit)
 	if hands[current].size() > _discard_limit:
 		phase = "discard"
 		return
 	for entry in temporary_attack: attack[int(entry[0])] = maxi(0,int(attack[int(entry[0])])-int(entry[1]))
 	temporary_attack.clear()
-	for seat in players.size(): hp[seat] = max_hp[seat]; dead[seat] = false
+	for seat in players.size():
+		max_hp[seat] = maxi(1, int(max_hp[seat]) - int(_turn_health_bonus[seat]))
+	_turn_health_bonus.fill(0)
+	_turn_roll_bonus.fill(0)
+	_next_hit_shields.clear()
+	_next_attack_damage20.clear()
+	_turn_monster_dc.fill(0)
+	_turn_monster_attack.fill(0)
+	_holy_saves.clear()
+	_shadow_penalty15.clear()
+	_roll_punishments15.clear()
+	_forced_regular16 = 0
+	_next_attack_bonus17.clear()
+	_next_any_attack_bonus17 = 0
+	_optional_blind17 = 0
+	_neighbor_faces15.clear()
+	_team_queue15.clear()
+	_team_source15.clear()
+	_blank_copies14.clear()
+	_forced_monsters14.clear()
+	_double_draw13.clear()
+	_unlimited_loot13.clear()
+	for seat in players.size():
+		for item: Dictionary in items[seat]:
+			if item.has("physical_id13") and not bool(item.get("copy_permanent14", false)):
+				_restore_copy21(item)
+	_refresh_passive_stats()
+	_red_candles.clear()
+	_telepathy_faces.clear()
+	_credit_free = false
+	_gold_deck_attacks = false
+	_forced_bosses.clear()
+	_lust_pending.clear()
+	_lust_victims.clear()
+	_jail_owner = -1
+	_era_face = 0
+	_era_left = 0
+	for index in range(_temporary_eternal.size() - 1, -1, -1):
+		var temporary: Dictionary = _temporary_eternal[index]
+		if _source_item_in_play(temporary.source):
+			temporary.source.eternal = bool(temporary.eternal)
+	_temporary_eternal.clear()
+	for seat in players.size():
+		hp[seat] = max_hp[seat]
+		dead[seat] = false
+		for item: Dictionary in items[seat]:
+			item.erase("familiar_hp15")
+		for soul: Dictionary in soul_cards[seat]:
+			soul.erase("familiar_hp15")
 	damage_shields.fill(0)
+	_bonus_loot_plays.fill(0)
+	_lemon_effects.clear()
 	for monster: Dictionary in monsters:
-		monster.hp = _monster_hp(int(monster.id))
+		monster.erase("temporary_hp15")
+		if int(monster.id) != 274:
+			monster.hp = _monster_max15(monster)
 		_expire_monster_modifiers(monster)
 	_advance_turn_order()
 	_ending_turn = false
@@ -160,7 +246,7 @@ func _check_bonuses() -> void:
 		if claimed.has(id): continue
 		var key: String = FSData.card(int(id)).key
 		for seat in players.size():
-			if room == 779 or curses[seat].has(744):
+			if _room_has20(779) or curses[seat].has(744):
 				continue
 			var guppy := 0
 			for item in items[seat]:
@@ -172,6 +258,8 @@ func _check_bonuses() -> void:
 				break
 	_refresh_passive_stats()
 func _check_win() -> void:
+	if not resolving.is_empty() and int(resolving.get("card", -1)) == 285 and resolving.get("kind", "") == "reward" and not resolving.has("reward_winner"):
+		return
 	if phase == "game_over":
 		return
 	for seat in players.size():
@@ -179,13 +267,15 @@ func _check_win() -> void:
 			_cleanup_reward_cards()
 			winner = seat; phase = "game_over"; _note("Четыре души! Победитель: " + name_of(seat)); return
 func actor() -> int:
+	if phase == "battle_roll":
+		return _battle_roller15()
 	if phase == "forced_discard":
 		return int(discard_choice.target)
 	if phase == "starting_item" and not _starting_choices.is_empty():
 		return int(_starting_choices[0].owner)
 	if phase == "priority": return priority
 	if phase == "effect":
-		return int(resolving.get("reroll_request", {}).get("owner", resolving.owner))
+		return int(resolving.get("reroll_request", {}).get("owner", _card_choice_owner()))
 	if phase == "death" and not _death_queue.is_empty(): return int(_death_queue[0])
 	return current
 func can_spectate() -> bool:

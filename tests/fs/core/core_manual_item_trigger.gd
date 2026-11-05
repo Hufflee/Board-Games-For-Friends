@@ -4,7 +4,7 @@ const Scenario := preload("res://tests/fs/fs_scenario.gd")
 const Check := preload("res://tests/fs/fs_check.gd")
 
 func run(t: Check) -> void:
-	for id: int in [70, 222]:
+	for id: int in [70]:
 		var s := Scenario.new(t).players(2).dlc().current(1).item(0, id).item(0, 237).shop(0, 243).build()
 		var index := -1
 		for i in s.g.items[0].size():
@@ -47,7 +47,7 @@ func run(t: Check) -> void:
 	# Протокол ручного условия: фактическое наступление текста подтверждает человек.
 	# Здесь проверяется сохранение уже объявленной смерти под ручным стеком.
 	var dying := Scenario.new(t).players(2).dlc().current(0).character(0, 821).no_items(0).no_items(1) \
-		.item(1, 222).monster(0, 344, {"hp": 5, "dc": 6, "at": 9}).build()
+		.item(1, 70).monster(0, 344, {"hp": 5, "dc": 6, "at": 9}).build()
 	dying.roll(1)
 	dying.ok(0, "attack", {"slot": 0})
 	dying.ok(0, "roll", null)

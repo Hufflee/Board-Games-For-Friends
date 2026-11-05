@@ -121,7 +121,7 @@ func _on_submit(text: String) -> void:
 	var team := _team_channel()
 	_input.clear()
 	_sync_caret()  # отправили — курсор пропадает до первого нового символа
-	_input.release_focus()
+	_input.grab_focus()
 	Net.send_chat(text, "chat", team)
 
 

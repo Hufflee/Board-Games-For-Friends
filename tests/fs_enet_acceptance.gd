@@ -68,15 +68,27 @@ func _process(delta: float) -> bool:
 		snapshot["disconnected"] = net.disconnected
 		snapshot["seat_peers"] = net.seat_peers
 		snapshot["audit_players"] = net.fours.players
-	var out := FileAccess.open(folder + "/" + role + "-snapshot.json", FileAccess.WRITE)
+	var snapshot_path := folder + "/" + role + "-snapshot.json"
+	var temporary_path := snapshot_path + ".tmp"
+	var out := FileAccess.open(temporary_path, FileAccess.WRITE)
 	out.store_string(JSON.stringify(snapshot))
 	out.close()
+	DirAccess.rename_absolute(ProjectSettings.globalize_path(temporary_path), ProjectSettings.globalize_path(snapshot_path))
 	return false
 
 ## Только подготовка отдельного регрессионного запуска, не сетевое действие игры.
 func prepare_passive_fixture(stage: String) -> void:
 	var g: FSRules = net.fours
-	if stage == "ownership":
+	if stage == "automation_choice":
+		var scenario = load("res://tests/fs/fs_scenario.gd").new()
+		scenario.players(2).dlc().current(1).character(0, 821).character(1, 821).hand(1, [544]).coins(1, 0).item(0, 40, {"tapped": true}).build()
+		var replacement: FSRules = scenario.g
+		replacement.players = g.players.duplicate(true)
+		replacement.action(1, "loot", {"card": 544})
+		replacement._finish_responses()
+		net.fours = replacement
+		g = replacement
+	elif stage == "ownership":
 		g._starting_choices.clear()
 		g.current = 0
 		g.phase = "effect"

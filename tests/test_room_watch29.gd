@@ -50,8 +50,8 @@ func _run() -> void:
 		await _unit()
 		print("ROOM_WATCH ", checks, "/", errors)
 		hub.queue_free()
-		await process_frame
-		quit(1 if errors else 0)
+		await create_timer(0.5).timeout
+		await root.get_node("Sfx").request_quit(1 if errors else 0)
 
 func _unit() -> void:
 	var room: Node = hub._room

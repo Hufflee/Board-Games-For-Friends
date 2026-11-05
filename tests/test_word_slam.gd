@@ -56,16 +56,21 @@ func test_teams_round() -> void:
 	check(r.set_ready(st0) and r.phase == "word", "первый готов")
 	check(r.set_ready(st1) and r.phase == "play", "СЛЭМ!")
 	check(not r.guess(guesser0, "кот"), "до первой карточки отгадывать нельзя")
-	check(r.set_holders(st0, [["noun:7", "adj:0"], ["verb:3"]]), "карточки выложены")
-	check(not r.set_holders(st0, [["noun:7", "noun:7"], []]), "одна карточка — один раз")
+	var noun: String = r.catalog_order.noun[0]
+	var adjective: String = r.catalog_order.adj[0]
+	var verb: String = r.catalog_order.verb[0]
+	check(r.set_holders(st0, [[noun, adjective], [verb]]), "выданные случайно карточки выложены")
+	check(not r.set_holders(st0, [[noun, noun], []]), "одна карточка — один раз")
 	check(r.get_view(r.team_members(1)[0])["holders"][0][0][0] == "?", "соперники не видят карточки")
-	check(r.point(st0, "adj:0") and r.pointer[0]["n"] == 1, "указать на карточку")
+	check(r.point(st0, adjective) and r.pointer[0]["n"] == 1, "указать на карточку")
 	check(r.flipped, "время на ход идёт сразу после «СЛЭМ!»")
 	r.word = "летучая мышь"
 	check(r.guess(guesser0, "кот") and r.phase == "play", "неверная догадка")
 	check(r.guess(guesser0, "Это летучие мыши!") and r.phase == "round_result", "угадали в другой форме")
 	check(r.scores == [1, 0], "карта команде")
+	var old_catalog := JSON.stringify(r.catalog_order)
 	r.advance()
+	check(JSON.stringify(r.catalog_order) != old_catalog, "Новый рассказчик получает новую случайную выборку")
 	check(r.phase == "word" and r.storytellers[0] != st0, "рассказчик сменился")
 
 

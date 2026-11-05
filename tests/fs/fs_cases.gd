@@ -68,6 +68,8 @@ static func run_case(t: FSCheck, c: Dictionary, file: String, known: Array) -> v
 			"ok": s.ok(int(step[1]), str(step[2]), step[3] if step.size() > 3 else null)
 			"no": s.no(int(step[1]), str(step[2]), step[3] if step.size() > 3 else null)
 			"effect": s.effect(int(step[1]), str(step[2]), step[3] if step.size() > 3 else {})
+			"choose": s.choose(int(step[1]), str(step[2]), step[3] if step.size() > 3 else {})
+			"operation_panel": s.operation_panel(int(step[1]) if step.size() > 1 else 0)
 			"roll": s.roll(int(step[1]), step.slice(2))
 			"close": s.close()
 			"expect": s.expect(str(step[1]), step[2], "шаг %s" % str(step))

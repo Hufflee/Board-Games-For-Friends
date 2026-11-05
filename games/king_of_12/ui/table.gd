@@ -650,6 +650,9 @@ func _layout_hand() -> void:
 		var sc := HAND_SCALE
 		tc.z_index = i
 		if tc.card == _hover:
+			if preload("res://hub/card_magnifier.gd").offer(tc):
+				tc.move_to(pos, rot, sc, 0.18)
+				continue
 			pos.y -= 92
 			rot = 0.0
 			sc = HOVER_SCALE
@@ -820,7 +823,7 @@ func _update_plates() -> void:
 			"status_color": st_color,
 			"border": border,
 			"avatar": Net.avatar(int(_v["players"][s].get("steam_id", 0))),
-			"played": played_now,
+			"played": [],
 			"group": group,
 			"inactive": inactive,
 			"crown": _v["phase"] == "game_over" and _v["winner"] == s,

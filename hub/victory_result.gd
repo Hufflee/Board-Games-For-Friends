@@ -7,11 +7,18 @@ static func resolve(game: String, view: Dictionary) -> Dictionary:
 	var result := {"finished": false, "winners": [], "others": [], "title": "Партия завершена", "team": false, "leader": -1, "summary": ""}
 	if str(view.get("phase", "")) != "game_over":
 		return result
+	# Clocktower: сначала все смотрят раскрытые роли, экран победы хост открывает кнопкой.
+	if game == "blood_on_the_clocktower" and not bool(view.get("victory_open", false)):
+		return result
 	result.finished = true
 	var players: Array = view.get("players", [])
 	var winners: Array = []
 	var teams: Array = []
 	match game:
+		"blood_on_the_clocktower":
+			winners = view.get("winners", []).duplicate()
+			result.leader = int(view.get("storyteller", -1))
+			result.summary = "Победило добро" if view.get("winner") == "good" else "Победило зло"
 		"the_mind", "the_gang", "tip_top", "tip_top_18":
 			result.team = true
 			if bool(view.get("won", false)):
@@ -63,7 +70,7 @@ static func resolve(game: String, view: Dictionary) -> Dictionary:
 				result.team = true
 			else:
 				winners = view.get("winners", []).duplicate()
-		"king_of_12", "perudo", "brodilka", "stillion", "four_souls":
+		"machi_koro", "king_of_12", "perudo", "brodilka", "stillion", "four_souls":
 			winners = [view.get("winner", -1)]
 		"poker":
 			winners = view.get("winners", []).duplicate()

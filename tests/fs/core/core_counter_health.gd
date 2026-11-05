@@ -6,7 +6,7 @@ const Check := preload("res://tests/fs/fs_check.gd")
 
 func run(t: Check) -> void:
 	var bag := Scenario.new(t).players(2).dlc().current(0).character(0, 821).no_items(0).no_items(1).item(0, 518).build()
-	bag.g._begin_resolving({"kind": "item", "card": 13, "owner": 0})
+	bag.operation_panel()
 	bag.effect(0, "destroy", {"target": 0, "item": 1})
 	t.equal(bag.zone_of(518), "item:0", "Первое уничтожение оставляет Пакет на столе")
 	t.equal(bag.g.items[0][1].counters, 1, "Замещение кладёт ровно один жетон")

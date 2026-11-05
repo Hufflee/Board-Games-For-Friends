@@ -16,6 +16,10 @@ var color := Color("f3ead2"):  # слоновая кость — нейтрал�
 		color = v
 		queue_redraw()
 var star_one := true  # единица — звезда (джокер Перудо); в других играх — обычная точка
+var sides := 6:
+	set(v):
+		sides = v
+		queue_redraw()
 var dim := false:
 	set(v):
 		dim = v
@@ -42,6 +46,9 @@ func _init(v: int = 1, side: float = 40.0, body: Color = Color("f3ead2")) -> voi
 
 func _draw() -> void:
 	var s := minf(size.x, size.y)
+	if sides == 8:
+		_draw_d8(s)
+		return
 	var r := Rect2(Vector2.ZERO, Vector2(s, s))
 	if highlight.a > 0.0:
 		var glow := StyleBoxFlat.new()
@@ -71,6 +78,27 @@ func _draw() -> void:
 		return
 	for p in PIPS.get(value, []):
 		draw_circle(p * s, s * 0.085, pip)
+
+## Числовой D8 использует ту же2D-механику TossDie, без отдельной физики.
+func _draw_d8(side: float) -> void:
+	var points := PackedVector2Array([Vector2(side * 0.5, 2), Vector2(side - 2, side * 0.5), Vector2(side * 0.5, side - 2), Vector2(2, side * 0.5)])
+	var body := color.darkened(0.45) if dim else color
+	var shadow := points.duplicate()
+	for index in shadow.size():
+		shadow[index].y += side * 0.05
+	draw_colored_polygon(shadow, Color(0, 0, 0, 0.25))
+	draw_colored_polygon(points, body)
+	var outline := points.duplicate()
+	outline.append(points[0])
+	draw_polyline(outline, body.darkened(0.3), 2, true)
+	draw_line(points[0], Vector2(side * 0.5, side * 0.76), body.darkened(0.2), 1, true)
+	draw_line(points[1], Vector2(side * 0.5, side * 0.76), body.darkened(0.2), 1, true)
+	draw_line(points[3], Vector2(side * 0.5, side * 0.76), body.darkened(0.2), 1, true)
+	var font := ThemeDB.fallback_font
+	var font_size := int(side * 0.34)
+	var text := str(value)
+	var width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+	draw_string(font, Vector2((side - width) * 0.5, side * 0.64), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, Color("7a1414"))
 
 
 func _star(c: Vector2, r: float, color: Color) -> void:

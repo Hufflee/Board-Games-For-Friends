@@ -27,7 +27,7 @@ const SHELF_SCALE := 0.95  # шкаф вместе с коробками кру�
 const BOXED_ROWS := 3  # ячеек с коробками (в последней — ещё «Перудо»), ниже — «Coming soon»
 ## Какие коробки на какой полке (сверху вниз, слева направо).
 const SHELF_LAYOUT := [
-	["wavelength", "hues_and_cues", "dangerous_words", "king_of_12", "not_a_hat", "khorom"],
+	["blood_on_the_clocktower", "machi_koro", "wavelength", "hues_and_cues", "dangerous_words", "king_of_12", "not_a_hat", "khorom"],
 	["ready_set_bet", "tip_top", "tip_top_18", "gloom", "gloomier", "stillion", "poker"],
 	["word_slam", "brodilka", "phantom_ink", "four_souls", "the_gang", "things_in_rings", "the_mind"],
 ]
@@ -97,7 +97,9 @@ var _drag_surface: Dictionary = {}
 ## Раскладка всех ящиков с переносимой коробкой, если её вставка сдвигает лишнее цепочкой в соседние.
 var _drag_cascade: Array = []
 ## Время на табло видеомагнитофона: каждый клик — следующее «красивое» время.
-const VCR_TIMES: Array[String] = ["0:00", "1:11", "2:22", "2:23", "2:28", "3:22", "3:33", "4:30", "4:44", "5:55"]
+const VCR_TIMES: Array[String] = ["0:00", "0:07", "1:11", "2:22", "2:23", "2:28", "3:22", "3:33", "4:20", "4:30", "4:44", "5:55", "6:07"]
+var _alarm_clock: Label3D
+var _alarm_second := -1
 var _vcr_clock: Label3D
 var _vcr_time := 0
 var _env: Environment
@@ -504,7 +506,9 @@ func _furniture() -> void:
 		knob.position = ns + Vector3(0, y, 0.222)
 		add_child(knob)
 	_soft(Vector3(0.17, 0.075, 0.08), Vector3(-1.62, 0.54, BACK + 0.3), "plastic", Color("232026"), self, Vector3(-0.15, 0.2, 0), 0.012)
-	var clock := _glow_label("17:14", Vector3(-1.617, 0.545, BACK + 0.342), 40, Color("ff3030"), "pixel", 0.0011)
+	var clock := _glow_label("00:00", Vector3(-1.617, 0.545, BACK + 0.342), 32, Color("ff3030"), "pixel", 0.0008)
+	_alarm_clock = clock
+	_update_alarm_clock()
 	clock.rotation = Vector3(-0.15, 0.2, 0)
 	clock.modulate = Color(2.2, 0.3, 0.3)
 	# лампа: основание, стойка, абажур
@@ -835,6 +839,10 @@ func _tv_corner(tv_x: float) -> void:
 	)
 	led.modulate = Color(0.5, 2.0, 0.7)
 	_vcr_clock = led
+	var room_prefs := ConfigFile.new()
+	if room_prefs.load("user://room_props.cfg") == OK:
+		_vcr_time = maxi(0, VCR_TIMES.find(str(room_prefs.get_value("room", "vcr_time", "0:00"))))
+	led.text = VCR_TIMES[_vcr_time]
 	_add_room_prop("vcr", Vector3(tv_x + 0.05, 0.38, z + 0.02), Vector3(0.42, 0.09, 0.3))
 	_soft(
 		Vector3(0.3, 0.07, 0.22),
@@ -1658,6 +1666,9 @@ func _use_room_prop(kind: String) -> void:
 	elif kind == "vcr" and is_instance_valid(_vcr_clock):
 		_vcr_time = (_vcr_time + 1) % VCR_TIMES.size()
 		_vcr_clock.text = VCR_TIMES[_vcr_time]
+		var room_prefs := ConfigFile.new()
+		room_prefs.set_value("room", "vcr_time", VCR_TIMES[_vcr_time])
+		room_prefs.save("user://room_props.cfg")
 		shelf_hint.emit("Видеомагнитофон · " + VCR_TIMES[_vcr_time])
 	Sfx.play("click", -12)
 
@@ -2393,7 +2404,19 @@ func focus_id(game_id: String) -> void:
 			return
 
 
+## Часы компьютера игрока, а не время комнаты хоста или длительность игры.
+func _update_alarm_clock() -> void:
+	if not is_instance_valid(_alarm_clock):
+		return
+	var now := Time.get_time_dict_from_system()
+	var second: int = now.hour * 3600 + now.minute * 60 + now.second
+	if second == _alarm_second:
+		return
+	_alarm_second = second
+	_alarm_clock.text = "%02d:%02d" % [now.hour, now.minute]
+
 func _process(delta: float) -> void:
+	_update_alarm_clock()
 	if (
 		is_instance_valid(panels)
 		and panels.is_open
@@ -2468,10 +2491,15 @@ func public_snapshot() -> Dictionary:
 	var state: Dictionary = _drag_backup if _drag_box != null else {
 		"config": _cabinet, "placements": _shelf_ids(), "poses": _box_modes
 	}
+	var custom := {}
+	for box: GameBox in boxes:
+		var id := str(box.game.get("id", ""))
+		if id.begins_with("custom:"):
+			custom[id] = {"title": str(box.game.get("title", "Своя игра")).left(64), "size": [box.size.x, box.size.y, box.size.z]}
 	return PublicRoom.clean({
 		"config": state.config, "placements": state.placements, "poses": state.poses,
 		"selected": str(focused.game.get("id", "")) if focused != null else "",
-		"editor": _editor_on
+		"editor": _editor_on, "custom": custom
 	})
 
 
@@ -2482,7 +2510,8 @@ func show_remote(snapshot: Dictionary, follow: bool = true) -> bool:
 	var ids: Array = []
 	for row in clean.placements:
 		ids.append_array(row)
-	if boxes.any(func(box): return not ids.has(_shelf_id(box))) or ids.size() != boxes.size():
+	var builtins: Array = boxes.filter(func(box): return not _shelf_id(box).begins_with("custom:"))
+	if builtins.any(func(box): return not ids.has(_shelf_id(box))) or ids.filter(func(id): return not str(id).begins_with("custom:")).size() != builtins.size():
 		return false
 	if not remote_view:
 		if _editor_on:
@@ -2492,6 +2521,7 @@ func show_remote(snapshot: Dictionary, follow: bool = true) -> bool:
 		for box: GameBox in boxes:
 			variants[_shelf_id(box)] = box.game.duplicate(true)
 		_local_room = {
+			"boxes": boxes.duplicate(), "remote_boxes": [], "custom": null,
 			"variants": variants,
 			"public": public_snapshot(),
 			"state": {"config": _cabinet.duplicate(true), "placements": _shelf_ids(), "poses": _box_modes.duplicate(true)},
@@ -2501,8 +2531,29 @@ func show_remote(snapshot: Dictionary, follow: bool = true) -> bool:
 		remote_view = true
 		panels.deselect()
 		panels.input_locked = true
+	var custom_changed: bool = _local_room.custom != clean.custom
+	if custom_changed:
+		if focused != null and _local_room.remote_boxes.has(focused):
+			release()
+		for box: GameBox in _local_room.remote_boxes:
+			boxes.erase(box)
+			box.free()
+		_local_room.remote_boxes = []
+		for box: GameBox in _local_room.boxes:
+			if str(box.game.id).begins_with("custom:"):
+				box.hide()
+				boxes.erase(box)
+		for id: String in clean.custom:
+			var meta: Dictionary = clean.custom[id]
+			var extent: Array = meta.size
+			var box := GameBox.new()
+			box.setup({"id": id, "title": meta.title, "custom": true, "remote": true, "players": "Игра друга", "time": "", "description": "", "scene": "", "box_size": Vector3(extent[0], extent[1], extent[2])}, Vector3(extent[0], extent[1], extent[2]), Color("655080"))
+			_shelf_root.add_child(box)
+			boxes.append(box)
+			_local_room.remote_boxes.append(box)
+		_local_room.custom = clean.custom.duplicate(true)
 	remote_follow = follow
-	var state_changed: bool = _cabinet != clean.config or _shelf_ids() != clean.placements or _box_modes != clean.poses
+	var state_changed: bool = custom_changed or _cabinet != clean.config or _shelf_ids() != clean.placements or _box_modes != clean.poses
 	if state_changed:
 		var local_selected: String = _shelf_id(focused) if focused != null else ""
 		var saved_camera := camera.transform
@@ -2533,6 +2584,12 @@ func return_home() -> void:
 	_cancel_drag()
 	remote_view = false
 	panels.input_locked = false
+	for box: GameBox in _local_room.remote_boxes:
+		boxes.erase(box)
+		box.free()
+	boxes.assign(_local_room.boxes)
+	for box: GameBox in boxes:
+		box.show()
 	for box: GameBox in boxes:
 		if box.game != _local_room.variants[_shelf_id(box)]:
 			box.set_variant(_local_room.variants[_shelf_id(box)])
