@@ -11,7 +11,38 @@ var setup_key := ""
 var setup_revision := 0
 var setup_error := ""
 var seat_tokens: Dictionary = {}
-var resume_token := ""
+## Ключ возвращения на место хранится и на диске: после вылета самой игры перезапущенный клиент
+## отправит его в hello и сядет на своё место с той же ролью, а не станет зрителем.
+## Ключ случайный (48 hex) и принимается хостом только для отключившегося места текущей партии.
+const RESUME_FILE := "user://bc_resume.cfg"
+const RESUME_HOURS := 12
+var _resume_token := ""
+var resume_token: String:
+	get:
+		if _resume_token.is_empty():
+			_resume_token = _load_token()
+		return _resume_token
+	set(value):
+		if value == _resume_token:
+			return
+		_resume_token = value
+		_save_token(value)
+
+func _load_token() -> String:
+	var file := ConfigFile.new()
+	if file.load(RESUME_FILE) != OK:
+		return ""
+	var saved := int(file.get_value("resume", "time", 0))
+	if Time.get_unix_time_from_system() - saved > RESUME_HOURS * 3600:
+		return ""
+	var token := str(file.get_value("resume", "token", ""))
+	return token if token.length() == 48 else ""
+
+func _save_token(token: String) -> void:
+	var file := ConfigFile.new()
+	file.set_value("resume", "token", token)
+	file.set_value("resume", "time", int(Time.get_unix_time_from_system()))
+	file.save(RESUME_FILE)
 
 func _init(owner: Node) -> void:
 	net = owner

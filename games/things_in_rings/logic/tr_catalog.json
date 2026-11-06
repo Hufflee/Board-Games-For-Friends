@@ -4786,5 +4786,1013 @@
     "sha256": "a0bfc5549c33128f10fc5a3a2205e1256d7b8f0f8bec3f1b6873e9c39f5e5123",
     "en": "YOU EXPECT TO FIND IT IN AN OFFICE",
     "ru": "Обычно встречается в офисе"
+  },
+  {
+    "id": 224,
+    "kind": "Word",
+    "file": "224.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 0,
+    "sha256": "5e8e55a0af6cf891ae80a5abab040b57ac945c0a0efa3ffe4fbbec1399fcd7a2",
+    "en": "HAS AN “E”",
+    "ru": "В названии есть буква E"
+  },
+  {
+    "id": 225,
+    "kind": "Word",
+    "file": "225.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 1,
+    "sha256": "1a251daf5373017b066e6c3bbf17c2ab7f5cb4cda395f9e396e71889237a481e",
+    "en": "HAS AN “A”",
+    "ru": "В названии есть буква A"
+  },
+  {
+    "id": 226,
+    "kind": "Word",
+    "file": "226.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 2,
+    "sha256": "61eb292a45972b17185f3ed8c32f985c97ca7d3d9f776819c108ece91746c2a3",
+    "en": "HAS AN “I”",
+    "ru": "В названии есть буква I"
+  },
+  {
+    "id": 227,
+    "kind": "Word",
+    "file": "227.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 3,
+    "sha256": "4fa239d6a48cd267ecd80dae43f5ad6395d3ef49e1d874de168b657ec845ea4f",
+    "en": "HAS AN “S”",
+    "ru": "В названии есть буква S"
+  },
+  {
+    "id": 228,
+    "kind": "Word",
+    "file": "228.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 4,
+    "sha256": "4c5212f10a0008f6135334ccfbaf5fbc63d3d6de719fb7d6378f9199065bdaf2",
+    "en": "HAS A “T”",
+    "ru": "В названии есть буква T"
+  },
+  {
+    "id": 229,
+    "kind": "Word",
+    "file": "229.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 5,
+    "sha256": "ea2213251967adfd7814ff00f8004bd9aae3bf6aa7532cdacefee6304d64baa5",
+    "en": "HAS AN “L”",
+    "ru": "В названии есть буква L"
+  },
+  {
+    "id": 230,
+    "kind": "Word",
+    "file": "230.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 6,
+    "sha256": "b1863cb155a57cac13ac3e6cb99f43b9e1e7b52ee21fe7c3680c195c467b80ed",
+    "en": "HAS AN “N”",
+    "ru": "В названии есть буква N"
+  },
+  {
+    "id": 231,
+    "kind": "Word",
+    "file": "231.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 7,
+    "sha256": "84565d07fe39c97cda5139639610c9b81dafe2d8e56bf76cd7ba8e26be148905",
+    "en": "HAS A “P” OR “B”",
+    "ru": "В названии есть буква P или B"
+  },
+  {
+    "id": 232,
+    "kind": "Word",
+    "file": "232.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 8,
+    "sha256": "0129d74e2ac7618df5a79d851661d6dde803a4cdda1aa60a8a6da5e51ef9cb1a",
+    "en": "HAS A “C” OR “K”",
+    "ru": "В названии есть буква C или K"
+  },
+  {
+    "id": 233,
+    "kind": "Word",
+    "file": "233.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 9,
+    "sha256": "e63efffcaf157ebaa89a4eee5b35fdea5d6d913f8b87f66a6bea2859ce4e04fd",
+    "en": "HAS A “J”, “K”, “Q”, “V”, “W”, “X” OR “Z”",
+    "ru": "В названии есть J, K, Q, V, W, X или Z"
+  },
+  {
+    "id": 234,
+    "kind": "Word",
+    "file": "234.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 10,
+    "sha256": "c2dbf7e7731ad1397a991619d58f9730a22fe01778caee042592cb025596e3cb",
+    "en": "ENDS WITH A VOWEL (NOT INCLUDING “Y”)",
+    "ru": "Название заканчивается гласной, без учёта Y"
+  },
+  {
+    "id": 235,
+    "kind": "Word",
+    "file": "235.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 11,
+    "sha256": "9457dd826830efd403a271224ed239c4e3df0b12cb5625a277d0121ef3ad2911",
+    "en": "7 OR MORE LETTERS LONG",
+    "ru": "Название длиной от 7 букв"
+  },
+  {
+    "id": 236,
+    "kind": "Word",
+    "file": "236.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 12,
+    "sha256": "ed7808e3724c0a8f172f2056c26f01af5f9b902f9f66ee80d95ef39f7e816e8d",
+    "en": "HAS AN EVEN NUMBER OF LETTERS",
+    "ru": "В названии чётное число букв"
+  },
+  {
+    "id": 237,
+    "kind": "Word",
+    "file": "237.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 13,
+    "sha256": "cf278bb991bd3a2ca6fd504e4a77cd87405420db9f4da50318192362487e33ca",
+    "en": "HAS EXACTLY 3 VOWELS",
+    "ru": "В названии ровно 3 гласные"
+  },
+  {
+    "id": 238,
+    "kind": "Word",
+    "file": "238.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 14,
+    "sha256": "009998517649ae319adccd85146dc9a41926c5a151423cd929445e50aed0d45a",
+    "en": "HAS 3 OR MORE DIFFERENT VOWELS",
+    "ru": "В названии 3 или больше разные гласные"
+  },
+  {
+    "id": 239,
+    "kind": "Word",
+    "file": "239.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 15,
+    "sha256": "3d06fed8563ddbc80fd9ea2d5d8d17b2de34c38ab1443aee08c3bca21edd575d",
+    "en": "HAS 3 OR MORE SYLLABLES",
+    "ru": "В названии 3 слога или больше"
+  },
+  {
+    "id": 240,
+    "kind": "Word",
+    "file": "240.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 16,
+    "sha256": "352f96ace8c144ec85469979c679ad525bf2ee2a0ea812254a0ef67e001881a0",
+    "en": "STARTS WITH 2 CONSONANTS (E.G. STAR, CLOCK)",
+    "ru": "Название начинается с двух согласных (например STAR, CLOCK)"
+  },
+  {
+    "id": 241,
+    "kind": "Word",
+    "file": "241.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 17,
+    "sha256": "7125731c2ea90102535465662ebdac023e754447e2d1bfb031eff90a17dd1c0e",
+    "en": "FIRST AND LAST LETTERS ARE BOTH “A”–“M”",
+    "ru": "Первая и последняя буквы — обе от A до M"
+  },
+  {
+    "id": 242,
+    "kind": "Word",
+    "file": "242.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 18,
+    "sha256": "fbc1d700144d66bdfadcbc14466402d91e1b6b9d927f414e1ff9afe6d0d1199e",
+    "en": "LAST LETTER COMES LATER IN THE ALPHABET THAN THE FIRST",
+    "ru": "Последняя буква стоит в алфавите дальше первой"
+  },
+  {
+    "id": 243,
+    "kind": "Word",
+    "file": "243.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 19,
+    "sha256": "e5494509a70d4f19ba34bb220b59af1fd7f1a4511b5d7b2fcb8bce4286b038d4",
+    "en": "NO LETTERS AFTER “S” IN THE ALPHABET",
+    "ru": "В названии нет букв дальше S по алфавиту"
+  },
+  {
+    "id": 244,
+    "kind": "Word",
+    "file": "244.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 20,
+    "sha256": "45bd0561bcfcf5bf58bf67a6481489fbec198acd1c53238a3f58b6d317d3dc93",
+    "en": "HAS 2 ALPHABET NEIGHBORS SIDE BY SIDE (E.G. “ST”, “ED”)",
+    "ru": "В названии рядом стоят две соседние по алфавиту буквы (например ST, ED)"
+  },
+  {
+    "id": 245,
+    "kind": "Word",
+    "file": "245.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 21,
+    "sha256": "cd80ace2c6ae775f95008fe8bca56ea0a8737e54eef73e928235e1030e6447fb",
+    "en": "VOWELS AND CONSONANTS ALTERNATE (E.G. BANANA)",
+    "ru": "Гласные и согласные чередуются (например BANANA)"
+  },
+  {
+    "id": 246,
+    "kind": "Word",
+    "file": "246.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 22,
+    "sha256": "70446a1e6e296981953948cb2efdfeae725c932e24fa86037596515edd662ffb",
+    "en": "AT LEAST TWICE AS MANY CONSONANTS AS VOWELS",
+    "ru": "Согласных минимум вдвое больше, чем гласных"
+  },
+  {
+    "id": 247,
+    "kind": "Word",
+    "file": "247.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 23,
+    "sha256": "1a51149a523ca4a1cbfebc255efd9f04a7180ffbf347594923816e7d207835b5",
+    "en": "ENDS WITH “ER”, “LE”, “ON”, “EL”, “ET”, “EN” OR “AN”",
+    "ru": "Оканчивается на ER, LE, ON, EL, ET, EN или AN"
+  },
+  {
+    "id": 324,
+    "kind": "Attribute",
+    "file": "324.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 0,
+    "sha256": "44abd69bb8daddc75445145f09b6f536fb43f9d26cb2bad0b1534ce47bfe83c0",
+    "en": "CONTAINS METAL",
+    "ru": "Содержит металл"
+  },
+  {
+    "id": 325,
+    "kind": "Attribute",
+    "file": "325.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 1,
+    "sha256": "fc4ba256c0d5f96f01925603e963600d7606833da59ff3f753fe7c89c13ea061",
+    "en": "CONTAINS GLASS",
+    "ru": "Содержит стекло"
+  },
+  {
+    "id": 326,
+    "kind": "Attribute",
+    "file": "326.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 2,
+    "sha256": "06f7822c679c9dd4959fae7ff50077d65f1e3e8b1a9ca48ceccace5d13cb0214",
+    "en": "CONTAINS FABRIC OR CLOTH",
+    "ru": "Содержит ткань"
+  },
+  {
+    "id": 327,
+    "kind": "Attribute",
+    "file": "327.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 3,
+    "sha256": "a358d8f4e24c3191915cd9af4f4f10f0d0d6dfb80d68872ade59b0df92bbc731",
+    "en": "SOFT TO THE TOUCH",
+    "ru": "Мягкое на ощупь"
+  },
+  {
+    "id": 328,
+    "kind": "Attribute",
+    "file": "328.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 4,
+    "sha256": "2491532549f799b06828258d5f4f9abe51b94cf45de6c8cfba443a2d107db382",
+    "en": "USES ELECTRICITY",
+    "ru": "Работает от электричества"
+  },
+  {
+    "id": 329,
+    "kind": "Attribute",
+    "file": "329.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 5,
+    "sha256": "2dd65998240cbdb332663edccf010ddd9b9bf7d190630c7776869c0e1a002548",
+    "en": "HAS MOVING PARTS",
+    "ru": "Есть движущиеся части"
+  },
+  {
+    "id": 330,
+    "kind": "Attribute",
+    "file": "330.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 6,
+    "sha256": "554c93c4e8817d7ba526ac88f9e71d3eafaed8ebe849c07b0a25b246086b5a30",
+    "en": "HAS A HANDLE",
+    "ru": "Есть ручка"
+  },
+  {
+    "id": 331,
+    "kind": "Attribute",
+    "file": "331.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 7,
+    "sha256": "48bdb205a2b09a97a721e1393ca55f6d7acc449a292fb489273efb48dd13ec18",
+    "en": "HAS LEGS OR WHEELS",
+    "ru": "Есть ноги или колёса"
+  },
+  {
+    "id": 332,
+    "kind": "Attribute",
+    "file": "332.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 8,
+    "sha256": "601fb85df6a4b978ba407669594aee05e8e84e4b2c28c787ab3fb5361649034c",
+    "en": "HAS EYES",
+    "ru": "Есть глаза"
+  },
+  {
+    "id": 333,
+    "kind": "Attribute",
+    "file": "333.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 9,
+    "sha256": "1515f116b83f29c754ef4206408117541819e901c3994397a79aff454821a982",
+    "en": "EDIBLE",
+    "ru": "Съедобное"
+  },
+  {
+    "id": 334,
+    "kind": "Attribute",
+    "file": "334.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 10,
+    "sha256": "c00b108b0297c9eef15ae524e296365f6f74ef6d099b114d1f9e41847139fd7c",
+    "en": "HAS A NOTICEABLE SMELL",
+    "ru": "Имеет заметный запах"
+  },
+  {
+    "id": 335,
+    "kind": "Attribute",
+    "file": "335.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 11,
+    "sha256": "00ea34c6368137fc0d546d39243610cfe3c367f5f8fd132c3fd642653156e7a4",
+    "en": "USUALLY WARM OR HOT",
+    "ru": "Обычно тёплое или горячее"
+  },
+  {
+    "id": 336,
+    "kind": "Attribute",
+    "file": "336.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 12,
+    "sha256": "066295ea2ca5033f3b67d0441b1707ae536c702a36b296d82a181ffb6e59b879",
+    "en": "USUALLY COLD",
+    "ru": "Обычно холодное"
+  },
+  {
+    "id": 337,
+    "kind": "Attribute",
+    "file": "337.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 13,
+    "sha256": "3518a5357a5d771a641498229c498312c15760091cb6874530a642b68c417861",
+    "en": "OFTEN RED, ORANGE OR YELLOW",
+    "ru": "Часто красное, оранжевое или жёлтое"
+  },
+  {
+    "id": 338,
+    "kind": "Attribute",
+    "file": "338.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 14,
+    "sha256": "1dfa4586e79a55592339d1b5f5d923466652709d8404d571fbd2cdd832e9c195",
+    "en": "OFTEN GREEN OR BLUE",
+    "ru": "Часто зелёное или синее"
+  },
+  {
+    "id": 339,
+    "kind": "Attribute",
+    "file": "339.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 15,
+    "sha256": "9278ff4b5fd55126a8130b5244693fb5bb754a93b39f9f0a8fdae0610c0c23d9",
+    "en": "FITS IN A POCKET",
+    "ru": "Помещается в карман"
+  },
+  {
+    "id": 340,
+    "kind": "Attribute",
+    "file": "340.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 16,
+    "sha256": "b61c75ed33862c7013d84040f64154065ce4b834741d26c4951f7818757105d4",
+    "en": "MUCH LONGER THAN IT IS WIDE",
+    "ru": "Намного длиннее, чем шире"
+  },
+  {
+    "id": 341,
+    "kind": "Attribute",
+    "file": "341.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 17,
+    "sha256": "aaa7c244250e908215b2b171f0f26cd36e9acd5987c4b9bda4f599790eaa8dab",
+    "en": "HAS A LID, DOOR OR COVER",
+    "ru": "Есть крышка, дверца или чехол"
+  },
+  {
+    "id": 342,
+    "kind": "Attribute",
+    "file": "342.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 18,
+    "sha256": "88248b0b66673f7b9b764c2b5181f777b5a4c5453d545f4599f9c9b10763ac21",
+    "en": "CAN HOLD WATER",
+    "ru": "Может удерживать воду"
+  },
+  {
+    "id": 343,
+    "kind": "Attribute",
+    "file": "343.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 19,
+    "sha256": "f9e4579b6e79d9baf119fae666954ee0c20f30e64e327d28ebfcadcbcfed62c5",
+    "en": "CAN BE FOLDED OR ROLLED UP",
+    "ru": "Можно сложить или свернуть"
+  },
+  {
+    "id": 344,
+    "kind": "Attribute",
+    "file": "344.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 20,
+    "sha256": "66a8f0eff86445dbbf79bc1878b12ba3714b894b6d89d24d6239716de28e1b9a",
+    "en": "USUALLY COMES IN PAIRS",
+    "ru": "Обычно бывает парой"
+  },
+  {
+    "id": 345,
+    "kind": "Attribute",
+    "file": "345.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 21,
+    "sha256": "1a85175356cf3e124a718f3cbaf1b8c85154f1ff7e27005384fd6107fc5c1cc9",
+    "en": "BENDS WITHOUT BREAKING",
+    "ru": "Гнётся и не ломается"
+  },
+  {
+    "id": 346,
+    "kind": "Attribute",
+    "file": "346.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 22,
+    "sha256": "8d2a2f1327a1adb9dbf1eb059827f9dd5d7d8831cd4028b7e6fc373728619ecb",
+    "en": "GLOWS OR GIVES OFF LIGHT",
+    "ru": "Светится или даёт свет"
+  },
+  {
+    "id": 347,
+    "kind": "Attribute",
+    "file": "347.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 23,
+    "sha256": "dea103daa0a542ff9f688e30b3daf3130540b4130b4ed4aa6550f17dd3b740aa",
+    "en": "SQUARE OR BOXY",
+    "ru": "Квадратное или в форме коробки"
+  },
+  {
+    "id": 424,
+    "kind": "Context",
+    "file": "424.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 0,
+    "sha256": "05bd3f0211832239c1af32aa6ecd0218ed9b23fdaa58a37bea62e59ae8346a2e",
+    "en": "FOUND IN A KITCHEN",
+    "ru": "Встречается на кухне"
+  },
+  {
+    "id": 425,
+    "kind": "Context",
+    "file": "425.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 1,
+    "sha256": "2b5dac1d7fd13ebd90894448ac961d683ec698e969658d0ad0f672403d6b2706",
+    "en": "FOUND IN A BATHROOM",
+    "ru": "Встречается в ванной"
+  },
+  {
+    "id": 426,
+    "kind": "Context",
+    "file": "426.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 2,
+    "sha256": "02d8c6ab29a2ba90cab8fe9afc4b6c936d7fb76c3ad0cdf0482f0756f754f664",
+    "en": "FOUND AT THE BEACH OR NEAR WATER",
+    "ru": "Встречается на пляже или у воды"
+  },
+  {
+    "id": 427,
+    "kind": "Context",
+    "file": "427.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 3,
+    "sha256": "bb6727f980277d3458960c2ede473da174dd3d0c9d738d937c29625a7c0500ca",
+    "en": "FOUND IN A CITY CENTER",
+    "ru": "Встречается в центре города"
+  },
+  {
+    "id": 428,
+    "kind": "Context",
+    "file": "428.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 4,
+    "sha256": "4ecb912ec13a5e400bddeeabd0af4093351021187bd9a8f380c918d7f8a165e6",
+    "en": "FOUND IN A HOSPITAL",
+    "ru": "Встречается в больнице"
+  },
+  {
+    "id": 429,
+    "kind": "Context",
+    "file": "429.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 5,
+    "sha256": "c70c4ba0cf4c7ec5f69135d4be5dcc9128964221a16bfaf6c8a4a51186e4d192",
+    "en": "YOU’D SEE IT IN A MUSEUM",
+    "ru": "Это можно увидеть в музее"
+  },
+  {
+    "id": 430,
+    "kind": "Context",
+    "file": "430.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 6,
+    "sha256": "c278938112e433f19f2890591fe099485312d5bfa6e6053721a6906aa8f96ce9",
+    "en": "CHILDREN PLAY WITH IT",
+    "ru": "С этим играют дети"
+  },
+  {
+    "id": 431,
+    "kind": "Context",
+    "file": "431.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 7,
+    "sha256": "4a6ffe46c33c627d1e9d56c08346e30f7b663d738f44830bb3e93a2844b1dfb9",
+    "en": "USED IN SPORTS OR GAMES",
+    "ru": "Используется в спорте или играх"
+  },
+  {
+    "id": 432,
+    "kind": "Context",
+    "file": "432.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 8,
+    "sha256": "e829945d9d8124fdf9510be0c920b4eef839c6a691a210ceeda8294ee8f98d3b",
+    "en": "A GOOD GIFT",
+    "ru": "Хороший подарок"
+  },
+  {
+    "id": 433,
+    "kind": "Context",
+    "file": "433.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 9,
+    "sha256": "36a8d79d0fc075e4a5c0a72cadb95a2cfbe005f35fc3990edf5bc61642a5c061",
+    "en": "ASSOCIATED WITH A HOLIDAY",
+    "ru": "Связано с каким-то праздником"
+  },
+  {
+    "id": 434,
+    "kind": "Context",
+    "file": "434.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 10,
+    "sha256": "ca849c642137609e58430deb317e6ecda81f8f1c11de4b56f8774f2188c86ba0",
+    "en": "INVENTED IN THE LAST 100 YEARS",
+    "ru": "Изобретено за последние 100 лет"
+  },
+  {
+    "id": 435,
+    "kind": "Context",
+    "file": "435.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 11,
+    "sha256": "78184bf8f378145c1d6ee744c0f1fd0d4e4bfb8db11e47b61c9c171ff7027f92",
+    "en": "ASSOCIATED WITH WINTER",
+    "ru": "Связано с зимой"
+  },
+  {
+    "id": 436,
+    "kind": "Context",
+    "file": "436.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 12,
+    "sha256": "9cf131f7bdea31e0c700824f78e342f5ff0fe5c8341ffa763b644274a8ba10e7",
+    "en": "ASSOCIATED WITH NIGHT",
+    "ru": "Связано с ночью"
+  },
+  {
+    "id": 437,
+    "kind": "Context",
+    "file": "437.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 13,
+    "sha256": "717205d81247540a9e36763c7b3465a43567cf46e59ab6c83568da0fd82ed5e2",
+    "en": "MANY PEOPLE ARE AFRAID OF IT",
+    "ru": "Многие этого боятся"
+  },
+  {
+    "id": 438,
+    "kind": "Context",
+    "file": "438.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 14,
+    "sha256": "89344135a429631a0db65ca8f90db5529b53d9e9d69ef75ce4cb9f0b82604348",
+    "en": "MOST PEOPLE HAVE NEVER SEEN ONE IN REAL LIFE",
+    "ru": "Большинство никогда не видели это вживую"
+  },
+  {
+    "id": 439,
+    "kind": "Context",
+    "file": "439.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 15,
+    "sha256": "b6b1a5e672d14520c910a128bb2e2a82a1aea9d102607f3b04ffc01cfaf387f3",
+    "en": "PEOPLE COLLECT IT",
+    "ru": "Это коллекционируют"
+  },
+  {
+    "id": 440,
+    "kind": "Context",
+    "file": "440.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 16,
+    "sha256": "d4a96f102da46bafc6a6077899b4625d5d2136394dff218f8f8ac2acf692c723",
+    "en": "YOU CAN RENT IT",
+    "ru": "Это можно взять напрокат"
+  },
+  {
+    "id": 441,
+    "kind": "Context",
+    "file": "441.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 17,
+    "sha256": "b365946d46be56a170d0372ecc35a7da39d35218d11f23eb16c69375d751761a",
+    "en": "NEEDS A LICENSE OR PERMISSION",
+    "ru": "Нужны права или разрешение"
+  },
+  {
+    "id": 442,
+    "kind": "Context",
+    "file": "442.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 18,
+    "sha256": "d49fd4a2be8c6cc653170fa70b17ec9c763cb23e30de7ad1fec0a381a0db2d28",
+    "en": "NEEDS REGULAR CARE",
+    "ru": "Требует регулярного ухода"
+  },
+  {
+    "id": 443,
+    "kind": "Context",
+    "file": "443.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 19,
+    "sha256": "36814ccce06755352aa555db7c7d6a711cc7439c8be180f94dbb26078b1fe258",
+    "en": "USUALLY SHARED BY MANY PEOPLE",
+    "ru": "Обычно этим пользуются многие сразу"
+  },
+  {
+    "id": 444,
+    "kind": "Context",
+    "file": "444.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 20,
+    "sha256": "7c82fe3a4ebfff16626066fea4c0d94bf914ec9ec6101b37db86ba7b562e58f5",
+    "en": "USUALLY BELONGS TO ONE PERSON",
+    "ru": "Обычно принадлежит одному человеку"
+  },
+  {
+    "id": 445,
+    "kind": "Context",
+    "file": "445.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 21,
+    "sha256": "a3c9bc273b37c3c59d2aa878bbbb00276341d7a7b5bfb8f84ae7516d7b8e0b37",
+    "en": "USUALLY COSTS LESS THAN $5",
+    "ru": "Обычно стоит меньше 5 долларов"
+  },
+  {
+    "id": 446,
+    "kind": "Context",
+    "file": "446.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 22,
+    "sha256": "0dbaec4f2cc3356cfb378f7693e649994fcc97c94a9243996f573dcaa6fc0f7b",
+    "en": "YOU’D PACK IT FOR A VACATION",
+    "ru": "Это берут с собой в отпуск"
+  },
+  {
+    "id": 447,
+    "kind": "Context",
+    "file": "447.webp",
+    "size": [
+      508,
+      772
+    ],
+    "sheet": "custom",
+    "index": 23,
+    "sha256": "abcb2540766c61ceaf541d54afe717ea513125f65cd1200e7dcd549962101040",
+    "en": "PEOPLE OFTEN TAKE PHOTOS OF IT",
+    "ru": "Это часто фотографируют"
   }
 ]

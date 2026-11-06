@@ -57,20 +57,13 @@ func _heal_applies_by_itself(t: FSCheck) -> void:
 	t.equal(s.g.actor(), 1, "Штраф выбирает погибший (место 1)")
 
 func _off_turn_window(t: FSCheck) -> void:
+	# 06.11 (решение владельца): окна «первые 10 с хода» больше нет — свои карты в чужой ход всегда.
 	var s := FSScenario.new(t).players(2).current(0).character(1, 821).hand(1, [497, 478]).build()
 	s.g.character_ready[1] = true
-	_wait(s, 3.0)
-	t.check(s.g.off_turn_open(1), "Первые 10 с хода — чужие карты можно")
-	_wait(s, 8.0)
-	t.check(not s.g.off_turn_open(1), "После 10 с хода — уже нельзя")
-	s.no(1, "loot", {"card": 497}, "лут в чужой ход после 10 с")
+	_wait(s, 11.0)
+	t.check(s.g.off_turn_open(1), "После 10 с хода чужие карты по-прежнему можно")
+	s.ok(1, "loot", {"card": 497}, "лут в чужой ход на 11-й секунде")
 	t.check(s.g.off_turn_open(0), "Активному игроку время не мешает")
-	# новый ход — окно снова открыто, даже если tick ещё не прошёл
-	s.ok(0, "end", null, "конец хода")
-	s.close()
-	if s.g.current == 0:
-		return  # ход не перешёл (сброс/штрафы) — проверка ниже не о том
-	t.check(s.g.off_turn_open(0), "Новый ход — у бывшего активного снова есть 10 с")
 
 func _response_resets_window(t: FSCheck) -> void:
 	var s := FSScenario.new(t).players(2).current(0).character(0, 821).hand(1, [478]).monster(0, 344, {"hp": 3, "dc": 2, "at": 1}).build()

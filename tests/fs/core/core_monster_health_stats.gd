@@ -5,7 +5,7 @@ const Check := preload("res://tests/fs/fs_check.gd")
 
 func _game(t: Check, card: int, health: int):
 	return Scenario.new(t).players(2).dlc().current(0).character(0, 908).no_items(0).no_items(1) \
-		.monster(0, card, {"hp": health}).monster(1, 344).hand(0, [497]).build()
+		.monster(0, card, {"hp": health}).monster(1, 344).hand(0, [497]).room(-1).build()
 
 func run(t: Check) -> void:
 	var mask = _game(t, 420, 2)

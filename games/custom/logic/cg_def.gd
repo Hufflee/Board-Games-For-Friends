@@ -4,7 +4,11 @@ extends RefCounted
 
 const Blocks := preload("res://games/custom/logic/cg_blocks.gd")
 const MAX_COMPONENTS := 300
-const CARD_SIZES := [Vector2i(88, 136), Vector2i(114, 178), Vector2i(126, 176), Vector2i(140, 220), Vector2i(160, 240), Vector2i(140, 140), Vector2i(200, 200), Vector2i(120, 120), Vector2i(90, 90)]
+## Номер размера в колоде = индекс + 1. Новые размеры только дописываются в конец: старые игры хранят номер.
+const CARD_SIZES := [Vector2i(88, 136), Vector2i(114, 178), Vector2i(126, 176), Vector2i(140, 220), Vector2i(160, 240), Vector2i(140, 140), Vector2i(200, 200), Vector2i(120, 120), Vector2i(90, 90),
+	Vector2i(136, 88), Vector2i(176, 126), Vector2i(220, 140)]
+## Слои лица карты: к общим слоям коробки добавляется рамка с заливкой внутри.
+const CARD_LAYER_KINDS := ["fill", "text", "image", "frame"]
 
 static func validate(def: Dictionary) -> Dictionary:
 	var result := {"errors": [], "warnings": []}
@@ -126,11 +130,16 @@ static func validate(def: Dictionary) -> Dictionary:
 			result.errors.append("Неверная колода.")
 			continue
 		var deck_id := str(deck.get("id", ""))
+		var deck_errors_from: int = result.errors.size()
 		if not deck.get("id") is String or not _id(deck_id) or deck_ids.has(deck_id):
 			result.errors.append("Неверная или повторяющаяся колода: %s." % deck_id)
 		deck_ids[deck_id] = true
 		if deck.has("back") and not deck.back is String:
 			result.errors.append("Рубашка колоды задаётся ключом ассета.")
+		if deck.has("color") and (not deck.color is String or not Color.html_is_valid(str(deck.color))):
+			result.errors.append("Неверный цвет карт в колоде «%s»." % deck_title(deck))
+		if deck.has("single") and not deck.single is bool:
+			result.errors.append("Признак одиночной карты должен быть да/нет.")
 		var owner := str(deck.get("owner", "shared"))
 		if owner not in ["shared", "player", "team"]:
 			result.errors.append("Неизвестный владелец колоды.")
@@ -146,7 +155,7 @@ static func validate(def: Dictionary) -> Dictionary:
 		else:
 			var fields := {}
 			for column: Variant in columns:
-				if not column is Dictionary or not column.get("id") is String or str(column.id).is_empty() or str(column.id).length() > 128 or column.id == "copies" or fields.has(column.id) or column.get("type", "text") not in ["text", "number", "bool", "image"]:
+				if not column is Dictionary or not column.get("id") is String or str(column.id).is_empty() or str(column.id).length() > 128 or column.id == "copies" or fields.has(column.id) or column.get("type", "text") not in ["text", "number", "bool", "image", "color"]:
 					result.errors.append("Неверная или повторяющаяся колонка карт.")
 					continue
 				fields[column.id] = true
@@ -157,7 +166,7 @@ static func validate(def: Dictionary) -> Dictionary:
 				if deck.face.has(binding) and not deck.face[binding] is String:
 					result.errors.append("Привязка шаблона карты должна быть текстовым ключом.")
 			if deck.face.has("layers"):
-				if not deck.face.layers is Array or not box_valid({"faces": {"front": deck.face.layers}}):
+				if not deck.face.layers is Array or not box_valid({"faces": {"front": deck.face.layers}}, CARD_LAYER_KINDS):
 					result.errors.append("Неверные слои шаблона лица карты.")
 				else:
 					var column_types := {}
@@ -177,7 +186,11 @@ static func validate(def: Dictionary) -> Dictionary:
 					for layer: Dictionary in deck.face.layers:
 						var field: Variant = layer.get("field", "")
 						if not field is String or not str(field).is_empty() and (not column_types.has(field) or (layer.kind == "image" and column_types.get(field) != "image")):
-							result.errors.append("Слой лица ссылается на отсутствующую или неподходящую колонку.")
+							result.errors.append("слой «%s» привязан к колонке «%s», которой нет или у неё не тот тип." % [str(layer.get("title", layer.kind)).left(64), str(field).left(64)])
+						for key: String in ["color_field", "fill_field"]:
+							var source: Variant = layer.get(key, "")
+							if not source is String or not str(source).is_empty() and column_types.get(source) != "color":
+								result.errors.append("слой «%s» берёт цвет из колонки «%s», а это не колонка-цвет." % [str(layer.get("title", layer.kind)).left(64), str(source).left(64)])
 						if layer.get("shape", "rect") not in ["rect", "ellipse"]:
 							result.errors.append("Неизвестная фигура слоя карты.")
 		for row: Variant in deck.get("rows", []):
@@ -196,9 +209,10 @@ static func validate(def: Dictionary) -> Dictionary:
 						continue
 					var value: Variant = row[column.id]
 					var type := str(column.get("type", "text"))
-					if type == "number" and not _number(value) or type == "bool" and not value is bool or type in ["text", "image"] and not value is String:
+					if type == "number" and not _number(value) or type == "bool" and not value is bool or type in ["text", "image", "color"] and not value is String or type == "color" and value is String and not Color.html_is_valid(value):
 						result.errors.append("Значение карты не соответствует типу колонки %s." % str(column.id))
 			components += copies * (int(seats[1]) if owner in ["player", "team"] and seats is Array and seats.size() == 2 and _number(seats[1]) else 1)
+		_prefix(result, deck_errors_from, ("Карта «%s»: " if deck.get("single", false) else "Колода «%s»: ") % deck_title(deck))
 	if components > MAX_COMPONENTS:
 		result.errors.append("В первой версии не больше 300 компонентов.")
 	var component_ids := deck_ids.duplicate()
@@ -217,6 +231,8 @@ static func validate(def: Dictionary) -> Dictionary:
 			var count: Variant = entry.get("count", 1)
 			if not _number(count) or count < 1 or count > (30 if kind == "dice" else 300) or float(int(count)) != float(count):
 				result.errors.append("Неверное количество компонентов.")
+			if kind == "dice":
+				_check_dice_look(entry, result)
 			if kind == "tokens" and not _number(entry.get("value", 1)):
 				result.errors.append("Номинал жетона должен быть числом.")
 			if kind == "tokens" and _number(count) and count >= 1 and count <= 300:
@@ -253,7 +269,18 @@ static func validate(def: Dictionary) -> Dictionary:
 	if not chains is Array:
 		result.errors.append("Цепочки должны быть массивом.")
 		return result
-	for chain: Variant in chains:
+	var dice_ids := {}
+	for entry: Variant in def.elements.get("dice", []):
+		if entry is Dictionary:
+			dice_ids[str(entry.get("id", ""))] = true
+	var var_ids := {}
+	if vars is Array:
+		for v: Variant in vars:
+			if v is Dictionary:
+				var_ids[str(v.get("id", ""))] = true
+	for chain_index in chains.size():
+		var chain: Variant = chains[chain_index]
+		var chain_errors_from: int = result.errors.size()
 		if chain is Dictionary and chain.has("comment") and (not chain.comment is String or str(chain.comment).length() > 4096):
 			result.errors.append("Комментарий цепочки должен быть текстом до4096символов.")
 		if not chain is Dictionary or not chain.get("blocks", []) is Array:
@@ -268,9 +295,10 @@ static func validate(def: Dictionary) -> Dictionary:
 		_walk_value(chain.get("guard", true), result, 0)
 		if event.has("zone"):
 			_walk_value(event.zone, result, 0)
-		_walk_blocks(chain.get("blocks", []), result, phases, 0, str(def.rules.get("turn_mode", "circle")))
+		_walk_blocks(chain.get("blocks", []), result, phases, 0, str(def.rules.get("turn_mode", "circle")), var_ids, dice_ids)
 		if not _zone_references(chain, zone_owners):
-			result.errors.append("Цепочка ссылается на отсутствующую зону.")
+			result.errors.append("один из блоков ссылается на удалённую или переименованную зону.")
+		_prefix(result, chain_errors_from, "Логика, цепочка №%d «%s»: " % [chain_index + 1, Blocks.event_label(str(event.get("type", "")))])
 	return result
 
 static func zone_references_valid(def: Dictionary, value: Variant) -> bool:
@@ -317,7 +345,7 @@ static func _zone_references(value: Variant, zones: Dictionary) -> bool:
 				return false
 	return true
 
-static func _walk_blocks(blocks: Array, result: Dictionary, phases: Array, depth: int, turn_mode: String = "circle") -> void:
+static func _walk_blocks(blocks: Array, result: Dictionary, phases: Array, depth: int, turn_mode: String = "circle", var_ids: Dictionary = {}, dice_ids: Dictionary = {}) -> void:
 	if depth > 32:
 		result.errors.append("Слишком глубокое вложение блоков.")
 		return
@@ -331,9 +359,16 @@ static func _walk_blocks(blocks: Array, result: Dictionary, phases: Array, depth
 			continue
 		for field: String in Blocks.OPS[op]:
 			if not block.has(field):
-				result.errors.append("В блоке %s пустое гнездо %s." % [op, field])
+				result.errors.append("блок «%s»: не заполнено поле «%s»." % [Blocks.label(op), Blocks.field_label(field)])
+		if op in ["set", "change"] and block.get("var") is String:
+			if str(block.var).is_empty():
+				result.errors.append("блок «%s»: не выбрана переменная." % Blocks.label(op))
+			elif not var_ids.is_empty() and not var_ids.has(block.var):
+				result.errors.append("блок «%s»: переменной «%s» больше нет." % [Blocks.label(op), str(block.var).left(64)])
+		if op in ["roll", "roll_player"] and block.has("dice") and (not block.dice is String or not str(block.dice).is_empty() and not dice_ids.has(block.dice)):
+			result.errors.append("блок «%s»: набора кубиков «%s» больше нет." % [Blocks.label(op), str(block.dice).left(64)])
 		if op == "phase" and block.get("phase") not in phases:
-			result.errors.append("Переход в неизвестную фазу.")
+			result.errors.append("блок «Перейти к фазе»: фазы «%s» нет." % str(block.get("phase", "")).left(64))
 		if op == "next" and turn_mode == "simultaneous":
 			result.errors.append("В одновременном режиме передача хода недоступна: фаза ждёт готовности всех.")
 		if op == "sound" and block.get("name") not in Blocks.SOUNDS:
@@ -344,7 +379,7 @@ static func _walk_blocks(blocks: Array, result: Dictionary, phases: Array, depth
 		for nested in ["then", "else", "body"]:
 			if block.has(nested):
 				if block[nested] is Array:
-					_walk_blocks(block[nested], result, phases, depth + 1, turn_mode)
+					_walk_blocks(block[nested], result, phases, depth + 1, turn_mode, var_ids, dice_ids)
 				else:
 					result.errors.append("Вложенные блоки должны быть массивом.")
 
@@ -366,7 +401,32 @@ static func _walk_value(v: Variant, result: Dictionary, depth: int) -> void:
 		for entry: Variant in v:
 			_walk_value(entry, result, depth + 1)
 
-static func box_valid(box: Dictionary) -> bool:
+## Название колоды для сообщений об ошибках.
+static func deck_title(deck: Dictionary) -> String:
+	return str(deck.get("title", deck.get("id", "?"))).left(64)
+
+## Приписать место ошибки к сообщениям, добавленным начиная с from.
+static func _prefix(result: Dictionary, from: int, place: String) -> void:
+	for index in range(from, result.errors.size()):
+		var text := str(result.errors[index])
+		if not text.begins_with(place):
+			result.errors[index] = place + text
+
+## Вид набора кубиков: цвета, грани (точки / цифры / свои картинки 1–6).
+static func _check_dice_look(entry: Dictionary, result: Dictionary) -> void:
+	var title := str(entry.get("title", entry.id)).left(64)
+	for key: String in ["color", "pips"]:
+		if key == "color" and entry.get(key) in ["player", "team"]:
+			continue
+		if entry.has(key) and (not entry[key] is String or not Color.html_is_valid(str(entry[key]))):
+			result.errors.append("Кубики «%s»: неверный цвет %s." % [title, "кубика" if key == "color" else "точек"])
+	if entry.get("faces", "dots") not in ["dots", "numbers", "images"]:
+		result.errors.append("Кубики «%s»: неизвестный вид граней." % title)
+	var images: Variant = entry.get("images", [])
+	if not images is Array or images.size() > 6 or not images.all(func(value: Variant): return value is String and (str(value).is_empty() or _hash(value))):
+		result.errors.append("Кубики «%s»: картинки граней заданы неверно." % title)
+
+static func box_valid(box: Dictionary, kinds: Array = ["fill", "text", "image"]) -> bool:
 	var faces: Variant = box.get("faces", {})
 	if not faces is Dictionary:
 		return false
@@ -374,7 +434,7 @@ static func box_valid(box: Dictionary) -> bool:
 		if part not in ["front", "back", "spine", "top"] or not faces[part] is Array or faces[part].size() > 64:
 			return false
 		for layer: Variant in faces[part]:
-			if not layer is Dictionary or layer.get("kind") not in ["fill", "text", "image"]:
+			if not layer is Dictionary or layer.get("kind") not in kinds:
 				return false
 			var rect: Variant = layer.get("rect")
 			if not rect is Array or rect.size() != 4:
@@ -384,16 +444,16 @@ static func box_valid(box: Dictionary) -> bool:
 					return false
 			if rect[2] <= 0 or rect[3] <= 0:
 				return false
-			for key: String in ["opacity", "rotation", "font_size", "brightness", "contrast", "saturation", "exposure", "hue", "outline"]:
+			for key: String in ["opacity", "rotation", "font_size", "brightness", "contrast", "saturation", "exposure", "hue", "outline", "border", "radius"]:
 				if layer.has(key) and not _number(layer[key]):
 					return false
-			for range_value: Array in [["opacity", 0, 1], ["rotation", -3600, 3600], ["font_size", 8, 512], ["brightness", -2, 2], ["contrast", 0, 4], ["saturation", 0, 4], ["exposure", -8, 8], ["hue", -360, 360]]:
+			for range_value: Array in [["opacity", 0, 1], ["rotation", -3600, 3600], ["font_size", 8, 512], ["brightness", -2, 2], ["contrast", 0, 4], ["saturation", 0, 4], ["exposure", -8, 8], ["hue", -360, 360], ["border", 0, 512], ["radius", 0, 2048]]:
 				if layer.has(range_value[0]) and (layer[range_value[0]] < range_value[1] or layer[range_value[0]] > range_value[2]):
 					return false
 			for key: String in ["visible", "locked", "flip_x", "flip_y", "gradient", "shadow"]:
 				if layer.has(key) and not layer[key] is bool:
 					return false
-			for key: String in ["text", "asset", "font", "color", "color2", "tint", "align", "title", "outline_color"]:
+			for key: String in ["text", "asset", "font", "color", "color2", "tint", "align", "title", "outline_color", "fill", "role", "color_field", "fill_field"]:
 				if layer.has(key) and not layer[key] is String:
 					return false
 	return true

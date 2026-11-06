@@ -82,7 +82,7 @@ func run(t: Check) -> void:
 	t.equal(blocked.g.souls[0], 0, "Комната запрещает душу автоматической награды")
 	t.equal(blocked.zone_of(428), "discard:monster", "Без полученной души физическая карта в сбросе")
 	var heart := Scenario.new(t).players(2).dlc().current(0).character(0, 821).no_items(0).no_items(1) \
-		.soul(1, 345).soul(1, 421).monster(0, 381, {"hp": 0}).build()
+		.soul(1, 345).soul(1, 421).monster(0, 381, {"hp": 0}).room(-1).build()
 	heart.g._continue_stack()
 	heart.close()
 	t.equal(heart.g.resolving.get("reward_winners"), [0, 1], "При равенстве максимумов Сердце Мамы требует выбор")

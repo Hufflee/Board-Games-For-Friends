@@ -69,7 +69,7 @@ func _take_penalty20(id: int) -> bool:
 		if int(shop[index]) == id:
 			_eternal_shop15.erase(id)
 			_shop_counters20.erase(id)
-			shop[index] = _draw("treasure")
+			shop[index] = _draw_shop_slot24()
 			return true
 	return false
 

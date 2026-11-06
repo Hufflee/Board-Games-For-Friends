@@ -312,6 +312,8 @@ func _phases() -> void:
 func _enum(caption: String, labels: Array, values: Array, selected: Variant, callback: Callable) -> void:
 	properties.add_child(Style.label(caption))
 	var menu := OptionButton.new()
+	menu.clip_text = true
+	menu.fit_to_longest_item = false
 	for label: String in labels:
 		menu.add_item(label)
 	menu.select(maxi(0, values.find(selected)))
@@ -432,7 +434,10 @@ func _event_properties(chain: Dictionary) -> void:
 func _block_properties(block: Dictionary) -> void:
 	var path: Array = app._logic_path
 	var op := str(block.op)
-	properties.add_child(Style.heading(Blocks.label(op)))
+	var title := Style.heading(Blocks.label(op))
+	title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	title.custom_minimum_size.x = 1
+	properties.add_child(title)
 	var destination: Array = app._logic_target if not app._logic_target.is_empty() else path.slice(0, path.size() - 1)
 	app._clipboard_controls(properties, "block", path.slice(0, path.size() - 1), int(path.back()), destination)
 	var order := Style.row()
@@ -469,6 +474,17 @@ func _block_properties(block: Dictionary) -> void:
 				if entry.id == block.get("var"):
 					kind = str(entry.get("type", "number"))
 		_socket(str(captions.get(key, key)), path + [key], kind)
+	var dice_sets: Array = document.data.elements.get("dice", [])
+	if op in ["roll", "roll_player"] and not dice_sets.is_empty():
+		# Набор определяет вид кубиков на столе (цвет, грани); без выбора — первый набор.
+		var titles: Array = ["Первый набор"]
+		var ids: Array = [""]
+		for entry: Dictionary in dice_sets:
+			titles.append(str(entry.get("title", entry.id)))
+			ids.append(str(entry.id))
+		_enum("Какие кубики", titles, ids, str(block.get("dice", "")), func(value: String):
+			document.set_value(path + ["dice"], value, "Набор кубиков")
+			app._status_text())
 	for key: String in ["then", "else", "body"]:
 		if not block.has(key):
 			continue

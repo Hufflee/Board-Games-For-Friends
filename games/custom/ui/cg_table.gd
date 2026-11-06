@@ -318,7 +318,7 @@ func _present_cards() -> void:
 	_at(preview, Rect2(Vector2((_field.size.x - dimensions.x) * 0.5, 128), dimensions))
 
 func _preview_size(data: Dictionary) -> Vector2:
-	var dimensions := Vector2(Definition.CARD_SIZES[clampi(int(data.get("size", 3)) - 1, 0, 8)])
+	var dimensions := Vector2(Definition.CARD_SIZES[clampi(int(data.get("size", 3)) - 1, 0, Definition.CARD_SIZES.size() - 1)])
 	return dimensions * minf(252.0 / dimensions.x, 352.0 / dimensions.y)
 
 func _item_visible(item: Dictionary) -> bool:
@@ -510,7 +510,7 @@ func _zone(key: String, spec: Dictionary, rect: Rect2, own: bool) -> void:
 			face.layer_reader = _assets
 			face.art_texture = _assets.image(str(fields.get("art", "")))
 			face.custom_font = _assets.font(str(fields.get("font", "")))
-		var card_size := Vector2(Definition.CARD_SIZES[clampi(int(data.get("size", 3)) - 1, 0, 8)])
+		var card_size := Vector2(Definition.CARD_SIZES[clampi(int(data.get("size", 3)) - 1, 0, Definition.CARD_SIZES.size() - 1)])
 		if token:
 			card_size = Vector2(72, 72)
 		var card := K12TableCard.new(str(data.get("id", "")), not data.get("hidden", false), face, card_size)
@@ -732,9 +732,11 @@ func _dice() -> void:
 			_at(Style.label("%d закрытых d6" % int(values.count)), Rect2(origin + Vector2(0, 48), Vector2(264, 32)))
 			continue
 		var x := origin.x
+		var look := _dice_look(str(_view.get("dice_sets", {}).get(seat, "")))
 		for index in values.size():
 			var face: Variant = values[index]
 			var die := TossDie.new()
+			_style_die(die, look, int(seat))
 			var compact: bool = values.size() > 3
 			die.scale = Vector2.ONE * (0.5 if compact else 1.0)
 			die.home = origin + Vector2(24 + (index % 6) * 40, 56 + (index / 6) * 32) if compact else Vector2(x + 32, origin.y + 80)
@@ -748,6 +750,7 @@ func _dice() -> void:
 			x += 72
 	if rolling:
 		var die := TossDie.new()
+		_style_die(die, _dice_look(""), _seat)
 		die.home = tray.get_center() if has_tray else Vector2(_field.size.x * 0.5, 320)
 		die.area = tray
 		die.draggable = true
@@ -755,3 +758,27 @@ func _dice() -> void:
 		_field.add_child(die)
 		die.wait_for_roll()
 		_at(Style.label("Потяните и бросьте кубик"), Rect2(536, 392, 300, 32))
+
+## Вид набора кубиков по id; пустой id — первый набор игры (блоки без выбора набора).
+func _dice_look(set_id: String) -> Dictionary:
+	var sets: Array = _view.get("cg_dice", [])
+	for entry: Dictionary in sets:
+		if str(entry.get("id", "")) == set_id:
+			return entry
+	return sets[0] if not sets.is_empty() else {}
+
+func _style_die(die: TossDie, look: Dictionary, seat: int) -> void:
+	Style.style_die(die._die, look, _assets, _owner_tint(look, seat))
+
+## Цвет игрока (палитра пати) или команды — цвет её первого по порядку игрока.
+func _owner_tint(look: Dictionary, seat: int) -> Color:
+	var players: Array = _view.get("players", [])
+	if look.get("color") not in ["player", "team"] or seat < 0 or seat >= players.size():
+		return Color.TRANSPARENT
+	var owner: int = seat
+	if look.color == "team":
+		for index in players.size():
+			if int(players[index].get("team", 0)) == int(players[seat].get("team", 0)):
+				owner = index
+				break
+	return Net.color_of(int(players[owner].get("color", owner)))

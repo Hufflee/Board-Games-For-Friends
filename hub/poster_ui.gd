@@ -1,0 +1,157 @@
+extends Control
+## Плакаты в хабе (поверх 3D-комнаты): после удержания плаката над ним появляется значок галереи; нажатие —
+## проводник Windows, выбранная фотография становится плакатом (рамка — по пропорциям фото, размер плаката
+## постоянный, большое фото — только чётче). Места и картинки плакатов своей комнаты сохраняются и через хоста
+## видны друзьям в режиме наблюдения (Net.stickers, hub/sticker_net.gd). Создаёт hub.gd.
+
+const Stickers := preload("res://hub/stickers.gd")
+const ICON := Vector2(48, 40)
+const SHOW_TIME := 6.0  # сколько висит значок после удержания
+
+var _room: NeonRoom
+var _watch_peer: Callable
+var _icon: Button
+var _slot := -1  # плакат, над которым значок
+var _icon_left := 0.0
+var _clock := 0.0
+
+
+func _init(room: NeonRoom, watch_peer: Callable) -> void:
+	_room = room
+	_watch_peer = watch_peer
+
+
+func _ready() -> void:
+	name = "PosterUI"
+	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_icon = HubStyle.button("", 14)
+	_icon.name = "PosterGallery"
+	_icon.custom_minimum_size = ICON
+	_icon.tooltip_text = "Заменить картинку плаката — выбрать фото"
+	_icon.draw.connect(_draw_gallery)
+	_icon.pressed.connect(_choose_picture)
+	_icon.visible = false
+	add_child(_icon)
+	_room.poster_held.connect(_on_held)
+	_room.poster_moved.connect(func(slot: int, center: Vector2):
+		if _own_room():
+			Net.stickers.set_poster_pos(slot, center))
+	Net.stickers.poster_ready.connect(func(_hash): _apply())
+	Net.stickers.changed.connect(func(_peer): _apply())
+	_apply()
+
+
+func _peer() -> int:
+	return int(_watch_peer.call())
+
+
+func _own_room() -> bool:
+	return _peer() == 0 and not _room.remote_view
+
+
+## Плакаты той комнаты, что на экране: места и картинки (пока картинка друга качается — стандартная).
+func _apply() -> void:
+	if not is_instance_valid(_room):
+		return
+	var data: Dictionary = Net.stickers.room_of(_peer())
+	var list: Array = data.get("posters", [])
+	for slot in _room.posters.size():
+		var poster: Node3D = _room.posters[slot]
+		var entry: Array = list[slot] if slot < list.size() and list[slot] is Array else []
+		var center: Vector2 = Vector2(float(entry[0]), float(entry[1])) if entry.size() == 3 else _room.poster_default_position(slot)
+		var hash: String = str(entry[2]) if entry.size() == 3 else ""
+		if hash.is_empty():
+			poster.show_default()
+		elif poster.picture_key != hash:
+			var texture: Texture2D = Net.stickers.poster_texture(hash)
+			if texture != null:
+				poster.set_picture(texture, hash)
+		_room.set_poster_position(slot, center)
+
+
+func _process(delta: float) -> void:
+	_clock += delta
+	if _clock >= 0.3:
+		_clock = 0.0
+		_apply()
+	if _slot < 0:
+		return
+	_icon_left -= delta
+	var dragging: bool = _room.poster_dragging != null
+	if (_icon_left <= 0.0 and not dragging) or not _own_room() or _slot >= _room.posters.size():
+		_hide_icon()
+		return
+	# Над верхним краем плаката, по центру.
+	var poster: Node3D = _room.posters[_slot]
+	var top: Vector3 = poster.global_position + Vector3(0, poster.wall_size().y / 2.0 + 0.03, 0.02)
+	if _room.camera.is_position_behind(top):
+		_icon.visible = false
+		return
+	_icon.visible = true
+	_icon.position = _room.camera.unproject_position(top) - Vector2(ICON.x / 2.0, ICON.y + 4)
+
+
+func _on_held(slot: int) -> void:
+	if not _own_room():
+		return
+	_slot = slot
+	_icon_left = SHOW_TIME
+	_icon.visible = true
+
+
+func _hide_icon() -> void:
+	_slot = -1
+	_icon.visible = false
+
+
+## Минималистичный значок галереи: рамка со скруглёнными углами, две горы и солнце — линиями.
+func _draw_gallery() -> void:
+	var color := HubStyle.TEXT
+	var box := Rect2(Vector2(9, 8), _icon.size - Vector2(18, 16))
+	var r := 4.0
+	var points := PackedVector2Array()
+	for corner in 4:
+		var center := [box.position + Vector2(r, r), Vector2(box.end.x - r, box.position.y + r), box.end - Vector2(r, r), Vector2(box.position.x + r, box.end.y - r)][corner] as Vector2
+		for step in 5:
+			var angle := PI + corner * PI / 2.0 + step * PI / 8.0
+			points.append(center + Vector2(cos(angle), sin(angle)) * r)
+	points.append(points[0])
+	_icon.draw_polyline(points, color, 2.0, true)
+	var base := box.end.y - 1.0
+	_icon.draw_polyline(PackedVector2Array([Vector2(box.position.x + 3, base), Vector2(box.position.x + box.size.x * 0.38, box.position.y + box.size.y * 0.32), Vector2(box.position.x + box.size.x * 0.66, base)]), color, 2.0, true)
+	_icon.draw_polyline(PackedVector2Array([Vector2(box.position.x + box.size.x * 0.52, box.position.y + box.size.y * 0.66), Vector2(box.position.x + box.size.x * 0.7, box.position.y + box.size.y * 0.48), Vector2(box.end.x - 3, base)]), color, 2.0, true)
+	_icon.draw_arc(Vector2(box.end.x - box.size.x * 0.22, box.position.y + box.size.y * 0.3), 3.2, 0, TAU, 16, color, 2.0, true)
+
+
+## Проводник Windows (системное окно): выбрать любую фотографию.
+func _choose_picture() -> void:
+	var slot := _slot
+	if slot < 0:
+		return
+	_icon_left = SHOW_TIME
+	var filters := PackedStringArray(["*.png, *.jpg, *.jpeg, *.webp, *.bmp ; Картинки"])
+	var start := OS.get_system_dir(OS.SYSTEM_DIR_PICTURES)
+	var err := DisplayServer.file_dialog_show("Картинка для плаката", start, "", false, DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, filters,
+		func(status: bool, paths: PackedStringArray, _filter: int): _picked(slot, status, paths))
+	if err != OK:
+		_toast("Не удалось открыть проводник")
+
+
+func _picked(slot: int, status: bool, paths: PackedStringArray) -> void:
+	if not status or paths.is_empty() or slot < 0 or slot >= _room.posters.size():
+		return
+	var image := Image.load_from_file(paths[0])
+	if image == null or image.is_empty():
+		_toast("Эту картинку не получилось открыть — подойдут PNG, JPG, WEBP, BMP")
+		return
+	var poster: Node3D = _room.posters[slot]
+	var hash: String = Net.stickers.set_poster_picture(slot, image, Vector2(poster.position.x, poster.position.y))
+	if hash != "":
+		Sfx.play("card_place", -6, 0.08)
+		_apply()
+		_hide_icon()
+
+
+func _toast(text: String) -> void:
+	_room.shelf_hint.emit(text)

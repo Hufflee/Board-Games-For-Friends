@@ -20,6 +20,7 @@ var _selected := {}
 var _watch_peer := 0
 var _watch_follow := true
 var _publish_clock := 0.0
+var _stickers: Control  # hub/sticker_ui.gd — стикеры на коробках и доска друзей
 
 
 
@@ -48,6 +49,8 @@ func _ready() -> void:
 				_ui.visible = not on
 			if is_instance_valid(_card):
 				_card.visible = not on
+			if is_instance_valid(_stickers):
+				_stickers.visible = not on
 	)
 	_room.shelf_hint.connect(
 		func(text: String):
@@ -64,6 +67,12 @@ func _ready() -> void:
 	_card.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_card)
+	_stickers = load("res://hub/sticker_ui.gd").new(_room, func(): return _watch_peer, _watch_name)
+	add_child(_stickers)
+	add_child(load("res://hub/poster_ui.gd").new(_room, func(): return _watch_peer))  # плакаты: перенос и своя картинка
+	_stickers.box_panel_toggled.connect(func(open: bool):
+		if is_instance_valid(_card):
+			_card.visible = not open and not _room._editor_on)
 	Net.public_room_changed.connect(_on_public_room)
 	Net.lobby_changed.connect(_on_lobby)
 	Net.party_game_changed.connect(_on_party_game)

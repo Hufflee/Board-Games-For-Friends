@@ -6,7 +6,7 @@ signal chosen(entry: Dictionary)
 signal preview_requested(entry: Dictionary)
 signal preview_closed
 ## Игра может ускорить просмотр, сохранив общий стандарт для остальных рук.
-var preview_delay := 1.5
+var preview_delay := 0.75  # приближение карты при наведении (06.11 — вдвое быстрее)
 signal order_changed(keys: Array)
 signal drag_began(entry: Dictionary)
 signal drag_ended

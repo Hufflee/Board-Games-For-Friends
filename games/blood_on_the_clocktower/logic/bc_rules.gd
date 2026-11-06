@@ -332,19 +332,23 @@ func action(seat: int, kind: String, arg: Variant = {}) -> bool:
 		public_revision += 1
 	return ok
 
-## Днём шёпот виден всем как факт разговора, без текста. Строка в журнале — только при смене пары,
-## чтобы переписка туда-обратно не засыпала журнал. Ревизию не трогаем: шёпот не должен
+## Днём шёпот виден всем как факт разговора, без текста. Строка в личных сообщениях — только при смене пары,
+## чтобы переписка туда-обратно их не засыпала. Ревизию не трогаем: шёпот не должен
 ## отклонять одновременные номинации и голоса.
 func _note_whisper(seat: int, recipient: int) -> void:
+	# Владелец 06.11: разговор с рассказчиком нигде не отмечается — ни строкой, ни «…» на плашке.
+	if seat == storyteller or recipient == storyteller:
+		return
 	var pair := [mini(seat, recipient), maxi(seat, recipient)]
 	if pair == last_whisper:
 		return
 	last_whisper = pair
-	if storyteller in pair:
-		var player := recipient if seat == storyteller else seat
-		public_log.append("%s говорит с рассказчиком." % players[player].name)
-	else:
-		public_log.append("%s и %s шепчутся." % [players[pair[0]].name, players[pair[1]].name])
+	# Владелец 06.11: факт разговора — не в общем журнале, а в личных сообщениях всех остальных
+	# (над панелью личных сообщений, как будто видишь, кто отошёл пошептаться).
+	var notice := "%s и %s шепчутся." % [players[pair[0]].name, players[pair[1]].name]
+	for other in players.size():
+		if not pair.has(other):
+			add_private(other, notice)
 
 ## Владелец 06.11: мёртвых не номинировать (правила это разрешают). Исключение — «Дурная луна»:
 ## там Зомбуул после первой смерти выглядит мёртвым, и победить его можно только казнью «мёртвого».

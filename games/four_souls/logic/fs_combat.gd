@@ -3,6 +3,9 @@ extends "res://games/four_souls/logic/fs_stack.gd"
 ## Часть цепочки fs_state → fs_stack → fs_combat → fs_turn → fs_effects → fs_rules (FSRules — фасад).
 ## Отдельно не используется: состояние и вызовы общие через self.
 
+## Здоровье игрока перед смертельным уроном (FAQ: возврат при предотвращении смерти).
+var _pre_lethal_hp := {}
+
 func _damage_player(seat: int, amount: int, context: Dictionary = {}) -> void:
 	if bool(context.get("prepared", false)):
 		_finish_player_damage(seat, amount, context)
@@ -51,7 +54,11 @@ func _finish_player_damage(seat: int, amount: int, context: Dictionary) -> void:
 	amount = _absorb_next_hit("player", seat, amount)
 	var blocked := mini(maxi(0, amount), int(damage_shields[seat]))
 	damage_shields[seat] -= blocked
+	var before_hit: int = int(hp[seat])
 	hp[seat] = maxi(0, int(hp[seat]) - (maxi(0, amount) - blocked))
+	if before_hit > 0 and int(hp[seat]) <= 0:
+		# FAQ: предотвращённая смерть возвращает здоровье, какое было до смертельного урона.
+		_pre_lethal_hp[seat] = before_hit
 	if maxi(0, amount) > blocked:
 		_last_player_killer[seat] = int(context.get("attacker", -1))
 		var data := context.duplicate(true)
@@ -70,7 +77,8 @@ func _purchase_cost(seat: int, slot: int) -> int:
 	# Скидки: 229 −5, 473/76 −1, Членская карта 91 −4, Сделка Хранителя 889 −3, комната 771 −5.
 	if _room_has20(782) and seat == current and slot >= 0 and int(souls[seat]) == int(souls.min()):
 		return 0
-	return maxi(0, 10 - 5 * _item_count(seat, 229) - _item_count(seat, 473) - _item_count(seat, 76) - 4 * _item_count(seat, 91) - 3 * _item_count(seat, 889) - (5 if _room_has20(771) and seat == current and slot >= 0 else 0) - (3 if seat == current and slot >= 0 and monsters.any(func(m): return int(m.id) == 279 and int(m.hp) > 0) else 0))
+	var sale := 2 * _room_sale_tokens24() if seat == current and slot >= 0 else 0
+	return maxi(0, 10 - 5 * _item_count(seat, 229) - _item_count(seat, 473) - _item_count(seat, 76) - 4 * _item_count(seat, 91) - 3 * _item_count(seat, 889) - sale - (5 if _room_has20(771) and seat == current and slot >= 0 else 0) - (3 if seat == current and slot >= 0 and monsters.any(func(m): return int(m.id) == 279 and int(m.hp) > 0) else 0))
 ## Ауры учитывают только открытых живых монстров, а не накрытые карты.
 func _monster_aura(key: String) -> int:
 	var count := 0
@@ -244,6 +252,8 @@ func _advance_auto_reward() -> void:
 			amount = int(resolving.get("reward_roll", 0))
 		if op in ["coins", "loot", "treasure"]:
 			amount *= int(resolving.get("reward_multiplier", 1)) * reward_boost
+			if _card_automation_enabled() and _room_has20(774):
+				amount *= 2
 		if op == "treasure":
 			# Остаток уже умножен: возвращение из пассива не удваивает его повторно.
 			amount = int(resolving.get("treasure_remaining", _treasure_amount21(int(resolving.get("resource_recipient", resolving.owner)), amount)))
@@ -370,7 +380,7 @@ func _start_attack(effect: Dictionary) -> void:
 		_continue_stack()
 		return
 	battle = slot; phase = "battle_roll"; _after_stack = "battle_roll"
-	_emit_passives("attack_start", {"seat": current, "card": int(monsters[slot].id)})
+	_emit_passives("attack_start", {"seat": current, "card": int(monsters[slot].id), "from_deck24": from_deck})
 	if from_deck:
 		_attack_target18(monsters[slot], int(effect.get("attack_token", 0)))
 	if int(monsters[slot].id) == 396 and not _card_automation_enabled():
@@ -389,7 +399,7 @@ func _complete_purchase(effect: Dictionary) -> void:
 			coins[seat] -= price
 			bank += price
 			_gain_item(seat, id)
-			if slot >= 0: shop[slot] = _draw("treasure")
+			if slot >= 0: shop[slot] = _draw_shop_slot24()
 			if _item_count(seat, 76) > 0:
 				_queue_passive(seat, 76, {}, [PassiveRules.operation("coins", _item_count(seat, 76))])
 			_emit_passives("purchase", {"seat": seat, "slot": slot, "cost": price})

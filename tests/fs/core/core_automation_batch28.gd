@@ -1,0 +1,472 @@
+extends "res://tests/fs/core/core_automation_batch27.gd"
+const PassiveRules28 := preload("res://games/four_souls/logic/fs_passives.gd")
+## Пакет 28: остаток группы 27 — персонажи 886–911, Бездна 891, Мёртвый груз 893,
+## Классический кубик 899, Дубинка 905.
+func run(t: Check) -> void:
+	_characters28(t)
+	_manual28(t)
+	_audit28(t)
+	_declare28(t)
+	_table_rules28(t)
+	var abyss = _game(t, 891)
+	_item(abyss, 0, 16)
+	_activate(abyss)
+	abyss.choose(0, "abyss_destroy28", {"item": 2})
+	abyss.close()
+	t.equal(int(abyss.g.items[0][1].counters), 1, "891 кладёт жетон на себя")
+	abyss.g.items[0][1].counters = 0
+	abyss.g._refresh_passive_stats()
+	var base_attack: int = int(abyss.g.attack[0])
+	abyss.g.items[0][1].counters = 1
+	abyss.g._refresh_passive_stats()
+	t.equal(abyss.g.items[0].size(), 2, "891 уничтожает выбранный свой предмет")
+	t.equal(abyss.g.attack[0], base_attack, "891 один жетон ещё не даёт атаки")
+	abyss.g.items[0][1].counters = 2
+	abyss.g._refresh_passive_stats()
+	t.equal(abyss.g.attack[0], base_attack + 1, "891 +1 атаки за каждые 2 жетона")
+	abyss.g.items[0][1].tapped = false
+	abyss.no(0, "activate", {"item": 1}, "891 без невечного предмета не активируется")
+
+	var weight = _game(t, 893)
+	var loot_before: int = weight.g.hands[1].size()
+	weight.g._queue_passive(1, 427, {}, [{"op": "loot", "amount": 1}])
+	weight.ok(0, "activate", {"item": 1})
+	weight.close()
+	weight.choose(0, "cancel_selected")
+	weight.close()
+	t.equal(weight.g.hands[1].size(), loot_before, "893 отменяет срабатывающую способность монстра")
+	var weight2 = _game(t, 893)
+	weight2.no(0, "activate", {"item": 1}, "893 без срабатывающей способности не активируется")
+
+	var classic = _game(t, 899)
+	classic.ok(0, "attack", {"slot": 0})
+	classic.close()
+	classic.roll(2)
+	classic.ok(0, "roll")
+	classic.ok(0, "activate", {"item": 1})
+	classic.close()
+	classic.choose(0, "classic_pick28")
+	t.equal(classic.g.actor(), 0, "899 перебрасывает владелец броска")
+	classic.roll(5)
+	classic.ok(0, "effect_roll")
+	classic.close()
+	classic.roll(3)
+	classic.ok(0, "effect_roll")
+	classic.close()
+	t.equal(classic.g.resolving.get("classic_faces28", []), [5, 3], "899 два кубика вместо одного")
+	classic.choose(0, "classic_judge28", {"target": 1})
+	t.equal(classic.g.actor(), 1, "899 результат выбирает другой игрок")
+	classic.choose(1, "classic_choose28", {"item": 0})
+	var rolls: Array = classic.g.stack.filter(func(entry): return str(entry.kind) == "roll")
+	t.equal(int(rolls[0].value) if not rolls.is_empty() else -1, 5, "899 выбранный кубик становится результатом")
+
+	var club = _game(t, 905)
+	var bottom_id: int = int(club.g.monsters[1].id)
+	club.ok(0, "activate", {"item": 1})
+	club.close()
+	club.choose(0, "club_bottom28", {"item": 1})
+	club.close()
+	t.equal(int(club.g.decks.monster[0]), bottom_id, "905 кладёт неатакуемого монстра под низ колоды")
+	var club2 = _game(t, 905)
+	club2._take(549)
+	club2.g._push({"kind": "loot", "card": 549, "owner": 1}, "turn")
+	var coins_before: Array = club2.g.coins.duplicate()
+	club2.ok(0, "activate", {"item": 1, "ability": "club_cancel28"})
+	club2.close()
+	club2.choose(0, "club_cancel28", {"index": 0})
+	club2.close()
+	t.equal(club2.g.coins, coins_before, "905 отменённая добыча не срабатывает")
+	t.check(549 in club2.g.discards.loot, "905 отменённая добыча в сбросе")
+	t.check(bool(club2.g.items[0][1].tapped) and bool(club2.g.items[0][1].get("club_off28", false)), "905 поворачивается и теряет способности")
+	t.equal(club2.g._item_count(0, 905), 0, "905 без способностей не учитывается как источник")
+	club2.g._treasure12_passives("turn_end", {})
+	t.check(not bool(club2.g.items[0][1].get("club_off28", false)), "905 способности возвращаются в конце хода владельца")
+	var club3 = _game(t, 905)
+	club3.g.monsters[0].hp = 1
+	var loot3: int = club3.g.hands[0].size()
+	var coin3: int = int(club3.g.coins[0])
+	club3.ok(0, "attack", {"slot": 1})
+	club3.close()
+	club3.g.monsters[1].hp = 1
+	club3.roll(6)
+	club3.ok(0, "roll")
+	club3.close()
+	for i in 4:
+		if club3.g.phase == "priority":
+			club3.close()
+	t.equal(club3.g.hands[0].size(), loot3 + 2, "905 удваивает награду не-босса (1 добыча → 2)")
+	t.equal(int(club3.g.coins[0]), coin3, "905 монеты не начисляются лишний раз")
+
+func _characters28(t: Check) -> void:
+	var expected := {886: 887, 888: 889, 890: 891, 892: 893, 894: 895, 896: 897, 898: 899, 900: 901, 902: 903, 904: 905, 906: 907, 909: 910, 911: 912}
+	var found := {}
+	for entry: Dictionary in FSData.characters(true):
+		found[int(entry.card)] = int(entry.item)
+	for character: int in expected:
+		t.equal(int(found.get(character, -2)), int(expected[character]), "%d стартовый предмет %d" % [character, expected[character]])
+		t.equal(PassiveRules28.character_health(character), 2, "%d здоровье 2" % character)
+	t.equal(PassiveRules28.character_health(908), 3, "908 здоровье 3")
+	t.check(found.has(908), "908 есть среди персонажей")
+
+func _manual28(t: Check) -> void:
+	var battery = _game(t, 56)
+	_item(battery, 1, 16)
+	for entry: Dictionary in battery.g.items[1]:
+		entry.tapped = true
+	battery.g.items[0][1].counters = 2
+	battery.ok(0, "activate", {"item": 1, "ability": "battery28"})
+	battery.close()
+	battery.choose(0, "recharge_all", {"target": 1})
+	battery.close()
+	t.check(battery.g.items[1].all(func(entry): return not bool(entry.tapped)), "56 перезаряжает все предметы выбранного игрока")
+	t.equal(int(battery.g.items[0][1].counters), 0, "56 сбрасывает 2 жетона")
+	battery.no(0, "activate", {"item": 1, "ability": "battery28"}, "56 без жетонов не активируется")
+
+	var rkey = _game(t, 60)
+	rkey.g.items[0][1].tapped = false
+	rkey._take(423)
+	rkey.g.soul_cards[1].append({"id": 423, "value": 1})
+	rkey.g.souls[1] = 1
+	_activate(rkey)
+	t.equal(rkey.g.items[0].size(), 1, "60 уничтожает себя")
+	t.equal(rkey.g.souls, [0, 0, 0], "60 уничтожает все души")
+	t.check(423 in rkey.g.discards.monster, "60 душа-монстр уходит в сброс")
+	t.equal(rkey.g.hands.map(func(hand): return hand.size()), [3, 3, 3], "60 у каждого новая рука из 3 добычи")
+
+	var lode = _game(t, 65)
+	var dc_before: int = lode.g._monster_evasion(lode.g.monsters[0])
+	_trigger(lode, "roll", {"seat": 1, "value": 3})
+	lode.choose(0, "temporary_monster_dc", {"item": 0})
+	lode.close()
+	t.equal(lode.g._monster_evasion(lode.g.monsters[0]), dc_before - 1, "65 на тройку −1 к защите выбранного монстра")
+
+	var bag = _game(t, 88)
+	var coins_bag: int = int(bag.g.coins[0])
+	bag.ok(0, "attack_familiar15", {"index": 0})
+	bag.close()
+	bag.g.attack[0] = 2
+	bag.roll(6)
+	bag.ok(0, "roll")
+	bag.close()
+	for i in 3:
+		if bag.g.phase == "priority":
+			bag.close()
+	t.equal(int(bag.g.coins[0]), coins_bag + 5, "88 побеждённый даёт активному 5¢")
+	t.check(bag.g.items[0].any(func(entry): return int(entry.id) == 88), "88 остаётся у владельца")
+
+	var loss = _game(t, 40)
+	loss._take(423)
+	loss._take(427)
+	loss.g.soul_cards[0].append({"id": 423, "value": 1})
+	loss.g.soul_cards[0].append({"id": 427, "value": 1})
+	loss.g.souls[0] = 2
+	loss.g._curse_of_loss(0)
+	loss.close()
+	loss.choose(0, "loss_soul28", {"item": 1})
+	loss.close()
+	t.equal(loss.g.soul_cards[0].map(func(entry): return int(entry.id)), [423], "706 игрок сам выбирает уничтожаемую душу")
+	t.equal(int(loss.g.souls[0]), 1, "706 счёт душ уменьшен")
+
+	var deeper = _game(t, 40)
+	deeper._take(711)
+	deeper._take(348)
+	deeper.g.discards.monster.append(348)
+	var attacks: int = int(deeper.g.attack_left)
+	deeper.g._push({"kind": "event", "card": 711, "owner": 0}, "turn")
+	deeper.close()
+	deeper.choose(0, "deeper28", {"card": 348})
+	deeper.choose(0, "skip_choice")
+	deeper.close()
+	t.equal(int(deeper.g.decks.monster.back()), 348, "711 монстр из сброса на верх колоды")
+	t.equal(int(deeper.g.attack_left), attacks + 1, "711 дополнительная атака")
+
+	var curse = _game(t, 832)
+	var top: int = int(curse.g.decks.loot.back())
+	_trigger(curse, "turn_start", {"seat": 0})
+	curse.choose(0, "curse_mill28", {"deck": "loot"})
+	curse.close()
+	t.equal(int(curse.g.discards.loot.back()), top, "832 в начале хода верхняя карта колоды в сброс")
+	_activate(curse)
+	curse.choose(0, "curse_return28", {"deck": "loot"})
+	curse.close()
+	t.equal(int(curse.g.decks.loot.back()), top, "832 поворот возвращает верх сброса на колоду")
+
+	var spin = _game(t, 865)
+	_item(spin, 1, 16)
+	var shop_id: int = int(spin.g.shop[0])
+	_activate(spin)
+	spin.choose(0, "spindown28", {"seat28": 1, "card": 16})
+	t.equal(spin.g.actor(), 1, "865 кражу из магазина выбирает владелец уничтоженного")
+	spin.choose(1, "take_shop", {"item": 0})
+	spin.close()
+	t.check(not spin.g.items[1].any(func(entry): return int(entry.id) == 16), "865 предмет уничтожен")
+	t.check(spin.g.items[1].any(func(entry): return int(entry.id) == shop_id), "865 владелец крадёт предмет магазина")
+	spin.roll(5)
+	_trigger(spin, "turn_end", {"seat": 0})
+	spin.ok(0, "effect_roll")
+	spin.close()
+	t.check(not bool(spin.g.items[0][1].tapped), "865 в конце хода на 4–6 перезаряжается")
+
+	var soulless = _game(t, 40)
+	soulless._take(744)
+	soulless.g.curses[1].append(744)
+	soulless.g.hp[1] = 0
+	soulless.g._death_queue = [1]
+	soulless.g._push({"kind": "death", "owner": 1}, "turn")
+	soulless.close()
+	soulless.ok(1, "death", {"loot": 482, "item": -1})
+	for i in 2:
+		if soulless.g.phase == "priority":
+			soulless.close()
+	soulless.choose(1, "curse_pass28", {"target": 2})
+	soulless.close()
+	t.check(744 in soulless.g.curses[2] and 744 not in soulless.g.discards.monster, "744 при смерти владельца переходит другому игроку, а не в сброс")
+	t.check(744 not in soulless.g.curses[1], "744 у прежнего владельца снято")
+
+## Аудит прежних partial: основной текст каждой карты одним сценарием.
+func _audit28(t: Check) -> void:
+	var all_dice = _game(t, 71)
+	_item(all_dice, 1, 16)
+	_room24(all_dice, 786)
+	all_dice.close()
+	t.check(not all_dice.g.items[1].any(func(entry): return int(entry.id) == 16) and all_dice.g.items[1].size() == 2, "786 предмет игрока переигран, вечный остаётся")
+	t.equal(all_dice.g.hands.map(func(hand): return hand.size()), [3, 3, 3], "786 новая рука из 3 добычи")
+	t.check(423 in all_dice.g.discards.monster and 427 in all_dice.g.discards.monster, "786 монстры в сброс")
+	var each_dice = _game(t, 71)
+	_item(each_dice, 1, 16)
+	_room24(each_dice, 788)
+	each_dice.close()
+	t.check(not each_dice.g.items[1].any(func(entry): return int(entry.id) == 16) and each_dice.g.items[1].size() == 2, "788 каждый переигрывает свои предметы")
+	t.check(each_dice.g.monsters.any(func(entry): return int(entry.id) == 423), "788 монстры остаются")
+	var own_dice = _game(t, 71)
+	_item(own_dice, 0, 16)
+	_item(own_dice, 1, 24)
+	_room24(own_dice, 791)
+	own_dice.close()
+	t.check(not own_dice.g.items[0].any(func(entry): return int(entry.id) == 16), "791 активный переигрывает свой предмет")
+	t.check(own_dice.g.items[1].any(func(entry): return int(entry.id) == 24), "791 чужие предметы не трогает")
+	for pair in [[793, 5], [794, 4], [795, 3]]:
+		var royale = _game(t, 71)
+		_room24(royale, int(pair[0]))
+		t.equal(royale.g._pvp_defense16(1), int(pair[1]), "%d защита игроков %d+" % pair)
+	var error_room = _game(t, 71)
+	_room24(error_room, 820)
+	error_room.roll(5)
+	_trigger(error_room, "turn_start", {"seat": 0})
+	error_room.ok(0, "effect_roll")
+	error_room.close()
+	t.equal(error_room.g.hands[0].size(), 3, "820 на 5 сбросить руку и взять 3")
+	var error_monster = _game(t, 71)
+	_room24(error_monster, 820)
+	error_monster.roll(1)
+	_trigger(error_monster, "turn_start", {"seat": 0})
+	error_monster.ok(0, "effect_roll")
+	error_monster.close()
+	error_monster.choose(0, "glitch_replace25", {"item": 0})
+	error_monster.close()
+	t.check(423 in error_monster.g.discards.monster or 423 in error_monster.g.discards.room, "820 на 1 монстр сброшен и заменён")
+	var corrupted = _game(t, 71)
+	var hands_before: Array = corrupted.g.hands.duplicate(true)
+	var chars_before: Array = corrupted.g.chars.duplicate()
+	corrupted.g.character_ready[0] = false
+	_event24(corrupted, 746)
+	corrupted.close()
+	t.equal(corrupted.g.hands[1], hands_before[0], "746 рука уходит игроку слева")
+	t.equal(int(corrupted.g.chars[2]), int(chars_before[1]), "746 персонаж уходит игроку справа")
+	t.check(corrupted.g.character_ready.all(func(ready): return bool(ready)), "746 персонажи перезаряжены")
+	var multi = _game(t, 71)
+	_room24(multi, 754)
+	multi.ok(0, "attack", {"slot": 0})
+	multi.close()
+	t.equal(multi.g._coop_partners20.size(), 2, "754 все неактивные объединяются с атакующим")
+	var sibling = _game(t, 863)
+	_activate(sibling)
+	sibling.choose(0, "sibling26", {"target": 1})
+	sibling.close()
+	sibling.ok(0, "attack", {"slot": 0})
+	sibling.close()
+	t.equal(sibling.g._sibling_reward26, [1], "863 выбранный игрок участвует в следующей атаке")
+	var blood = _game(t, 879)
+	_activate(blood)
+	t.equal(int(blood.g.items[0][1].counters), 1, "879 поворот кладёт жетон")
+	blood.ok(0, "activate", {"item": 1, "ability": "blood_at26"})
+	blood.close()
+	blood.choose(0, "blood_at26", {"item": 0})
+	blood.close()
+	t.equal(blood.g._monster_attack(blood.g.monsters[0]), 1, "879 атака монстра становится 1")
+	var glitch = _game(t, 883)
+	var shop_card: int = int(glitch.g.shop[0])
+	_trigger(glitch, "turn_start", {"seat": 0})
+	glitch.choose(0, "glitch_copy26", {"item": 0})
+	glitch.close()
+	t.equal(int(glitch.g.items[0][1].id), shop_card, "883 в начале хода получает способности предмета магазина")
+	t.equal(int(glitch.g.items[0][1].get("physical_id13", -1)), 883, "883 физическая карта остаётся Глюком")
+	var d6 = _game(t, 50)
+	d6.g.items[0][1].counters = 2
+	d6.ok(0, "activate", {"item": 1, "ability": "paid"})
+	d6.close()
+	t.equal(int(d6.g.items[0][1].counters), 0, "50 платно сбрасывает 2 жетона")
+	d6.ok(0, "attack", {"slot": 0})
+	d6.close()
+	d6.roll(3)
+	d6.ok(0, "roll")
+	var low: Array = d6.g.stack.filter(func(entry): return str(entry.kind) == "roll")
+	t.equal(int(low[0].value) if not low.is_empty() else int(d6.g.last_roll), 1, "50 выпавшие 2 или 3 становятся 1 до конца хода")
+	var saved = _game(t, 40)
+	saved.g.hp[1] = 2
+	saved.g._damage_player(1, 5, {})
+	t.equal(int(saved.g.hp[1]), 0, "FAQ: смертельный урон")
+	saved.operation_panel(0)
+	saved.effect(0, "prevent_death", {"target": 1})
+	t.equal(int(saved.g.hp[1]), 2, "FAQ: предотвращённая смерть возвращает здоровье до смертельного урона")
+
+## Объявление цели при розыгрыше, когда у другого игрока есть 72/114/470.
+func _bomb_game28(t: Check) -> RefCounted:
+	var s = _game(t, 40)
+	s._take(497)
+	s.g.hands[0].append(497)
+	s.g.hp[1] = 2
+	return s
+
+func _declare28(t: Check) -> void:
+	var leaf = _bomb_game28(t)
+	_item(leaf, 1, 72)
+	leaf.ok(0, "loot", {"card": 497})
+	t.equal(leaf.g.phase, "effect", "72 рядом: цель Бомбы объявляется сразу при розыгрыше")
+	leaf.choose(0, "damage", {"target": 1})
+	leaf.close()
+	leaf.choose(1, "cancel_target21")
+	leaf.close()
+	t.equal(int(leaf.g.hp[1]), 2, "72 отменяет объявленную Бомбу целиком — урона нет")
+	t.check(497 in leaf.g.discards.loot and not leaf.g.stack.any(func(e): return int(e.get("card", -1)) == 497), "72 отменённая Бомба в сбросе и не в стеке")
+
+	var skipped = _bomb_game28(t)
+	_item(skipped, 1, 72)
+	skipped.g.hp[2] = 2
+	skipped.ok(0, "loot", {"card": 497})
+	t.equal(skipped.g.phase, "effect", "72 у соперника: объявление и при цели в другого игрока")
+	skipped.choose(0, "damage", {"target": 2})
+	for i in 4:
+		if skipped.g.phase == "priority":
+			skipped.close()
+	t.equal(int(skipped.g.hp[2]), 1, "объявленная цель получает урон при разрешении")
+	t.check(skipped.g._card_choices().is_empty() and skipped.g.phase != "effect", "при разрешении цель второй раз не спрашивается")
+	var leaf_skip = _bomb_game28(t)
+	_item(leaf_skip, 1, 72)
+	leaf_skip.ok(0, "loot", {"card": 497})
+	leaf_skip.choose(0, "damage", {"target": 1})
+	leaf_skip.close()
+	leaf_skip.choose(1, "skip_choice")
+	for i in 4:
+		if leaf_skip.g.phase == "priority":
+			leaf_skip.close()
+	t.check(497 in leaf_skip.g.discards.loot and leaf_skip.g.phase != "effect", "72 без отмены: Бомба разрешилась (урон гасит сам Лист в чужой ход)")
+
+	var bean = _bomb_game28(t)
+	bean._take(470)
+	bean.g.hands[1].append(470)
+	bean.g.character_ready[1] = true
+	var hp0: int = int(bean.g.hp[0])
+	bean.ok(0, "loot", {"card": 497})
+	bean.choose(0, "damage", {"target": 1})
+	bean.ok(1, "loot", {"card": 470})
+	bean.close()
+	bean.choose(1, "cancel_target21")
+	for i in 4:
+		if bean.g.phase == "priority":
+			bean.close()
+	t.equal(int(bean.g.hp[1]), 2, "470 отменяет объявленную Бомбу целиком")
+	t.equal(int(bean.g.hp[0]), maxi(0, hp0 - 2), "470 наносит 2 урона разыгравшему")
+
+	var plain = _bomb_game28(t)
+	plain.ok(0, "loot", {"card": 497})
+	t.equal(plain.g.phase, "priority", "без 72/114/470 у соперников розыгрыш как раньше — цель при разрешении")
+	plain.close()
+	plain.choose(0, "damage", {"target": 1})
+	plain.close()
+	t.equal(int(plain.g.hp[1]), 1, "обычный порядок по-прежнему наносит урон")
+	var butter = _game(t, 40)
+	_item(butter, 1, 114)
+	var butter_slot: int = butter.g.items[1].size() - 1
+	butter._take(515)
+	butter.g.hands[0].append(515)
+	butter.g._push({"kind": "roll", "value": 3, "owner": 1}, "turn")
+	butter.ok(0, "loot", {"card": 515})
+	t.equal(butter.g.phase, "effect", "114 у соперника: Осколок объявляет бросок сразу")
+	butter.choose(0, "reroll", {"roll_index": 0})
+	butter.ok(1, "activate", {"item": butter_slot})
+	butter.close()
+	butter.choose(1, "cancel_target21")
+	for i in 4:
+		if butter.g.phase == "priority":
+			butter.close()
+	t.check(515 in butter.g.discards.loot, "114 отменил Осколок целиком — карта в сбросе")
+	var rolls: Array = butter.g.stack.filter(func(e): return str(e.kind) == "roll")
+	t.check(rolls.is_empty() or int(rolls[0].value) == 3, "114 бросок не переброшен")
+	t.check(not butter.g.resolving.has("reroll_request"), "114 переброс не запрошен")
+	var penny = _game(t, 40)
+	_item(penny, 1, 114)
+	_item(penny, 1, 16)
+	var tapped_slot: int = penny.g.items[1].size() - 1
+	penny.g.items[1][tapped_slot].tapped = true
+	penny._take(544)
+	penny.g.hands[0].append(544)
+	var coins_before: int = int(penny.g.coins[0])
+	penny.ok(0, "loot", {"card": 544})
+	t.equal(penny.g.phase, "effect", "544: цель второго шага объявляется при розыгрыше")
+	penny.choose(0, "recharge", {"target": 1, "item": tapped_slot})
+	for i in 4:
+		if penny.g.phase == "priority":
+			penny.close()
+	t.equal(int(penny.g.coins[0]), coins_before + 1, "544 сначала даёт монету")
+	t.check(not bool(penny.g.items[1][tapped_slot].tapped), "544 объявленный предмет перезаряжен без повторного выбора")
+	t.check(penny.g.phase != "effect", "544 разрешилась без лишних вопросов")
+
+## 06.11: окно ответов в чужой ход, лента сброса, замешивание сброса под низ, partial-карты вне колод.
+func _table_rules28(t: Check) -> void:
+	var strict = _game(t, 40)
+	strict.g.strict_responses28 = true
+	strict._take(497)
+	strict.g.hands[1].append(497)
+	strict.g.character_ready[1] = true
+	strict.g.phase = "turn"
+	strict.no(1, "loot", {"card": 497}, "строгий режим: в чужой ход без действия в стеке ответить нельзя")
+	strict.g._push({"kind": "roll", "value": 3, "owner": 0}, "turn")
+	t.check(strict.g.off_turn_open(1), "строгий режим: на бросок в стеке ответить можно")
+	for i in 3:
+		strict.g.tick(5.2)
+	t.check(strict.g.stack.is_empty() and not strict.g.off_turn_open(1), "через 5 с тишины стек разрешился — ответ закрыт")
+
+	var feed = _game(t, 40)
+	feed.g.get_view(0)
+	feed.g.discards.loot.append(feed.g.hands[0].pop_back())
+	var view: Dictionary = feed.g.get_view(0)
+	t.equal(int(view.discard_feed28.back().card), int(feed.g.discards.loot.back()), "лента сброса показывает последнюю карту сброса")
+
+	var shuffle = _game(t, 40)
+	var unseen: int = int(shuffle.g.decks.treasure.back())
+	shuffle.g.discards.treasure.append_array(shuffle.g.decks.treasure.slice(0, shuffle.g.decks.treasure.size() - 1))
+	shuffle.g.decks.treasure = [unseen]
+	var first: int = shuffle.g._draw("treasure")
+	t.equal(first, unseen, "оставшаяся невиданная карта выходит первой")
+	var refill: int = shuffle.g.discards.treasure.size()
+	shuffle.g._draw("treasure")
+	t.equal(shuffle.g.decks.treasure.size(), refill - 1, "пустая колода берёт перемешанный сброс")
+
+	var off := preload("res://games/four_souls/logic/fs_rules.gd").new()
+	off.excluded_cards28 = FSData.PARTIAL_OFF28.duplicate()
+	off.new_game([{"name": "А"}, {"name": "Б"}], true, 5)
+	var everywhere: Array = []
+	for kind in off.decks:
+		everywhere.append_array(off.decks[kind])
+	for hand in off.hands:
+		everywhere.append_array(hand)
+	everywhere.append_array(off.monsters.map(func(m): return int(m.id)))
+	t.check(FSData.PARTIAL_OFF28.all(func(id): return int(id) not in everywhere), "partial-карты не попадают в колоды настоящей партии")
+	var partner = _game(t, 40)
+	partner.g.phase = "effect"
+	partner.g.resolving = {}
+	partner.g._after_stack = "turn"
+	partner.g._queue_passive(1, 863, {}, [{"op": "coins", "amount": 1}])
+	partner.close()
+	t.equal(partner.g.phase, "turn", "пассив сразу после эффекта возвращает ход, а не пустую фазу effect (фазз 281128)")

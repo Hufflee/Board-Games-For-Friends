@@ -308,6 +308,8 @@ func _can_play_gift12(owner: int, id: int) -> bool:
 		return false
 	if id == 469 and not stack.any(func(e): return e.kind == "loot"):
 		return false
+	if id == 470 and _card_automation_enabled() and not _can_guard21(owner, id):
+		return false
 	if (id in CardAutomation.REROLL_LOOT or id == 621) and not stack.any(func(e): return e.kind in ["roll", "effect_roll"]):
 		return false
 	if id in CardAutomation.CANCEL_LOOT and not stack.any(func(e): return e.kind == "loot" or (e.kind == "item" and not bool(e.get("conditional", false)) and not e.has("automation_context"))):

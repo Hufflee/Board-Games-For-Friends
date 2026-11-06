@@ -33,7 +33,7 @@ func run(t: Check) -> void:
 	# Общая операция уже существовала, но старые строки реестра70/222 считали её отсутствующей.
 	for card: int in [70, 222]:
 		var discard := Scenario.new(t).players(2).dlc().current(0).item(0, card).shop(0, 243).shop(1, 91).build()
-		discard.g._begin_resolving({"kind": "item", "card": card, "owner": 0})
+		discard.operation_panel()
 		var old_coins: Array = discard.g.coins.duplicate()
 		var old_buys: int = discard.g.buy_left
 		discard.effect(0, "discard_shop", {"item": 0})

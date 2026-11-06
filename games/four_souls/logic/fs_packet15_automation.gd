@@ -492,6 +492,10 @@ func _attack_familiar15(seat: int, index: int) -> bool:
 	var targets := _familiar_targets15()
 	if not _card_automation_enabled() or phase != "turn" or seat != current or dead[seat] or attacked or battle >= 0 or battle_player >= 0 or index < 0 or index >= targets.size() or not _forced_slots14().is_empty() or _forced_deck_remaining() > 0 or _required_player_remaining() > 0:
 		return false
+	if int(coins[seat]) < _attack_tax(seat):
+		return false
+	if _prepare_attack24(seat):
+		return true
 	if not _pay_attack_tax(seat):
 		return false
 	var target: Dictionary = targets[index]

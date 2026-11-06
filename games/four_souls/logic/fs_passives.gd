@@ -159,7 +159,7 @@ static func room_ops(game: RefCounted, room_id: int, event: String, data: Dictio
 			if event == "activate":
 				out.append([int(data.seat), [operation("damage")]])
 		816:
-			if event == "turn_end" and not game.bought and not game.hands[game.current].is_empty():
+			if event == "turn_end" and (int(game._shop_buys_turn) == 0 if game._card_automation_enabled() else not game.bought) and not game.hands[game.current].is_empty():
 				out.append([game.current, [{"op": "discard_loot", "amount": game.hands[game.current].size()}]])
 	return out
 
@@ -184,4 +184,6 @@ static func stat_bonus(id: int, entry: Dictionary, hand_size: int, meat_cubes: i
 		bonus.y += int(entry.counters)
 	if id == 93 and int(entry.counters) == 2:
 		bonus.x += 1
+	if id == 891:
+		bonus.x += int(entry.get("counters", 0)) / 2
 	return bonus

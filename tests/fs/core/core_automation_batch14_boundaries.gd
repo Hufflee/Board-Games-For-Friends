@@ -42,7 +42,10 @@ func run(t: Check) -> void:
 	_activate(soul)
 	soul.ok(0, "loot", {"card": 475})
 	soul.close()
-	t.equal(soul.g.souls[0], 1, "227 виртуальная копия не создаёт физическую душу")
+	for copy_index in 2:
+		soul.choose(0, "gift_soul21", {"target": 1})
+		soul.close()
+	t.equal(soul.g.souls[1], 1, "227 виртуальная копия не создаёт физическую душу")
 	soul.inv("227 потерянная душа существует одна")
 	var sun = _game(t, 227)
 	sun._take(636)

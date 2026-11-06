@@ -23,6 +23,8 @@ func _card_choices() -> Array:
 					var source: Dictionary = items[seat][index]
 					if bool(source.tapped) and int(source.id) != 44 and not is_same(source, resolving.source):
 						out.append({"label": name_of(seat) + " · " + FSData.title(int(source.id)), "arg": {"op": "battery_item21", "target": seat, "item": index}})
+			if out.all(func(choice): return str(choice.arg.op) == "skip_choice"):
+				out.clear()
 		"discard_monsters21":
 			for id in discards.monster:
 				if FSData.card(int(id)).get("kind", "") == "monster":

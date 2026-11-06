@@ -146,7 +146,7 @@ func _resolve_passive(effect: Dictionary) -> void:
 					entry.tapped = true
 				character_ready[seat] = false
 			"discard_loot":
-				if amount > 0 and not hands[seat].is_empty():
+				if amount > 0 and not hands[seat].is_empty() and _item_count(seat, 523) == 0:
 					var resume: String = _after_stack if phase == "priority" else phase
 					_push({"kind": "forced_discard", "owner": seat, "target": seat, "card": int(effect.card), "amount": amount}, resume)
 			"loot_from_discard":
@@ -280,6 +280,11 @@ func _resolve_top() -> void:
 				if other != slot and _dies_with_other_monster(int(monsters[other].id)):
 					monsters[other].hp = 0
 			var reward := {"kind": "reward", "card": int(effect.card), "owner": current, "slot": slot, "monster_ref20": monsters[slot]}
+			var slayer: int = int(monsters[slot].get("slayer", current))
+			if _card_automation_enabled() and _room_has20(754) and slayer >= 0 and slayer != current:
+				reward["team_reward24"] = slayer
+			if _card_automation_enabled() and slot == battle and not _sibling_reward26.is_empty():
+				reward["sibling_reward26"] = _sibling_reward26.duplicate()
 			var printed := _printed_monster_reward(int(effect.card))
 			if bool(monsters[slot].get("ambush_return20", false)):
 				# Уход в промежуточную зону смерти заменён возвратом: физическая карта не становится душой/предметом.
@@ -307,10 +312,11 @@ func _resolve_top() -> void:
 				resolving["requires_reward_roll"] = true
 			if int(effect.card) == 268:
 				required_player_attacks += 1
-			bonus_progress.monsters = int(bonus_progress.monsters) + 1
+			if slayer >= 0 or not _card_automation_enabled():
+				bonus_progress.monsters = int(bonus_progress.monsters) + 1
 			if int(monsters[slot].get("slayer", current)) == current:
 				_turn_kills += 1
-			_emit_passives("monster_death", {"seat": int(monsters[slot].get("slayer", current)), "card": int(effect.card), "physical_id20": int(monsters[slot].get("physical_id20", monsters[slot].id))})
+			_emit_passives("monster_death", {"seat": slayer, "card": int(effect.card), "physical_id20": int(monsters[slot].get("physical_id20", monsters[slot].id)), "max_hp24": _monster_max15(monsters[slot]), "slot27": slot})
 			_advance_auto_reward()
 		else:
 			if slot >= 0 and slot < monsters.size(): monsters[slot]["death_pending"] = false
@@ -381,6 +387,7 @@ func _resolve_top() -> void:
 		if target in _player_attack_targets() and not dead[current] and hp[current] > 0:
 			_turn_attacks_started += 1
 			battle_player = target
+			_pvp_attacked25[target] = true
 			phase = "battle_roll"
 			_after_stack = "battle_roll"
 		else:
@@ -538,8 +545,8 @@ func _resolve_top() -> void:
 			stack.append(continuation)
 			_gain_coins(int(effect.owner), 1)
 		_continue_stack()
-	elif effect.kind == "loot" and FSData.coin_loot_value(int(effect.card)) > 0:
-		_gain_coins(int(effect.owner), FSData.coin_loot_value(int(effect.card)))
+	elif effect.kind == "loot" and _coin_loot_value22(effect) > 0:
+		_gain_coins(int(effect.owner), _coin_loot_value22(effect))
 		if not bool(effect.get("loot_copy14", false)):
 			discards.loot.append(int(effect.card))
 		_continue_stack()

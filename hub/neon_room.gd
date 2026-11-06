@@ -11,6 +11,10 @@ signal shelf_hint(text: String)
 signal box_released
 signal editor_mode_changed(on:bool)
 signal game_editor_requested
+signal board_requested(screen_point: Vector2)  # клик по доске друзей (своя или в комнате друга)
+signal board_moved(center: Vector2)
+signal poster_held(slot: int)  # плакат зажали — над ним значок галереи (hub/poster_ui.gd)
+signal poster_moved(slot: int, center: Vector2)  # плакат перевесили (центр на стене, м)  # свою доску перевесили (центр на задней стене, x/y в метрах)
 
 const HINT := "Нажмите на коробку, чтобы открыть · Удерживайте для выделения, затем удерживайте снова для переноса"
 
@@ -58,6 +62,21 @@ var _cups_z := 0.0
 var camera: Camera3D
 var boxes: Array = []  # GameBox
 var focused: GameBox
+var sticker_board: Node3D  # hub/sticker_board.gd — доска, на которую клеят стикеры друзья
+var board_dragging := false  # свою доску переносят по стене
+var _board_home := Vector2(INF, INF)  # где игрок повесил доску (сохранено)
+var _board_target := Vector2(INF, INF)  # где она висит сейчас (сдвинута, если там шкаф)
+var _wall_decor: Array = []  # [Rect2 на задней стене (x, y), глубина, на которой доска их перекрывает]
+var posters: Array = []  # hub/wall_poster.gd — плакаты на задней стене
+var poster_dragging: Node3D = null  # плакат, который сейчас переносят
+var _poster_press: Node3D = null  # нажали на плакат: удержание — перенос и значок галереи
+var _poster_hold := 0.0
+var _poster_grab := Vector3.ZERO
+const BOARD_EXTENT := Vector2(0.56, 0.48)  # доска с рамой и полочкой (м)
+var _board_press := false  # нажали на доску: короткий клик — панель, удержание — перенос
+var _board_hold := 0.0
+var _board_grab := Vector3.ZERO
+const BOARD_AT := Vector3(1.13, 1.02, BACK + 0.012)
 var panels: GamePanels  # «окошки игр» (стеклянный куб на шкафу)
 var shelf_top_right := Vector3.ZERO  # место на крышке шкафа у правого края (куб-кнопка окошек игр)
 var _hover: GameBox
@@ -391,6 +410,9 @@ func _room() -> void:
 	_window()
 	_stars()
 	_posters()
+	sticker_board = preload("res://hub/sticker_board.gd").new()
+	sticker_board.position = BOARD_AT
+	add_child(sticker_board)
 
 
 const CITY := "res://hub/art/city.png"
@@ -429,6 +451,8 @@ static func city_image() -> Image:
 func _window() -> void:
 	var c := Vector3(-1.75, 1.62, BACK + 0.02)
 	var size := Vector2(1.25, 0.95)
+	# Окно с рамой, подоконником и жалюзи выступает от стены до ~0.11 м: доска поверх него висит впереди.
+	_wall_decor.append([Rect2(Vector2(c.x, c.y) - size / 2.0 - Vector2(0.07, 0.06), size + Vector2(0.14, 0.12)), BACK + 0.14])
 	# ночной город за окном: готовая картинка (hub/art/city.png), если её нет — рисуем на лету
 	var tex: Texture2D = load(CITY) if ResourceLoader.exists(CITY) else ImageTexture.create_from_image(city_image())
 	var city := StandardMaterial3D.new()
@@ -462,25 +486,23 @@ func _stars() -> void:
 	moon.modulate = Color(0.55, 1.1, 0.85)
 
 
-func _poster(tex_path: String, pos: Vector3, size: Vector2, rot_z: float = 0.0) -> void:
-	if not ResourceLoader.exists(tex_path):
-		return
-	var m := StandardMaterial3D.new()
-	m.albedo_texture = load(tex_path)
-	m.roughness = 0.6
-	m.emission_enabled = true
-	m.emission_texture = m.albedo_texture
-	m.emission_energy_multiplier = 0.25
-	var q := _quad(size, pos, Vector3(0, 0, rot_z), m)
-	q.set_meta("poster_source", tex_path)
-	_box(Vector3(size.x + 0.03, size.y + 0.03, 0.005), pos + Vector3(0, 0, -0.004), _mat(Color("f6f0ff")))
-	q.position.z += 0.001
+## Три плаката — отдельные узлы (hub/wall_poster.gd): их можно перевесить и заменить своей картинкой.
+const POSTER_DEFAULTS := [
+	["res://games/ready_set_bet/art/cover.jpg", Vector2(1.05, 1.55), 0.03],
+	["res://hub/art/posters/coin_heap.png", Vector2(1.62, 1.66), -0.04],
+	["res://games/stillion/art/bg_circus_approved.png", Vector2(2.15, 1.5), 0.02],
+]
 
 
 func _posters() -> void:
-	_poster("res://games/ready_set_bet/art/cover.jpg", Vector3(1.05, 1.55, BACK + 0.012), Vector2(0.46, 0.46), 0.03)
-	_poster("res://hub/art/posters/coin_heap.png", Vector3(1.62, 1.66, BACK + 0.012), Vector2(0.46, 0.322), -0.04)
-	_poster("res://games/stillion/art/bg_circus_approved.png", Vector3(2.15, 1.5, BACK + 0.012), Vector2(0.46, 0.259), 0.02)
+	for i in POSTER_DEFAULTS.size():
+		var entry: Array = POSTER_DEFAULTS[i]
+		var poster: Node3D = preload("res://hub/wall_poster.gd").new()
+		poster.setup(i, str(entry[0]), float(entry[2]))
+		add_child(poster)
+		var at: Vector2 = entry[1]
+		poster.position = Vector3(at.x, at.y, BACK + 0.012)
+		posters.append(poster)
 
 
 # --- Мебель ---------------------------------------------------------------------------
@@ -1393,6 +1415,16 @@ func _frame_shelf() -> void:
 		_shelf_root.global_transform * Vector3(SHELF_X, 0.06 + height / (2 * SHELF_SCALE), BACK + 0.18)
 	)
 	var shift: float = width * 0.16 if _editor_on else 0.0
+	if _editor_on:
+		# В редакторе шкафа в кадре ещё все плакаты и будильник слева (просьба владельца 06.11).
+		var area := shelf_wall_rect()
+		for poster: Node3D in posters:
+			if is_instance_valid(poster):
+				area = area.merge(poster.wall_rect())
+		area = area.merge(Rect2(-1.8, 0.4, 0.36, 0.28))  # будильник на тумбочке слева
+		distance = maxf(1.7, maxf((area.size.y + 0.18) / (2 * tangent * 0.80), area.size.x / (2 * tangent * aspect * 0.62)))
+		aim = Vector3(area.get_center().x, area.get_center().y, BACK + 0.18)
+		shift = area.size.x * 0.16
 	camera.global_position = aim + Vector3(shift, 0.03, distance)
 	camera.look_at(aim + Vector3(shift, 0, 0))
 	_cam_home = camera.transform
@@ -1644,6 +1676,181 @@ func _add_room_prop(kind: String, at: Vector3, dimensions: Vector3) -> void:
 	add_child(body)
 
 
+## Точка задней стены (плоскость доски) под курсором.
+func _wall_point(point: Vector2) -> Variant:
+	var plane := Plane(Vector3.BACK, BOARD_AT.z)
+	return plane.intersects_ray(camera.project_ray_origin(point), camera.project_ray_normal(point))
+
+
+func _begin_board_drag(point: Vector2) -> void:
+	var hit: Variant = _wall_point(point)
+	if hit == null or not is_instance_valid(sticker_board):
+		return
+	board_dragging = true
+	_board_grab = sticker_board.position - (hit as Vector3)
+	sticker_board.scale = Vector3.ONE * 1.04
+	Sfx.play("card_shove", -8, 0.05)
+	shelf_hint.emit("Доска друзей · ведите по стене и отпустите, чтобы повесить")
+	Input.set_default_cursor_shape(Input.CURSOR_MOVE)
+
+
+func _drag_board(point: Vector2) -> void:
+	var hit: Variant = _wall_point(point)
+	if hit == null:
+		return
+	var at := (hit as Vector3) + _board_grab
+	var center := preload("res://hub/stickers.gd").clamp_board_pos(Vector2(at.x, at.y))
+	sticker_board.position = Vector3(center.x, center.y, _board_depth(center))
+
+
+func _end_board_drag() -> void:
+	board_dragging = false
+	sticker_board.scale = Vector3.ONE
+	Sfx.play("card_place", -8, 0.05)
+	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	shelf_hint.emit(HINT if not _editor_on else "Доска друзей повешена")
+	# Бросили на шкаф — повесится в ближайшем свободном месте, его и сохраняем.
+	var spot := board_free_spot(Vector2(sticker_board.position.x, sticker_board.position.y))
+	_board_home = spot
+	_board_target = spot
+	board_moved.emit(spot)
+
+
+## Глубина доски: вплотную к стене, но поверх окна и постеров, если заходит на них (доска всегда перекрывает их).
+func _board_depth(center: Vector2) -> float:
+	var rect := Rect2(center - BOARD_EXTENT / 2.0, BOARD_EXTENT)
+	var depth := BOARD_AT.z
+	for decor: Array in _wall_decor:
+		if rect.intersects(decor[0]):
+			depth = maxf(depth, float(decor[1]))
+	for poster: Node3D in posters:
+		if is_instance_valid(poster) and rect.intersects(poster.wall_rect().grow(0.02)):
+			depth = maxf(depth, poster.position.z + 0.016)
+	return depth
+
+
+## Плакат на стене: вплотную, но поверх окна, если заходит на него.
+func _poster_depth(rect: Rect2) -> float:
+	var depth := BACK + 0.012
+	for decor: Array in _wall_decor:
+		if rect.intersects(decor[0]):
+			depth = maxf(depth, float(decor[1]))
+	return depth
+
+
+## Центр плаката в пределах стены.
+func clamp_poster(poster: Node3D, center: Vector2) -> Vector2:
+	var half: Vector2 = poster.wall_size() / 2.0
+	return Vector2(clampf(center.x, -W / 2.0 + half.x + 0.03, W / 2.0 - half.x - 0.03), clampf(center.y, half.y + 0.12, H - half.y - 0.03))
+
+
+## Повесить плакат (своя комната — из сохранения, у друга — где повесил он). Во время переноса не трогаем.
+func set_poster_position(slot: int, center: Vector2) -> void:
+	if slot < 0 or slot >= posters.size():
+		return
+	var poster: Node3D = posters[slot]
+	if poster == poster_dragging:
+		return
+	var at := clamp_poster(poster, center)
+	poster.position = Vector3(at.x, at.y, _poster_depth(Rect2(at - poster.wall_size() / 2.0, poster.wall_size())))
+
+
+func poster_default_position(slot: int) -> Vector2:
+	return POSTER_DEFAULTS[slot][1]
+
+
+func _poster_at(point: Vector2) -> Node3D:
+	var origin := camera.project_ray_origin(point)
+	var query := PhysicsRayQueryParameters3D.create(origin, origin + camera.project_ray_normal(point) * 20, 8)
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	if hit.is_empty() or str(hit.collider.get_meta("room_prop", "")) != "poster":
+		return null
+	var slot := int(hit.collider.get_meta("poster_slot", -1))
+	return posters[slot] if slot >= 0 and slot < posters.size() else null
+
+
+func _begin_poster_drag(poster: Node3D, point: Vector2) -> void:
+	var hit: Variant = _wall_point(point)
+	if hit == null:
+		return
+	poster_dragging = poster
+	_poster_grab = poster.position - (hit as Vector3)
+	poster.scale = Vector3.ONE * 1.04
+	Sfx.play("card_shove", -8, 0.05)
+	shelf_hint.emit("Плакат · ведите по стене и отпустите · значок над ним — заменить картинку")
+	Input.set_default_cursor_shape(Input.CURSOR_MOVE)
+	poster_held.emit(int(poster.slot))
+
+
+func _drag_poster(point: Vector2) -> void:
+	var hit: Variant = _wall_point(point)
+	if hit == null or poster_dragging == null:
+		return
+	var at := clamp_poster(poster_dragging, Vector2((hit as Vector3).x + _poster_grab.x, (hit as Vector3).y + _poster_grab.y))
+	poster_dragging.position = Vector3(at.x, at.y, _poster_depth(Rect2(at - poster_dragging.wall_size() / 2.0, poster_dragging.wall_size())))
+
+
+func _end_poster_drag() -> void:
+	var poster := poster_dragging
+	poster_dragging = null
+	if not is_instance_valid(poster):
+		return
+	poster.scale = Vector3.ONE
+	Sfx.play("card_place", -8, 0.05)
+	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	shelf_hint.emit(HINT if not _editor_on else "Плакат повешен")
+	poster_moved.emit(int(poster.slot), Vector2(poster.position.x, poster.position.y))
+
+
+## Повесить доску (своя — из сохранения, в комнате друга — где её повесил друг). Во время переноса не трогаем.
+## Место доски — сохранённое игроком (center), но если там шкаф, доска висит в ближайшем свободном месте.
+## Пересчитывается постоянно: в редакторе шкаф стал шире — доска отъезжает, сузили обратно — возвращается.
+func set_board_position(center: Vector2) -> void:
+	if board_dragging or not is_instance_valid(sticker_board):
+		return
+	_board_home = center
+	_board_target = board_free_spot(center)
+
+
+## Прямоугольник шкафа на задней стене (x, y в метрах; с кубом окошек на крыше и небольшим зазором).
+func shelf_wall_rect() -> Rect2:
+	if not is_instance_valid(_shelf_root) or _cabinet.is_empty():
+		return Rect2()
+	var cols: int = int(_cabinet.cols)
+	var rows: int = int(_cabinet.rows)
+	var full_width: float = cols * float(_cabinet.width) + (cols + 1) * BOARD
+	var full_height: float = rows * float(_cabinet.height) + (rows + 1) * BOARD
+	var left: float = SHELF_X - full_width * 0.5
+	var a := _shelf_root.transform * Vector3(left, 0.0, BACK)
+	var b := _shelf_root.transform * Vector3(left + full_width, 0.06 + full_height + 0.16, BACK)  # 0.16 — стеклянный куб
+	return Rect2(Vector2(a.x, a.y), Vector2(b.x - a.x, b.y - a.y)).grow(0.03)
+
+
+## Ближайшее к center место на стене, где доска не заходит на шкаф (слева, справа или над ним).
+func board_free_spot(center: Vector2) -> Vector2:
+	var clamp_pos := func(p: Vector2) -> Vector2: return preload("res://hub/stickers.gd").clamp_board_pos(p)
+	var spot: Vector2 = clamp_pos.call(center)
+	var shelf := shelf_wall_rect()
+	var half := BOARD_EXTENT / 2.0
+	if shelf.size == Vector2.ZERO or not Rect2(spot - half, BOARD_EXTENT).intersects(shelf):
+		return spot
+	var best := spot
+	var best_distance := INF
+	for candidate: Vector2 in [
+		Vector2(shelf.position.x - half.x, spot.y),  # левее шкафа
+		Vector2(shelf.end.x + half.x, spot.y),  # правее шкафа
+		Vector2(spot.x, shelf.end.y + half.y),  # над шкафом
+	]:
+		var fitted: Vector2 = clamp_pos.call(candidate)
+		if Rect2(fitted - half, BOARD_EXTENT).intersects(shelf):
+			continue  # упёрлось в край стены — места нет
+		var distance := fitted.distance_to(center)
+		if distance < best_distance:
+			best = fitted
+			best_distance = distance
+	return best
+
+
 func _room_prop_at(point: Vector2) -> String:
 	var origin := camera.project_ray_origin(point)
 	var query := PhysicsRayQueryParameters3D.create(origin, origin + camera.project_ray_normal(point) * 20, 8)
@@ -1809,6 +2016,53 @@ func _pointer_clear() -> bool:
 	return control == null or control.mouse_filter == Control.MOUSE_FILTER_IGNORE
 
 func _unhandled_input(event: InputEvent) -> void:
+	# Плакат переносят — ведём по стене до отпускания.
+	if poster_dragging != null:
+		if event is InputEventMouseMotion:
+			_drag_poster(event.position)
+		elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+			_end_poster_drag()
+		get_viewport().set_input_as_handled()
+		return
+	if _poster_press != null and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		_poster_press = null  # короткий клик по плакату ничего не делает
+		get_viewport().set_input_as_handled()
+		return
+	if not remote_view and focused == null and not (panels and panels.is_open) and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+		var poster := _poster_at(event.position)
+		if poster != null:
+			if _editor_on:
+				_begin_poster_drag(poster, event.position)
+			else:
+				_poster_press = poster
+				_poster_hold = 0.0
+			get_viewport().set_input_as_handled()
+			return
+	# Доска стикеров: перенос идёт — ведём её по стене до отпускания.
+	if board_dragging:
+		if event is InputEventMouseMotion:
+			_drag_board(event.position)
+		elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+			_end_board_drag()
+		get_viewport().set_input_as_handled()
+		return
+	if _board_press and event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+		_board_press = false  # короткий клик по своей доске — панель доски
+		board_requested.emit(event.position)
+		get_viewport().set_input_as_handled()
+		return
+	# Доска кликается и в своей комнате, и в комнате друга (там на неё и клеят). Свою можно перевесить:
+	# в редакторе шкафа — сразу перетаскиванием, вне редактора — удержанием.
+	if (focused == null or remote_view) and not (panels and panels.is_open) and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and _room_prop_at(event.position) == "board":
+		if remote_view:
+			board_requested.emit(event.position)
+		elif _editor_on:
+			_begin_board_drag(event.position)
+		else:
+			_board_press = true
+			_board_hold = 0.0
+		get_viewport().set_input_as_handled()
+		return
 	if remote_view:
 		if not remote_follow and event is InputEventMouseButton and event.pressed:
 			if event.button_index == MOUSE_BUTTON_LEFT:
@@ -2417,6 +2671,24 @@ func _update_alarm_clock() -> void:
 
 func _process(delta: float) -> void:
 	_update_alarm_clock()
+	# Доска плавно едет к свободному месту (шкаф в редакторе стал шире/уже — отъезжает и возвращается).
+	if not board_dragging and is_instance_valid(sticker_board) and _board_target.x != INF:
+		if _board_home.x != INF:
+			_board_target = board_free_spot(_board_home)
+		var now := Vector2(sticker_board.position.x, sticker_board.position.y)
+		var next := now.lerp(_board_target, 1.0 - exp(-10.0 * delta)) if now.distance_to(_board_target) > 0.002 else _board_target
+		sticker_board.position = Vector3(next.x, next.y, _board_depth(next))
+	if _poster_press != null:
+		_poster_hold += delta
+		if _poster_hold >= BOX_HOLD:
+			var poster := _poster_press
+			_poster_press = null
+			_begin_poster_drag(poster, get_viewport().get_mouse_position())
+	if _board_press:
+		_board_hold += delta
+		if _board_hold >= BOX_HOLD:
+			_board_press = false
+			_begin_board_drag(get_viewport().get_mouse_position())
 	if (
 		is_instance_valid(panels)
 		and panels.is_open

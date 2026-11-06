@@ -62,7 +62,7 @@ static func view(rules: Object, seat: int, hotseat: bool) -> Dictionary:
 					if deck.get("face", {}).get("layers") is Array:
 						# Общий шаблон передаётся один раз, а не вместе с каждой картой руки.
 						if not templates.has(str(deck.id)):
-							templates[str(deck.id)] = {"face": deck.face.duplicate(true), "size": int(deck.get("size", 3))}
+							templates[str(deck.id)] = {"face": deck.face.duplicate(true), "size": int(deck.get("size", 3)), "color": Faces.paper(deck)}
 						card["face"] = {"template": str(deck.id)}
 					else:
 						card["face"] = Faces.fields(card.data, deck)
@@ -71,6 +71,7 @@ static func view(rules: Object, seat: int, hotseat: bool) -> Dictionary:
 	out["cg_meta"] = rules.definition.meta.duplicate(true)
 	out["cg_layout"] = rules.definition.layout.duplicate(true)
 	out["cg_vars"] = rules.definition.rules.get("vars", []).duplicate(true)
+	out["cg_dice"] = rules.definition.elements.get("dice", []).duplicate(true)
 	out["cg_card_templates"] = templates
 	out["hotseat"] = hotseat
 	return out

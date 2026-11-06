@@ -2,6 +2,15 @@ extends Control
 ## Стол Four Souls: закрытая рука, открытые карты, приоритет и ручная панель эффектов.
 const HealthBar := preload("res://games/four_souls/ui/fs_health.gd")
 const PassiveRules := preload("res://games/four_souls/logic/fs_passives.gd")
+const Packet26 := preload("res://games/four_souls/logic/fs_packet26_cards.gd")
+const FX := preload("res://games/four_souls/ui/fs_fx.gd")
+var _fx_layer28: Control  # слой всплывающих индикаторов поверх стола
+var _fx_anchor28: Dictionary = {}  # ключ → узел текущей раскладки (игрок, монстр, магазин, карта)
+var _fx_seen28 := -1  # номер последнего показанного события ленты fx28
+var _fx_ready28 := false
+var _rects28: Dictionary = {}  # прошлые экранные прямоугольники якорей (монстры, стопка) — откуда летят карты
+var _feed_seen28 := -1  # последняя показанная запись ленты сброса
+var _fly_seen28 := -1  # последний розыгрыш, показанный полётом через центр  # первое состояние уже принято (его события не проигрываются)
 var app: Node
 var _v: Dictionary = {}
 var _body: VBoxContainer
@@ -17,9 +26,11 @@ const RECHARGE_TIME := 1.2  # цвет возвращается плавно
 var _charge_prev := {}
 ## Своя рука переживает пересборку стола, если её карты не изменились: иначе на каждое чужое
 ## действие карты создавались заново и «прилетали» в руку, а начатое перетаскивание обрывалось.
-var _own_fan: PrivateHand
-var _own_fan_sig := ""
+var _own_fan: PrivateHand  # своя карта «в игре» (персонаж, вечные, брелки, предметы) — для тестов и совместимости
+var _own_fans: Dictionary = {}  # ключ веера → PrivateHand: свои веера не пересоздаются от чужих обновлений
+var _own_fan_sigs: Dictionary = {}
 var _drag_resume: Dictionary = {}
+var _played_seen := -1  # номер последнего показанного розыгрыша (для «прыжка» новой карты на стопку)
 var _charge_now := {}  # чей ход уже видели: на новом ходу экран сам переходит к ходящему (один компьютер)
 var _last_roll := -1
 # Не отправляем второй запрос, пока хост не подтвердил изменение состояния.
@@ -32,10 +43,7 @@ var _play_note: Label
 var _drag_entry: Dictionary = {}
 static var _hand_orders: Dictionary = {}
 ## Операции панели эффекта — общий список с сервером (fs_ops.gd): [op, подпись, поля].
-const Ops := preload("res://games/four_souls/logic/fs_ops.gd")
 const Support := preload("res://games/four_souls/logic/fs_support.gd")
-const OPS: Array = Ops.MAIN
-const EXTRA_OPS: Array = Ops.EXTRA
 func _ready() -> void:
 	add_child(FSStyle.Backdrop.new())
 	_top = TopBar.make(
@@ -69,10 +77,18 @@ func _ready() -> void:
 	_body = FSStyle.vbox(8)
 	margin.add_child(_body)
 	_make_play_zone()
+	_fx_layer28 = Control.new()
+	_fx_layer28.name = "FxLayer"
+	_fx_layer28.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_fx_layer28.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	_fx_layer28.z_index = 90
+	add_child(_fx_layer28)
 	_die = TossDie.new()
 	_die.z_index = 30
 	add_child(_die)
 	_die.thrown.connect(_throw_die)
+	# Хост не ответил на бросок — не держим кубик и запрос вечно; _process снова предложит бросок.
+	_die.stalled.connect(func(): _roll_request_revision = -1)
 	Net.state_changed.connect(_changed)
 	_changed(Net.view)
 
@@ -153,8 +169,9 @@ func _button(parent: Control,text: String,kind: String,arg = null,primary: bool 
 	var b := FSStyle.primary(text) if primary else FSStyle.button(text,FSStyle.CAP)
 	b.pressed.connect(func(): _send(kind,arg)); parent.add_child(b); return b
 func _exit_tree() -> void:
-	if is_instance_valid(_own_fan) and _own_fan.get_parent() == null:
-		_own_fan.free()  # снятая на время пересборки рука — не в дереве, сама не освободится
+	for fan: Variant in _own_fans.values():
+		if is_instance_valid(fan) and (fan as Node).get_parent() == null:
+			(fan as Node).free()  # снятая на время пересборки рука — не в дереве, сама не освободится
 
 
 func _changed(view: Dictionary, received: bool = true) -> void:
@@ -176,7 +193,10 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 			if not first and current >= 0 and current < players.size() and current != int(view.seat) and not bool((players[current] as Dictionary).get("bot", false)):
 				_switch(current)
 				return  # придёт состояние уже для ходящего
+	var prev28: Dictionary = _v
 	_v = view
+	_fx_anchor28.clear()
+	_show_fx28.call_deferred(prev28, view)
 	_charge_prev = _charge_now
 	_charge_now = _collect_charge(view)
 	if received:
@@ -184,8 +204,9 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 	_schedule_off_turn_close()
 	if int(view.revision) > _roll_request_revision:
 		_roll_request_revision = -1
-	if is_instance_valid(_own_fan) and _own_fan.get_parent() != null:
-		_own_fan.get_parent().remove_child(_own_fan)  # не уничтожать вместе со столом — может пригодиться
+	for fan: Variant in _own_fans.values():
+		if is_instance_valid(fan) and (fan as Node).get_parent() != null:
+			(fan as Node).get_parent().remove_child(fan)  # не уничтожать вместе со столом — может пригодиться
 	FSStyle.clear(_body)
 	_hide_preview()
 	_top.info.text = (
@@ -193,9 +214,11 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 		if view.winner >= 0
 		else "%s · ход %d" % [view.players[int(view.current)].name, view.round_no]
 	)
+	# 06.11 (владелец): верхняя полоса — выбор места (один компьютер) и бонусные души.
+	var top_row28 := FSStyle.hbox(8)
+	_body.add_child(top_row28)
 	if Net.mode == "offline":
-		var row := FSStyle.hbox(8)
-		_body.add_child(row)
+		var row := top_row28
 		var select := OptionButton.new()
 		for player in view.players:
 			select.add_item(str(player.name))
@@ -227,19 +250,18 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 			col.add_child(open)
 			_die.visible = false
 			return
-	# Рука занимает нижнюю часть экрана; содержимое стола прокручивается на низких окнах.
-	var main_scroll := ScrollContainer.new()
-	main_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	main_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	_body.add_child(main_scroll)
+	# 06.11 (владелец): панели всегда целиком, с верхней и нижней рамкой — прокручивается
+	# только содержимое внутри панелей и центральной колонки, а не весь стол.
 	var main := FSStyle.hbox(12)
 	main.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	main_scroll.add_child(main)
+	main.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	_body.add_child(main)
 	var players_panel := FSStyle.panel()
 	players_panel.custom_minimum_size.x = 248
 	main.add_child(players_panel)
 	var player_scroll := ScrollContainer.new()
 	player_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	player_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	players_panel.add_child(player_scroll)
 	var player_col := FSStyle.vbox(4)
 	player_col.custom_minimum_size.x = 216
@@ -281,9 +303,16 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 		var health := HealthBar.new(int(player.hp), int(player.max_hp))
 		health.name = "Health"
 		details.add_child(health)
+		_fx_anchor28["p%d" % i] = player_row
+		_fx_anchor28["ph%d" % i] = health
+	var center_scroll := ScrollContainer.new()
+	center_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	center_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	center_scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	main.add_child(center_scroll)
 	var center := FSStyle.vbox(4)
 	center.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	main.add_child(center)
+	center_scroll.add_child(center)
 	_note(center, "МОНСТРЫ · %d в колоде" % int(view.counts.monster), FSStyle.BODY)
 	var monsters := FSStyle.hbox(8)
 	center.add_child(monsters)
@@ -294,6 +323,7 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 	monster_scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var monster_row := FSStyle.hbox(8)
 	monster_scroll.add_child(monster_row)
+	_played_pile(monsters, view)
 	for i in view.monsters.size():
 		var m: Dictionary = view.monsters[i]
 		var group := FSStyle.vbox(4)
@@ -320,11 +350,15 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 						and not bool(m.get("untargetable", false))
 					)
 				)
-				_add_monster_trigger(i, dialog)
 		)
 		var health := HealthBar.new(int(m.hp), maxi(int(m.hp), FSData.stat(int(m.id), "hp", 1)))
 		health.name = "MonsterHealth%d" % i
 		group.add_child(health)
+		_fx_anchor28["m%d" % i] = group
+		if int(m.hp) <= 0:
+			FX.badge(group.get_child(0), "dead")
+		elif _is_target28(view, i):
+			FX.badge(group.get_child(0), "target")
 		var stats := "%d+ · ⚔%d" % [m.dc, m.at]
 		if int(m.get("counters", 0)) > 0:
 			stats += " · ●%d" % int(m.counters)
@@ -363,6 +397,10 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 						)
 					)
 			)
+			var shop_card: Control = shop_row.get_child(shop_row.get_child_count() - 1)
+			_fx_anchor28["s%d" % i] = shop_card
+			if view.stack.any(func(e): return str(e.get("kind", "")) == "purchase" and int(e.get("slot", -2)) == i):
+				FX.badge(shop_card, "buy")
 	if int(view.get("loot_top20", -1)) >= 0:
 		var loot_col := FSStyle.vbox(4)
 		shop_row.add_child(loot_col)
@@ -376,14 +414,7 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 			room_col,
 			int(view.room),
 			Vector2(72, 100),
-			func():
-				_card_dialog(
-					int(view.room),
-					"Сменить комнату",
-					"room",
-					null,
-					view.phase == "turn" and view.seat == view.current
-				)
+			func(): _native_room_dialog24(-1, int(view.room))
 		)
 	for index in view.get("extra_rooms20", []).size():
 		var source: Dictionary = view.extra_rooms20[index]
@@ -391,11 +422,26 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 		shop_row.add_child(room_col)
 		_note(room_col, "КОМНАТА %d" % (index + 2))
 		_card(room_col, int(source.id), Vector2(80, 104), func(): _room_dialog20(index))
-	var bonus_row := FSStyle.hbox(4)
-	center.add_child(bonus_row)
+	var bonus_row := top_row28
+	var open_souls: Array = view.bonuses.filter(func(id): return not view.claimed.has(id))
+	if not open_souls.is_empty():
+		var souls_caption := FSStyle.label("  БОНУСНЫЕ ДУШИ", FSStyle.CAP)
+		souls_caption.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		bonus_row.add_child(souls_caption)
 	for id in view.bonuses:
 		if not view.claimed.has(id):
-			var b := FSStyle.button("◈", FSStyle.CAP)
+			var b := Button.new()
+			b.custom_minimum_size = Vector2(34, 46)
+			b.add_theme_stylebox_override("normal", StyleBoxEmpty.new())
+			b.add_theme_stylebox_override("hover", FSStyle.box(FSStyle.GOLD))
+			var soul_image := TextureRect.new()
+			soul_image.texture = FSData.texture(int(id))
+			soul_image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			soul_image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			soul_image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+			soul_image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			_round_image(soul_image)
+			b.add_child(soul_image)
 			b.tooltip_text = FSData.title(int(id))
 			b.pressed.connect(
 				func():
@@ -410,7 +456,7 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 						view.seat >= 0 and view.phase in ["turn", "priority"]
 					)
 			)
-			b.mouse_entered.connect(func(): _show_preview(int(id)))
+			b.mouse_entered.connect(func(): _schedule_preview(int(id)))
 			b.mouse_exited.connect(_hide_preview)
 			bonus_row.add_child(b)
 	var side := FSStyle.panel()
@@ -418,6 +464,7 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 	main.add_child(side)
 	var scroll := ScrollContainer.new()
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	side.add_child(scroll)
 	var actions := FSStyle.vbox(12)
 	actions.custom_minimum_size.x = 268
@@ -425,8 +472,11 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 	scroll.add_child(actions)
 	_controls(actions)
 	_hands(view)
+	# Летящий/показывающий результат кубик не прячем, даже если фаза уже сменилась:
+	# иначе чужой бросок, сразу разрешённый хостом, не было видно.
 	_die.visible = (
-		view.phase in ["battle_roll", "effect"] or bool(view.get("effect_pending", false))
+		_die.is_busy()
+		or view.phase in ["battle_roll", "effect"] or bool(view.get("effect_pending", false))
 		or view.stack.any(
 			_is_roll_event
 		)
@@ -458,7 +508,11 @@ func _off_turn_left() -> float:
 
 
 func _off_turn_ok() -> bool:
-	return _v.seat == _v.current or _off_turn_left() > 0.0
+	# 06.11: хост больше не ограничивает чужой ход по времени (off_turn_left = −1).
+	# 06.11: в чужой ход — только в ответ, пока стек не разрешился (окно тишины хоста 5 с).
+	if not bool(_v.get("strict_responses28", false)) or _v.seat == _v.current:
+		return true
+	return str(_v.get("phase", "")) == "death" or (str(_v.get("phase", "")) == "priority" and not (_v.get("stack", []) as Array).is_empty())
 
 
 ## Окно закрылось — пересобрать стол, чтобы карты и предметы погасли (новое состояние может не прийти).
@@ -476,7 +530,7 @@ func _can_play_hand() -> bool:
 	if _v.seat < 0: return false
 	if not _off_turn_ok(): return false
 	if _v.phase == "discard": return _v.seat == _v.current
-	return _v.phase in ["turn","priority","battle_roll","death"] and not _v.players[int(_v.seat)].dead and (bool(_v.get("unlimited_loot",false)) or bool(_v.players[int(_v.seat)].ready) or int(_v.get("bonus_loot_plays", 0)) > 0 or _v.seat == _v.current and int(_v.free_loot) > 0)
+	return _v.phase in ["turn","priority","battle_roll","death"] and not _v.players[int(_v.seat)].dead and (bool(_v.get("unlimited_loot",false)) or _character_can_pay24() or int(_v.get("bonus_loot_plays", 0)) > 0 or _v.seat == _v.current and int(_v.free_loot) > 0)
 func _hands(view: Dictionary) -> void:
 	var row := FSStyle.hbox(20); row.name="PersonalCards"; _body.add_child(row)
 	if view.seat != view.current:
@@ -496,46 +550,76 @@ func _hands(view: Dictionary) -> void:
 		_fan(public_row,backs,"opponent",false)
 	if view.seat < 0: return
 	var own := FSStyle.vbox(2); own.size_flags_horizontal=Control.SIZE_EXPAND_FILL; own.size_flags_stretch_ratio=1.35; row.add_child(own)
-	_note(own,"ВАШИ КАРТЫ" if view.seat==view.current else "ВАШИ ОТВЕТНЫЕ КАРТЫ · лут и способности")
-	var entries: Array = []
-	entries.append({"key": "character:%d" % int(view.seat), "id": int(view.players[int(view.seat)].char), "character": true, "texture": FSData.texture(int(view.players[int(view.seat)].char)), "material": _charge_material("c:%d" % int(view.seat))})
+	# 06.11: персонаж, вечные карты, брелки и предметы — отдельно от руки лута, чтобы было видно, что они в игре.
+	var split := FSStyle.hbox(24); split.size_flags_horizontal = Control.SIZE_EXPAND_FILL; own.add_child(split)
+	var in_play := FSStyle.vbox(2); in_play.name = "InPlay"; in_play.size_flags_horizontal = Control.SIZE_EXPAND_FILL; in_play.size_flags_stretch_ratio = 0.9; split.add_child(in_play)
+	var loot_col := FSStyle.vbox(2); loot_col.name = "LootHand"; loot_col.size_flags_horizontal = Control.SIZE_EXPAND_FILL; split.add_child(loot_col)
+	_note(loot_col, "РУКА · лут" if view.seat == view.current else "РУКА · справа — карты для ответов")
+	var board: Array = []
+	board.append({"key": "character:%d" % int(view.seat), "id": int(view.players[int(view.seat)].char), "character": true, "texture": FSData.texture(int(view.players[int(view.seat)].char)), "material": _charge_material("c:%d" % int(view.seat))})
 	for i in view.players[int(view.seat)].items.size():
 		var item: Dictionary = view.players[int(view.seat)].items[i]
-		if view.seat != view.current and _item_kind20(item) in ["passive","none"]: continue
-		entries.append({"key":"item:%d"%item.id,"id":int(item.id),"item":i,"starting":bool(item.eternal),"texture":FSData.texture(int(item.id)),"material":_charge_material("i:%d:%d" % [int(view.seat), int(item.id)])})
+		board.append({"key":"item:%d"%item.id,"id":int(item.id),"item":i,"starting":bool(item.eternal),"texture":FSData.texture(int(item.id)),"material":_charge_material("i:%d:%d" % [int(view.seat), int(item.id)])})
+	var loot: Array = []
 	if bool(view.get("can_top_loot20", false)) and int(view.get("loot_top20", -1)) >= 0:
-		entries.append({"key": "top_loot:%d" % int(view.loot_top20), "id": int(view.loot_top20), "top_loot20": true, "texture": FSData.texture(int(view.loot_top20))})
+		loot.append({"key": "top_loot:%d" % int(view.loot_top20), "id": int(view.loot_top20), "top_loot20": true, "texture": FSData.texture(int(view.loot_top20))})
+	# 06.11: в чужой ход видна вся рука; карты для ответов (бомбы, бобы, осколки, сердца) — справа,
+	# а те, что можно разыграть прямо сейчас по делу, подсвечены и нетерпеливо покачиваются.
+	var off_turn28: bool = view.seat != view.current
+	var ready28: Array = view.get("loot_moment28", [])
+	var later28: Array = []
 	for id in view.hand:
-		if view.seat!=view.current and FSData.response_kind(int(id))=="own_turn": continue
-		entries.append({"key":"loot:%d"%id,"id":int(id),"texture":FSData.texture(int(id))})
-	_fan(own,entries,str(view.seat),true)
-func _fan(parent: Control, entries: Array, key: String, movable: bool) -> PrivateHand:
+		var entry28 := {"key":"loot:%d"%id,"id":int(id),"texture":FSData.texture(int(id))}
+		if off_turn28 and FSData.reactive_loot28(int(id)):
+			entry28["reactive28"] = true
+			entry28["ready28"] = int(id) in ready28
+			later28.append(entry28)
+		else:
+			loot.append(entry28)
+	loot.append_array(later28)
+	_own_fan = _fan(in_play, board, "%d:board" % int(view.seat), true, Vector2(150, 219))
+	if loot.is_empty():
+		var empty := FSStyle.label("Карт лута нет", FSStyle.CAP)
+		empty.modulate.a = 0.6
+		loot_col.add_child(empty)
+	else:
+		_fan(loot_col, loot, str(view.seat), true)
+func _fan(parent: Control, entries: Array, key: String, movable: bool, card_size := Vector2(192, 280)) -> PrivateHand:
 	if movable:
-		var sig := str([key, entries.map(func(e): return [e.get("key"), e.get("id"), e.get("face_up", true), e.get("item", -1)]),
-			_charge_now.hash(), _v.get("phase", ""), _v.get("current", -1)])
-		if is_instance_valid(_own_fan) and _own_fan.get_parent() == null and sig == _own_fan_sig:
-			parent.add_child(_own_fan)  # та же рука: карты не пересоздаются и не «прилетают»
-			if not _drag_resume.is_empty() and _own_fan._cards.values().any(func(c): return c.dragging):
+		var sig := str([key, entries.map(func(e): return [e.get("key"), e.get("id"), e.get("face_up", true), e.get("item", -1), e.get("ready28", false), e.get("reactive28", false)]),
+			_charge_now.hash(), _v.get("phase", ""), _v.get("current", -1), card_size])
+		var cached: PrivateHand = _own_fans.get(key) if is_instance_valid(_own_fans.get(key)) else null
+		if cached != null and cached.get_parent() == null and sig == str(_own_fan_sigs.get(key, "")):
+			parent.add_child(cached)  # та же рука: карты не пересоздаются и не «прилетают»
+			if not _drag_resume.is_empty() and cached._cards.values().any(func(c): return c.dragging):
 				_begin_card_drag(_drag_resume)  # перетаскивание продолжается
-			return _own_fan
-		if is_instance_valid(_own_fan) and _own_fan.get_parent() == null:
-			_own_fan.queue_free()
-		_own_fan_sig = sig
+			return cached
+		if cached != null and cached.get_parent() == null:
+			cached.queue_free()
+		_own_fan_sigs[key] = sig
 	var fan := PrivateHand.new()
 	for entry: Dictionary in entries:
 		if bool(entry.get("face_up", true)) and int(entry.get("id", -1)) >= 0 and not entry.has("texture"):
 			entry["texture"] = FSData.texture(int(entry.id))
 	fan.entries = entries
 	fan.movable = movable
-	fan.preview_delay = 0.75
+	fan.preview_delay = 0.375  # 06.11: вдвое быстрее
 	if movable:
-		fan.card_size = Vector2(192, 280)
+		fan.card_size = card_size
 		fan.edge_peek = true
 		fan.drag_began.connect(_begin_card_drag)
 		fan.drag_ended.connect(_end_card_drag)
 		fan.drop_action = _drop_card
 	fan.order = (_hand_orders.get(key, []) as Array).duplicate()
-	if movable:
+	if entries.any(func(e): return bool(e.get("reactive28", false))):
+		var keys28: Array = entries.map(func(e): return str(e.key))
+		var ordered28: Array = fan.order.filter(func(k): return k in keys28)
+		for k in keys28:
+			if k not in ordered28:
+				ordered28.append(k)
+		var right28: Array = entries.filter(func(e): return bool(e.get("reactive28", false))).map(func(e): return str(e.key))
+		fan.order = ordered28.filter(func(k): return k not in right28) + ordered28.filter(func(k): return k in right28)
+	if movable and entries.any(func(e): return bool(e.get("character", false))):
 		var character_key := "character:%d" % int(_v.seat)
 		fan.order.erase(character_key)
 		var beside := 0
@@ -571,10 +655,12 @@ func _fan(parent: Control, entries: Array, key: String, movable: bool) -> Privat
 		if bool(entry.get("face_up", true)) and int(entry.get("id", -1)) >= 0:
 			var card: K12TableCard = fan._cards[str(entry.key)]
 			_support_badge(card._face, int(entry.id))
+			if bool(entry.get("ready28", false)):
+				FX.wiggle.call_deferred(card)
 	if movable:
 		# Высота задаётся после _ready общего компонента: за край уходит только низ карты.
 		fan.custom_minimum_size.y = fan.card_size.y - 24
-		_own_fan = fan
+		_own_fans[key] = fan
 	return fan
 
 
@@ -622,12 +708,10 @@ func _can_drop_entry(entry: Dictionary) -> bool:
 		if index < 0 or index >= items.size():
 			return false
 		var ability := _item_kind20(items[index])
-		if _can_trigger_item(int(items[index].id)):
-			return true
 		if not _can_use_item():
 			return false
 		return (
-			ability in ["paid", "hybrid", "conditional"] or ability == "tap" and not bool(items[index].tapped)
+			ability in ["paid", "hybrid", "conditional"] or ability == "tap" and _can_tap_item24(items[index])
 		)
 	return _can_play_hand()
 
@@ -666,7 +750,7 @@ func _drop_card(entry: Dictionary, screen: Vector2) -> bool:
 	elif entry.has("item"):
 		var item: Dictionary = _v.players[int(_v.seat)].items[int(entry.item)]
 		var ability := _item_kind20(item)
-		if ability in ["hybrid", "conditional", "passive"] or int(item.id) == 70:
+		if ability in ["hybrid", "conditional", "passive"] or int(item.id) == 70 or Packet26.PAID.has(int(item.id)):
 			_item_dialog(int(entry.item))
 		else:
 			_send("activate", {"item": int(entry.item), "tap": ability == "tap"})
@@ -682,47 +766,126 @@ func _item_kind20(item: Dictionary) -> String:
 		return "tap" if item.get("prototype_texts20", []).any(func(text): return int(text.begin) == 2) else "passive"
 	return FSData.item_response_kind(int(item.id))
 func _can_use_character() -> bool:
-	return _can_use_item() and bool(_v.players[int(_v.seat)].ready)
+	return _can_use_item() and _character_can_pay24()
+func _character_can_pay24() -> bool:
+	if int(_v.seat) < 0:
+		return false
+	var player: Dictionary = _v.players[int(_v.seat)]
+	var price: int = int(_v.get("tap_price24", 0))
+	return int(player.coins) >= price if price > 0 else bool(player.ready)
+func _can_tap_item24(item: Dictionary) -> bool:
+	var price: int = int(_v.get("tap_price24", 0))
+	return int(_v.players[int(_v.seat)].coins) >= price + (3 if int(item.id) == 1 else 0) if price > 0 else not bool(item.tapped)
 func _character_dialog() -> void:
-	var col := _card_dialog(int(_v.players[int(_v.seat)].char), "Повернуть персонажа → ещё один розыгрыш добычи", "character", null, _can_use_character())
+	var player: Dictionary = _v.players[int(_v.seat)]
+	var caption := "Заплатить 3¢ → ещё один розыгрыш добычи" if int(_v.get("tap_price24", 0)) > 0 else "Повернуть персонажа → ещё один розыгрыш добычи"
+	if int(player.char) == 882:
+		caption = "Заплатить 3¢ → выбрать способность" if int(_v.get("tap_price24", 0)) > 0 else "Повернуть персонажа → выбрать способность"
+	var col := _card_dialog(int(player.char), caption, "character", null, _can_use_character())
+	if bool(player.get("enigma_back26", false)):
+		_note(col, "Энигма перевёрнут · здоровье 1 · атака 2")
 	if _v.players[int(_v.seat)].items.any(func(item): return int(item.id) == 5):
 		var mushroom := _button(col, "Повернуть персонажа → жетон Волшебного гриба", "mushroom_counter20", null)
 		mushroom.disabled = not _can_use_character()
 	if int(_v.get("spider_tokens15", 0)) > 0:
 		var remove := _button(col, "Повернуть персонажа → убрать жетон паука", "remove_spider15", null)
 		remove.disabled = not _can_use_character()
-func _can_trigger_item(id: int) -> bool:
-	return _v.seat >= 0 and _v.phase in ["turn", "priority", "battle_roll", "death"] and FSData.manual_item_trigger(id)
 func _item_condition_button(parent: Control, index: int, id: int) -> Button:
-	var paid: bool = FSData.item_response_kind(id) in ["paid", "hybrid"]
-	var button := _button(parent, "Оплатить способность" if paid else "Срабатывание по условию", "activate" if paid else "item_trigger", {"item": index, "tap": false})
-	button.disabled = not _can_use_item() if paid else not _can_trigger_item(id)
+	if id in [44, 50]:
+		return _paid_button21(parent, index, _v.players[int(_v.seat)].items[index], "activate")
+	if FSData.item_response_kind(id) not in ["paid", "hybrid"]:
+		return null
+	var button := _button(parent, "Оплатить способность", "activate", {"item": index, "tap": false})
+	button.disabled = not _can_use_item()
+	return button
+
+func _paid_button21(parent: Control, index: int, source: Dictionary, action: String) -> Button:
+	var battery: bool = int(source.id) == 44
+	var button := _button(parent, "Заплатить 7¢ и перезарядить" if battery else "Сбросить 2 жетона и заменить 2 и 3 на 1", action, {"item": index, "ability": "paid"})
+	var affordable: bool = int(_v.players[int(_v.seat)].coins) >= 7 if battery else int(source.counters) >= 2
+	button.disabled = not _can_use_item() or not affordable or (action == "room_activate20" and _v.seat != _v.current)
 	return button
 func _item_dialog(index: int) -> void:
 	var item: Dictionary = _v.players[int(_v.seat)].items[index]
 	var ability := _item_kind20(item)
-	var col := _card_dialog(int(item.id),"Повернуть → эффект","activate",{"item":index,"tap":true},_can_use_item() and not item.tapped and ability in ["tap","hybrid","conditional"])
+	var price: int = int(_v.get("tap_price24", 0))
+	var caption := "Заплатить %d¢ → эффект" % (price + (3 if int(item.id) == 1 else 0)) if price > 0 else "Повернуть → эффект"
+	var col := _card_dialog(int(item.id), caption, "activate", {"item": index, "tap": true}, _can_use_item() and _can_tap_item24(item) and ability in ["tap", "hybrid", "conditional"])
 	if int(item.id) == 173:
 		var inspect := _button(col, "Посмотреть верхнее сокровище", "inspect_item13")
 		inspect.disabled = _v.seat != _v.current or _v.phase not in ["turn","priority","battle_roll","death"]
 		col.move_child(inspect, col.get_child_count()-2)
-	if int(item.id) == 248:
+	if int(item.id) == 843:
+		for cost in [1, 2, 5]:
+			var label: String = {1: "1 жетон → прибавить 1 к броску", 2: "2 жетона → нанести 1 урона", 5: "5 жетонов → стать душой"}[cost]
+			var button := _button(col, label, "activate", {"item": index, "ability": "bone%d" % cost})
+			button.disabled = not _can_use_item() or int(item.counters) < cost or (cost == 1 and not _v.stack.any(func(entry): return str(entry.kind) in ["roll", "effect_roll"]))
+			col.move_child(button, col.get_child_count() - 2)
+	elif Packet26.PAID.has(int(item.id)):
+		_paid_buttons26(col, index, item, "activate")
+	elif int(item.id) == 248:
 		var kill := _button(col, "Сбросить 3 жетона → убить", "activate", {"item": index, "ability": "kill"})
 		kill.disabled = not _can_use_item() or int(item.counters) < 3
 		col.move_child(kill, col.get_child_count() - 2)
-	elif ability in ["paid", "hybrid"] or FSData.manual_item_trigger(int(item.id)):
+	elif ability in ["paid", "hybrid"]:
 		var use := _item_condition_button(col, index, int(item.id))
-		col.move_child(use, col.get_child_count()-2)
+		col.move_child(use, col.get_child_count() - 2)
+
+func _paid_buttons26(col: VBoxContainer, index: int, item: Dictionary, action: String) -> void:
+	var modes: Dictionary = Packet26.PAID.get(int(item.id), {})
+	var seat: int = int(_v.seat)
+	for mode in modes:
+		var cost: Array = modes[mode]
+		var label: String = "Заплатить %d¢" % int(cost[0]) if int(cost[0]) > 0 else ("Сбросить жетоны (%d)" % int(cost[1]) if int(cost[1]) > 0 else "Сбросить добычу (%d)" % int(cost[2]))
+		if int(cost[0]) == 0 and int(cost[1]) == 0 and int(cost[2]) == 0:
+			label = "Повернуть"
+			if bool(item.get("tapped", false)) or bool(item.get("club_off28", false)):
+				label = "Повёрнуто"
+		var button := _button(col, label + " → " + str(cost[3]), action, {"item": index, "ability": mode})
+		button.disabled = not _can_use_item() or int(_v.players[seat].coins) < int(cost[0]) or int(item.counters) < int(cost[1]) or _v.hand.size() < int(cost[2])
+		if int(cost[2]) > 0 and _v.players[seat].items.any(func(entry): return int(entry.id) == 523):
+			button.disabled = true
+		if mode == "ibs_cancel26" and not _v.stack.any(func(entry): return str(entry.kind) in ["loot", "item"]):
+			button.disabled = true
+		if mode == "club_cancel28" and (bool(item.get("tapped", false)) or bool(item.get("club_off28", false)) or not _v.stack.any(func(entry): return str(entry.kind) in ["loot", "item"])):
+			button.disabled = true
+		col.move_child(button, col.get_child_count() - 2)
+
 func _room_dialog20(index: int) -> void:
 	var source: Dictionary = _v.extra_rooms20[index]
+	if not bool(source.get("room_item20", false)):
+		_native_room_dialog24(index, int(source.id))
+		return
 	var ability := _item_kind20(source) if bool(source.get("room_item20", false)) else "passive"
 	var can_activate: bool = _v.seat == _v.current and _can_use_item() and ability in ["tap", "paid", "hybrid", "conditional"] and (ability == "paid" or not bool(source.get("tapped", false)))
 	var col := _card_dialog(int(source.id), "Применить способность комнаты", "room_activate20", {"item": index}, can_activate)
+	if int(source.id) in [44, 50] and bool(source.get("room_item20", false)):
+		var paid := _paid_button21(col, index, source, "room_activate20")
+		col.move_child(paid, col.get_child_count() - 2)
+	elif Packet26.PAID.has(int(source.id)):
+		_paid_buttons26(col, index, source, "room_activate20")
 	var replace := _button(col, "Сменить эту комнату", "room", {"index": index})
 	replace.disabled = _v.seat != _v.current or _v.phase != "turn"
 	col.move_child(replace, col.get_child_count() - 2)
 	if source.has("counters"):
 		_note(col, "Жетонов: %d" % int(source.counters))
+
+func _native_room_dialog24(index: int, id: int) -> void:
+	var replace_arg: Variant = null if index < 0 else {"index": index}
+	var can_replace: bool = _v.phase == "turn" and _v.seat == _v.current and bool(_v.dlc)
+	if id == 758 and _v.shop.any(func(card): return int(card) >= 0):
+		can_replace = false
+	for entry: Dictionary in _v.get("native_room_actions24", []):
+		if int(entry.index) != index:
+			continue
+		var attack_room: bool = id in [757, 778]
+		var label: String = {755: "Повернуть → посмотреть сокровища", 757: "Атаковать комнату", 759: "Заплатить 2 здоровья → взять предмет", 760: "Заплатить 1 здоровье → получить 3¢", 761: "Заплатить 2¢ → выбрать сброс", 762: "Заплатить 3¢ → бросить кубик", 775: "Выбрать добычу для оплаты", 776: "Выбрать добычу для оплаты", 778: "Атаковать комнату", 780: "Заплатить 1 здоровье → бросить кубик", 784: "Заплатить 3¢ → бросить кубик", 785: "Выбрать добычу для оплаты", 801: "Заплатить 3¢ → бросить кубик", 805: "Заплатить 3¢ → бросить кубик"}.get(id, "Применить способность комнаты")
+		var col := _card_dialog(id, label, "room_attack24" if attack_room else "room_activate24", {"index": index, "card": id}, bool(entry.attack) if attack_room else bool(entry.activate))
+		var replace := _button(col, "Сменить комнату", "room", replace_arg)
+		replace.disabled = not can_replace
+		col.move_child(replace, col.get_child_count() - 2)
+		return
+	_card_dialog(id, "Сменить комнату", "room", replace_arg, can_replace)
 
 func _switch(seat: int) -> void:
 	_unlocked = -2; Net.fs_switch_seat(seat)
@@ -737,6 +900,8 @@ func _card(parent: Control,id: int,dimensions: Vector2,callback: Callable,charge
 	image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); image.mouse_filter = Control.MOUSE_FILTER_IGNORE; button.add_child(image)
 	_support_badge(image, id)
 	button.mouse_entered.connect(func(): _schedule_preview(id)); button.mouse_exited.connect(_hide_preview); button.pressed.connect(callback); parent.add_child(button)
+	if charge_key != "":
+		_fx_anchor28["k:" + charge_key] = button
 
 ## Компактная пометка до розыгрыша; подробная инструкция — рядом с крупным просмотром.
 func _support_badge(parent: Control, id: int) -> void:
@@ -798,7 +963,7 @@ func _round_image(image: TextureRect) -> void:
 func _schedule_preview(id: int) -> void:
 	_hide_preview()
 	var token := _preview_token
-	await get_tree().create_timer(0.75).timeout
+	await get_tree().create_timer(0.375).timeout  # 06.11: вдвое быстрее
 	if token == _preview_token:
 		_show_preview(id)
 
@@ -823,6 +988,112 @@ func _hide_preview() -> void:
 	_preview_token+=1
 	if is_instance_valid(_preview): _preview.queue_free()
 	_preview = null
+## Стопка «СБРОС» (06.11): настоящий сброс всех колод — сверху последняя попавшая туда карта,
+## под ней две предыдущие со сдвигом. Клик — история сброса партии.
+func _played_pile(parent: Control, view: Dictionary) -> void:
+	var feed: Array = view.get("discard_feed28", [])
+	var col := FSStyle.vbox(4)
+	col.name = "PlayedPile"
+	parent.add_child(col)
+	var caption := FSStyle.label("СБРОС", FSStyle.CAP)
+	caption.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(caption)
+	var pile := Control.new()
+	pile.custom_minimum_size = Vector2(104 + 24, 128 + 12)
+	pile.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	col.add_child(pile)
+	_fx_anchor28["pile"] = pile
+	if feed.is_empty():
+		var slot := Panel.new()
+		var frame := FSStyle.box(Color(FSStyle.COAL, 0.35), Color(FSStyle.PAPER, 0.25))
+		slot.add_theme_stylebox_override("panel", frame)
+		slot.size = Vector2(104, 128)
+		slot.position = Vector2(12, 0)
+		slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		pile.add_child(slot)
+		var empty := FSStyle.label("пока пусто", FSStyle.CAP)
+		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		empty.modulate.a = 0.6
+		col.add_child(empty)
+		return
+	var shown := feed.slice(maxi(0, feed.size() - 3))
+	for i in shown.size():
+		var entry: Dictionary = shown[i]
+		var depth := shown.size() - 1 - i  # 0 — верхняя карта
+		var holder := Control.new()
+		holder.position = Vector2(12 + depth * 8, depth * 6)
+		holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		pile.add_child(holder)
+		pile.move_child(holder, 0)
+		if depth == 0:
+			_card(holder, int(entry.card), Vector2(104, 128), _played_history)
+			var top: Control = holder.get_child(0)
+			top.tooltip_text = "История сброса"
+			if int(entry.get("n", 0)) > _feed_seen28 and _feed_seen28 >= 0:
+				# карта ещё летит на стопку — показываем её после приземления
+				top.modulate.a = 0.0
+				var land := top.create_tween()
+				land.tween_interval(1.25)
+				land.tween_property(top, "modulate:a", 1.0, 0.15)
+		else:
+			var image := TextureRect.new()
+			image.texture = FSData.texture(int(entry.card))
+			image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			image.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+			image.size = Vector2(104, 128)
+			image.modulate = Color(0.62, 0.58, 0.56)
+			image.mouse_filter = Control.MOUSE_FILTER_IGNORE
+			_round_image(image)
+			holder.add_child(image)
+	var count := FSStyle.label("%d карт" % feed.size() if feed.size() < 40 else "последние 40", FSStyle.CAP)
+	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	count.modulate.a = 0.7
+	col.add_child(count)
+
+
+func _player_name(seat: int) -> String:
+	var players: Array = _v.get("players", [])
+	return str(players[seat].name) if seat >= 0 and seat < players.size() else "?"
+
+
+func _play_kind_text(kind: String) -> String:
+	return {"loot": "лут", "activate": "активация", "trigger": "условие"}.get(kind, kind)
+
+
+## История сброса: новые сверху, у каждой карты — из какой колоды и на каком ходу.
+func _played_history() -> void:
+	var feed: Array = _v.get("discard_feed28", [])
+	var col := _dialog()
+	_note(col, "Сброс", FSStyle.H1)
+	if feed.is_empty():
+		_note(col, "Сброс пока пуст.")
+		_close_button(col)
+		return
+	_note(col, "Последние %d карт в сбросе · наведите на карту, чтобы рассмотреть." % feed.size())
+	var scroll := ScrollContainer.new()
+	scroll.custom_minimum_size = Vector2(minf(size.x - 160, 760), minf(size.y - 260, 420))
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	col.add_child(scroll)
+	var grid := GridContainer.new()
+	grid.columns = maxi(3, int(scroll.custom_minimum_size.x / 124.0))
+	grid.add_theme_constant_override("h_separation", 12)
+	grid.add_theme_constant_override("v_separation", 16)
+	scroll.add_child(grid)
+	var piles := {"loot": "добыча", "treasure": "сокровища", "monster": "монстры", "room": "комнаты"}
+	for index in range(feed.size() - 1, -1, -1):
+		var entry: Dictionary = feed[index]
+		var cell := FSStyle.vbox(4)
+		grid.add_child(cell)
+		_card(cell, int(entry.card), Vector2(104, 128), func(): _show_preview(int(entry.card)))
+		var info := FSStyle.label("%s · ход %d" % [piles.get(str(entry.pile), str(entry.pile)), int(entry.get("round", 0))], FSStyle.CAP)
+		info.custom_minimum_size.x = 104
+		info.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		if index == feed.size() - 1:
+			info.add_theme_color_override("font_color", FSStyle.GOLD.lightened(0.25))
+		cell.add_child(info)
+	_close_button(col)
+
+
 func _dialog() -> VBoxContainer:
 	if is_instance_valid(_popup): _popup.queue_free()
 	_hide_preview(); _popup = Control.new(); _popup.z_index = 65; _popup.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT); add_child(_popup)
@@ -864,7 +1135,13 @@ func _inventory(seat: int) -> void:
 			var ability := _item_kind20(item)
 			var use := _button(group,"Повернуть → эффект","activate",{"item":i,"tap":true})
 			use.disabled = item.tapped or not _can_use_item() or not ability in ["tap","hybrid","conditional"]
-			_item_condition_button(group, i, int(item.id))
+			if Packet26.PAID.has(int(item.id)):
+				var modes := FSStyle.button("Оплатить способность", FSStyle.CAP)
+				modes.disabled = not _can_use_item()
+				modes.pressed.connect(func(): _item_dialog(i))
+				group.add_child(modes)
+			else:
+				_item_condition_button(group, i, int(item.id))
 	var extra_scroll := ScrollContainer.new(); extra_scroll.custom_minimum_size = Vector2(500,108); extra_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED; col.add_child(extra_scroll)
 	var extra := FSStyle.hbox(8); extra_scroll.add_child(extra)
 	for id in _v.players[seat].curses:
@@ -915,9 +1192,7 @@ func _controls(col: Control) -> void:
 	_note(col,"Ход: " + str(_v.players[int(_v.current)].name) if _v.phase=="priority" else "Сейчас: " + str(_v.players[int(_v.actor)].name))
 	_note(col,"В банке: %d¢" % int(_v.bank))
 	if _v.seat >= 0 and _v.seat != _v.current and _v.phase != "game_over":
-		# свои карты в чужой ход — только первые 10 с хода
-		var left := _off_turn_left()
-		_note(col, "Свои карты в чужой ход: ещё %d с" % ceili(left) if left > 0.0 else "Свои карты в чужой ход — только в первые 10 с хода")
+		_note(col, "Свои карты в чужой ход — только в ответ: пока стек не разрешился (5 с тишины)")
 	if _v.seat >= 0 and int(_v.get("spider_tokens15", 0)) > 0 and _v.phase in ["turn", "priority", "battle_roll", "death"]:
 		var spider := _button(col, "Повернуть персонажа → убрать паука", "remove_spider15")
 		spider.disabled = not bool(_v.players[int(_v.seat)].ready) or not _off_turn_ok()
@@ -964,7 +1239,6 @@ func _controls(col: Control) -> void:
 		_button(col,"Купить вслепую · 10¢","buy",{"slot":-1}).disabled = _v.bought
 		if int(_v.get("discard_treasure", -1)) >= 0:
 			_button(col, "Купить из сброса · %d¢" % int(_v.get("shop_price", 10)), "buy", {"slot": -2}).disabled = _v.bought
-		_note(col,"Сложные эффекты и пассивные условия выполняют участники по тексту русской карты.")
 	elif _v.phase == "battle_roll":
 		if int(_v.get("battle_player", -1)) >= 0:
 			_note(col, "Атака: %s · защита4+" % str(_v.players[int(_v.battle_player)].name))
@@ -1027,72 +1301,7 @@ func _effect_controls(col: Control) -> void:
 	if _v.resolving.has("auto_reward") and bool(_v.resolving.get("requires_reward_roll", false)) and not _v.resolving.has("reward_roll"):
 		_note(col, "Добыча уже выдана. Бросьте кубик мышью: при1 или6 Тряпочник вернётся на верх колоды." if bool(_v.resolving.auto_reward.get("return_roll", false)) else "Бросьте кубик мышью. Игра автоматически начислит награду по итоговому результату; на бросок можно ответить.")
 		return
-	_note(col,"Если карта требует бросок — бросьте кубик мышью. На него можно ответить.")
-	if PassiveRules.AUTOMATIC_OPS.has(int(_v.resolving.card)) or PassiveRules.ATTACK.has(int(_v.resolving.card)) or PassiveRules.HEALTH.has(int(_v.resolving.card)):
-		_note(col, "Постоянные бонусы и подключённые обязательные срабатывания этой карты учтены автоматически. Не повторяйте их вручную.")
-	if _v.resolving.has("reroll_request"):
-		_note(col, "Вы управляете исходным броском. Перебросьте кубик мышью; затем эффект вернётся владельцу карты.")
-		return
-	# Что движок делает сам, а что — руками (card_support.json).
-	var support_status := Support.status(int(_v.resolving.card))
-	if support_status != "auto":
-		_note(col, ("Частично автоматически. " if support_status == "partial" else "Вручную. ") + Support.hint(int(_v.resolving.card)))
-	if _v.resolving.kind == "monster_trigger":
-		_note(col, "Выполните условие по тексту монстра вручную. Уже учтённые ауры и боевые эффекты повторять не нужно.")
-	var target := OptionButton.new()
-	for player in _v.players: target.add_item(str(player.name))
-	target.select(int(_v.actor)); col.add_child(target)
-	var op := OptionButton.new()
-	op.fit_to_longest_item = false
-	op.clip_text = true
-	op.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	var operations := OPS + EXTRA_OPS
-	for entry in operations: op.add_item(entry[1])
-	if _v.resolving.kind == "event" and str(FSData.card(int(_v.resolving.card)).lua.get("type","")) == "curse":
-		for i in OPS.size():
-			if OPS[i][0] == "attach_curse": op.select(i)
-		_note(col,"Это проклятие: выберите игрока, передайте ему карту и завершите эффект.")
-	col.add_child(op)
-	var amount := SpinBox.new(); amount.min_value = -99; amount.max_value = 99; amount.value = 1; col.add_child(amount)
-	var index_note := _note(col, "")
-	var index := SpinBox.new(); index.min_value = 1; index.max_value = 99; index.value = 1; col.add_child(index)
-	var other_index := SpinBox.new()
-	other_index.min_value = 1
-	other_index.max_value = 99
-	other_index.value = 1
-	other_index.tooltip_text = "Номер предмета выбранного игрока при обмене"
-	col.add_child(other_index)
-	# Поля операции — из общего описания fs_ops.gd: лишние скрыты.
-	var show_fields := func(selected: int) -> void:
-		var fields: Dictionary = operations[selected][2]
-		target.visible = bool(fields.get("target", false))
-		amount.visible = bool(fields.get("amount", false))
-		index.visible = fields.has("item")
-		index_note.visible = fields.has("item")
-		index_note.text = "Номер %s слева направо" % str(fields.get("item", ""))
-		other_index.visible = bool(fields.get("other", false))
-	op.item_selected.connect(show_fields)
-	show_fields.call(maxi(0, op.selected))
-	var apply := FSStyle.button("Применить",FSStyle.CAP)
-	apply.pressed.connect(func(): _send("effect",{"target":target.selected,"op":operations[op.selected][0],"amount":int(amount.value),"item":int(index.value)-1,"other_item":int(other_index.value)-1})); col.add_child(apply)
-	var needs_roll: bool = bool(_v.resolving.get("requires_reward_roll", false)) and not _v.resolving.has("reward_roll")
-	if needs_roll:
-		_note(col, "После награды бросьте кубик: при1 или6 Тряпочник вернётся на верх колоды.")
-	_button(col,"Эффект выполнен","effect_done",null,true).disabled = needs_roll
-	if not _v.peek.is_empty():
-		_note(col,"Только вы видите просмотренные карты.")
-		for revealed: Dictionary in _v.peek.get("hands", []):
-			_note(col, str(_v.players[int(revealed.seat)].name))
-			for id in revealed.cards:
-				var hand_card := FSStyle.button(FSData.title(int(id)), FSStyle.CAP)
-				col.add_child(hand_card)
-				hand_card.mouse_entered.connect(func(): _show_preview(int(id)))
-				hand_card.mouse_exited.connect(_hide_preview)
-		for id in _v.peek.get("cards", []):
-			var peek_card := FSStyle.button(FSData.title(int(id)),FSStyle.CAP); col.add_child(peek_card)
-			peek_card.mouse_entered.connect(func(): _show_preview(int(id))); peek_card.mouse_exited.connect(_hide_preview)
-			var row := FSStyle.hbox(4); col.add_child(row)
-			for entry in [["↑","top"],["↓","bottom"],["Рука","hand"],["Предмет","item"],["Сброс","discard"]]: _button(row,entry[0],"peek_take",{"card":int(id),"dest":entry[1]})
+	_note(col, "Нужно аварийное вмешательство. Хост может продолжить эффект через «Панель хоста».")
 ## Выбор в отдельном окне: кнопки не прячутся под нижней рукой.
 func _card_choice_dialog() -> void:
 	var col := _dialog()
@@ -1144,13 +1353,6 @@ func _death_controls(col: Control) -> void:
 	var pay := FSStyle.primary("Принять штраф")
 	pay.pressed.connect(func(): _send("death",{"loot":loot.get_selected_id() if loot.item_count else -1,"item":item.get_selected_id() if item.item_count else -1})); col.add_child(pay)
 
-## Неизвестные пассивы монстра выполняются вручную по его тексту, как в TTS.
-func _add_monster_trigger(slot: int, col: Control) -> void:
-	if Support.status(int(_v.monsters[slot].id)) == "auto":
-		return
-	var trigger := _button(col, "Срабатывание монстра · вручную", "monster_trigger", {"slot": slot})
-	trigger.disabled = not _can_use_item()
-	col.move_child(trigger, col.get_child_count() - 2)
 func _trade() -> void:
 	var col := _dialog(); _note(col,"Передать монеты",FSStyle.H1)
 	var target := OptionButton.new()
@@ -1186,3 +1388,154 @@ func _choose_top_attack() -> void:
 
 func _is_roll_event(effect: Dictionary) -> bool:
 	return effect.kind in ["attack", "player_attack", "player_combat", "forced_discard", "roll", "combat", "effect_roll", "monster_death", "death", "monster_trigger"]
+
+
+## Атакуемый монстр: текущий бой или объявленная атака в стеке.
+func _is_target28(view: Dictionary, slot: int) -> bool:
+	if int(view.get("battle", -1)) == slot:
+		return true
+	return view.get("stack", []).any(func(e): return str(e.get("kind", "")) == "attack" and int(e.get("slot", -2)) == slot)
+
+
+## Индикаторы после перестройки стола: изменения ресурсов (по разнице состояний) и лента fx28 с хоста.
+func _show_fx28(prev: Dictionary, view: Dictionary) -> void:
+	var events: Array = view.get("fx28", [])
+	var newest := _fx_seen28
+	for entry: Dictionary in events:
+		newest = maxi(newest, int(entry.get("n", -1)))
+	if prev.is_empty() or not _fx_ready28:
+		_fx_seen28 = newest  # первое состояние: старые события не проигрываем
+		_fx_ready28 = true
+		if is_inside_tree():
+			await get_tree().process_frame
+			await get_tree().process_frame
+			_remember_rects28()
+		return
+	if not is_inside_tree():
+		return
+	await get_tree().process_frame
+	await get_tree().process_frame
+	if not is_same(view, _v):
+		return  # пришло новое состояние — его индикаторы покажет следующий вызов
+	for entry: Dictionary in events:
+		if int(entry.get("n", -1)) <= _fx_seen28:
+			continue
+		match str(entry.get("kind", "")):
+			"trigger":
+				var node := _card_node28(int(entry.get("seat", -1)), int(entry.get("card", -1)))
+				FX.flash(_fx_layer28, node)
+			"roll":
+				FX.float_text(_fx_layer28, _fx_anchor28.get("p%d" % int(entry.get("seat", -1))), int(entry.get("amount", 0)), " к броску", 3)
+				if int(entry.get("card", -1)) >= 0:
+					FX.float_text(_fx_layer28, _card_node28(int(entry.get("seat", -1)), int(entry.card)), int(entry.get("amount", 0)))
+	_fx_seen28 = newest
+	_diff_fx28(prev, view)
+	_fly_cards28(prev, view)
+
+
+## Полёт карт (06.11): разыгранная добыча — крупно в центре, затем на «СБРОС»; активация — в центре и гаснет;
+## погибший монстр и прочие карты из ленты сброса летят со своего места на стопку.
+func _fly_cards28(prev: Dictionary, view: Dictionary) -> void:
+	var pile: Control = _fx_anchor28.get("pile")
+	var pile_rect := Rect2()
+	if is_instance_valid(pile):
+		var r := pile.get_global_rect()
+		pile_rect = Rect2(r.position + Vector2(12, 0), Vector2(104, 128))
+	var flown := {}
+	for entry: Dictionary in view.get("played", []):
+		var no: int = int(entry.get("no", 0))
+		if no <= _fly_seen28:
+			continue
+		var kind := str(entry.get("kind", ""))
+		if kind == "loot":
+			FX.fly_card(_fx_layer28, FSData.texture(int(entry.card)), Rect2(), pile_rect)
+			flown[int(entry.card)] = true
+		elif kind == "activate":
+			FX.fly_card(_fx_layer28, FSData.texture(int(entry.card)), Rect2(), Rect2(), 0.5)
+	var old_monsters: Array = prev.get("monsters", [])
+	var now_ids: Array = view.get("monsters", []).map(func(m): return int(m.id))
+	for entry: Dictionary in view.get("discard_feed28", []):
+		if int(entry.get("n", 0)) <= _feed_seen28 or flown.has(int(entry.card)):
+			continue
+		for slot in old_monsters.size():
+			if int(old_monsters[slot].id) == int(entry.card) and int(entry.card) not in now_ids and _rects28.has("m%d" % slot):
+				FX.fly_card(_fx_layer28, FSData.texture(int(entry.card)), _rects28["m%d" % slot], pile_rect, 0.0)
+				break
+	_remember_rects28()
+
+
+func _remember_rects28() -> void:
+	_rects28.clear()
+	for key in _fx_anchor28:
+		var node: Control = _fx_anchor28[key]
+		if is_instance_valid(node) and node.is_inside_tree():
+			_rects28[key] = node.get_global_rect()
+	var played: Array = _v.get("played", [])
+	_fly_seen28 = int(played.back().get("no", 0)) if not played.is_empty() else maxi(_fly_seen28, 0)
+	var feed: Array = _v.get("discard_feed28", [])
+	_feed_seen28 = int(feed.back().get("n", 0)) if not feed.is_empty() else maxi(_feed_seen28, 0)
+
+
+func _diff_fx28(prev: Dictionary, view: Dictionary) -> void:
+	var before: Array = prev.get("players", [])
+	var after: Array = view.get("players", [])
+	for i in mini(before.size(), after.size()):
+		var a: Dictionary = before[i]
+		var b: Dictionary = after[i]
+		var row: Control = _fx_anchor28.get("p%d" % i)
+		var bar: Control = _fx_anchor28.get("ph%d" % i, row)
+		var lane := 0
+		if bool(b.get("dead", false)) and not bool(a.get("dead", false)):
+			FX.float_label(_fx_layer28, row, "СМЕРТЬ", FX.BAD, 0, 26)
+			FX.flash(_fx_layer28, row, FX.BAD)
+			continue
+		FX.float_text(_fx_layer28, bar, int(b.hp) - int(a.hp), " ХП", lane)
+		if int(b.max_hp) != int(a.max_hp):
+			lane += 1
+			FX.float_text(_fx_layer28, bar, int(b.max_hp) - int(a.max_hp), " макс. ХП", lane)
+		if int(b.attack) != int(a.attack):
+			lane += 1
+			FX.float_text(_fx_layer28, row, int(b.attack) - int(a.attack), " ⚔", lane)
+		if int(b.coins) != int(a.coins):
+			lane += 1
+			FX.float_text(_fx_layer28, row, int(b.coins) - int(a.coins), "¢", lane)
+		if int(b.souls) > int(a.souls):
+			FX.float_label(_fx_layer28, row, "+%d душа" % (int(b.souls) - int(a.souls)), FX.GLOW, lane + 1, 24)
+			FX.flash(_fx_layer28, row, FX.GLOW)
+		elif int(b.souls) < int(a.souls):
+			FX.float_label(_fx_layer28, row, "−%d душа" % (int(a.souls) - int(b.souls)), FX.BAD, lane + 1, 24)
+		if int(b.get("hand_count", 0)) > int(a.get("hand_count", 0)):
+			FX.float_label(_fx_layer28, row, "+%d добыча" % (int(b.hand_count) - int(a.hand_count)), Color(0.55, 0.8, 1.0), lane + 2, 18)
+		if (b.get("items", []) as Array).size() > (a.get("items", []) as Array).size():
+			FX.float_label(_fx_layer28, row, "+ предмет", Color(0.55, 0.8, 1.0), lane + 3, 18)
+		if (b.get("curses", []) as Array).size() > (a.get("curses", []) as Array).size():
+			FX.float_label(_fx_layer28, row, "проклятие!", Color(0.78, 0.5, 1.0), lane + 3, 20)
+	var old_monsters: Array = prev.get("monsters", [])
+	var new_monsters: Array = view.get("monsters", [])
+	for slot in mini(old_monsters.size(), new_monsters.size()):
+		var a: Dictionary = old_monsters[slot]
+		var b: Dictionary = new_monsters[slot]
+		if int(a.get("id", -1)) != int(b.get("id", -2)):
+			continue
+		var group: Control = _fx_anchor28.get("m%d" % slot)
+		if int(b.hp) <= 0 and int(a.hp) > 0:
+			FX.float_label(_fx_layer28, group, "УБИТ!", FX.GLOW, 0, 26)
+			FX.flash(_fx_layer28, group, FX.BAD)
+			continue
+		FX.float_text(_fx_layer28, group, int(b.hp) - int(a.hp), " ХП")
+		if int(b.get("at", 0)) != int(a.get("at", 0)):
+			FX.float_text(_fx_layer28, group, int(b.at) - int(a.at), " ⚔", 1)
+		if int(b.get("dc", 0)) != int(a.get("dc", 0)):
+			FX.float_text(_fx_layer28, group, int(b.dc) - int(a.dc), " защита", 2)
+
+
+## Узел сработавшей карты: свой ряд «В игре», открытые предметы ходящего, иначе — персонаж в списке игроков.
+func _card_node28(seat: int, card: int) -> Control:
+	if seat == int(_v.get("seat", -1)) and is_instance_valid(_own_fan):
+		for key in ["item:%d" % card, "character:%d" % seat]:
+			if _own_fan._cards.has(key) and (key.begins_with("item") or int(_v.players[seat].char) == card):
+				return _own_fan._cards[key]
+	var node: Control = _fx_anchor28.get("k:i:%d:%d" % [seat, card])
+	if node == null:
+		node = _fx_anchor28.get("k:c:%d" % seat)
+	return node

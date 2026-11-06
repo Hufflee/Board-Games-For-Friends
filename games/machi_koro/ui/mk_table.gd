@@ -115,8 +115,10 @@ func _ready() -> void:
 		die.z_index = 20
 		add_child(die)
 		dice_nodes.append(die)
+		die.finished.connect(_dice_finished)
 		if i == 0:
 			die.thrown.connect(_thrown)
+			die.stalled.connect(_dice_stalled)
 	fx = Control.new()
 	fx.mouse_filter = MOUSE_FILTER_IGNORE
 	fx.z_index = 60
@@ -250,7 +252,8 @@ func _refresh_city() -> void:
 		landmark_title.text = "Ходит %s · %d мон." % [view.players[active].name, int(view.coins[active])]
 		city_panel.set_meta("shown_seat", mine)
 		landmark_panel.set_meta("shown_seat", active)
-		_sync_cards(city_cards, _city_entries(mine) + _landmark_entries(mine))
+		# В чужой ход в своём городе только предприятия: достопримечательности не нужны (просьба владельца 06.11).
+		_sync_cards(city_cards, _city_entries(mine))
 		_sync_cards(landmark_cards, _city_entries(active) + _landmark_entries(active))
 	else:
 		city_title.text = "Город: %s" % str(view.players[inspect_seat].name)
@@ -445,12 +448,14 @@ func _sync_dice() -> void:
 	var serial := int(view.throw_serial)
 	for i in dice_nodes.size():
 		var die: TossDie = dice_nodes[i]
-		die.visible = (i < n if waiting else i < view.dice.size()) and view.phase != "game_over"
+		die.visible = ((i < n if waiting else i < view.dice.size()) or die.is_busy()) and view.phase != "game_over"
 		var pending := waiting and i == 0 and local_throw_serial == serial + 1 and die.state == "flying"
 		die.draggable = waiting and i == 0 and _can_act() and not pending
-		if waiting and not pending and die.state != "waiting" and not (die.state == "dragging" and die.draggable):
+		# Пока прошлый бросок показывает результат, новый не начинаем: досмотрим и вернёмся (_dice_finished).
+		var showing: bool = die.state in ["flying", "settled", "returning"]
+		if waiting and not pending and not showing and die.state != "waiting" and not (die.state == "dragging" and die.draggable):
 			die.wait_for_roll()
-		if not die.draggable and waiting:
+		if not die.draggable and waiting and not showing:
 			die.modulate.a = 0.45 if not _can_act() else 1.0
 	if seen_throw != serial and not view.dice.is_empty():
 		seen_throw = serial
@@ -466,6 +471,14 @@ func _sync_dice() -> void:
 			else:
 				die.throw(velocity.rotated(0.4 * i), int(view.dice[i]))
 
+func _dice_finished() -> void:
+	if not view.is_empty():
+		_sync_dice()
+
+## Хост не прислал грань (бросок отклонён/потерян) — снова разрешаем бросить.
+func _dice_stalled() -> void:
+	local_throw_serial = -1
+
 func _thrown(velocity: Vector2) -> void:
 	local_throw_serial = int(view.throw_serial) + 1
 	local_throw_velocity = velocity
@@ -479,7 +492,7 @@ func _hover(card: Control, on: bool) -> void:
 	if preload("res://hub/card_magnifier.gd").offer(card):
 		return
 	var token := preview_token
-	await get_tree().create_timer(0.25).timeout
+	await get_tree().create_timer(0.125).timeout  # приближение вдвое быстрее (06.11)
 	if not is_instance_valid(card) or token != preview_token:
 		return
 	preview = Card.new()

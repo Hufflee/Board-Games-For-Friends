@@ -50,10 +50,27 @@ static func response_kind(id: int) -> String:
 		_responses = JSON.parse_string(FileAccess.get_file_as_string("res://games/four_souls/art/response_catalog.json")).cards
 	return str(_responses[id].response_kind) if id>=0 and id<_responses.size() else "none"
 static func item_response_kind(id: int) -> String:
+	const Packet26 = preload("res://games/four_souls/logic/fs_packet26_cards.gd")
+	const Packet27 = preload("res://games/four_souls/logic/fs_packet27_cards.gd")
+	if id in Packet27.ITEMS:
+		if id in Packet27.TAP:
+			return "hybrid" if Packet26.PAID.has(id) else "tap"
+		return "paid" if Packet26.PAID.has(id) else "passive"
+	if id in Packet26.ITEMS:
+		if id in Packet26.TAP:
+			return "hybrid" if Packet26.PAID.has(id) else "tap"
+		return "paid" if Packet26.PAID.has(id) else "passive"
+	if id in [44, 50, 843]:
+		return "hybrid"
 	return "passive" if card(id).get("kind", "") in ["loot", "monster"] else response_kind(id)
 
 ## Только ручная часть условного текста; полностью автоматические предметы повторно не вызываются.
 ## У Неопределённого70 есть отдельная пассивная часть помимо поворотной.
+## 06.11: частично автоматизированные карты, временно убранные из колод настоящей партии.
+const PARTIAL_OFF28 := [258, 328, 500, 502, 564]
+## Добыча «для ответов»: бомбы, отмены, перебросы и защита — в чужой ход лежит справа в руке.
+static func reactive_loot28(id: int) -> bool:
+	return id in [469, 470, 621] or str(card(id).get("lua", {}).get("type", "")) in ["bombs", "butter", "dice_sheart"]
 static func manual_item_trigger(id: int) -> bool:
 	return Support.status(id) != "auto" and (id == 70 or item_response_kind(id) in ["passive", "conditional"])
 
@@ -71,6 +88,12 @@ static func end_turn_recharge(id: int) -> bool:
 static func draw_loot_back(canvas: CanvasItem,rect: Rect2) -> void:
 	canvas.draw_texture_rect(preload("res://games/four_souls/art/backs/loot.webp"),rect,false)
 static func stat(id: int, key: String, fallback: int) -> int:
+	if id == 897:
+		return int({"hp": 2, "dc": 3, "at": 2}.get(key, fallback))
+	if id == 88:
+		return int({"hp": 2, "dc": 5, "at": 1}.get(key, fallback))
+	if id == 778:
+		return int({"hp": 9, "dc": 3, "at": 1}.get(key, fallback))
 	if id == 467:
 		return 6 if key in ["hp", "dc", "at"] else fallback
 	if id == 3:

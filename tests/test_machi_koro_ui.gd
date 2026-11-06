@@ -168,7 +168,10 @@ func _run() -> void:
 		app.screen._state(foreign)
 		await create_timer(0.15).timeout
 		check(app.screen.city_panel.get_meta("shown_seat") == 1 and app.screen.landmark_panel.get_meta("shown_seat") == 0, "одновременно личный и активный город: " + theme_name)
-		check(app.screen.city_cards.get_child_count() == 8 and app.screen.landmark_cards.get_child_count() == 7, "оба города включают предприятия и достопримечательности: " + theme_name)
+		# 06.11: в чужой ход в своём городе только предприятия (без достопримечательностей), в городе ходящего — всё.
+		var landmarks: int = app.screen._landmark_entries(1).size()
+		check(app.screen.city_cards.get_child_count() == 8 - landmarks and app.screen.landmark_cards.get_child_count() == 7, "свой город без достопримечательностей, город ходящего — с ними: " + theme_name)
+		check(app.screen.city_cards.get_children().all(func(card): return not app.screen.view.cities[1].is_empty() and not str(card.get("id")) in app.screen.Data.LANDMARKS), "в своём городе нет карт достопримечательностей: " + theme_name)
 		app.screen.inspect_seat = 3
 		app.screen._refresh_city()
 		check(app.screen.city_panel.get_meta("shown_seat") == 1 and app.screen.landmark_panel.get_meta("shown_seat") == 0, "выбор другого имени не скрывает два города")

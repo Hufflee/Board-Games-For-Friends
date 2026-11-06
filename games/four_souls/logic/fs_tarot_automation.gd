@@ -36,7 +36,7 @@ func _card_choices() -> Array:
 		"own_destroy":
 			for index in items[owner].size():
 				if not bool(items[owner][index].eternal):
-					out.append({"label": "Уничтожить: " + FSData.title(int(items[owner][index].id)), "arg": {"op": "devil_destroy", "item": index}})
+					out.append({"label": "Уничтожить: " + FSData.title(int(items[owner][index].id)), "arg": {"op": "destroy" if step.op == "destroy" else "devil_destroy", "item": index}})
 		"steal_or_shop":
 			for seat in players.size():
 				if seat == owner:

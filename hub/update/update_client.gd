@@ -30,6 +30,8 @@ var _queue: Array = []  # что качать: [{version, url, size, sha256, fil
 var _keep: Array = []  # уже установленная годная часть цепочки
 var _http: HTTPRequest
 var _current := 0  # размер скачанных файлов очереди до текущего
+var _system_tls := false  # встроенные сертификаты Godot не подошли — работаем с хранилищем Windows
+var _last_problem := ""  # причина последней сетевой неудачи (по-русски, для игрока и лога)
 
 
 ## Единственный клиент на весь запуск.
@@ -74,7 +76,8 @@ func check(force: bool = false) -> void:
 	var m: Variant = JSON.parse_string(body) if body != "" else null
 	if not (m is Dictionary) or int(m.get("format", 0)) != 1:
 		if force:
-			error = "Не удалось получить сведения об обновлениях."
+			error = _last_problem if _last_problem != "" else "сервер обновлений прислал не то, что ожидалось (возможно, страница-заглушка провайдера)"
+			print("[update] проверка не удалась: ", error)
 			_set_state(State.FAILED)
 		else:
 			_set_state(State.NONE)  # автоматическая проверка без сети молчит
@@ -190,15 +193,10 @@ func _download(q: Dictionary, path: String) -> bool:
 		if have == q["sha256"]:
 			return true  # уже скачан раньше
 	DirAccess.remove_absolute(part)
-	_http.download_file = part
-	if _http.request(str(q["url"]), ["User-Agent: PartyWorld-Updater"]) != OK:
-		_fail("не удалось начать загрузку")
-		return false
-	var res: Array = await _await_request(30000)
-	_http.download_file = ""
+	var res: Array = await _request(str(q["url"]), ["User-Agent: PartyWorld-Updater"], 30000, part)
 	if res[0] != HTTPRequest.RESULT_SUCCESS or res[1] != 200:
 		DirAccess.remove_absolute(part)
-		_fail("загрузка прервалась (%s/%s)" % [res[0], res[1]])
+		_fail("загрузка прервалась: " + _describe(res))
 		return false
 	var sum: String = await _sha256(part)
 	if sum != q["sha256"] or _file_size(part) != int(q["size"]):
@@ -305,14 +303,74 @@ func _writable(dir: String) -> bool:
 
 
 func _get_text(url: String) -> String:
-	_http.download_file = ""
-	if _http.request(url, ["User-Agent: PartyWorld-Updater", "Cache-Control: no-cache"]) != OK:
-		return ""
-	var res: Array = await _await_request(10000)
+	_last_problem = ""
+	var res: Array = await _request(url, ["User-Agent: PartyWorld-Updater", "Cache-Control: no-cache"], 10000, "")
 	if res[0] != HTTPRequest.RESULT_SUCCESS or res[1] != 200:
-		print("[update] манифест недоступен (%s/%s)" % [res[0], res[1]])
+		_last_problem = _describe(res)
+		print("[update] манифест недоступен (%s/%s): %s" % [res[0], res[1], _last_problem])
 		return ""
 	return (res[3] as PackedByteArray).get_string_from_utf8()
+
+
+## Запрос с запасным путём: если соединение не удалось (часто — антивирус подменяет HTTPS-сертификаты,
+## которым Godot не доверяет, хотя браузер работает), повторяем с сертификатами из хранилища Windows.
+## Удачный запасной путь запоминается до конца запуска (и для скачивания патчей).
+func _request(url: String, headers: PackedStringArray, stall_ms: int, file: String) -> Array:
+	var res: Array = await _request_once(url, headers, stall_ms, file)
+	if res[0] in [HTTPRequest.RESULT_SUCCESS, HTTPRequest.RESULT_TIMEOUT] or _system_tls:
+		return res
+	var tls := _system_tls_options()
+	if tls == null:
+		return res
+	print("[update] повтор с сертификатами Windows после: ", _describe(res))
+	_http.set_tls_options(tls)
+	var again: Array = await _request_once(url, headers, stall_ms, file)
+	if again[0] == HTTPRequest.RESULT_SUCCESS:
+		_system_tls = true
+		return again
+	_http.set_tls_options(TLSOptions.client())
+	return again
+
+
+func _request_once(url: String, headers: PackedStringArray, stall_ms: int, file: String) -> Array:
+	_http.download_file = file
+	var err := _http.request(url, headers)
+	if err != OK:
+		_http.download_file = ""
+		return [HTTPRequest.RESULT_CANT_CONNECT, 0, PackedStringArray(), PackedByteArray()]
+	var res: Array = await _await_request(stall_ms)
+	_http.download_file = ""
+	return res
+
+
+func _system_tls_options() -> TLSOptions:
+	var pem := OS.get_system_ca_certificates()
+	if pem.is_empty():
+		return null
+	var cert := X509Certificate.new()
+	if cert.load_from_string(pem) != OK:
+		return null
+	return TLSOptions.client(cert)
+
+
+## Понятная причина сетевой неудачи — её видно в настройках и в логе.
+static func _describe(res: Array) -> String:
+	match int(res[0]):
+		HTTPRequest.RESULT_SUCCESS:
+			return "GitHub ответил кодом %d" % int(res[1])
+		HTTPRequest.RESULT_CANT_RESOLVE:
+			return "не найден адрес GitHub — нет интернета или DNS не отвечает"
+		HTTPRequest.RESULT_CANT_CONNECT, HTTPRequest.RESULT_CONNECTION_ERROR:
+			return "нет соединения с GitHub — сеть, VPN или провайдер не пускают к серверу файлов"
+		HTTPRequest.RESULT_TLS_HANDSHAKE_ERROR:
+			return "не удалось защищённое соединение — проверьте дату и время на компьютере и HTTPS-проверку в антивирусе"
+		HTTPRequest.RESULT_TIMEOUT:
+			return "GitHub не отвечает больше 10 секунд — медленная сеть или сервер файлов недоступен"
+		HTTPRequest.RESULT_REDIRECT_LIMIT_REACHED:
+			return "слишком много перенаправлений"
+		HTTPRequest.RESULT_NO_RESPONSE:
+			return "GitHub не прислал ответ"
+	return "ошибка сети %d/%d" % [int(res[0]), int(res[1])]
 
 
 ## Дождаться конца запроса; если stall_ms не приходит ни байта — отменить (RESULT_TIMEOUT).

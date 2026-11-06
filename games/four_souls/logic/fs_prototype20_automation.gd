@@ -43,9 +43,10 @@ func _apply_card_step(step: Dictionary) -> void:
 			var text: Dictionary = resolving.get("automation_data", {}).get("prototype20", {})
 			if text.is_empty():
 				var index: int = int(step.get("index", -1))
-				if index < 0 or index >= source.get("prototype_texts20", []).size():
+				var templates := _prototype_texts21()
+				if index < 0 or index >= templates.size():
 					return
-				text = source.prototype_texts20[index]
+				text = templates[index]
 			var effects: Array = [{"op": "loot", "amount": 2}, {"op": "prototype_health20"}, {"op": "coins", "amount": 6}, {"op": "damage", "target": owner, "amount": 1}]
 			var tails: Array = [{"op": "prototype_give20", "targets": "prototype_receivers20"}, {"op": "damage", "target": owner, "amount": 1}, {"op": "prototype_discard20"}]
 			_insert_card_steps([effects[int(text.effect)], tails[int(text.tail)]])

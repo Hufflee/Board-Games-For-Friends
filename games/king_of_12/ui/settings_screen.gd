@@ -9,6 +9,8 @@ var make_primary: Callable  # (text) -> Button — «Готово»
 var ink := Color(0, 0, 0, 0)  # цвет текста на панели (прозрачный — из темы)
 var _resolutions: OptionButton
 var _physical_resolution: Label
+const TABS := ["Графика", "Звук", "Геймплей"]
+static var _tab := 0  # открытая вкладка (помнится между открытиями окна)
 
 
 func _ready() -> void:
@@ -45,7 +47,7 @@ func _ready() -> void:
 	if neon_style:
 		var header := HubStyle.hbox(16)
 		header.add_child(HubStyle.neon_label("НАСТРОЙКИ", 28, HubStyle.PINK))
-		var badge := HubStyle.label("ЗВУК / ЭКРАН", 14, HubStyle.CYAN, HORIZONTAL_ALIGNMENT_RIGHT, "medium")
+		var badge := HubStyle.label("ГРАФИКА / ЗВУК / ГЕЙМПЛЕЙ", 14, HubStyle.CYAN, HORIZONTAL_ALIGNMENT_RIGHT, "medium")
 		badge.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		header.add_child(badge)
@@ -70,6 +72,17 @@ func _ready() -> void:
 	var col := K12UI.vbox(14)
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(col)
+	# Вкладки: графика / звук / геймплей (последняя открытая запоминается на время запуска).
+	var graphics := K12UI.vbox(14)
+	var sound := K12UI.vbox(14)
+	var gameplay := K12UI.vbox(14)
+	var pages := [graphics, sound, gameplay]
+	for page: Control in pages:
+		page.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		col.add_child(page)
+	var tabs := K12UI.hbox(8)
+	tabs.name = "SettingsTabs"
+	tabs.alignment = BoxContainer.ALIGNMENT_CENTER
 	var fit := func():
 		if not is_inside_tree():
 			return
@@ -78,14 +91,33 @@ func _ready() -> void:
 			col.get_combined_minimum_size().x + 12.0, minf(col.get_combined_minimum_size().y, room)
 		)
 	get_viewport().size_changed.connect(fit)
+	col.minimum_size_changed.connect(func(): fit.call_deferred())  # вкладки разной высоты
 	fit.call_deferred()
+	for i in TABS.size():
+		var tab := _button(TABS[i], K12UI.BODY, 150)
+		tab.name = "Tab%d" % i
+		var index := i
+		tab.pressed.connect(func():
+			_tab = index
+			for page_index in pages.size():
+				(pages[page_index] as Control).visible = page_index == index
+			for button in tabs.get_children():
+				UISel.pick(button, button.get_index() == index)
+			fit.call_deferred())
+		tabs.add_child(tab)
+	outer.add_child(tabs)
+	outer.move_child(tabs, scroll.get_index())
+	for page_index in pages.size():
+		(pages[page_index] as Control).visible = page_index == _tab
+	for button in tabs.get_children():
+		UISel.pick(button, button.get_index() == _tab)
 
-	if neon_style:
-		col.add_child(_section("01 / ЗВУК"))
-	col.add_child(
+
+
+	sound.add_child(
 		_slider("Музыка", Prefs.music_volume, 0.0, 1.0, 0.05, func(v): Prefs.set_value("music_volume", v))
 	)
-	col.add_child(
+	sound.add_child(
 		_slider(
 			"Звуки игры",
 			Prefs.sfx_volume,
@@ -95,7 +127,7 @@ func _ready() -> void:
 			_on_sfx_volume
 		)
 	)
-	col.add_child(
+	sound.add_child(
 		_slider(
 			"Чат и реплики", Prefs.chat_volume, 0.0, 1.0, 0.05, func(v): Prefs.set_value("chat_volume", v)
 		)
@@ -107,9 +139,9 @@ func _ready() -> void:
 	_ink(mute)
 	mute.button_pressed = Prefs.muted
 	mute.toggled.connect(func(on): Prefs.set_value("muted", on))
-	col.add_child(mute)
-	if neon_style:
-		col.add_child(_section("02 / ЭКРАН И ГРАФИКА"))
+	sound.add_child(mute)
+
+
 	# экран: окно / полный экран в окне (без рамки) / эксклюзивный; размер — для оконного режима
 	var wm := K12UI.hbox(8)
 	wm.add_child(_label("Экран:", K12UI.BODY))
@@ -140,7 +172,7 @@ func _ready() -> void:
 						UISel.pick(c, modes[c.get_index() - 1][0] == v)
 		)
 		wm.add_child(b)
-	col.add_child(wm)
+	graphics.add_child(wm)
 	rr.add_child(_label("Разрешение:", K12UI.BODY))
 	_resolutions = OptionButton.new()
 	_resolutions.add_theme_font_size_override("font_size", K12UI.CAP)
@@ -151,9 +183,9 @@ func _ready() -> void:
 	get_tree().root.size_changed.connect(_sync_resolution)
 	Prefs.changed.connect(_sync_resolution)
 	_sync_resolution.call_deferred()
-	col.add_child(rr)
+	graphics.add_child(rr)
 	# масштаб применяется по отпусканию ползунка: иначе окно настроек «уезжает» из-под мыши
-	col.add_child(
+	graphics.add_child(
 		_slider(
 			"Масштаб интерфейса", Prefs.ui_scale, Prefs.UI_SCALE_MIN, Prefs.UI_SCALE_MAX, 0.05,
 			func(v): Prefs.set_value("ui_scale", v), true
@@ -166,16 +198,29 @@ func _ready() -> void:
 	_ink(par)
 	par.button_pressed = Prefs.parallax
 	par.toggled.connect(func(on): Prefs.set_value("parallax", on))
-	col.add_child(par)
+	graphics.add_child(par)
 	var preview := HBoxContainer.new()
 	preview.add_child(_label("Просмотр карт:", K12UI.BODY))
 	var preview_mode := OptionButton.new()
 	preview_mode.add_item("Крупная карта")
-	preview_mode.add_item("Лупа ×2 с окружением")
+	preview_mode.add_item("Лупа ×2 (карта в полном качестве)")
 	preview_mode.select(1 if Prefs.card_preview_mode == "magnifier" else 0)
 	preview_mode.item_selected.connect(func(index: int): Prefs.set_value("card_preview_mode", "magnifier" if index == 1 else "card"))
 	preview.add_child(preview_mode)
-	col.add_child(preview)
+	gameplay.add_child(preview)
+	var shift := CheckBox.new()
+	shift.text = "Лупа на Shift"
+	shift.tooltip_text = "Зажмите Shift — лупа включится в любом режиме просмотра и не пропадёт, если увести курсор с карты"
+	shift.add_theme_font_size_override("font_size", 17)
+	_ink(shift)
+	shift.button_pressed = Prefs.magnifier_shift
+	shift.toggled.connect(func(on): Prefs.set_value("magnifier_shift", on))
+	gameplay.add_child(shift)
+	var shift_hint := _label("Зажатый Shift включает лупу над картой и держит её, даже если отвести курсор. Лупа показывает карту в полном качестве и включается сразу при наведении.", K12UI.CAP)
+	shift_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	shift_hint.custom_minimum_size.x = 400
+	shift_hint.modulate.a = 0.75
+	gameplay.add_child(shift_hint)
 	# качество графики (главное меню и 3D-кубики)
 	var gq := K12UI.hbox(8)
 	gq.add_child(_label("Качество графики:", K12UI.BODY))
@@ -196,14 +241,14 @@ func _ready() -> void:
 						UISel.pick(c, c.get_index() - 1 == ii)
 		)
 		gq.add_child(b)
-	col.add_child(gq)
+	graphics.add_child(gq)
 	var fps := CheckBox.new()
 	fps.text = "Показывать FPS"
 	fps.add_theme_font_size_override("font_size", 17)
 	_ink(fps)
 	fps.button_pressed = Prefs.show_fps
 	fps.toggled.connect(func(on): Prefs.set_value("show_fps", on))
-	col.add_child(fps)
+	graphics.add_child(fps)
 	# логи — чтобы отправить разработчику, если что-то сломалось
 	var lr := K12UI.hbox(8)
 	lr.add_child(_label("Логи:", K12UI.BODY))
@@ -219,14 +264,20 @@ func _ready() -> void:
 	lf.tooltip_text = "Там и логи прошлых запусков (godot<дата>.log)"
 	lf.pressed.connect(func(): load("res://hub/crash_report.gd").open_folder())
 	lr.add_child(lf)
-	col.add_child(lr)
+	gameplay.add_child(lr)
 	var updates := K12UI.vbox(8)
-	col.add_child(updates)
+	gameplay.add_child(updates)
 	var update_button := _button("Проверить обновления", K12UI.CAP)
 	updates.add_child(update_button)
 	var update_status := _label("", K12UI.CAP)
 	update_status.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	updates.add_child(update_status)
+	# Нынешняя версия игры (с учётом установленных патчей) — под проверкой обновлений.
+	var current: String = str(Updater.version) if str(Updater.version) != "" else str(ProjectSettings.get_setting("application/config/version", "?"))
+	var version_label := _label("Версия игры: " + current, K12UI.CAP)
+	version_label.name = "GameVersion"
+	version_label.modulate.a = 0.75
+	updates.add_child(version_label)
 	var client: Node = load("res://hub/update/update_client.gd").get_or_create(get_tree())
 	var refresh := func():
 		if not is_instance_valid(update_button):
@@ -238,7 +289,7 @@ func _ready() -> void:
 			3, 8: update_status.text = "Доступна версия %s. Обновление — в главном меню." % client.target
 			4, 5: update_status.text = "Обновление загружается…"
 			6: update_status.text = "Обновление готово. Перезапуск — в главном меню."
-			7: update_status.text = "Не удалось проверить обновления. Попробуйте позже."
+			7: update_status.text = "Не удалось проверить обновления: %s." % str(client.error) if str(client.error) != "" else "Не удалось проверить обновления. Попробуйте позже."
 			_: update_status.text = ""
 		if not Updater.enabled:
 			update_status.text = "Обновления Steam — через Steam." if OS.has_feature("steam_store") else "Проверка доступна в собранной игре."
@@ -252,7 +303,7 @@ func _ready() -> void:
 	_ink(vs)
 	vs.button_pressed = Prefs.vsync
 	vs.toggled.connect(func(on): Prefs.set_value("vsync", on))
-	col.add_child(vs)
+	graphics.add_child(vs)
 	var fl := K12UI.hbox(8)
 	fl.add_child(_label("Ограничение FPS:", K12UI.BODY))
 	for lim in Prefs.FPS_LIMITS:
@@ -267,7 +318,7 @@ func _ready() -> void:
 						UISel.pick(c, Prefs.FPS_LIMITS[c.get_index() - 1] == ll)
 		)
 		fl.add_child(b)
-	col.add_child(fl)
+	graphics.add_child(fl)
 	# тема светлых игр — кнопкой-солнцем/луной рядом с «Правила» и «Настройки» в самих играх
 
 	var scroll_gap := Control.new()

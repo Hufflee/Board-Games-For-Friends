@@ -10,8 +10,21 @@ static func text(value: Variant) -> String:
 		return str(int(value))
 	return str(value)
 
+## Цвет бумаги карт колоды (свойство «Цвет карт»).
+const PAPER := "#ded7c8"
+
+static func paper(deck: Dictionary) -> String:
+	var value := str(deck.get("color", PAPER))
+	return value if Color.html_is_valid(value) else PAPER
+
+## Слой-фон, который красится цветом колоды: помеченный role=card или нижний закреплённый «Фон» старых проектов.
+static func is_card_background(layer: Dictionary, index: int) -> bool:
+	if layer.get("role", "") == "card":
+		return true
+	return index == 0 and layer.get("kind") == "fill" and layer.get("locked", false) and str(layer.get("title", "")) == "Фон"
+
 static func dimensions(deck: Dictionary) -> Array:
-	var size: Vector2i = Definition.CARD_SIZES[clampi(int(deck.get("size", 3)) - 1, 0, 8)] * 4
+	var size: Vector2i = Definition.CARD_SIZES[clampi(int(deck.get("size", 3)) - 1, 0, Definition.CARD_SIZES.size() - 1)] * 4
 	return [size.x, size.y]
 
 static func columns(deck: Dictionary) -> Array:
@@ -36,11 +49,20 @@ static func fields(row: Dictionary, deck: Dictionary) -> Dictionary:
 	var art := str(bindings.get("art", "art"))
 	var body_field := str(bindings.get("text", "text"))
 	var result := {"title": "" if bindings.has("title") and title.is_empty() else row.get(title, row.get("name", row.get("Название", row.get(value, "Карта")))),
-		"rank": row.get(value, ""), "art": row.get(art, ""), "text": row.get(body_field, ""), "font": bindings.get("font", "")}
+		"rank": row.get(value, ""), "art": row.get(art, ""), "text": row.get(body_field, ""), "font": bindings.get("font", ""), "paper": paper(deck)}
 	if bindings.get("layers") is Array:
 		result["canvas_size"] = dimensions(deck)
 		result["layers"] = bindings.layers.duplicate(true)
-		for layer: Dictionary in result.layers:
+		for index in result.layers.size():
+			var layer: Dictionary = result.layers[index]
+			if is_card_background(layer, index):
+				layer["color"] = result.paper
+			# Цвет из колонки таблицы: у каждой карты свой (например, масть или цвет внутри рамки).
+			for pair: Array in [["color_field", "color"], ["fill_field", "fill"]]:
+				var source := str(layer.get(pair[0], ""))
+				var supplied := str(row.get(source, "")) if not source.is_empty() else ""
+				if Color.html_is_valid(supplied):
+					layer[pair[1]] = supplied
 			var field := str(layer.get("field", ""))
 			if field.is_empty():
 				continue
@@ -59,7 +81,7 @@ static func default_layers(deck: Dictionary) -> Array:
 	var fields := {}
 	for column: Dictionary in columns(deck):
 		fields[str(column.id)] = true
-	var result: Array = [{"kind": "fill", "title": "Фон", "rect": [0, 0, width, height], "color": "#ded7c8", "locked": true}]
+	var result: Array = [{"kind": "fill", "title": "Фон", "role": "card", "rect": [0, 0, width, height], "color": paper(deck), "locked": true}]
 	for spec: Array in [["art", "image", "Рисунок", [32, 128, width - 64, height - 192], "art"],
 		["title", "text", "Название", [32, 16, width - 64, 112], "title"],
 		["value", "text", "Значение", [0, height * 0.38, width, height * 0.28], "rank"],

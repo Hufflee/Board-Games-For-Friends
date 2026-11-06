@@ -78,4 +78,6 @@ func _treasure12_passives(event: String, data: Dictionary) -> void:
 				_queue_packet15(current, 70, source, event, data)
 
 func _tap_item14(id: int) -> bool:
-	return false if id == 1 else super._tap_item14(id)
+	if id == 1:
+		return false
+	return id in [44, 50, 843] or super._tap_item14(id)

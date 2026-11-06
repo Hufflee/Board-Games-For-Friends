@@ -7,7 +7,7 @@ func _game(t: Check, id: int, health: int = 0) -> RefCounted:
 	var s := Scenario.new(t).players(3).dlc().current(0).character(0, 821).character(1, 821).character(2, 821) \
 		.no_items(0).no_items(1).no_items(2).hand(0, []).hand(1, []).hand(2, []) \
 		.monster(0, id, {"hp": health}).monster(1, 344).deck_top("monster", [423]) \
-		.deck_top("treasure", [91, 229, 180]).build()
+		.deck_top("treasure", [91, 229, 180]).room(-1).build()
 	s.g.bonuses.clear()
 	return s
 

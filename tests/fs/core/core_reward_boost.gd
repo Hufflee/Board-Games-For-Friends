@@ -6,7 +6,7 @@ const Check := preload("res://tests/fs/fs_check.gd")
 func _game(t: Check, monster: int) -> RefCounted:
 	var s := Scenario.new(t).players(2).dlc().current(0).character(0, 821).character(1, 821) \
 		.no_items(0).no_items(1).hand(0, [528]).hand(1, []).coins(0, 0) \
-		.monster(0, monster, {"hp": 1}).monster(1, 423).deck_top("monster", [427]).build()
+		.monster(0, monster, {"hp": 1}).monster(1, 423).deck_top("monster", [427]).room(-1).build()
 	s.g.bonuses.clear()
 	return s
 

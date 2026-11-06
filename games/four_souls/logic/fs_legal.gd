@@ -3,6 +3,7 @@ extends RefCounted
 ## candidates() перечисляет правдоподобные действия по фазе, legal() оставляет только те,
 ## которые FSRules.action принимает на копии состояния (никакой второй копии правил).
 ## Ручные операции панели эффекта — короткое меню с аргументами по умолчанию.
+const Packet26 := preload("res://games/four_souls/logic/fs_packet26_cards.gd")
 
 ## Операции панели, которые пробуются как «законные» (аргументы подставляются ниже).
 const EFFECT_MENU := ["coins", "loot", "damage", "heal", "prevent_death", "cancel_attack", "roll",
@@ -49,11 +50,16 @@ static func candidates(g: FSRules, seat: int) -> Array:
 	if seat < 0 or seat >= g.players.size() or g.phase == "game_over":
 		return out
 	var is_current: bool = seat == g.current
-	if g.phase in ["turn", "priority", "battle_roll", "death"] and not g.dead[seat] and bool(g.character_ready[seat]):
+	if g.phase in ["turn", "priority", "battle_roll", "death"] and not g.dead[seat] and g._character_can_pay24(seat):
 		out.append(_a("character"))
 		if g._item_count(seat, 5) > 0:
 			out.append(_a("mushroom_counter20"))
 	if is_current and g._item_count(seat,173)>0: out.append(_a("inspect_item13"))
+	for room_action: Dictionary in g._native_room_actions24(seat):
+		if bool(room_action.activate):
+			out.append(_a("room_activate24", {"index": int(room_action.index), "card": int(room_action.card)}))
+		if bool(room_action.attack):
+			out.append(_a("room_attack24", {"index": int(room_action.index)}))
 	match g.phase:
 		"starting_item":
 			if not g._starting_choices.is_empty():
@@ -129,10 +135,21 @@ static func _add_responses(g: FSRules, seat: int, out: Array) -> void:
 	if seat == g.current:
 		for index in g._extra_rooms20.size():
 			out.append(_a("room_activate20", {"item": index}))
+			if int(g._extra_rooms20[index].id) in [44, 50]:
+				out.append(_a("room_activate20", {"item": index, "ability": "paid"}))
+			for mode in Packet26.PAID.get(int(g._extra_rooms20[index].id), {}):
+				out.append(_a("room_activate20", {"item": index, "ability": mode}))
 	for index in g.items[seat].size():
+		for mode in Packet26.PAID.get(int(g.items[seat][index].id), {}):
+			out.append(_a("activate", {"item": index, "ability": mode}))
 		if int(g.items[seat][index].id) == 248:
 			out.append(_a("activate", {"item": index, "ability": "kill"}))
-		if not bool(g.items[seat][index].tapped):
+		if int(g.items[seat][index].id) in [44, 50]:
+			out.append(_a("activate", {"item": index, "ability": "paid"}))
+		if int(g.items[seat][index].id) == 843:
+			for mode in ["bone1", "bone2", "bone5"]:
+				out.append(_a("activate", {"item": index, "ability": mode}))
+		if not bool(g.items[seat][index].tapped) or g._tap_price24() > 0 or int(g.items[seat][index].id) in [35, 42, 48, 55]:
 			out.append(_a("activate", {"item": index}))
 
 ## Штраф за смерть: первая карта лута и первый не вечный предмет (если есть).

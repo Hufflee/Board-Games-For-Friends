@@ -281,13 +281,22 @@ func new_theme() -> bool:
 
 
 ## Локальный аварийный ввод: клиентского RPC для обхода карточного исполнителя нет.
-func four_souls_effect(kind: String, argument: Dictionary) -> bool:
-	if not net.is_host() or net.fours == null or net.fours.resolving.is_empty() or kind not in ["effect", "effect_done", "effect_roll", "peek_take"]:
+func four_souls_effect(kind: String, argument: Dictionary, trigger_seat: int = -1) -> bool:
+	if not net.is_host() or net.fours == null:
+		return false
+	var game: Object = net.fours
+	var seat: int
+	if kind in ["item_trigger", "monster_trigger"]:
+		seat = trigger_seat
+	elif kind in ["effect", "effect_done", "effect_roll", "peek_take"] and not game.resolving.is_empty():
+		seat = game.actor() if kind == "effect_roll" else int(game.resolving.owner)
+	else:
+		return false
+	if seat < 0 or seat >= game.players.size():
 		return false
 	before_action("host")
-	var game: Object = net.fours
 	game._host_manual = true
-	var accepted: bool = game.action(int(game.resolving.owner), kind, argument)
+	var accepted: bool = game.action(seat, kind, argument)
 	game._host_manual = false
 	if accepted:
 		net._push_state()

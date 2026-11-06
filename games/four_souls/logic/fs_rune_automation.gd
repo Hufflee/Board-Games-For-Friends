@@ -98,7 +98,7 @@ func _apply_card_step(step: Dictionary) -> void:
 				_temporary_eternal.append({"source": item, "eternal": bool(item.eternal)})
 				item.eternal = true
 		"berkano_destroy", "reroll_item":
-			if bool(step.shop):
+			if bool(step.get("shop", false)):
 				if _eternal_shop15.has(int(shop[int(step.item)])):
 					return
 				_effect({"op": "discard_shop", "item": int(step.item)})

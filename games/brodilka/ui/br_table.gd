@@ -841,6 +841,9 @@ func _ensure_dice() -> void:
 		move_child(d, _bar.get_index())  # над полем, под панелью хода и окнами
 		var di := i
 		d.thrown.connect(func(vel: Vector2): _on_die_thrown(di, vel))
+		# Вернулся на место — можно снова просить свой бросок; хост не ответил — бросок не засчитан.
+		d.finished.connect(_update_dice)
+		d.stalled.connect(func(): _thrown_mine = false)
 		_dice3d.append(d)
 
 

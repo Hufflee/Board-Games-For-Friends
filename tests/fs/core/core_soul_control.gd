@@ -42,7 +42,7 @@ func run(t: Check) -> void:
 	# Обязательная Карма сама открывает ручную панель, даже когда новое применение карт закрыто.
 	var karma := Scenario.new(t).rules_type(preload("res://tests/fs/fs_legacy_manual_reward_rules.gd")).players(3).dlc().current(1).item(0, 8).item(1, 243).build()
 	karma.g.tick(11.0)
-	t.check(not karma.g.off_turn_open(0), "У владельца Кармы истекло окно10с")
+	t.check(karma.g.off_turn_open(0), "Окна 10 с больше нет: свои карты в чужой ход открыты (06.11)")
 	_manual(karma, 1, 243)
 	karma.effect(1, "item_to_soul", {"target": 1, "item": _index(karma, 1, 243)})
 	karma.close()
@@ -67,7 +67,7 @@ func run(t: Check) -> void:
 	karma.inv("После вложенной Кармы")
 	# Та же вложенность поверх награды: признак kept_as_soul обязан пережить ручную Карму.
 	var reward := Scenario.new(t).players(3).dlc().current(1).item(0, 8) \
-		.monster(0, 345, {"hp": 1, "dc": 1}).monster(1, 344).build()
+		.monster(0, 345, {"hp": 1, "dc": 1}).monster(1, 344).room(-1).build()
 	reward.roll(6)
 	reward.ok(1, "attack", {"slot": 0})
 	reward.ok(1, "roll", null)

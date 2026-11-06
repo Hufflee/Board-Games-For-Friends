@@ -94,6 +94,8 @@ static func _cards(g: FSRules) -> Array[String]:
 			add.call(id, "под дополнительной комнатой")
 	for choice: Dictionary in g._starting_choices:
 		for id in choice.cards: add.call(id, "выбор Эдема")
+	for id in g._outside_starters21:
+		add.call(id, "заменённый стартовый предмет")
 	# Карты внутри эффектов: лут в стеке и событие — физически вне колод.
 	var held := {}
 	for effect: Dictionary in _effects(g):

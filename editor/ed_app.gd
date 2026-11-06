@@ -17,6 +17,12 @@ const Logic := preload("res://editor/ed_logic.gd")
 const BoxEditor := preload("res://editor/ed_box.gd")
 const BoxView := preload("res://editor/ed_box_view.gd")
 const ElementsModel := preload("res://editor/ed_elements.gd")
+const Issues := preload("res://editor/ed_issues.gd")
+const Tutorial := preload("res://editor/ed_tutorial.gd")
+const TutorialUI := preload("res://editor/ed_tutorial_ui.gd")
+## Подписи размеров по номеру в CGDef.CARD_SIZES (мм — как у настоящих карт).
+const CARD_SIZE_TITLES := ["Мини · 44×68", "Бридж · 57×89", "Стандарт · 63×88", "Большая · 70×110", "Макси · 80×120", "Квадрат · 70", "Квадрат · 100", "Квадрат · 60", "Квадрат · 45",
+	"Горизонтальная маленькая · 68×44", "Горизонтальная стандарт · 88×63", "Горизонтальная большая · 110×70"]
 var document := Document.new()
 var _editing := false
 var _tab := 3
@@ -58,6 +64,9 @@ var _face_layer := -1
 var _face_row := 0
 var _face_zoom := 1.0
 var _face_pan := Vector2.ZERO
+## Идущий урок вкладки «Обучение» ("" — нет) и была ли уже проверка игрой.
+var _lesson := ""
+var _lesson_played := false
 
 func _ready() -> void:
 	set_anchors_and_offsets_preset(PRESET_FULL_RECT)
@@ -146,7 +155,7 @@ func _render() -> void:
 	header.add_child(test)
 	var tabs := Style.row()
 	_shell.add_child(tabs)
-	var titles := ["Коробка", "Интерфейс", "Логика", "Элементы"]
+	var titles := ["Коробка", "Интерфейс", "Логика", "Элементы", "Обучение"]
 	for index in titles.size():
 		var button := Style.button(titles[index])
 		button.size_flags_horizontal = SIZE_EXPAND_FILL
@@ -174,6 +183,8 @@ func _render() -> void:
 	body.add_child(center)
 	var property_scroll := ScrollContainer.new()
 	property_scroll.custom_minimum_size.x = 304
+	# Свойства только по вертикали: широкие выпадающие списки обрезаются, а не дают прокрутку вбок.
+	property_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	body.add_child(property_scroll)
 	var properties := Style.column(8)
 	properties.custom_minimum_size.x = 288
@@ -185,6 +196,7 @@ func _render() -> void:
 		1: _layout(tools, center, properties)
 		2: _logic(tools, center, properties)
 		3: _elements(tools, center, properties)
+		4: TutorialUI.build(self, tools, center, properties)
 	_status = Style.label("")
 	var status_row := Style.row(8)
 	_shell.add_child(status_row)
@@ -193,7 +205,7 @@ func _render() -> void:
 	status_row.add_child(_status)
 	if _help_tab != _tab:
 		_help_tab = _tab
-		_tab_tip = _help.tip(_tab)
+		_tab_tip = _help.tip(_tab) if _tab < 4 else ""
 	_help_done = LinkButton.new()
 	_help_done.name = "EditorHintDone"
 	_help_done.text = "Понятно"
@@ -204,7 +216,17 @@ func _render() -> void:
 	help.text = "Справка"
 	help.tooltip_text = "Как пользоваться этой вкладкой"
 	help.pressed.connect(func(): _help.show(self, _tab, _dismiss_help))
+	help.visible = _tab < 4
 	status_row.add_child(help)
+	if not _lesson.is_empty() and _tab != 4:
+		var lesson := LinkButton.new()
+		lesson.name = "EditorBackToLesson"
+		lesson.text = "К уроку"
+		lesson.pressed.connect(func():
+			if await _save():
+				_tab = 4
+				_render())
+		status_row.add_child(lesson)
 	_status_text()
 
 func _dismiss_help() -> void:
@@ -227,8 +249,22 @@ func _library() -> void:
 			_reset_logic_navigation()
 			_deck = 0
 			_tab = 3
+			_lesson = ""
 			_render())
 	row.add_child(create)
+	var tutorial := Style.button("Обучение: игра про слова")
+	tutorial.name = "LibraryTutorial"
+	tutorial.tooltip_text = "Новый пустой проект и пошаговый урок: соберёте «Объясни слово» со словарём."
+	tutorial.pressed.connect(func():
+		if document.create("blank"):
+			_editing = true
+			_reset_logic_navigation()
+			_deck = 0
+			_tab = 4
+			_lesson = Tutorial.WORDS
+			_lesson_played = false
+			_render())
+	row.add_child(tutorial)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = SIZE_EXPAND_FILL
 	_shell.add_child(scroll)
@@ -523,7 +559,7 @@ func _logic(tools: VBoxContainer, center: VBoxContainer, properties: VBoxContain
 
 func _elements(tools: VBoxContainer, center: VBoxContainer, properties: VBoxContainer) -> void:
 	var face_decks: Array = document.data.elements.get("decks", [])
-	if _face_edit and _category == "decks" and not face_decks.is_empty():
+	if _face_edit and _category in ["decks", "cards"] and not face_decks.is_empty():
 		_deck = clampi(_deck, 0, face_decks.size() - 1)
 		FaceEditor.new().setup(self, tools, center, properties, _deck)
 		return
@@ -539,39 +575,54 @@ func _elements(tools: VBoxContainer, center: VBoxContainer, properties: VBoxCont
 		var help := Style.label("Логика → текстовое гнездо → Случайное слово. Сохраните его в текстовую переменную, чтобы всем досталось одно слово.")
 		help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		tools.add_child(help)
-	for entry: Array in [["decks", "Колоды"], ["dice", "Кубики"], ["tokens", "Жетоны"], ["resources", "Ресурсы"]]:
+	for entry: Array in [["decks", "Колоды"], ["cards", "Карты"], ["dice", "Кубики"], ["tokens", "Жетоны"], ["resources", "Ресурсы"]]:
 		var category := Style.button(entry[1])
+		category.name = "EditorCategory_" + entry[0]
+		if entry[0] == _category:
+			category.add_theme_stylebox_override("normal", Style.box(Style.panel().lerp(Style.accent(), 0.24)))
 		category.pressed.connect(func():
 			_category = entry[0]
 			_deck = 0
 			_render())
 		tools.add_child(category)
-	if _category != "decks":
+	if _category not in ["decks", "cards"]:
 		_components(tools, center, properties)
 		return
 	var decks: Array = document.data.elements.get("decks", [])
-	_clipboard_controls(tools, "decks", ["elements", "decks"], _deck)
-	tools.add_child(Style.heading("КОЛОДЫ"))
+	# «Карты» — одиночные карты (single), «Колоды» — остальные; индекс _deck общий для обоих списков.
+	var singles := _category == "cards"
+	var shown: Array = []
 	for index in decks.size():
+		if bool(decks[index].get("single", false)) == singles:
+			shown.append(index)
+	if not shown.is_empty() and not shown.has(_deck):
+		_deck = shown[0]
+	_clipboard_controls(tools, "decks", ["elements", "decks"], _deck)
+	tools.add_child(Style.heading("КАРТЫ" if singles else "КОЛОДЫ"))
+	for index: int in shown:
 		var button := Style.button(str(decks[index].get("title", decks[index].id)))
+		if index == _deck:
+			button.add_theme_stylebox_override("normal", Style.box(Style.panel().lerp(Style.accent(), 0.24)))
 		button.clip_text = true
 		button.pressed.connect(func():
 			_deck = index
 			_render())
 		tools.add_child(button)
-	var add := Style.button("+ Колода")
+	var add := Style.button("+ Карта" if singles else "+ Колода")
+	add.name = "EditorAddDeck"
 	add.pressed.connect(func():
-		document.add_deck()
+		document.add_deck(singles)
 		_deck = document.data.elements.decks.size() - 1
 		_render())
 	tools.add_child(add)
-	if decks.is_empty():
-		center.add_child(Style.heading("ДОБАВЬТЕ ПЕРВУЮ КОЛОДУ"))
-		center.add_child(Style.label("Один шаблон и таблица с названием, свойствами и числом копий."))
+	if shown.is_empty():
+		center.add_child(Style.heading("ДОБАВЬТЕ ПЕРВУЮ КАРТУ" if singles else "ДОБАВЬТЕ ПЕРВУЮ КОЛОДУ"))
+		center.add_child(Style.label("Одна карта на столе: свой текст, рисунок, цвет и размер." if singles else "Один шаблон и таблица с названием, свойствами и числом копий."))
 		return
 	_deck = clampi(_deck, 0, decks.size() - 1)
 	var deck: Dictionary = decks[_deck]
-	var face_editor := Style.button("Редактор лица карты")
+	var face_editor := Style.button("Рамки и слои карты")
+	face_editor.tooltip_text = "Редактор лица карты: рамки, фигуры, текст и рисунки на всех картах колоды."
 	face_editor.pressed.connect(func():
 		_face_edit = true
 		_face_layer = -1
@@ -585,7 +636,7 @@ func _elements(tools: VBoxContainer, center: VBoxContainer, properties: VBoxCont
 			var reader = load("res://games/custom/ui/cg_assets.gd").new()
 			reader.configure_document(document.data)
 			card.layer_reader = reader
-		var card_size := Vector2(Definition.CARD_SIZES[clampi(int(deck.get("size", 3)) - 1, 0, 8)])
+		var card_size := Vector2(Definition.CARD_SIZES[clampi(int(deck.get("size", 3)) - 1, 0, Definition.CARD_SIZES.size() - 1)])
 		card.custom_minimum_size = card_size * minf(192.0 / card_size.y, 224.0 / card_size.x)
 		card.size_flags_horizontal = SIZE_SHRINK_CENTER
 		var hash_value := str(display.get("art", ""))
@@ -606,9 +657,12 @@ func _elements(tools: VBoxContainer, center: VBoxContainer, properties: VBoxCont
 				font.data = font_bytes
 				card.custom_font = font
 		center.add_child(card)
+	if singles:
+		_single_fields(center, deck)
 	var table := ScrollContainer.new()
 	table.size_flags_vertical = SIZE_EXPAND_FILL
 	table.size_flags_horizontal = SIZE_EXPAND_FILL
+	table.visible = not singles
 	center.add_child(table)
 	var rows := Style.column(8)
 	rows.size_flags_horizontal = SIZE_EXPAND_FILL
@@ -640,6 +694,18 @@ func _elements(tools: VBoxContainer, center: VBoxContainer, properties: VBoxCont
 		title.custom_minimum_size.x = 24
 		row.add_child(title)
 		for field: String in fields:
+			if field_types.get(field) == "color":
+				var swatch := ColorPickerButton.new()
+				swatch.name = "CardCellColor"
+				swatch.custom_minimum_size = Vector2(112, 40)
+				swatch.size_flags_horizontal = SIZE_EXPAND_FILL
+				swatch.edit_alpha = false
+				swatch.color = Color.from_string(str(deck.rows[index].get(field, "#ffffff")), Color.WHITE)
+				swatch.popup_closed.connect(func():
+					document.set_value(["elements", "decks", _deck, "rows", index, field], "#" + swatch.color.to_html(false), "Цвет карты")
+					_render.call_deferred())
+				row.add_child(swatch)
+				continue
 			if field_types.get(field) == "bool":
 				var flag := CheckBox.new()
 				flag.custom_minimum_size.x = 112
@@ -685,26 +751,41 @@ func _elements(tools: VBoxContainer, center: VBoxContainer, properties: VBoxCont
 		var next := {"title": "Новая карта", "copies": 1}
 		for field: String in fields:
 			var old: Variant = deck.rows[0].get(field) if not deck.rows.is_empty() else ""
-			next[field] = 0 if field_types.get(field) == "number" or old is int or old is float else (false if field_types.get(field) == "bool" else ("" if field_types.get(field) == "image" else "Новая карта"))
+			next[field] = 0 if field_types.get(field) == "number" or old is int or old is float else (false if field_types.get(field) == "bool" else ("" if field_types.get(field) == "image" else (str(old) if field_types.get(field) == "color" else "Новая карта")))
 		copy.elements.decks[_deck].rows.append(next)
 		document.replace(copy, "Добавить карту")
 		_render())
+	add_row.visible = not singles
 	center.add_child(add_row)
 	if not deck.has("title"):
 		var copy := document.data.duplicate(true)
 		copy.elements.decks[_deck].title = str(deck.id)
 		document.replace(copy, "Название колоды")
-	_text(properties, "Название колоды", ["elements", "decks", _deck, "title"])
+	_text(properties, "Название карты" if singles else "Название колоды", ["elements", "decks", _deck, "title"])
 	properties.add_child(Style.label("Размер карты"))
 	var sizes := OptionButton.new()
-	for title: String in ["Мини · 44×68", "Бридж · 57×89", "Стандарт · 63×88", "Большая · 70×110", "Макси · 80×120", "Квадрат · 70", "Квадрат · 100", "Квадрат · 60", "Квадрат · 45"]:
+	sizes.name = "EditorCardSize"
+	sizes.clip_text = true
+	sizes.fit_to_longest_item = false
+	for title: String in CARD_SIZE_TITLES:
 		sizes.add_item(title)
-	sizes.select(clampi(int(deck.get("size", 3)) - 1, 0, 8))
+	sizes.select(clampi(int(deck.get("size", 3)) - 1, 0, Definition.CARD_SIZES.size() - 1))
 	sizes.item_selected.connect(func(index: int):
 		document.set_value(["elements", "decks", _deck, "size"], index + 1, "Размер карт")
 		_render.call_deferred())
 	properties.add_child(sizes)
-	properties.add_child(Style.label("Колода"))
+	properties.add_child(Style.label("Цвет карт"))
+	var paper := ColorPickerButton.new()
+	paper.name = "EditorCardColor"
+	paper.custom_minimum_size.y = 40
+	paper.edit_alpha = false
+	paper.color = Color.from_string(Faces.paper(deck), Color(Faces.PAPER))
+	paper.tooltip_text = "Цвет бумаги всех карт. Цвет внутри рамок — в «Рамки и слои карты»."
+	paper.popup_closed.connect(func():
+		document.set_value(["elements", "decks", _deck, "color"], "#" + paper.color.to_html(false), "Цвет карт")
+		_render.call_deferred())
+	properties.add_child(paper)
+	properties.add_child(Style.label("Чья карта" if singles else "Колода"))
 	var owner := OptionButton.new()
 	for label: String in ["Одна общая", "Отдельная у каждого игрока", "Отдельная у каждой команды"]:
 		owner.add_item(label)
@@ -725,7 +806,10 @@ func _elements(tools: VBoxContainer, center: VBoxContainer, properties: VBoxCont
 	var columns_button := Style.button("Свойства карт / колонки")
 	columns_button.pressed.connect(_columns_dialog)
 	properties.add_child(columns_button)
-	_face_bindings(properties, deck, fields)
+	if deck.get("face", {}).get("layers") is Array:
+		_text_layers(properties, deck)
+	else:
+		_face_bindings(properties, deck, fields)
 	var back_button := Style.button("Импорт рубашки")
 	back_button.pressed.connect(func():
 		_with_notice(func(): _dialog(PackedStringArray(["*.png,*.jpg,*.jpeg,*.webp ; Рубашка карт"]), false, _import_back)))
@@ -739,6 +823,8 @@ func _elements(tools: VBoxContainer, center: VBoxContainer, properties: VBoxCont
 			back_labels.append("Рисунок · " + hash_value.left(8))
 	_choice(properties, "Рубашка колоды", ["elements", "decks", _deck, "back"], back_labels, back_values)
 	for item: Array in [["Импорт CSV", _csv_dialog], ["Вставить таблицу", _paste], ["Добавить картинки", _images_dialog], ["Импорт шрифта", _font_dialog]]:
+		if singles and item[0] != "Импорт шрифта":
+			continue
 		var button := Style.button(item[0])
 		button.pressed.connect(item[1])
 		properties.add_child(button)
@@ -814,7 +900,11 @@ func _components(tools: VBoxContainer, center: VBoxContainer, properties: VBoxCo
 		_number(properties, "Кубиков d6", path + ["count"], 1, 30)
 		_choice(properties, "Кому виден результат", path + ["visible"], ["Всем", "Бросавшему"], ["all", "owner"])
 		center.add_child(Style.label("В игре нажмите «Бросить», потяните кубик и отпустите. Результат выбирает хост."))
+		_dice_look(properties, center, entry, path)
 		var die := TossDie.new()
+		var reader = load("res://games/custom/ui/cg_assets.gd").new()
+		reader.configure_document(document.data)
+		Style.style_die(die._die, entry, reader, Net.color_of(0))
 		die.position = Vector2(160, 120)
 		die.home = Vector2(192, 152)
 		die.area = Rect2(0, 0, 480, 288)
@@ -825,6 +915,7 @@ func _components(tools: VBoxContainer, center: VBoxContainer, properties: VBoxCo
 		preview.add_child(die)
 		die.wait_for_roll()
 		die.thrown.connect(func(_vel: Vector2): die.set_result(randi_range(1, 6)))
+		die.name = "DicePreview"
 	else:
 		_number(properties, "Количество", path + ["count"], 1, 300)
 		_number(properties, "Номинал", path + ["value"], 0, 999999)
@@ -841,6 +932,89 @@ func _components(tools: VBoxContainer, center: VBoxContainer, properties: VBoxCo
 		document.set_value(path + ["free"], value, "Ручное управление")
 		_status_text())
 	properties.add_child(free)
+
+## Вид набора кубиков: цвет корпуса и точек, грани точками / цифрами / своими картинками.
+func _dice_look(properties: VBoxContainer, center: VBoxContainer, entry: Dictionary, path: Array) -> void:
+	properties.add_child(Style.heading("ВИД КУБИКОВ"))
+	properties.add_child(Style.label("Цвет кубика"))
+	var owner_modes := ["own", "player", "team"]
+	var current := str(entry.get("color", "#f3ead2"))
+	var owner_mode := current if current in ["player", "team"] else "own"
+	var owner := OptionButton.new()
+	owner.name = "DiceColorMode"
+	for caption: String in ["Свой цвет", "Цвет игрока", "Цвет команды"]:
+		owner.add_item(caption)
+	owner.select(owner_modes.find(owner_mode))
+	owner.item_selected.connect(func(index: int):
+		document.set_value(path + ["color"], "#f3ead2" if index == 0 else owner_modes[index], "Цвет кубика")
+		_render.call_deferred())
+	properties.add_child(owner)
+	if owner_mode != "own":
+		var note := Style.label("У каждого свой: цвет игрока из пати%s. В просмотре — пример." % ("" if owner_mode == "player" else ", у команды — цвет её первого игрока"))
+		note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		note.modulate.a = 0.75
+		properties.add_child(note)
+	for item: Array in [["color", "", "#f3ead2"], ["pips", "Цвет точек и цифр", "#7a1414"]]:
+		if item[0] == "color" and owner_mode != "own":
+			continue
+		if not str(item[1]).is_empty():
+			properties.add_child(Style.label(item[1]))
+		var picker := ColorPickerButton.new()
+		picker.name = "DiceColor_" + item[0]
+		picker.custom_minimum_size.y = 40
+		picker.edit_alpha = false
+		picker.color = Color.from_string(str(entry.get(item[0], item[2])), Color(item[2]))
+		picker.popup_closed.connect(func():
+			document.set_value(path + [item[0]], "#" + picker.color.to_html(false), "Цвет кубика" if item[0] == "color" else str(item[1]))
+			_render.call_deferred())
+		properties.add_child(picker)
+	properties.add_child(Style.label("Грани"))
+	var faces := OptionButton.new()
+	faces.name = "DiceFaces"
+	for caption: String in ["Точки", "Цифры", "Свои картинки"]:
+		faces.add_item(caption)
+	var modes := ["dots", "numbers", "images"]
+	faces.select(maxi(0, modes.find(str(entry.get("faces", "dots")))))
+	faces.item_selected.connect(func(index: int):
+		document.set_value(path + ["faces"], modes[index], "Грани кубиков")
+		_render.call_deferred())
+	properties.add_child(faces)
+	if entry.get("faces", "dots") != "images":
+		return
+	var hashes: Array = [""]
+	var labels: Array = ["Точки (как обычно)"]
+	for hash_value: String in document.data.get("assets", {}):
+		var asset: Dictionary = document.data.assets[hash_value]
+		if str(asset.get("path", "")).begins_with("assets/img/"):
+			hashes.append(hash_value)
+			var caption := str(asset.get("name", asset.get("source", ""))).get_file()
+			labels.append(caption if not caption.is_empty() else "Рисунок · " + hash_value.left(8))
+	var images: Array = entry.get("images", []).duplicate()
+	images.resize(6)
+	for face in 6:
+		properties.add_child(Style.label("Грань %d" % (face + 1)))
+		var menu := OptionButton.new()
+		menu.name = "DiceFaceImage%d" % (face + 1)
+		menu.clip_text = true
+		menu.fit_to_longest_item = false
+		for label: String in labels:
+			menu.add_item(label)
+		menu.select(maxi(0, hashes.find(str(images[face]) if images[face] != null else "")))
+		menu.item_selected.connect(func(index: int):
+			var next: Array = images.map(func(value: Variant): return "" if value == null else str(value))
+			next[face] = hashes[index]
+			document.set_value(path + ["images"], next, "Картинка грани")
+			_render.call_deferred())
+		properties.add_child(menu)
+	var import_button := Style.button("Добавить картинки граней")
+	import_button.tooltip_text = "Импортируйте PNG/JPG, затем выберите картинку для каждой грани."
+	import_button.pressed.connect(func():
+		_with_notice(func(): _dialog(PackedStringArray(["*.png,*.jpg,*.jpeg,*.webp ; Грани кубика"]), true, _import_dice_images.bind(path))))
+	properties.add_child(import_button)
+	if hashes.size() == 1:
+		var note := Style.label("Сначала добавьте картинки — кнопка ниже.")
+		note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		center.add_child(note)
 
 func _clipboard_entries(path: Array) -> Array:
 	var entries: Variant = document.data
@@ -956,6 +1130,9 @@ func _status_text() -> void:
 	_status.text = _message if not _message.is_empty() else ("Есть изменения" if document.dirty else ("Черновик сохранён" if document.draft else "Сохранено"))
 	if _message.is_empty() and not _tab_tip.is_empty():
 		_status.text = _tab_tip
+	var lesson_status: String = TutorialUI.status(self)
+	if _message.is_empty() and not lesson_status.is_empty() and _tab != 4:
+		_status.text = lesson_status
 	if is_instance_valid(_help_done):
 		_help_done.visible = _message.is_empty() and not _tab_tip.is_empty()
 	_status.text += " · Ошибок: %d" % errors.size()
@@ -1019,15 +1196,79 @@ func _show_issues() -> void:
 	window.theme = Style.theme()
 	Style.window_surface(window)
 	add_child(window)
-	var content := TextEdit.new()
-	content.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
-	content.editable = false
+	var scroll := ScrollContainer.new()
+	scroll.name = "IssuesList"
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	scroll.offset_left = 16
+	scroll.offset_top = 16
+	scroll.offset_right = -16
+	scroll.offset_bottom = -16
+	window.add_child(scroll)
+	var list := Style.column(8)
+	list.size_flags_horizontal = SIZE_EXPAND_FILL
+	scroll.add_child(list)
 	var report: Dictionary = document.issues()
-	content.text = "ОШИБКИ\n" + ("Нет ошибок." if report.errors.is_empty() else "\n\n".join(report.errors))
-	content.text += "\n\nПРЕДУПРЕЖДЕНИЯ\n" + ("Нет предупреждений." if report.warnings.is_empty() else "\n\n".join(report.warnings))
-	window.add_child(content)
+	for group: Array in [["ОШИБКИ", report.errors, "Нет ошибок."], ["ПРЕДУПРЕЖДЕНИЯ", report.warnings, "Нет предупреждений."]]:
+		list.add_child(Style.heading(group[0]))
+		if group[1].is_empty():
+			list.add_child(Style.label(group[2]))
+		for text: String in group[1]:
+			list.add_child(_issue_row(text, group[0] == "ОШИБКИ", window))
 	window.close_requested.connect(window.queue_free)
 	window.popup_centered()
+
+## Строка ошибки: значок, текст, «i» с подсказкой при наведении и переход на нужную вкладку.
+func _issue_row(text: String, error: bool, window: Window) -> Control:
+	var info: Dictionary = Issues.explain(text)
+	var row := Style.row(8)
+	row.name = "IssueRow"
+	var mark := Style.label("●")
+	mark.add_theme_color_override("font_color", Color("d0574f") if error else Color("d9a441"))
+	row.add_child(mark)
+	var label := Style.label(text)
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.size_flags_horizontal = SIZE_EXPAND_FILL
+	row.add_child(label)
+	var box := Style.column(4)
+	box.size_flags_horizontal = SIZE_EXPAND_FILL
+	row.remove_child(label)
+	box.add_child(label)
+	var explanation := Style.label(str(info.hint), 14)
+	explanation.name = "IssueHintText"
+	explanation.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	explanation.modulate.a = 0.75
+	explanation.visible = false
+	box.add_child(explanation)
+	row.add_child(box)
+	var hint := Style.button("i")
+	hint.name = "IssueHint"
+	hint.custom_minimum_size = Vector2(32, 32)
+	hint.tooltip_text = str(info.hint)
+	hint.mouse_default_cursor_shape = Control.CURSOR_HELP
+	hint.pressed.connect(func(): explanation.visible = not explanation.visible)
+	row.add_child(hint)
+	var tab := int(info.tab)
+	if tab >= 0:
+		var place: Dictionary = Issues.place(text, document.data)
+		var go := Style.button(Issues.TAB_TITLES[tab])
+		go.name = "IssueGo"
+		go.tooltip_text = "Открыть вкладку «%s»" % Issues.TAB_TITLES[tab]
+		go.pressed.connect(func():
+			window.queue_free()
+			if tab == _tab or await _save():
+				_tab = tab
+				_face_edit = false
+				if int(place.chain) >= 0:
+					_logic_chain = int(place.chain)
+					_logic_path = []
+					_logic_target = []
+				if int(place.deck) >= 0:
+					_deck = int(place.deck)
+					_category = "cards" if document.data.elements.decks[_deck].get("single", false) else "decks"
+				_render())
+		row.add_child(go)
+	return row
 
 func _back() -> void:
 	if _editing:
@@ -1137,6 +1378,28 @@ func _import_images(paths: PackedStringArray) -> void:
 	document.replace(copy, "Добавить изображения карт")
 	_render()
 
+## Картинки граней по порядку выбора: первая — грань 1 и так далее, остальные грани не меняются.
+func _import_dice_images(paths: PackedStringArray, path: Array) -> void:
+	var copy := document.data.duplicate(true)
+	if not copy.has("assets"):
+		copy.assets = {}
+	var target: Dictionary = copy.elements.dice[int(path[2])]
+	var images: Array = target.get("images", []).duplicate()
+	images.resize(6)
+	for index in mini(paths.size(), 6):
+		var result := Assets.import_image(str(copy.id), paths[index], _source)
+		if not str(result.error).is_empty():
+			_message = str(result.error)
+			break
+		copy.assets[result.hash] = result.asset
+		images[index] = result.hash
+	target["images"] = images.map(func(value: Variant): return "" if value == null else str(value))
+	target["faces"] = "images"
+	if paths.size() > 6:
+		_message = "У кубика 6 граней: взяты первые 6 картинок."
+	document.replace(copy, "Картинки граней кубика")
+	_render()
+
 func _font_dialog() -> void:
 	_with_notice(_select_font)
 
@@ -1148,6 +1411,88 @@ func _import_back(path: String) -> void:
 		copy.assets[result.hash] = result.asset
 		copy.elements.decks[_deck]["back"] = result.hash
 		document.replace(copy, "Рубашка колоды")
+	_render.call_deferred()
+
+## Поля одиночной карты: каждое свойство — отдельное поле ввода вместо таблицы.
+func _single_fields(parent: VBoxContainer, deck: Dictionary) -> void:
+	if deck.rows.is_empty():
+		return
+	var row: Dictionary = deck.rows[0]
+	for column: Dictionary in Faces.columns(deck):
+		var field := str(column.id)
+		var type := str(column.get("type", "text"))
+		if type == "image":
+			continue
+		if type == "color":
+			parent.add_child(Style.label(field))
+			var swatch := ColorPickerButton.new()
+			swatch.custom_minimum_size.y = 40
+			swatch.edit_alpha = false
+			swatch.color = Color.from_string(str(row.get(field, "#ffffff")), Color.WHITE)
+			swatch.popup_closed.connect(func(): document.set_value(["elements", "decks", _deck, "rows", 0, field], "#" + swatch.color.to_html(false), "Цвет карты"))
+			parent.add_child(swatch)
+			continue
+		parent.add_child(Style.label({"title": "Название", "text": "Текст карты", "rank": "Число"}.get(field, field)))
+		if type == "bool":
+			var flag := CheckBox.new()
+			flag.button_pressed = bool(row.get(field, false))
+			flag.toggled.connect(func(value: bool): document.set_value(["elements", "decks", _deck, "rows", 0, field], value, "Свойство карты"))
+			parent.add_child(flag)
+			continue
+		if field == "text":
+			var body := TextEdit.new()
+			body.name = "SingleCardText"
+			body.custom_minimum_size.y = 96
+			body.text = Style.value_text(row.get(field, ""))
+			body.text_changed.connect(func():
+				document.set_value(["elements", "decks", _deck, "rows", 0, field], body.text, "Текст карты")
+				_status_text())
+			parent.add_child(body)
+			continue
+		var line := LineEdit.new()
+		line.text = Style.value_text(row.get(field, ""))
+		line.text_changed.connect(func(text: String):
+			if type == "number" and not text.is_valid_float():
+				_message = "В этом поле карты нужно число."
+			else:
+				_message = ""
+				document.set_value(["elements", "decks", _deck, "rows", 0, field], float(text) if type == "number" else text, "Поле карты")
+			_status_text())
+		parent.add_child(line)
+
+## «Текст на картах»: галочка у колонки = текстовый слой на лице, привязанный к этой колонке.
+func _text_layers(parent: VBoxContainer, deck: Dictionary) -> void:
+	parent.add_child(Style.heading("ТЕКСТ НА КАРТАХ"))
+	var note := Style.label("Отметьте свойства, которые печатаются на каждой карте. Расположение и шрифт — в «Рамки и слои карты».")
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	parent.add_child(note)
+	var layers: Array = deck.face.layers
+	for column: Dictionary in Faces.columns(deck):
+		if column.get("type", "text") in ["image", "color"]:
+			continue
+		var field := str(column.id)
+		var bound := layers.any(func(layer: Dictionary): return layer.get("kind") == "text" and layer.get("field", "") == field)
+		var flag := CheckBox.new()
+		flag.name = "CardTextBinding_" + field
+		flag.text = field
+		flag.button_pressed = bound
+		flag.toggled.connect(_toggle_text_layer.bind(field))
+		parent.add_child(flag)
+
+func _toggle_text_layer(on: bool, field: String) -> void:
+	var copy: Dictionary = document.data.duplicate(true)
+	var target: Array = copy.elements.decks[_deck].face.layers
+	if on:
+		var size: Array = Faces.dimensions(copy.elements.decks[_deck])
+		var count := target.filter(func(layer: Dictionary): return layer.get("kind") == "text").size()
+		var top := mini(32 + count * 96, int(size[1]) - 112)
+		target.append({"kind": "text", "title": field, "field": field, "rect": [32, top, int(size[0]) - 64, 96],
+			"text": "", "asset": "", "font_size": 64, "color": "#30263f", "rotation": 0, "opacity": 1.0, "align": "left"})
+	else:
+		for index in range(target.size() - 1, -1, -1):
+			if target[index].get("kind") == "text" and target[index].get("field", "") == field:
+				target.remove_at(index)
+	document.replace(copy, "Текст на картах")
 	_render.call_deferred()
 
 func _face_bindings(parent: VBoxContainer, deck: Dictionary, fields: Array) -> void:
@@ -1197,12 +1542,12 @@ func _columns_dialog() -> void:
 		label.size_flags_horizontal = SIZE_EXPAND_FILL
 		row.add_child(label)
 		var column_type := OptionButton.new()
-		for caption: String in ["Текст", "Число", "Да / нет", "Рисунок"]:
+		for caption: String in ["Текст", "Число", "Да / нет", "Рисунок", "Цвет"]:
 			column_type.add_item(caption)
-		var old_type := maxi(0, ["text", "number", "bool", "image"].find(str(columns[index].get("type", "text"))))
+		var old_type := maxi(0, ["text", "number", "bool", "image", "color"].find(str(columns[index].get("type", "text"))))
 		column_type.select(old_type)
 		column_type.item_selected.connect(func(next: int):
-			var result: String = ElementsModel.new(document).change_column_type(_deck, index, ["text", "number", "bool", "image"][next])
+			var result: String = ElementsModel.new(document).change_column_type(_deck, index, ["text", "number", "bool", "image", "color"][next])
 			message.text = result
 			if result.is_empty():
 				popup.queue_free()
@@ -1221,13 +1566,13 @@ func _columns_dialog() -> void:
 	name_field.placeholder_text = "Например: сила"
 	col.add_child(name_field)
 	var type := OptionButton.new()
-	for text: String in ["Текст", "Число", "Да / нет", "Рисунок (хэш ассета)"]:
+	for text: String in ["Текст", "Число", "Да / нет", "Рисунок (хэш ассета)", "Цвет"]:
 		type.add_item(text)
 	col.add_child(type)
 	col.add_child(message)
 	var add := Style.button("Добавить свойство")
 	add.pressed.connect(func():
-		var result: String = ElementsModel.new(document).add_column(_deck, name_field.text, ["text", "number", "bool", "image"][type.selected])
+		var result: String = ElementsModel.new(document).add_column(_deck, name_field.text, ["text", "number", "bool", "image", "color"][type.selected])
 		message.text = result
 		if result.is_empty():
 			popup.queue_free()

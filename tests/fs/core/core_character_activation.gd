@@ -30,7 +30,7 @@ func run(t: Check) -> void:
 	var late = _game(t)
 	late.g.turn_elapsed = 11
 	late.g._turn_seen = late.g.turn_serial
-	late.no(1, "character", null, "Персонаж подчиняется общему окну чужих ответов")
+	late.ok(1, "character", null, "06.11: окна 10 с нет — персонажа можно повернуть и на 11-й секунде чужого хода")
 	var room = _game(t)
 	room._take(814)
 	room.g.room = 814

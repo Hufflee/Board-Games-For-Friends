@@ -7,6 +7,12 @@ const Treasures := preload("res://games/four_souls/logic/fs_treasure_cards.gd")
 const Active := preload("res://games/four_souls/logic/fs_active_cards.gd")
 const Monster20 := preload("res://games/four_souls/logic/fs_monster20_cards.gd")
 const Packet21 := preload("res://games/four_souls/logic/fs_packet21_cards.gd")
+const Packet22 := preload("res://games/four_souls/logic/fs_packet22_cards.gd")
+const Packet24 := preload("res://games/four_souls/logic/fs_packet24_cards.gd")
+const Packet25 := preload("res://games/four_souls/logic/fs_packet25_cards.gd")
+const Packet26 := preload("res://games/four_souls/logic/fs_packet26_cards.gd")
+const Packet27 := preload("res://games/four_souls/logic/fs_packet27_cards.gd")
+const Packet28 := preload("res://games/four_souls/logic/fs_packet28_cards.gd")
 const Treasure20 := preload("res://games/four_souls/logic/fs_treasure20_cards.gd")
 const Wildcard20 := preload("res://games/four_souls/logic/fs_wildcard20_cards.gd")
 const Monster19 := preload("res://games/four_souls/logic/fs_monster19_cards.gd")
@@ -29,6 +35,16 @@ const CANCEL_LOOT := [509, 510, 511, 573, 659, 660, 661]
 
 static func handles(effect: Dictionary) -> bool:
 	var id: int = int(effect.get("card", -1))
+	if id in Packet28.IDS:
+		return (effect.get("kind", "") == "event" and id in Packet28.EVENTS) or (effect.get("kind", "") == "item" and effect.has("automation_context"))
+	if id in Packet26.ITEMS or id in Packet27.ITEMS or id in [848, 882]:
+		return effect.get("kind", "") == "item"
+	if id in Packet25.ROOMS or id in Packet25.ITEMS:
+		return effect.get("kind", "") == "item" and (id in Packet25.ITEMS or effect.has("automation_context"))
+	if id in Packet24.BONUSES or id in Packet24.EVENTS or id in Packet24.ROOMS:
+		return effect.get("kind", "") == "event" or (effect.get("kind", "") == "item" and effect.has("automation_context"))
+	if id in Packet22.IDS:
+		return effect.get("kind", "") == "loot" or (effect.get("kind", "") == "item" and effect.has("automation_context"))
 	if id in Packet21.IDS:
 		return effect.get("kind", "") == "loot" or effect.get("kind", "") == "item"
 	if id in Wildcard20.IDS:
@@ -76,6 +92,18 @@ static func choose(name: String, targets: String, amount: int = 1, optional: boo
 	return {"op": name, "targets": targets, "amount": amount, "optional": optional}
 
 static func plan(id: int, context: String = "") -> Array:
+	if id in Packet28.IDS:
+		return Packet28.plan(id, context)
+	if id in Packet27.ITEMS and not context.begins_with("loot_cost26/"):
+		return Packet27.plan(id, context)
+	if id in Packet26.ITEMS or id in Packet27.ITEMS or id in [848, 882]:
+		return Packet26.plan(id, context)
+	if id in Packet25.ROOMS or id in Packet25.ITEMS:
+		return Packet25.plan(id, context)
+	if id in Packet24.BONUSES or id in Packet24.EVENTS or id in Packet24.ROOMS:
+		return Packet24.plan(id, context)
+	if id in Packet22.IDS:
+		return Packet22.plan(id, context)
 	if id in Packet21.IDS:
 		return Packet21.plan(id, context)
 	if id in Wildcard20.IDS:

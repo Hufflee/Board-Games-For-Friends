@@ -1,4 +1,4 @@
-extends "res://games/four_souls/logic/fs_copy21_automation.gd"
+extends "res://games/four_souls/logic/fs_declare28_automation.gd"
 ## Four Souls, модуль правил: Ручные операции панели эффекта (_effect).
 ## Часть цепочки fs_state → fs_stack → fs_combat → fs_turn → fs_effects → fs_rules (FSRules — фасад).
 ## Отдельно не используется: состояние и вызовы общие через self.
@@ -112,6 +112,7 @@ func _effect(a: Dictionary) -> bool:
 		"steal_soul":
 			var i: int = int(a.get("item",-1))
 			if i < 0 or i >= soul_cards[target].size() or target == int(resolving.owner): return false
+			if FSData.card(int(soul_cards[target][i].id)).get("kind", "") == "character": return false
 			var card: Dictionary = soul_cards[target].pop_at(i)
 			souls[target] = maxi(0, int(souls[target]) - int(card.value))
 			_gain_soul_card(int(resolving.owner), card, false)
@@ -147,7 +148,10 @@ func _effect(a: Dictionary) -> bool:
 		"roll":
 			var found := false
 			for i in range(stack.size()-1,-1,-1):
-				if stack[i].kind in ["roll","effect_roll"]: stack[i].value = clampi(int(stack[i].value)+amount,1,6); found = true; break
+				if stack[i].kind in ["roll","effect_roll"]:
+					stack[i].value = clampi(int(stack[i].value)+amount,1,6); found = true
+					_fx28({"kind": "roll", "seat": int(stack[i].owner), "amount": amount, "card": int(resolving.get("card", -1))})
+					break
 			if not found: return false
 		"cancel":
 			if stack.is_empty() or not stack.back().kind in ["loot","item","event","passive"]: return false
@@ -168,7 +172,9 @@ func _effect(a: Dictionary) -> bool:
 					found = true; break
 			if not found: return false
 		"prevent_death":
-			hp[target] = maxi(1, int(hp[target]))
+			# FAQ foursouls.net: здоровье возвращается к значению до смертельного урона (не меньше 1).
+			hp[target] = mini(int(max_hp[target]), maxi(1, maxi(int(hp[target]), int(_pre_lethal_hp.get(target, 1)))))
+			_pre_lethal_hp.erase(target)
 			dead[target] = false
 			if target == current and FSData.card(int(resolving.card)).get("key", "") == "holymantle":
 				resolving["end_turn_after"] = true
@@ -257,13 +263,13 @@ func _effect(a: Dictionary) -> bool:
 			_eternal_shop15.erase(int(shop[i]))
 			_shop_counters20.erase(int(shop[i]))
 			discards.treasure.append(int(shop[i]))
-			shop[i] = _draw("treasure")
+			shop[i] = _draw_shop_slot24()
 		"take_shop":
 			var i: int = int(a.get("item", -1))
 			if i < 0 or i >= shop.size() or int(shop[i]) < 0:
 				return false
 			var id: int = shop[i]
-			shop[i] = _draw("treasure")
+			shop[i] = _draw_shop_slot24()
 			_gain_item(target, id)
 			_note("%s забирает из магазина без покупки: %s" % [name_of(target), FSData.title(id)])
 		"discard_monster":

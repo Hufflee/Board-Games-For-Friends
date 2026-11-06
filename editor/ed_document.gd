@@ -260,7 +260,8 @@ func save() -> bool:
 	last_error = ""
 	return true
 
-func add_deck() -> String:
+## single = true — элемент «Карта»: одна карта без таблицы, с теми же шаблоном, цветом и размером.
+func add_deck(single: bool = false) -> String:
 	var copy := data.duplicate(true)
 	if copy.layout.get("screens", []).is_empty():
 		copy.layout["screens"] = [{"id": "main", "items": []}]
@@ -272,8 +273,19 @@ func add_deck() -> String:
 	while decks.any(func(deck: Dictionary): return deck.id == "deck_%d" % number):
 		number += 1
 	var id := "deck_%d" % number
-	decks.append({"id": id, "title": "Новая колода", "size": 3, "zone": "draw", "columns": [{"id": "title", "type": "text"}],
-		"rows": [{"title": "Новая карта", "copies": 1}]})
+	var deck := {"id": id, "title": "Новая колода", "size": 3, "zone": "draw", "columns": [{"id": "title", "type": "text"}],
+		"rows": [{"title": "Новая карта", "copies": 1}]}
+	if single:
+		deck.merge({"title": "Карта", "single": true, "zone": "table" if _has_zone(copy, "table") else "draw",
+			"columns": [{"id": "title", "type": "text"}, {"id": "text", "type": "text"}],
+			"rows": [{"title": "Карта", "text": "", "copies": 1}]}, true)
+	decks.append(deck)
 	copy.elements.decks = decks
-	replace(copy, "Добавить колоду")
+	replace(copy, "Добавить карту" if single else "Добавить колоду")
 	return id
+
+static func _has_zone(definition: Dictionary, zone_id: String) -> bool:
+	for item: Dictionary in definition.layout.screens[0].get("items", []):
+		if item.get("kind") == "zone" and item.get("id") == zone_id and item.get("owner", "shared") == "shared":
+			return true
+	return false

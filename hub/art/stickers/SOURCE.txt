@@ -1,0 +1,4 @@
+Стикеры хаба (06.11.2026), рисует tools/hub_stickers.py.
+fire, mind_blown, joy, skull, thumbs_up — глифы эмодзи шрифта Windows Segoe UI Emoji (Microsoft), с белой вырубкой.
+  Только для личной игры с друзьями; перед публикацией в Steam заменить на свои или на эмодзи с открытой лицензией (например, Twemoji CC-BY 4.0).
+neon_die, crown, gg, neon_star, pixel_heart, six_seven («6 7») — нарисованы кодом в этом проекте (свой арт).

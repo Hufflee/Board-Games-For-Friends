@@ -43,6 +43,8 @@ func _card_choices() -> Array:
 	if str(step.get("targets", "")) == "stairway_slots20":
 		var owner: int = int(resolving.owner)
 		for slot in range(-2, shop.size()):
+			if slot < 0 and _must_buy24():
+				continue
 			if (slot == -2 and (_item_count(owner, 473) <= 0 or discards.treasure.is_empty())) or (slot == -1 and decks.treasure.is_empty()) or (slot >= 0 and int(shop[slot]) < 0):
 				continue
 			if int(coins[owner]) >= _purchase_cost(owner, slot):

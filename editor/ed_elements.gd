@@ -8,7 +8,7 @@ func _init(doc: RefCounted) -> void:
 
 func add_column(deck_index: int, name_value: String, type: String) -> String:
 	var id := name_value.strip_edges()
-	if id.is_empty() or id.length() > 128 or id == "copies" or type not in ["text", "number", "bool", "image"]:
+	if id.is_empty() or id.length() > 128 or id == "copies" or type not in ["text", "number", "bool", "image", "color"]:
 		return "Введите имя свойства и допустимый тип. «copies» зарезервировано для копий."
 	if deck_index < 0 or deck_index >= document.data.elements.decks.size():
 		return "Колода не найдена."
@@ -21,7 +21,7 @@ func add_column(deck_index: int, name_value: String, type: String) -> String:
 	deck.columns = columns
 	for row: Dictionary in deck.rows:
 		if not row.has(id):
-			row[id] = 0 if type == "number" else (false if type == "bool" else "")
+			row[id] = 0 if type == "number" else (false if type == "bool" else ("#ffffff" if type == "color" else ""))
 	document.replace(copy, "Добавить свойство карты")
 	return ""
 
@@ -36,6 +36,7 @@ func remove_column(deck_index: int, index: int) -> bool:
 	deck.columns.remove_at(index)
 	for row: Dictionary in deck.rows:
 		row.erase(id)
+	_unbind_colors(deck, id)
 	for layer: Dictionary in deck.get("face", {}).get("layers", []):
 		if layer.get("field") == id:
 			layer["field"] = ""
@@ -77,7 +78,7 @@ func set_owner(deck_index: int, owner: String) -> bool:
 	return document.replace(copy, "Владелец колоды и начальная зона")
 
 func change_column_type(deck_index: int, column_index: int, type: String) -> String:
-	if type not in ["text", "number", "bool", "image"] or deck_index < 0 or deck_index >= document.data.elements.decks.size():
+	if type not in ["text", "number", "bool", "image", "color"] or deck_index < 0 or deck_index >= document.data.elements.decks.size():
 		return "Неверный тип или колода."
 	var copy: Dictionary = document.data.duplicate(true)
 	var deck: Dictionary = copy.elements.decks[deck_index]
@@ -107,13 +108,29 @@ func change_column_type(deck_index: int, column_index: int, type: String) -> Str
 			"image":
 				if not value is String or (not value.is_empty() and (not copy.get("assets", {}).has(value) or not str(copy.assets[value].get("path", "")).begins_with("assets/img/"))):
 					return "Строка %d: выберите импортированный рисунок." % (index + 1)
+			"color":
+				var text := str(value).strip_edges()
+				if text.is_empty():
+					text = "#ffffff"
+				if value is bool or not Color.html_is_valid(text):
+					return "Строка %d: «%s» — не цвет. Нужен код вида #ff8800." % [index + 1, str(value)]
+				value = text
 			"text":
 				value = "да" if value is bool and value else ("нет" if value is bool else str(value))
 		row[id] = value
 	deck.columns[column_index].type = type
+	if type != "color":
+		_unbind_colors(deck, id)
 	if type != "image":
 		for layer: Dictionary in deck.get("face", {}).get("layers", []):
 			if layer.get("kind") == "image" and layer.get("field") == id:
 				layer["field"] = ""
 	document.replace(copy, "Тип свойства карты")
 	return ""
+
+## Снять привязки цвета слоёв к колонке, которая перестала быть цветом.
+static func _unbind_colors(deck: Dictionary, id: String) -> void:
+	for layer: Dictionary in deck.get("face", {}).get("layers", []):
+		for key: String in ["color_field", "fill_field"]:
+			if layer.get(key) == id:
+				layer[key] = ""

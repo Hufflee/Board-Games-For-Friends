@@ -10,6 +10,7 @@ var circle: Control
 var seat_nodes: Dictionary = {}
 var phase_label: Label
 var nomination: Label
+var controls: VBoxContainer
 var event_label: Label
 var personal: PanelContainer
 var role_icon: TextureRect
@@ -31,6 +32,10 @@ var request_token := ""
 var request_indices: Array[int] = []
 var request_data: Array = []
 var selected_option := -1
+## Выбор игроков щелчком по плашкам: "" — обычный список, "one" — один игрок, "pair" — два (Гадалка).
+var pick_mode := ""
+var picked: Array[int] = []
+var request_summary: Label
 var messages: RichTextLabel
 var public_log: RichTextLabel
 var log_window: PanelContainer
@@ -86,6 +91,12 @@ func _ready() -> void:
 	title_row.add_child(solo)
 	nomination = Style.label("", Style.SMALL, Style.MUTED)
 	nomination.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	# Строка события всегда в две строки высотой: иначе 1↔2 строки от чужого действия меняли высоту площади
+	# и плашки мест подёргивались. Длиннее — многоточие, целиком в подсказке.
+	nomination.max_lines_visible = 2
+	nomination.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	nomination.custom_minimum_size.y = 2 * (Style.SMALL + 7)
+	nomination.mouse_filter = MOUSE_FILTER_PASS
 	square.add_child(nomination)
 	circle = Control.new()
 	circle.name = "TownCircle"
@@ -97,7 +108,7 @@ func _ready() -> void:
 	event_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	circle.add_child(event_label)
 	event_label.set_anchors_and_offsets_preset(PRESET_CENTER)
-	var controls := VBoxContainer.new()
+	controls = VBoxContainer.new()
 	controls.add_theme_constant_override("separation", 8)
 	square.add_child(controls)
 	var choose := HBoxContainer.new()
@@ -203,8 +214,14 @@ func _ready() -> void:
 	request_options.size_flags_vertical = SIZE_EXPAND_FILL
 	request_options.item_selected.connect(func(index: int):
 		selected_option = request_indices[index]
-		request_confirm.disabled = false)
+		picked.clear()
+		_paint_picks()
+		request_confirm.disabled = _choice_sent)
 	request_panel.add_child(request_options)
+	request_summary = Style.label("", Style.SMALL)
+	request_summary.name = "ChoiceSummary"
+	request_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	request_panel.add_child(request_summary)
 	request_confirm = Style.button("Подтвердить", Style.SMALL)
 	request_confirm.name = "ConfirmChoice"
 	request_confirm.pressed.connect(_confirm_choice)
@@ -288,6 +305,7 @@ func update_view(next: Dictionary) -> void:
 		text = "На плахе: %s · %d голосов" % [_person(int(view.leader)), int(view.high_vote)]
 	if phase == "game_over": text = "Победило %s" % ("добро" if view.get("winner") == "good" else "зло")
 	nomination.text = text
+	nomination.tooltip_text = text
 	event_label.text = str(view.get("event", {}).get("text", ""))
 	_ensure_seats(people)
 	# Роли рядом с никами: рассказчику — всегда (его гримуар), всем — после конца партии.
@@ -310,15 +328,19 @@ func update_view(next: Dictionary) -> void:
 		# полное пояснение — в подсказке. «Мёртв» без пометки — последний голос уже потрачен.
 		var vote: bool = bool(entry.alive) or bool(entry.dead_vote)
 		refs.state.text = "Жив" if entry.alive else ("Мёртв · голос" if vote else "Мёртв")
-		refs.hand.visible = bool(entry.hand)
+		# Значки не прячем, а делаем прозрачными: их глифы выше строки ника, и появление «↑»/«…»
+		# от чужого действия меняло высоту плашки — она подпрыгивала на площади.
+		refs.hand.modulate.a = 1.0 if bool(entry.hand) else 0.0
 		# «…» — участник последнего дневного шёпота (виден факт разговора, не текст).
 		var whispering: bool = view.get("last_whisper", []).has(seat)
-		refs.whisper.visible = whispering
+		refs.whisper.modulate.a = 1.0 if whispering else 0.0
 		refs.panel.tooltip_text = "%s\n%s%s%s" % [refs.name_label.text.replace("\n", " "),
 			"Жив" if entry.alive else ("Мёртв, остался последний голос" if vote else "Мёртв, голоса больше нет"),
 			"\nРука поднята" if entry.hand else "", "\nСейчас шепчется" if whispering else ""]
 		refs.panel.modulate = Color.WHITE if entry.alive else Color(0.7, 0.74, 0.8)
 		refs.panel.add_theme_stylebox_override("panel", Style.box(Style.ACCENT if seat == nominee else Style.PANEL))
+	_sync_evil_votes(phase)
+	_fit_nicks(role_of)
 	_place_seats.call_deferred()
 	solo.visible = bool(view.get("hotseat", false))
 	if solo.item_count != people.size() + 1:
@@ -359,6 +381,8 @@ func update_view(next: Dictionary) -> void:
 		selected_option = -1
 		request_search.text = ""
 		request_data = request.get("options", []).duplicate(true)
+		picked.clear()
+		pick_mode = _pick_mode()
 		request_title.text = str(request.get("title", ""))
 		request_hint.text = str(request.get("hint", ""))
 		request_hint.visible = not request_hint.text.is_empty()
@@ -368,6 +392,7 @@ func update_view(next: Dictionary) -> void:
 	messages.visible = token.is_empty()
 	messages.size_flags_vertical = SIZE_EXPAND_FILL if token.is_empty() else SIZE_FILL
 	request_confirm.disabled = selected_option < 0 or _choice_sent
+	_paint_picks()
 	_update_texts()
 	var day := phase in ["discussion", "nominations"]
 	var alive := me >= 0 and bool(people[me].alive)
@@ -405,6 +430,7 @@ func update_view(next: Dictionary) -> void:
 	if not view.has("grimoire") and not view.get("knowledge", {}).has("grimoire"):
 		grimoire_text.text = ""
 	private_text.editable = me >= 0 and phase != "game_over"
+	_hold_controls_height.call_deferred()
 
 func _ensure_seats(people: Array) -> void:
 	if not seat_nodes.is_empty(): return
@@ -422,6 +448,11 @@ func _ensure_seats(people: Array) -> void:
 		var row := HBoxContainer.new()
 		row.mouse_filter = MOUSE_FILTER_IGNORE
 		col.add_child(row)
+		# Голоса приспешников за эту жертву: квадратики цвета голосующих (видит только зло, ночью).
+		var votes := HBoxContainer.new()
+		votes.name = "EvilVotes"
+		votes.add_theme_constant_override("separation", 2)
+		votes.mouse_filter = MOUSE_FILTER_IGNORE
 		var dot := ColorRect.new()
 		dot.color = Net.color_of(int(people[i].color))
 		dot.custom_minimum_size = Vector2(8, 8)
@@ -434,12 +465,18 @@ func _ensure_seats(people: Array) -> void:
 		nick.clip_text = true
 		nick.mouse_filter = MOUSE_FILTER_IGNORE
 		row.add_child(nick)
+		row.add_child(votes)
+		# Распорка: квадратики голосов стоят сразу за ником, значки «…»/«↑» — у правого края.
+		var gap := Control.new()
+		gap.size_flags_horizontal = SIZE_EXPAND_FILL
+		gap.mouse_filter = MOUSE_FILTER_IGNORE
+		row.add_child(gap)
 		var whisper := Style.label("…", Style.SMALL, Style.MUTED)
-		whisper.visible = false
+		whisper.modulate.a = 0.0
 		whisper.mouse_filter = MOUSE_FILTER_IGNORE
 		row.add_child(whisper)
 		var hand := Style.label("↑", Style.SMALL)
-		hand.visible = false
+		hand.modulate.a = 0.0
 		hand.mouse_filter = MOUSE_FILTER_IGNORE
 		row.add_child(hand)
 		var state := Style.label("", Style.SMALL, Style.MUTED)
@@ -447,10 +484,16 @@ func _ensure_seats(people: Array) -> void:
 		col.add_child(state)
 		panel.gui_input.connect(func(event: InputEvent):
 			if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
-				for j in target.item_count:
-					if target.get_item_id(j) == i: target.select(j))
-		seat_nodes[i] = {"panel": panel, "name_label": nick, "state": state, "hand": hand, "whisper": whisper}
+				_seat_clicked(i))
+		seat_nodes[i] = {"panel": panel, "name_label": nick, "state": state, "hand": hand, "whisper": whisper, "votes": votes}
 	_place_seats()
+
+## Панель кнопок под площадью только растёт: кнопки появляются и прячутся от каждого действия,
+## и без этого высота площади (а с ней плашки мест) менялась от чужих номинаций и рук.
+func _hold_controls_height() -> void:
+	var need := controls.get_combined_minimum_size().y
+	if need > controls.custom_minimum_size.y:
+		controls.custom_minimum_size.y = need
 
 func _place_seats() -> void:
 	var count := seat_nodes.size()
@@ -548,11 +591,137 @@ func _filter_choices() -> void:
 	for i in request_data.size():
 		var option: Variant = request_data[i]
 		var text := str(option.get("label", option.get("text", "Вариант %d" % (i + 1)))) if option is Dictionary else str(option)
+		# Игроков выбирают щелчком по плашке на площади; в списке остаются особые варианты («Не использовать»).
+		if pick_mode == "pair" or (pick_mode == "one" and int(option.get("target", -1)) >= 0): continue
 		if not request_search.text.is_empty() and not text.to_lower().contains(request_search.text.to_lower()): continue
 		request_indices.append(i)
 		request_options.add_item(text)
 		request_options.set_item_tooltip(request_options.item_count - 1, text)
 	request_confirm.disabled = true
+	request_options.visible = request_options.item_count > 0
+	request_search.visible = pick_mode.is_empty() and request_data.size() > 8
+	_paint_picks()
+
+## Как выбирать в текущем запросе: все игроки по одному — "one", пары игроков — "pair", иначе список.
+func _pick_mode() -> String:
+	var players := 0
+	var pairs := 0
+	for option: Variant in request_data:
+		if not option is Dictionary: return ""
+		if option.get("targets") is Array and option.targets.size() == 2: pairs += 1
+		elif int(option.get("target", -1)) >= 0: players += 1
+	if pairs > 0 and pairs == request_data.size(): return "pair"
+	if players > 0 and pairs == 0: return "one"
+	return ""
+
+## Номер варианта запроса для выбранных плашек (пара — без учёта порядка), -1 — нет такого.
+func _option_for(seats: Array[int]) -> int:
+	for i in request_data.size():
+		var option: Variant = request_data[i]
+		if not option is Dictionary: continue
+		if seats.size() == 1 and int(option.get("target", -2)) == seats[0]: return i
+		if seats.size() == 2 and option.get("targets") is Array and option.targets.size() == 2:
+			var pair: Array = option.targets
+			if (int(pair[0]) == seats[0] and int(pair[1]) == seats[1]) or (int(pair[0]) == seats[1] and int(pair[1]) == seats[0]): return i
+	return -1
+
+## Щелчок по плашке: сначала — выбор в личном запросе, иначе — цель публичного действия и собеседник шёпота.
+func _seat_clicked(seat: int) -> void:
+	if not pick_mode.is_empty() and not request_token.is_empty() and not _choice_sent:
+		if picked.has(seat):
+			picked.erase(seat)
+		elif pick_mode == "one" or picked.size() >= 2:
+			if pick_mode == "pair": picked.pop_front()
+			else: picked.clear()
+			picked.append(seat)
+		else:
+			picked.append(seat)
+		var need := 2 if pick_mode == "pair" else 1
+		var index := _option_for(picked) if picked.size() == need else -1
+		# Недопустимую цель (не из вариантов запроса) не выделяем.
+		if pick_mode == "one" and index < 0: picked.clear()
+		selected_option = index
+		request_options.deselect_all()
+		request_confirm.disabled = selected_option < 0 or _choice_sent
+		_paint_picks()
+		Sfx.play("click", -8)
+		return
+	for menu: OptionButton in [target, receiver]:
+		if not menu.visible and menu == target: continue
+		for j in menu.item_count:
+			if menu.get_item_id(j) == seat:
+				menu.select(j)
+	_paint_picks()
+
+## Подсветка выбранных плашек и строка «вы выбрали …» над «Подтвердить».
+func _paint_picks() -> void:
+	var marked: Array[int] = picked.duplicate()
+	if pick_mode.is_empty() and target.visible and target.selected >= 0:
+		marked = [target.get_selected_id()]
+	for seat: int in seat_nodes:
+		var refs: Dictionary = seat_nodes[seat]
+		var on := marked.has(seat)
+		var box := Style.box(Style.ACCENT if seat == int(view.get("nominee", -1)) else Style.PANEL)
+		if on:
+			box.set_border_width_all(3)
+			box.border_color = Style.GOOD
+		refs.panel.add_theme_stylebox_override("panel", box)
+	if request_summary == null: return
+	var names: Array[String] = []
+	for seat: int in picked: names.append(_person(seat))
+	if pick_mode == "pair":
+		request_summary.text = ("Вы выбрали %s для проверки." % " и ".join(names)) if picked.size() == 2 else (
+			"Щёлкните по плашкам двух игроков на площади." if picked.is_empty() else "Выбран %s — щёлкните по второму игроку." % names[0])
+		if picked.size() == 2 and selected_option < 0: request_summary.text = "Такую пару выбрать нельзя — выберите других игроков."
+	elif pick_mode == "one":
+		request_summary.text = ("Вы выбрали: %s." % names[0]) if not picked.is_empty() else (
+			"Щёлкните по плашке игрока на площади." if request_options.item_count == 0 else "Щёлкните по плашке игрока на площади или выберите вариант в списке.")
+	request_summary.visible = not pick_mode.is_empty() and not request_token.is_empty()
+
+## Ник занимает ровно ширину текста (но не больше места в плашке), чтобы квадратики голосов
+## стояли прямо за ним и плашка не расширялась. С ролью в скобках — прежний перенос на всю ширину.
+func _fit_nicks(role_of: Dictionary) -> void:
+	for seat: int in seat_nodes:
+		var refs: Dictionary = seat_nodes[seat]
+		var nick: Label = refs.name_label
+		if role_of.has(seat):
+			nick.size_flags_horizontal = SIZE_EXPAND_FILL
+			nick.custom_minimum_size.x = 80
+			continue
+		var font := nick.get_theme_font("font")
+		var width := font.get_string_size(nick.text, HORIZONTAL_ALIGNMENT_LEFT, -1, nick.get_theme_font_size("font_size")).x + 2
+		var room := 80.0 - 11.0 * (refs.votes as HBoxContainer).get_child_count()
+		nick.size_flags_horizontal = SIZE_FILL
+		nick.custom_minimum_size.x = clampf(width, 24.0, maxf(24.0, room))
+
+## Голоса приспешников квадратиками их цвета у ника жертвы (только у зла и только ночью).
+func _sync_evil_votes(phase: String) -> void:
+	var by_target: Dictionary = {}
+	if phase == "night":
+		for vote: Dictionary in view.get("evil_votes", []):
+			var list: Array = by_target.get(int(vote.target), [])
+			list.append(int(vote.from))
+			by_target[int(vote.target)] = list
+	var people: Array = view.get("players", [])
+	for seat: int in seat_nodes:
+		var box: HBoxContainer = seat_nodes[seat].votes
+		var voters: Array = by_target.get(seat, [])
+		var key := str(voters)
+		if str(box.get_meta("voters", "[]")) == key: continue
+		box.set_meta("voters", key)
+		for child: Node in box.get_children():
+			box.remove_child(child)
+			child.queue_free()
+		for voter: int in voters:
+			var square := ColorRect.new()
+			square.custom_minimum_size = Vector2(9, 9)
+			square.size_flags_vertical = SIZE_SHRINK_CENTER
+			square.mouse_filter = MOUSE_FILTER_IGNORE
+			square.color = Net.color_of(int(people[voter].color)) if voter < people.size() else Style.EVIL
+			box.add_child(square)
+		var names: Array[String] = []
+		for voter: int in voters: names.append(_person(voter))
+		box.tooltip_text = "" if voters.is_empty() else "Голос приспешников: %s" % ", ".join(names)
 
 func _confirm_choice() -> void:
 	if selected_option < 0 or _choice_sent: return

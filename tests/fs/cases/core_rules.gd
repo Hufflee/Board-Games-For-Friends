@@ -19,7 +19,7 @@ const CASES := [
 	 "do": [["ok", 0, "end"], ["close"], ["expect", "phase", "discard"], ["expect", "_discard_limit", 2],
 		["ok", 0, "discard", {"card": 478}], ["expect", "current", 1], ["ok", 1, "end"], ["close"]],
 	 "expect": {"current": 0, "hand_size.0": 4}},
-	{"name": "Лечение после подтверждённой смерти: штрафа нет, бой снят (решение coal 26.10)", "card": 824,
+	{"name": "Ручное лечение после подтверждённой смерти: штрафа нет, бой снят (решение coal 26.10)", "card": 824, "legacy_manual_rewards": true,
 	 "setup": {"current": 0, "character": {1: 823}, "monsters": {0: [344, {"dc": 5}]}, "hp": {0: 1}, "hand": {0: [478]}},
 	 "do": [["roll", 1], ["ok", 0, "attack", {"slot": 0}], ["ok", 0, "roll"], ["close"], ["expect", "phase", "death"],
 		["ok", 1, "activate", {"item": 0}], ["ok", 0, "death", {"loot": 478, "item": -1}], ["expect", "phase", "effect"],

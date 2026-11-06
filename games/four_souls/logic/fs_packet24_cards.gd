@@ -1,0 +1,31 @@
+extends RefCounted
+## Группа24: события, бонусные души и комнаты.
+const BONUSES := [692, 693, 694, 695, 696]
+const EVENTS := [707, 708, 745, 746, 747, 748, 749, 750, 751, 752, 753]
+const ROOMS := [754, 755, 756, 757, 758, 759, 760, 761, 762, 763, 765, 767, 768, 773, 774, 775]
+static func plan(id: int, context: String) -> Array:
+	match id:
+		692, 693, 696: return [{"op": "bonus_active24"}]
+		694, 695: return [{"op": "bonus_seat24", "targets": "bonus_seats24"}]
+		707, 708, 749: return [{"op": "attach_curse", "targets": "players"}]
+		745: return [{"op": "flush_monsters24"}, {"op": "expand_monsters"}, {"op": "extra_attack"}]
+		746: return [{"op": "rotate_players24"}]
+		747: return [{"op": "coins", "amount": 2}, {"op": "auto_roll"}, {"op": "skull_result24"}] if context == "control24" else [{"op": "skull_item24"}]
+		748: return [{"op": "vote_prepare24"}]
+		750: return [{"op": "crash_table24"}]
+		751: return [{"op": "guardian_prepare24"}]
+		752: return [{"op": "token_prepare24"}]
+		753: return [{"op": "vote_prepare24"}]
+		755: return [{"op": "peek_deck", "deck": "treasure", "amount": 5}, {"op": "room_guppy24", "targets": "room_guppy24", "optional": true}, {"op": "room_bottom24"}]
+		757: return [{"op": "room_hit24", "targets": "room_hit24"}, {"op": "room_cancel24", "targets": "room_cancel24", "optional": true}]
+		759: return [{"op": "take_shop", "targets": "shop_items"}]
+		760: return [{"op": "coins", "amount": 3}]
+		761: return [{"op": "room_clear24", "targets": "room_clear24"}]
+		762: return [{"op": "auto_roll"}, {"op": "room_fortune24"}]
+		763: return [{"op": "room_cancel24", "targets": "room_cancel24", "optional": true}]
+		767: return [{"op": "peek_deck", "targets": "room_peek24", "deck": "monster", "amount": 3, "optional": true}, {"op": "order_peek"}, {"op": "room_attack_choice24", "targets": "room_attack_choice24"}]
+		768: return [{"op": "room_reroll24", "targets": "room_reroll24", "optional": true}]
+		773: return [{"op": "reroll_item", "targets": "room_owned24", "optional": true}]
+		775:
+			return [{"op": "room_bomb_cost24", "targets": "own_hand"}] if context == "room_cost24" else [{"op": "auto_roll"}, {"op": "room_bomb_result24"}]
+	return []

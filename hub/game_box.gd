@@ -7,6 +7,7 @@ extends Node3D
 ## Наведение — выезжает и светится; выбор — плавно летит к камере лицом к игроку.
 
 const COVERS := "res://hub/covers/"
+const StickerArt := preload("res://hub/stickers.gd")
 const META := "res://hub/covers/meta.cfg"
 const SOFT := preload("res://hub/soft_box.gdshader")
 const EDGE_RADIUS := 0.003
@@ -26,6 +27,7 @@ var _glow_mats: Array = []  # [материал, «пик» свечения п�
 ## Тёмные торцы, которые на полке теряются, — чуть светлее (множитель к картинке).
 const SPINE_BOOST := {"hues_and_cues": 1.35}
 
+var _sticker_count := -1  # сколько стикеров было на обложке (-1 — ещё не показывали)
 var _face_mats: Array = []  # материалы картинок — показываются без света комнаты, когда игра в руках
 var _swap_halo: Node3D
 var _halo: MeshInstance3D
@@ -76,12 +78,153 @@ func set_variant(g: Dictionary) -> void:
 	game = g
 	color = g.get("color", color)
 	for ch in get_children():
-		if not ch is StaticBody3D:
+		if not ch is StaticBody3D and ch.name != "Stickers":  # наклейки игрока остаются и на другой версии
 			remove_child(ch)
 			ch.queue_free()
 	_glow_mats.clear()
 	_build_box()
 	_set_glow(_glow)
+
+
+## Стикеры игрока на обложке (+X): [[id, u, v, поворот], ...] — hub/stickers.gd.
+## Стороны коробки для стикеров: нормаль, «вправо» и «вверх» картинки (правая тройка: вправо × вверх = нормаль).
+## 0 — обложка (+X), 1 — оборот, 2 — корешок (+Z), 3 — второй торец, 4 — верх, 5 — низ.
+const FACES := [
+	[Vector3.RIGHT, Vector3.FORWARD, Vector3.UP],
+	[Vector3.LEFT, Vector3.BACK, Vector3.UP],
+	[Vector3.BACK, Vector3.RIGHT, Vector3.UP],
+	[Vector3.FORWARD, Vector3.LEFT, Vector3.UP],
+	[Vector3.UP, Vector3.FORWARD, Vector3.LEFT],
+	[Vector3.DOWN, Vector3.FORWARD, Vector3.RIGHT],
+]
+
+
+## Ширина и высота стороны (вдоль «вправо» и «вверх»), м.
+func face_size(face: int) -> Vector2:
+	var axes: Array = FACES[face]
+	return Vector2(absf((axes[1] as Vector3).dot(size)), absf((axes[2] as Vector3).dot(size)))
+
+
+## Точка стороны по долям (u, v от левого верхнего угла) в координатах коробки; lift — над поверхностью.
+func face_point(face: int, uv: Vector2, lift: float = 0.0) -> Vector3:
+	var axes: Array = FACES[face]
+	var n: Vector3 = axes[0]
+	var dims := face_size(face)
+	return n * (absf(n.dot(size)) / 2.0 + lift) + (axes[1] as Vector3) * (uv.x - 0.5) * dims.x + (axes[2] as Vector3) * (0.5 - uv.y) * dims.y
+
+
+## Положение квада стикера (поворот r вокруг нормали стороны) в координатах коробки.
+func sticker_transform(face: int, uv: Vector2, r: float, lift: float) -> Transform3D:
+	var axes: Array = FACES[face]
+	return Transform3D(Basis(axes[1], axes[2], axes[0]) * Basis(Vector3.BACK, r), face_point(face, uv, lift))
+
+
+## Сторона и доли под лучом камеры. face = -1 — мимо коробки.
+## only_face >= 0 — пересечение только с плоскостью этой стороны (перетаскивание, без проверки краёв).
+func face_hit(origin_global: Vector3, dir_global: Vector3, only_face: int = -1) -> Dictionary:
+	var inverse := global_transform.affine_inverse()
+	var o: Vector3 = inverse * origin_global
+	var d: Vector3 = (inverse.basis * dir_global).normalized()
+	var half := size / 2.0
+	if only_face >= 0:
+		var n: Vector3 = FACES[only_face][0]
+		var denom := n.dot(d)
+		if absf(denom) < 0.00001:
+			return {"face": -1}
+		var t := (absf(n.dot(size)) / 2.0 - n.dot(o)) / denom
+		return {"face": only_face, "uv": _face_uv(only_face, o + d * t)}
+	var t_near := -INF
+	var t_far := INF
+	var enter_axis := -1
+	for axis in 3:
+		if absf(d[axis]) < 0.00001:
+			if absf(o[axis]) > half[axis]:
+				return {"face": -1}
+			continue
+		var t1 := (-half[axis] - o[axis]) / d[axis]
+		var t2 := (half[axis] - o[axis]) / d[axis]
+		if t1 > t2:
+			var swap := t1
+			t1 = t2
+			t2 = swap
+		if t1 > t_near:
+			t_near = t1
+			enter_axis = axis
+		t_far = minf(t_far, t2)
+	if enter_axis < 0 or t_near > t_far or t_far < 0.0:
+		return {"face": -1}
+	var p := o + d * t_near
+	var normal := Vector3.ZERO
+	normal[enter_axis] = signf(p[enter_axis])
+	for face in FACES.size():
+		if (FACES[face][0] as Vector3).is_equal_approx(normal):
+			return {"face": face, "uv": _face_uv(face, p).clamp(Vector2.ZERO, Vector2.ONE)}
+	return {"face": -1}
+
+
+func _face_uv(face: int, p: Vector3) -> Vector2:
+	var axes: Array = FACES[face]
+	var dims := face_size(face)
+	return Vector2(p.dot(axes[1]) / dims.x + 0.5, 0.5 - p.dot(axes[2]) / dims.y)
+
+
+## Сторона стикера размера 1 на этой коробке (м).
+func sticker_side() -> float:
+	return minf(size.y, size.z) * 0.3
+
+
+## Стикеры игрока на любой стороне: [[id, u, v, поворот, размер, сторона], ...] — hub/stickers.gd.
+## Стаканчики «Перудо» и заглушки не обклеиваются.
+func set_stickers(list: Array) -> void:
+	var holder := get_node_or_null("Stickers") as Node3D
+	if is_cups() or is_soon():
+		list = []
+	if holder != null and holder.get_meta("list", []) == list:
+		return
+	# Новые (дописанные в конец) стикеры шлёпаются с анимацией; при первом показе — без неё.
+	var old_count: int = (holder.get_meta("list", []) as Array).size() if holder != null else maxi(_sticker_count, 0)
+	var animate_from := old_count if _sticker_count >= 0 else list.size()
+	_sticker_count = list.size()
+	if holder != null:
+		remove_child(holder)
+		holder.free()
+	if list.is_empty():
+		return
+	holder = Node3D.new()
+	holder.name = "Stickers"
+	holder.set_meta("list", list.duplicate(true))
+	add_child(holder)
+	var side := sticker_side()
+	for i in list.size():
+		var entry: Array = list[i]
+		var k := float(entry[4]) if entry.size() > 4 else 1.0
+		var face: int = int(entry[5]) if entry.size() > 5 else 0
+		var at := sticker_transform(face, Vector2(float(entry[1]), float(entry[2])), float(entry[3]), 0.0016 + i * 0.0003)
+		# Всё, что торчит за край стороны, не рисуется: режем по двум осям стороны, по нормали — нет.
+		var normal_axis: Vector3 = (FACES[face][0] as Vector3).abs()
+		var clip := size / 2.0 * (Vector3.ONE - normal_axis) + normal_axis * 1000.0
+		var quad := StickerArt.make_quad(str(entry[0]), side * k, at, clip)
+		if quad == null:
+			continue
+		holder.add_child(quad)
+		if i >= animate_from:
+			StickerArt.slap(quad, FACES[face][0])
+
+
+## Поворот вылетевшей коробки в режиме стикеров (вокруг вертикали и горизонтали экрана), центр на месте.
+var _focus_target := Transform3D.IDENTITY
+var view_spin := Vector2.ZERO  # x — вокруг вертикали экрана, y — наклон к игроку
+
+
+func spin_ready() -> bool:
+	return focused and (_tween == null or not _tween.is_running())
+
+
+func set_view_spin(spin: Vector2) -> void:
+	view_spin = Vector2(wrapf(spin.x, -PI, PI), clampf(spin.y, -PI / 2.0, PI / 2.0))
+	var base := _focus_target.basis
+	var turn := Basis(base.z.normalized(), view_spin.y) * Basis(base.y.normalized(), view_spin.x)
+	transform = Transform3D(turn * base, _focus_target.origin)
 
 
 func is_cups() -> bool:
@@ -662,6 +805,8 @@ func stop_shelf_motion() -> void:
 
 ## Вылететь к игроку: target — куда, лицом к камере.
 func fly_to(target: Transform3D) -> void:
+	_focus_target = target
+	view_spin = Vector2.ZERO
 	focused = true
 	hovered = false
 	if _tween:

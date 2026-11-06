@@ -22,7 +22,7 @@ func _card_choices() -> Array:
 				var entry: Dictionary = items[seat][index]
 				if bool(entry.eternal):
 					continue
-				if category in ["copy_items14", "tap_items14", "other_destroy14"] and is_same(entry, resolving.source):
+				if category in ["copy_items14", "tap_items14", "other_destroy14"] and is_same(entry, resolving.get("source", {})):
 					continue
 				if category == "tap_items14" and not (_item_kind20(entry) == "tap" if int(entry.id) == 1 else _tap_item14(int(entry.id))):
 					continue
@@ -143,7 +143,7 @@ func _apply_card_step(step: Dictionary) -> void:
 				for index in shop.size():
 					if int(shop[index]) >= 0:
 						decks.treasure.push_front(int(shop[index]))
-						shop[index] = _draw("treasure")
+						shop[index] = _draw_shop_slot24()
 			else:
 				for slot in range(monsters.size() - 1, -1, -1):
 					if slot != battle:

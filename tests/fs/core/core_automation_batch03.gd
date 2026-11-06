@@ -7,7 +7,7 @@ const Cards := preload("res://games/four_souls/logic/fs_card_automation.gd")
 func _game(t: Check, id: int) -> RefCounted:
 	var s := Scenario.new(t).players(3).dlc().current(0).character(0, 821).character(1, 821).character(2, 908) \
 		.no_items(0).no_items(1).no_items(2).hand(0, [id]).hand(1, [477, 478]).hand(2, []) \
-		.item(1, 40, {"tapped": true}).coins(0, 3).coins(1, 6).monster(0, 423).monster(1, 427).build()
+		.item(1, 40, {"tapped": true}).coins(0, 3).coins(1, 6).monster(0, 423).monster(1, 427).room(-1).build()
 	s.g.bonuses.clear()
 	return s
 

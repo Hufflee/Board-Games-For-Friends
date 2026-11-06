@@ -51,7 +51,7 @@ func _run() -> void:
 		app._render()
 		await frames(6)
 		var original := JSON.stringify(app.document.data)
-		await click(button("Редактор лица карты"))
+		await click(button("Рамки и слои карты"))
 		check(app._face_edit and JSON.stringify(app.document.data) == original, "Просмотр редактора не меняет прежний шаблон")
 		await click(button("Создать слои из текущего вида"))
 		check(app.document.data.elements.decks[0].face.layers.size() == 2 and app.document.issues().errors.is_empty(), "Явная конверсия создала фон и привязку числа")

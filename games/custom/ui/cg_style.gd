@@ -167,6 +167,19 @@ class TokenFace extends Control:
 		var font_size := 32 if CGStyle.HEAD.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 32).x < size.x * 0.8 else 16
 		draw_string(CGStyle.HEAD, Vector2(0, center.y + font_size * 0.35), label, HORIZONTAL_ALIGNMENT_CENTER, size.x, font_size, Color("30263f"))
 
+## Внешний вид кости PerudoDie по набору из «Элементы → Кубики». reader — cg_assets (картинки граней), может быть null.
+## tint — цвет игрока/команды для набора с color = "player"/"team" (прозрачный — обычная кость).
+static func style_die(die: Control, look: Dictionary, reader: RefCounted, tint: Color = Color.TRANSPARENT) -> void:
+	var by_owner: bool = look.get("color") in ["player", "team"]
+	die.color = tint if by_owner and tint.a > 0.0 else Color.from_string(str(look.get("color", "#f3ead2")) if not by_owner else "#f3ead2", Color("f3ead2"))
+	die.pip_color = Color.from_string(str(look.get("pips", "")), Color.TRANSPARENT) if look.has("pips") else Color.TRANSPARENT
+	die.number_faces = look.get("faces", "dots") == "numbers"
+	var textures: Array = []
+	if look.get("faces", "dots") == "images" and reader != null:
+		for hash_value: Variant in look.get("images", []):
+			textures.append(reader.image(str(hash_value)) if not str(hash_value).is_empty() else null)
+	die.face_textures = textures
+
 class CardFace extends Control:
 	var data: Dictionary
 	var art_texture: Texture2D
@@ -198,14 +211,16 @@ class CardFace extends Control:
 			_art.position = Vector2(8, 32)
 			_art.size = Vector2(maxf(1, size.x - 16), maxf(1, size.y - 48))
 	func _draw() -> void:
-		var paper := Color("ded7c8")
+		var paper := Color.from_string(str(data.get("paper", "#ded7c8")), Color("ded7c8"))
 		draw_style_box(CGStyle.box(paper, 0), Rect2(Vector2.ZERO, size))
 		if data.has("layers"):
 			return
+		# На тёмной бумаге — светлые надписи, иначе текст пропадает.
+		var ink := Color("f3ecdc") if paper.get_luminance() < 0.45 else Color("30263f")
 		var title := CGStyle.value_text(data.get("title", data.get("name", data.get("rank", "Карта"))))
 		var number := CGStyle.value_text(data.get("rank", data.get("value", "")))
-		draw_string(custom_font if custom_font != null else CGStyle.BODY, Vector2(10, 24), title, HORIZONTAL_ALIGNMENT_LEFT, size.x - 20, 16, Color("30263f"))
-		draw_string(custom_font if custom_font != null else CGStyle.HEAD, Vector2(0, size.y * 0.58), number, HORIZONTAL_ALIGNMENT_CENTER, size.x, 32, Color("30263f"))
+		draw_string(custom_font if custom_font != null else CGStyle.BODY, Vector2(10, 24), title, HORIZONTAL_ALIGNMENT_LEFT, size.x - 20, 16, ink)
+		draw_string(custom_font if custom_font != null else CGStyle.HEAD, Vector2(0, size.y * 0.58), number, HORIZONTAL_ALIGNMENT_CENTER, size.x, 32, ink)
 		var text := str(data.get("text", ""))
 		if not text.is_empty():
-			draw_multiline_string(CGStyle.BODY, Vector2(10, size.y * 0.72), text, HORIZONTAL_ALIGNMENT_LEFT, size.x - 20, 16, 3, Color("30263f"))
+			draw_multiline_string(CGStyle.BODY, Vector2(10, size.y * 0.72), text, HORIZONTAL_ALIGNMENT_LEFT, size.x - 20, 16, 3, ink)

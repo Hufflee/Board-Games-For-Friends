@@ -19,7 +19,7 @@ func _advance_card_automation() -> void:
 		return
 	_automation_running = true
 	if not resolving.has("automation_steps"):
-		resolving["automation_steps"] = CardAutomation.plan(int(resolving.card), str(resolving.get("automation_context", "")))
+		resolving["automation_steps"] = _automation_plan22(resolving)
 		resolving["automation_step"] = 0
 	var original: Dictionary = resolving
 	while phase == "effect" and is_same(original, resolving):
@@ -113,7 +113,9 @@ func _card_choices() -> Array:
 				if seat == owner:
 					continue
 				for i in soul_cards[seat].size():
-					out.append({"label": name_of(seat) + " · " + FSData.title(int(soul_cards[seat][i].id)), "arg": {"op": op, "target": seat, "item": i}})
+					var card: int = int(soul_cards[seat][i].id)
+					if FSData.card(card).get("kind", "") != "character":
+						out.append({"label": name_of(seat) + " · " + FSData.title(card), "arg": {"op": op, "target": seat, "item": i}})
 		"rolls", "roll_modifiers":
 			for i in stack.size():
 				if stack[i].kind not in ["roll", "effect_roll"]:
@@ -128,7 +130,7 @@ func _card_choices() -> Array:
 					out.append({"label": FSData.title(int(monsters[slot].id)), "arg": {"op": "monster_temporary_attack", "item": slot, "amount": amount}})
 		"own_hand":
 			for i in hands[owner].size():
-				out.append({"label": FSData.title(int(hands[owner][i])), "arg": {"op": "discard_loot", "item": i}})
+				out.append({"label": FSData.title(int(hands[owner][i])), "arg": {"op": op, "item": i}})
 	if bool(step.get("optional", false)):
 		out.append({"label": "Пропустить", "arg": {"op": "skip_choice"}})
 	if op == "read_peek":
@@ -162,13 +164,19 @@ func _choose_card_effect(index: int) -> bool:
 	else:
 		resolving.automation_step = int(resolving.automation_step) + 1
 		if str(arg.op) != "skip_choice":
-			_apply_card_step(arg)
+			_dispatch_card_choice21(arg)
 		if str(step.get("targets", "")) in ["own_hand", "own_hand_top"] and int(step.get("amount", 1)) > 1:
 			var rest := step.duplicate(true)
 			rest.amount = int(rest.amount) - 1
 			(resolving.automation_steps as Array).insert(int(resolving.automation_step), rest)
 	_advance_card_automation()
 	return true
+
+func _dispatch_card_choice21(step: Dictionary) -> void:
+	_apply_card_step(step)
+
+func _automation_plan22(effect: Dictionary) -> Array:
+	return CardAutomation.plan(int(effect.card), str(effect.get("automation_context", "")))
 
 func _insert_card_steps(steps: Array) -> void:
 	var index: int = int(resolving.automation_step)
@@ -252,6 +260,7 @@ func _apply_card_step(step: Dictionary) -> void:
 		"roll":
 			var i: int = int(step.roll_index)
 			stack[i].value = clampi(int(stack[i].value) + int(step.amount), 1, 6)
+			_fx28({"kind": "roll", "seat": int(stack[i].owner), "amount": int(step.amount), "card": int(resolving.get("card", -1))})
 			if stack[i].has("final_value"):
 				stack[i].final_value = clampi(int(stack[i].final_value) + int(step.amount), 1, 6)
 		_:

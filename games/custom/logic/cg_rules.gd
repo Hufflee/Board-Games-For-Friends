@@ -292,7 +292,7 @@ func act(seat: int, kind: String, data: Dictionary) -> bool:
 				state.cards[id].face_up = not bool(state.cards[id].face_up)
 				ok = true
 			elif kind == "manual_roll":
-				ok = Interp.run(self, [{"blocks": [{"op": "roll_player", "player": seat, "count": action.count, "visible": action.visible}], "index": 0, "context": {"actor": seat}}]).is_empty()
+				ok = Interp.run(self, [{"blocks": [{"op": "roll_player", "player": seat, "count": action.count, "visible": action.visible, "dice": str(action.id)}], "index": 0, "context": {"actor": seat}}]).is_empty()
 			elif kind == "manual_resource":
 				var v := var_def(str(action.id))
 				var owner := int(players[seat].get("team", 0)) if v.get("scope") == "team" else seat
@@ -453,9 +453,11 @@ func get_view(seat: int) -> Dictionary:
 	if not state.get("pending", {}).is_empty() and int(state.pending.get("seat", -1)) == seat:
 		pending = {"kind": state.pending.kind, "options": state.pending.get("options", []).duplicate(true), "min": state.pending.get("min", 0), "max": state.pending.get("max", 0)}
 	var dice := {}
+	var dice_sets := {}
 	for who: String in state.get("dice", {}):
 		var roll: Dictionary = state.dice[who]
 		dice[who] = roll.values.duplicate() if roll.get("visible", "all") == "all" or int(who) == seat else {"count": roll.values.size()}
+		dice_sets[who] = str(roll.get("set", ""))
 	var hints: Array = []
 	for hint: Dictionary in state.get("hints", []):
 		if int(hint.seat) == -1 or int(hint.seat) == seat:
@@ -465,7 +467,7 @@ func get_view(seat: int) -> Dictionary:
 		var reveal: Dictionary = state.reveals[id]
 		if int(reveal.seat) == -1 or int(reveal.seat) == seat:
 			shown.append(id)
-	return {"players": players.duplicate(true), "seat": seat, "zones": zones, "vars": vars, "dice": dice, "phase": phase,
+	return {"players": players.duplicate(true), "seat": seat, "zones": zones, "vars": vars, "dice": dice, "dice_sets": dice_sets, "phase": phase,
 		"hints": hints, "show_cards": shown, "sound_event": state.get("sound_event", {}).duplicate(true),
 		"current": state.get("current", 0), "leader": state.get("leader", 0), "round": state.get("round", 1),
 		"turn_mode": TurnOrder.mode(self), "ready_seats": state.get("ready_seats", []).duplicate(),
@@ -590,7 +592,7 @@ func restore(data: Dictionary) -> String:
 		if not seat_keys.has(key):
 			return "Неверный владелец кубиков."
 		var roll: Variant = snapshot.dice[key]
-		if not roll is Dictionary or not roll.get("values") is Array or roll.values.size() > 30:
+		if not roll is Dictionary or not roll.get("values") is Array or roll.values.size() > 30 or not roll.get("set", "") is String:
 			return "Повреждён набор кубиков."
 		for face: Variant in roll.values:
 			if not Definition._number(face) or face < 1 or face > 6 or float(int(face)) != float(face):

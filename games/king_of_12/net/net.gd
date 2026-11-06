@@ -90,6 +90,7 @@ var nothat: NHRules = null  # «Это не шляпа!»
 var gloom: GLRules = null  # Gloom
 var fours = null  # FSRules; без типа — Айзека может не быть в сборке (тогда он «Скоро»)
 var cg_transfer: Node
+var stickers: Node  # hub/sticker_net.gd
 var cg = null  # Пользовательская JSON-игра, только хост.
 var cg_view_seat := 0
 var bc = null  # Clocktower: правила на хосте, отдельные приватные view.
@@ -155,6 +156,9 @@ func _ready() -> void:
 	cg_transfer.name = "CustomTransfer"
 	cg_transfer.net = self
 	add_child(cg_transfer)
+	stickers = load("res://hub/sticker_net.gd").new()  # стикеры хаба: коробки и доска друзей (узел Net/Stickers)
+	stickers.name = "Stickers"
+	add_child(stickers)
 	Diag.attach_net(self)
 	settings["manual"] = K12Cards.FIRST_GAME.duplicate()
 	multiplayer.peer_connected.connect(_on_peer_connected)
@@ -1112,6 +1116,8 @@ func start_game() -> String:
 		tiptop = null
 		fs_view_seat = 0
 		fours = load("res://games/four_souls/logic/fs_rules.gd").new()
+		fours.excluded_cards28 = load("res://games/four_souls/logic/fs_data.gd").PARTIAL_OFF28.duplicate()  # Four Souls 06.11: partial-карты не в колодах
+		fours.strict_responses28 = true  # Four Souls 06.11: в чужой ход — только в ответ (5 с тишины стека)
 		fours.new_game(players, bool(settings.get("fs_dlc", false)))
 		auto_advance_time = 0.0
 	elif party_game == "phantom_ink":
@@ -1308,6 +1314,8 @@ func _handle_action(peer: int, kind: String, arg) -> void:
 		return
 	var seat := seat_peers.find(peer)
 	if seat < 0 or paused:
+		return
+	if fours != null and kind in ["effect", "effect_done", "peek_take", "item_trigger", "monster_trigger"]:
 		return
 	if bc != null:
 		bc_bridge.handle_action(peer, seat, kind, arg)

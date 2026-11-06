@@ -50,6 +50,18 @@ func setup(data: Dictionary, assets: RefCounted, font: Font) -> void:
 					var fill := ColorRect.new()
 					fill.color = color
 					content = fill
+			"frame":
+				# Рамка: обводка цветом слоя, внутри — своя заливка (пустая — прозрачно).
+				var frame := Panel.new()
+				var style := StyleBoxFlat.new()
+				var inside := str(data_layer.get("fill", ""))
+				style.bg_color = Color.from_string(inside, Color.TRANSPARENT) if not inside.is_empty() else Color.TRANSPARENT
+				style.border_color = color
+				style.set_border_width_all(int(data_layer.get("border", 16)))
+				style.set_corner_radius_all(int(data_layer.get("radius", 24)))
+				style.anti_aliasing = true
+				frame.add_theme_stylebox_override("panel", style)
+				content = frame
 			"image":
 				var image := TextureRect.new()
 				image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE

@@ -206,8 +206,9 @@ static func limits(config: Dictionary) -> Array:
 
 
 ## Сначала сохраняем привычные места; если не помещается — ищем общую раскладку без потери коробок.
+## allow_repack = false — только привычные места + свободное место для новых коробок; без общей перекладки.
 static func solve(
-	config: Dictionary, placements: Array, sizes: Dictionary, poses: Dictionary, old_cols: int = 1
+	config: Dictionary, placements: Array, sizes: Dictionary, poses: Dictionary, old_cols: int = 1, allow_repack: bool = true
 ) -> Dictionary:
 	var cfg := normalized(config)
 	var count: int = int(cfg.rows) * int(cfg.cols)
@@ -305,6 +306,8 @@ static func solve(
 				)
 			)
 		)
+	if not fitted and not allow_repack:
+		return {"ok": false, "message": "Для новой коробки нет свободного места."}
 	if not fitted:
 		cells = []
 		for i in count:
@@ -405,6 +408,12 @@ static func _pack(
 	return false
 
 
+## Поза, сохранённая игроком для коробки (-1 — не сохранена).
+static func stored_pose(file: ConfigFile, id: String) -> int:
+	var stored: Variant = file.get_value("cabinet", "poses", {})
+	return int((stored as Dictionary).get(id, -1)) if stored is Dictionary else -1
+
+
 static func save_state(
 	config: Dictionary, placements: Array, poses: Dictionary, path: String = FILE
 ) -> Error:
@@ -464,20 +473,37 @@ static func load_state(
 		config.width = float(config.width) + (sizes["shelf_andy"] as Vector3).x
 	for id in sizes:
 		poses[id] = clampi(int(poses.get(id, 1)), 0, 1 if id == "perudo" else 3)
-	# Новая авторская коробка не должна сбрасывать всю личную расстановку.
+	# Новая коробка (своя игра или игра из обновления) не должна сбрасывать личную расстановку.
 	# Сначала подбираем для неё позу по существующей высоте, затем свободную ячейку.
 	var existing: Array = []
 	for row: Array in rows:
 		existing.append_array(row)
-	for id: String in sizes:
-		if not id.begins_with("custom:") or existing.has(id):
+	var fresh_ids: Array = sizes.keys().filter(func(id): return not existing.has(id))
+	for id: String in fresh_ids:
+		if stored_pose(file, id) >= 0:
 			continue
 		for pose in [1, 2, 3, 0]:
 			var ext := item_occupied(id, sizes[id], pose)
 			if ext.y <= float(config.height) and ext.z <= CELL_DEPTH:
 				poses[id] = pose
 				break
-	var result := solve(config, rows, sizes, poses, int(config.get("cols", 1)))
+	var cols := int(config.get("cols", 1))
+	var result := solve(config, rows, sizes, poses, cols, false)
+	if not result.ok and not fresh_ids.is_empty():
+		# Не влезает — шкаф чуть шире (все ячейки одинаково), прежние коробки остаются на своих местах,
+		# новая встаёт в появившееся место. Пока шкаф не упёрся в предел ширины.
+		var wider := config.duplicate(true)
+		var last_width := float(normalized(config).width)
+		for step in range(1, 46):
+			wider.width = float(config.width) + step * 0.02
+			if float(normalized(wider).width) <= last_width + 0.0001:
+				break  # дальше расширять некуда
+			last_width = float(normalized(wider).width)
+			result = solve(wider, rows, sizes, poses, cols, false)
+			if result.ok:
+				break
+	if not result.ok:
+		result = solve(config, rows, sizes, poses, cols)
 	if not result.ok and sizes.keys().any(func(id): return str(id).begins_with("custom:") and not existing.has(id)):
 		# Расширяем в ширину, сохраняя предпочтения старых ячеек и все позы.
 		var expanded := config.duplicate(true)

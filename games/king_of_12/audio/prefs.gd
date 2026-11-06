@@ -21,6 +21,7 @@ const UI_SCALE_MIN := 0.8
 const UI_SCALE_MAX := 1.4
 var parallax := true  # двигающийся за мышью задний фон во всех играх и в хабе
 var card_preview_mode := "card"
+var magnifier_shift := true  # зажатый Shift включает лупу и держит её, даже если увести курсор с карты
 var pointer_position := Vector2.ZERO
 
 func _input(event: InputEvent) -> void:
@@ -50,6 +51,8 @@ var _recorded := {}  # ключи уже записанных розыгрыше
 
 func _ready() -> void:
 	UIAccentFX.watch_panels(get_tree())  # свечение края панелей у курсора — во всех играх
+	add_child(load("res://hub/cursors.gd").new())  # свой курсор игры (все экраны), hub/cursors.gd
+	load("res://hub/card_magnifier.gd").ensure(self)  # лупа сразу на всех экранах: включается без задержки
 	for bus in ["Music", "SFX"]:
 		if AudioServer.get_bus_index(bus) < 0:
 			AudioServer.add_bus()
@@ -66,6 +69,7 @@ func _ready() -> void:
 		parallax = cfg.get_value("video", "parallax", parallax)
 		card_preview_mode = str(cfg.get_value("video", "card_preview_mode", "card"))
 		if card_preview_mode not in ["card", "magnifier"]: card_preview_mode = "card"
+		magnifier_shift = bool(cfg.get_value("game", "magnifier_shift", magnifier_shift))
 		tutorial_seen = cfg.get_value("game", "tutorial_seen", tutorial_seen)
 		graphics = cfg.get_value("video", "graphics", graphics)
 		show_fps = cfg.get_value("video", "show_fps", show_fps)
@@ -209,6 +213,7 @@ func save() -> void:
 	cfg.set_value("video", "ui_scale", ui_scale)
 	cfg.set_value("video", "parallax", parallax)
 	cfg.set_value("video", "card_preview_mode", card_preview_mode)
+	cfg.set_value("game", "magnifier_shift", magnifier_shift)
 	cfg.set_value("game", "tutorial_seen", tutorial_seen)
 	cfg.set_value("video", "graphics", graphics)
 	cfg.set_value("video", "show_fps", show_fps)

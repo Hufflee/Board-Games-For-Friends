@@ -72,6 +72,21 @@ for cid in range(409, 452):
         core_cases[str(cid)] = dict(file="core_automation_batch19.gd", aspect="Полные40текстов, случайная кража, общий иммунитет и размещение Утопца")
 for cid in [452, 453, 454, 455, 456, 457, 458, 459, 460, 461, 462, 463, 464, 465, 466, 467, 468, 1, 2, 3, 4, 5, 7, 8, 9, 10, 11, 12, 13, 17, 19, 20, 22, 23, 27, 28, 29, 30, 31, 32]:
     core_cases[str(cid)] = dict(file="core_automation_batch20_monsters.gd" if cid in range(452, 467) else "core_automation_batch20_wildcards.gd" if cid in [467, 468] else "core_automation_batch20_treasures.gd", aspect="Полные тексты группы20, эффекты и физические зоны; спорные сочетания оставлены partial")
+for cid in [37, 44, 46, 52, 53, 54, 72, 83, 470, 475]:
+    core_cases[str(cid)] = dict(file="core_automation_batch21.gd", aspect="Отдельные сценарии оплаты, физической карты, выбора и отмены по цели")
+for cid in list(range(485, 495)) + [500, 502, 514, 522, 534, 549, 550, 583] + list(range(535, 541)) + list(range(555, 565)) + list(range(575, 578)) + list(range(585, 588)):
+    core_cases[str(cid)] = dict(file="core_automation_batch22.gd", aspect="Напечатанные монеты, временная правка числа, физические копии и пассивная защита")
+core_cases["70"] = dict(file="core_manual_item_trigger.gd", aspect="Пассив начала хода срабатывает без ручной активации")
+for cid in list(range(588,621)) + list(range(666,672)) + [675]:
+    core_cases[str(cid)] = dict(file="core_automation_batch23.gd", aspect="Номиналы и пассивная прибавка только при получении монет")
+for cid in [694, 747, 748, 751, 756, 757, 758, 760, 763, 767, 768]:
+    core_cases[str(cid)] = dict(file="core_automation_batch24.gd", aspect="Автоматический бонус, скрытые голоса, физические зоны и реальные команды комнаты")
+for cid in [775, 776, 778, 790, 792, 795, 824, 830, 836, 841, 843]:
+    core_cases[str(cid)] = dict(file="core_automation_batch25.gd", aspect="Проверки стоимости, целей, приватного просмотра, обязательной атаки и физических душ")
+for cid in [845, 848, 849, 853, 855, 859, 869, 881, 882]:
+    core_cases[str(cid)] = dict(file="core_automation_batch26.gd", aspect="Стоимость, привязка к цели, пассивы, выбор персонажа и физические зоны")
+
+
 for evidence in core_cases.values():
     if not (ROOT / 'tests/fs/core' / evidence['file']).is_file():
         raise RuntimeError('Нет заявленного core-сценария: ' + evidence['file'])

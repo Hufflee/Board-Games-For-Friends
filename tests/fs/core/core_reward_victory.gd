@@ -6,7 +6,7 @@ const Check := preload("res://tests/fs/fs_check.gd")
 func run(t: Check) -> void:
 	var s := Scenario.new(t).players(3).dlc().current(0).character(0, 821).no_items(0).no_items(1).no_items(2) \
 		.item(1, 8).soul(0, 345).soul(0, 421).soul(0, 428) \
-		.monster(0, 420, {"hp": 1, "dc": 1}).monster(1, 344).deck_top("treasure", [91]).build()
+		.monster(0, 420, {"hp": 1, "dc": 1}).monster(1, 344).deck_top("treasure", [91]).room(-1).build()
 	s.g.bonuses.clear()
 	s.roll(5)
 	s.ok(0, "attack", {"slot": 0})

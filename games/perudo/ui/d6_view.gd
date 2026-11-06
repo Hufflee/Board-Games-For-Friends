@@ -15,6 +15,19 @@ var color := Color("f3ead2"):  # слоновая кость — нейтрал�
 	set(v):
 		color = v
 		queue_redraw()
+## Вид граней для игр из редактора: цвет точек (прозрачный — как раньше), цифры вместо точек, свои картинки 1–6.
+var pip_color := Color.TRANSPARENT:
+	set(v):
+		pip_color = v
+		queue_redraw()
+var number_faces := false:
+	set(v):
+		number_faces = v
+		queue_redraw()
+var face_textures: Array = []:
+	set(v):
+		face_textures = v
+		queue_redraw()
 var star_one := true  # единица — звезда (джокер Перудо); в других играх — обычная точка
 var sides := 6:
 	set(v):
@@ -71,8 +84,21 @@ func _draw() -> void:
 	draw_rect(Rect2(s * 0.15, s * 0.08, s * 0.7, s * 0.12), Color(1, 1, 1, 0.25))
 	# точки: на слоновой кости — бордовые, на цветных — белые (на светлых — тёмные)
 	var pip := Color("7a1414") if ivory else (Color("1b1b1b") if color.get_luminance() > 0.62 else Color.WHITE)
+	if pip_color.a > 0.0:
+		pip = pip_color
 	if dim:
 		pip = pip.darkened(0.5)
+	var texture: Variant = face_textures[value - 1] if value >= 1 and value <= face_textures.size() else null
+	if texture is Texture2D:
+		draw_texture_rect(texture, Rect2(Vector2(s, s) * 0.14, Vector2(s, s) * 0.72), false, Color(1, 1, 1, 0.5) if dim else Color.WHITE)
+		return
+	if number_faces:
+		var font := ThemeDB.fallback_font
+		var font_size := int(s * 0.5)
+		var text := str(value)
+		var width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+		draw_string(font, Vector2((s - width) * 0.5, s * 0.68), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, pip)
+		return
 	if value == 1 and star_one:
 		_star(Vector2(s, s) * 0.5, s * 0.3, (Color("d4a017") if ivory else pip) if not dim else Color("6d5a25"))
 		return

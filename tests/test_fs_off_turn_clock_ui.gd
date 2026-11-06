@@ -1,5 +1,5 @@
 extends "res://tests/test_fs_table_runtime.gd"
-## Локальное открытие руки/перестроение не запускает заново десять секунд чужого хода.
+## 06.11 (владелец): в чужой ход свои карты — только в ответ на действие в стеке (окно тишины 5 с).
 func _run() -> void:
 	root.size = Vector2i(1280, 720)
 	net = root.get_node("Net")
@@ -18,15 +18,13 @@ func _run() -> void:
 	await frames(20)
 	table = current_scene.screen
 	table._view_at = Time.get_ticks_msec() - 11000
-	check(not table._off_turn_ok(), "Истёкшие десять секунд закрывают чужие карты")
+	# 06.11 (владелец): в чужой ход — только в ответ, пока в стеке что-то есть (5 с тишины).
+	check(not table._off_turn_ok(), "Без действия в стеке своих карт в чужой ход нет")
 	await click(find_button("Открыть мою руку"))
 	await frames(5)
-	check(not table._off_turn_ok(), "Открытие шторки не продлевает окно")
-	table._changed(table._v, false)
-	check(not table._off_turn_ok() and not table._can_play_hand(), "Локальное перестроение не продлевает окно")
-	check(table._view_at <= Time.get_ticks_msec() - 10000, "Сохранилось время получения хостового view")
+	net.fours._push({"kind": "roll", "value": 3, "owner": 0}, "turn")
 	net._push_state()
 	await frames(5)
-	check(table._off_turn_ok(), "Новый снимок хоста обновляет остаток времени")
+	check(table._off_turn_ok() and table._can_play_hand(), "На бросок в стеке можно ответить лутом (поворот персонажа)")
 	print("OFF TURN CLOCK UI: %d проверок, %d ошибок" % [checks, errors])
 	await root.get_node("Sfx").request_quit(1 if errors else 0)

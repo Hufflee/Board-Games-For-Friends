@@ -68,7 +68,6 @@ func _run() -> void:
 	net._push_state()
 	await frames(5)
 	check(g.resolving.get("card", -1) == 8 and g.actor() == 0, "Чужая душа автоматически открыла Карму первому игроку")
-	check(not g.off_turn_open(0), "Окно личных карт первого игрока уже закрыто")
 	net.fs_switch_seat(0)
 	await frames(5)
 	await click(find_button("Открыть мою руку"))

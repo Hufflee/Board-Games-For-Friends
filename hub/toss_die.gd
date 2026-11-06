@@ -6,6 +6,13 @@ extends Control
 ## Пока бросать нельзя — полупрозрачный. API как у K12Die3D: thrown(vel), throw(vel, result), set_result, wait_for_roll.
 
 signal thrown(vel: Vector2)
+## Кубик вернулся на место и снова свободен (после показа результата или после «зависания»).
+signal finished
+## Кубик лежит без результата дольше STALL_TIME (хост не ответил / отклонил бросок) — его вернули на место.
+signal stalled
+
+## Сколько ждать результата с хоста, когда кубик уже лёг: дальше не крутимся вечно, а возвращаемся.
+const STALL_TIME := 6.0
 
 const SIDE := 64.0
 const FRICTION := 2.2
@@ -37,6 +44,8 @@ var _rot0 := 0.0
 var _dir0 := 0.0
 var _grab := Vector2.ZERO
 var _samples: Array = []
+var _anim: Tween  # показ результата и возврат; новый бросок обязан его остановить
+var _wait := 0.0  # сколько кубик лежит без результата
 
 
 func _init() -> void:
@@ -58,28 +67,45 @@ func _set_center(p: Vector2) -> void:
 	position = p - size * 0.5
 
 
+## Анимация ещё идёт (в руке, летит, показывает результат или едет на место).
 func is_busy() -> bool:
-	return state in ["dragging", "flying", "returning"]
+	return state in ["dragging", "flying", "settled", "returning"]
+
+
+## Старый показ результата не должен дописывать state/позицию поверх нового броска:
+## иначе новый бросок «пропадал» (возврат домой посреди полёта), а кубик после wait_for_roll
+## становился idle и его нельзя было бросить.
+func _stop_anim() -> void:
+	if _anim != null and _anim.is_valid():
+		_anim.kill()
+	_anim = null
+	scale = Vector2.ONE
 
 
 ## Твой бросок: кубик яркий на своём месте, ждёт броска мышью.
 func wait_for_roll() -> void:
+	_stop_anim()
 	state = "waiting"
 	_result = 0
 	rotation = 0.0
 	_set_center(home)
-	create_tween().tween_property(self, "modulate:a", 1.0, 0.2)
+	_anim = create_tween()
+	_anim.tween_property(self, "modulate:a", 1.0, 0.2)
 
 
 ## Бросок без мыши (чужой ход, бот): result — что выпадет (0 — придёт позже через set_result).
 func throw(vel: Vector2, result: int = 0) -> void:
+	_stop_anim()
 	visible = true
 	modulate.a = 1.0 if draggable or state == "waiting" else 0.8
 	_set_center(home if state != "dragging" else center())
 	_vel = vel.limit_length(MAX_SPEED)
 	_spin = randf_range(-14.0, 14.0)
-	_result = result
+	# Результат мог прийти раньше самого броска (set_result) — не затираем его нулём.
+	if result > 0:
+		_result = clampi(result, 1, max_face)
 	_rest = 0.0
+	_wait = 0.0
 	state = "flying"
 	Sfx.play("die_throw", -4, 0.08, 0.05)
 
@@ -162,6 +188,10 @@ func _process(delta: float) -> void:
 		_rest += delta
 		if _result > 0 and _rest > 0.15:
 			_settle()
+		elif _result <= 0:
+			_wait += delta
+			if _wait > STALL_TIME:
+				_give_up()
 
 
 func _hit() -> void:
@@ -171,9 +201,12 @@ func _hit() -> void:
 
 ## Остановился: результат, пауза, потом назад на место и неактивный.
 func _settle() -> void:
+	_stop_anim()
 	state = "settled"
 	_die.value = _result
+	_result = 0  # показан; следующий бросок ждёт свой результат
 	var t := create_tween()
+	_anim = t
 	t.tween_property(self, "rotation", round(rotation / (PI / 2.0)) * (PI / 2.0), 0.15)
 	t.tween_property(self, "scale", Vector2(1.15, 1.15), 0.1)
 	t.tween_property(self, "scale", Vector2.ONE, 0.12)
@@ -182,4 +215,23 @@ func _settle() -> void:
 	t.tween_property(self, "position", home - size * 0.5, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
 	t.parallel().tween_property(self, "rotation", 0.0, 0.45)
 	t.parallel().tween_property(self, "modulate:a", 0.45, 0.45)
-	t.tween_callback(func(): state = "idle")
+	t.tween_callback(_back_home)
+
+
+func _back_home() -> void:
+	state = "idle"
+	_anim = null
+	finished.emit()
+
+
+## Результат так и не пришёл: тихо возвращаемся, чтобы стол мог снова попросить бросок.
+func _give_up() -> void:
+	_stop_anim()
+	state = "returning"
+	_wait = 0.0
+	_anim = create_tween()
+	_anim.tween_property(self, "position", home - size * 0.5, 0.45).set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_IN_OUT)
+	_anim.parallel().tween_property(self, "rotation", 0.0, 0.45)
+	_anim.parallel().tween_property(self, "modulate:a", 0.45, 0.45)
+	_anim.tween_callback(_back_home)
+	stalled.emit()

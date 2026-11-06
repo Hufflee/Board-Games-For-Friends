@@ -6,7 +6,9 @@ const Setup := preload("res://games/blood_on_the_clocktower/logic/bc_setup.gd")
 var app: Control
 var edition: OptionButton
 var teller: OptionButton
-var roster: Label
+var roster: GridContainer
+var roster_title: Label
+var roster_key := ""
 var error: Label
 var secret: VBoxContainer
 var roles: ItemList
@@ -50,15 +52,25 @@ func _ready() -> void:
 	teller.item_selected.connect(func(index: int):
 		if not updating: Net.set_setting("bc_storyteller", index))
 	public.add_child(teller)
-	roster = Style.label("", Style.SMALL)
-	roster.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	# Без растяжения по ширине перенос внутри прокрутки получал ширину 0 и ставил каждую букву на свою строку.
-	roster.size_flags_horizontal = SIZE_EXPAND_FILL
+	# Участники: заголовок со счётом и сетка ников в 3 колонки (16 мест помещаются без прокрутки в 720p).
+	# Заголовок списка и кнопки соло-мест — одной строкой, чтобы 16 ников влезали без прокрутки.
+	var roster_head := HBoxContainer.new()
+	roster_head.add_theme_constant_override("separation", 8)
+	public.add_child(roster_head)
+	roster_title = Style.label("", Style.SMALL, Style.MUTED)
+	roster_title.size_flags_horizontal = SIZE_EXPAND_FILL
+	roster_head.add_child(roster_title)
+	roster = GridContainer.new()
+	roster.name = "Roster"
+	roster.columns = 3
+	roster.add_theme_constant_override("h_separation", 16)
+	roster.add_theme_constant_override("v_separation", 4)
 	var roster_scroll := ScrollContainer.new()
 	roster_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	roster_scroll.size_flags_vertical = SIZE_EXPAND_FILL
-	roster_scroll.custom_minimum_size.y = 96
+	roster_scroll.custom_minimum_size.y = 156
 	public.add_child(roster_scroll)
+	roster.size_flags_horizontal = SIZE_EXPAND_FILL
 	roster_scroll.add_child(roster)
 	var local := HBoxContainer.new()
 	local.name = "SoloSeats"
@@ -66,21 +78,30 @@ func _ready() -> void:
 		var button := Style.button("− Место" if change < 0 else "+ Место", Style.SMALL)
 		button.pressed.connect(func(): Net.set_bots(clampi(Net.bots + change, 5, 15)))
 		local.add_child(button)
-	public.add_child(local)
+	roster_head.add_child(local)
 	local.visible = Net.mode == "offline"
-	var handbook := Style.button("Справочник")
-	handbook.pressed.connect(app.show_handbook)
-	public.add_child(handbook)
 	start = Style.button("Начать партию")
 	start.name = "StartGame"
 	start.add_theme_stylebox_override("normal", Style.box(Style.ACCENT))
-	start.pressed.connect(func(): error.text = Net.start_game())
+	start.pressed.connect(func(): _show_error(Net.start_game()))
 	public.add_child(start)
+	# Второстепенные кнопки — одной строкой под главной: так 16 участников и кнопки помещаются в 720p.
+	var footer := HBoxContainer.new()
+	footer.name = "Footer"
+	footer.add_theme_constant_override("separation", 8)
+	public.add_child(footer)
+	var handbook := Style.button("Справочник", Style.SMALL)
+	handbook.size_flags_horizontal = SIZE_EXPAND_FILL
+	handbook.pressed.connect(app.show_handbook)
+	footer.add_child(handbook)
 	var leave := Style.button("К выбору игры", Style.SMALL)
+	leave.name = "Leave"
+	leave.size_flags_horizontal = SIZE_EXPAND_FILL
 	LeaveGuard.wire(leave, "Выйти?", "Вернуться в хаб.", app.back_to_hub)
-	public.add_child(leave)
+	footer.add_child(leave)
 	error = Style.label("", Style.SMALL, Style.MUTED)
 	error.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	error.visible = false
 	public.add_child(error)
 	secret = VBoxContainer.new()
 	secret.custom_minimum_size.x = 540
@@ -102,7 +123,8 @@ func _ready() -> void:
 		lists.add_child(col)
 		col.add_child(Style.label(title, Style.SMALL))
 		var list := ItemList.new()
-		list.select_mode = ItemList.SELECT_MULTI
+		# Клик выбирает роль, повторный клик по выбранной — снимает; остальные остаются выбранными (без Ctrl).
+		list.select_mode = ItemList.SELECT_TOGGLE
 		list.size_flags_vertical = SIZE_EXPAND_FILL
 		list.custom_minimum_size = Vector2(250, 200)
 		list.add_theme_font_size_override("font_size", Style.SMALL)
@@ -149,11 +171,13 @@ func refresh() -> void:
 	for member: Dictionary in members:
 		names.append(str(member.get("name", "Игрок")))
 	var joined := "\n".join(names)
-	if teller.item_count != names.size() or roster.text != joined:
+	if teller.item_count != names.size() or str(teller.get_meta("names", "")) != joined:
 		teller.clear()
 		for nick: String in names: teller.add_item(nick)
-		roster.text = joined
-	if teller.item_count > 0: teller.select(clampi(int(options.get("bc_storyteller", 0)), 0, teller.item_count - 1))
+		teller.set_meta("names", joined)
+	var story := clampi(int(options.get("bc_storyteller", 0)), 0, maxi(names.size() - 1, 0))
+	if teller.item_count > 0: teller.select(story)
+	_fill_roster(names, story, int(Data.EDITIONS[id].minimum))
 	start.visible = Net.is_host()
 	start.disabled = names.size() - 1 < int(Data.EDITIONS[id].minimum) or names.size() > 16
 	secret.visible = Net.bc_bridge.is_story_lobby()
@@ -166,12 +190,38 @@ func refresh() -> void:
 			accepted_revision = revision
 			_build_choices(id)
 			_fill(packet.get("options", {}))
-		error.text = str(packet.get("error", ""))
+		_show_error(str(packet.get("error", "")))
 	elif not secret.visible:
 		draft_key = ""
 		roles.clear()
 		bluffs.clear()
 	updating = false
+
+## Пустая строка ошибки не занимает место: иначе при 16 участниках «К выбору игры» уходит за край 720p.
+func _show_error(text: String) -> void:
+	error.text = text
+	error.visible = not text.is_empty()
+
+## Сетка участников: рассказчик первым и подписан, остальные — игроки на площади. Пересобирается только при изменении.
+func _fill_roster(names: Array[String], story: int, minimum: int) -> void:
+	var players := maxi(names.size() - 1, 0)
+	roster_title.text = "Участники: %d · игроков %d (нужно %d–15)" % [names.size(), players, minimum]
+	var key := "%d|%s" % [story, "\n".join(names)]
+	if key == roster_key: return
+	roster_key = key
+	for child: Node in roster.get_children():
+		roster.remove_child(child)
+		child.queue_free()
+	for i in names.size():
+		var nick := Style.label(names[i] + (" · рассказчик" if i == story else ""), Style.SMALL,
+			Style.INK if i == story else Style.MUTED)
+		nick.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		nick.tooltip_text = names[i]
+		nick.mouse_filter = Control.MOUSE_FILTER_PASS
+		nick.size_flags_horizontal = SIZE_EXPAND_FILL
+		nick.custom_minimum_size.x = 96
+		if i == story: roster.add_child(nick); roster.move_child(nick, 0)
+		else: roster.add_child(nick)
 
 func _build_choices(id: String) -> void:
 	roles.clear()

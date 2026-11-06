@@ -9,6 +9,9 @@ static func make() -> Control:
 	note.text = "Аварийное исправление эффекта\nВсе операции записываются в журнал."
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	col.add_child(note)
+	if Net.fours.resolving.is_empty():
+		_add_triggers(col)
+		return col
 	var target := OptionButton.new()
 	for player: Dictionary in Net.fours.players:
 		target.add_item(str(player.name))
@@ -75,3 +78,35 @@ static func make() -> Control:
 				button.pressed.connect(func(): Net.host_tools.four_souls_effect("peek_take", {"card": int(id), "dest": str(entry[1])}))
 				col.add_child(button)
 	return col
+
+static func _add_triggers(col: VBoxContainer) -> void:
+	var seat := OptionButton.new()
+	for player: Dictionary in Net.fours.players:
+		seat.add_item(str(player.name))
+	seat.select(int(Net.fours.current))
+	col.add_child(seat)
+	var cards := OptionButton.new()
+	cards.fit_to_longest_item = false
+	col.add_child(cards)
+	var trigger := Button.new()
+	trigger.text = "Запустить ручной эффект"
+	col.add_child(trigger)
+	var refresh := func(owner: int) -> void:
+		cards.clear()
+		for index in Net.fours.items[owner].size():
+			var item: Dictionary = Net.fours.items[owner][index]
+			if FSData.manual_item_trigger(int(item.id)):
+				cards.add_item(FSData.title(int(item.id)))
+				cards.set_item_metadata(cards.item_count - 1, {"kind": "item_trigger", "arg": {"item": index}})
+		for index in Net.fours.monsters.size():
+			var id: int = int(Net.fours.monsters[index].id)
+			if preload("res://games/four_souls/logic/fs_support.gd").status(id) != "auto":
+				cards.add_item(FSData.title(id))
+				cards.set_item_metadata(cards.item_count - 1, {"kind": "monster_trigger", "arg": {"slot": index}})
+		trigger.disabled = cards.item_count == 0
+	seat.item_selected.connect(refresh)
+	refresh.call(seat.selected)
+	trigger.pressed.connect(func():
+		if cards.selected >= 0:
+			var command: Dictionary = cards.get_item_metadata(cards.selected)
+			Net.host_tools.four_souls_effect(str(command.kind), command.arg, seat.selected))

@@ -4,6 +4,10 @@ extends "res://games/four_souls/logic/fs_combat.gd"
 ## Отдельно не используется: состояние и вызовы общие через self.
 
 func _advance_start() -> void:
+	if not stack.is_empty():
+		phase = "priority"
+		_after_stack = "starting_continue"
+		return
 	if not _starting_choices.is_empty():
 		phase = "starting_item"
 		_note("Эдем выбирает стартовый предмет")
@@ -16,6 +20,8 @@ func _begin_turn() -> void:
 		_note("%s пропускает ход" % name_of(current))
 		_advance_turn_order()
 	turn_serial += 1  # новый ход — часы чужих карт с нуля (FSRules.tick)
+	_mandatory_attacks25 = 0
+	_pvp_attacked25.clear()
 	_room_extra_attack = 0
 	_room_extra_attack_used = false
 	_card_delayed.clear()

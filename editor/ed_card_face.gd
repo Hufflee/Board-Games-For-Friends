@@ -55,7 +55,7 @@ func setup(owner: Control, tools: VBoxContainer, center: VBoxContainer, right: V
 		app._face_row = row
 		_refresh_canvas())
 	center.add_child(sample)
-	for entry: Array in [["fill", "+ Фигура"], ["text", "+ Текст"], ["image", "+ Рисунок"]]:
+	for entry: Array in [["fill", "+ Фигура"], ["frame", "+ Рамка"], ["text", "+ Текст"], ["image", "+ Рисунок"]]:
 		var add := Style.button(entry[1])
 		add.disabled = layers.size() >= 64
 		add.pressed.connect(func(): _add(entry[0]))
@@ -105,11 +105,18 @@ func _add(kind: String) -> void:
 	var layers: Array = copy.elements.decks[deck_index].face.layers
 	if layers.size() >= 64:
 		return
-	layers.append({"kind": kind, "title": {"fill": "Фигура", "text": "Текст", "image": "Рисунок"}[kind],
+	var layer := {"kind": kind, "title": {"fill": "Фигура", "frame": "Рамка", "text": "Текст", "image": "Рисунок"}[kind],
 		"rect": [48, 160, 320, 160], "field": "", "text": "Новый текст" if kind == "text" else "", "asset": "",
-		"font_size": 64, "color": "#30263f" if kind == "text" else "#b7c9bd", "rotation": 0, "opacity": 1.0})
+		"font_size": 64, "color": "#30263f" if kind in ["text", "frame"] else "#b7c9bd", "rotation": 0, "opacity": 1.0}
+	if kind == "frame":
+		# Рамка по умолчанию — по краю карты с отступом, внутри прозрачно.
+		var size: Array = Faces.dimensions(copy.elements.decks[deck_index])
+		layer.merge({"rect": [24, 24, int(size[0]) - 48, int(size[1]) - 48], "border": 16, "radius": 24, "fill": ""}, true)
+	# Рамка — оформление: кладём сразу над фоном карты, чтобы текст и рисунки остались поверх.
+	var at := 1 if kind == "frame" and not layers.is_empty() and Faces.is_card_background(layers[0], 0) else layers.size()
+	layers.insert(at, layer)
 	document.replace(copy, "Добавить слой карты")
-	app._face_layer = layers.size() - 1
+	app._face_layer = at
 	app._render.call_deferred()
 
 func _refresh_canvas() -> void:
@@ -192,6 +199,18 @@ func _properties() -> void:
 			if key == "locked":
 				_properties())
 		properties.add_child(flag)
+	if Faces.is_card_background(layer, app._face_layer):
+		# Фон карты = «Цвет карт» колоды: одна настройка и в таблице, и здесь.
+		properties.add_child(Style.label("Цвет карт колоды"))
+		var paper := ColorPickerButton.new()
+		paper.name = "CardFacePaper"
+		paper.custom_minimum_size.y = 40
+		paper.edit_alpha = false
+		paper.color = Color.from_string(Faces.paper(_deck()), Color("ded7c8"))
+		paper.popup_closed.connect(func():
+			document.set_value(["elements", "decks", deck_index, "color"], "#" + paper.color.to_html(false), "Цвет карт")
+			_refresh_canvas())
+		properties.add_child(paper)
 	if layer.get("locked", false):
 		var note := Style.label("Снимите закрепление, чтобы менять слой.")
 		note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -201,7 +220,7 @@ func _properties() -> void:
 		var labels: Array = ["Своё значение"]
 		var values: Array = [""]
 		for column: Dictionary in Faces.columns(_deck()):
-			if layer.kind == "image" and column.get("type", "text") != "image":
+			if layer.kind == "image" and column.get("type", "text") != "image" or column.get("type", "text") == "color":
 				continue
 			labels.append(str(column.id))
 			values.append(str(column.id))
@@ -238,14 +257,45 @@ func _properties() -> void:
 		import_button.pressed.connect(func():
 			app._with_notice(func(): app._dialog(PackedStringArray(["*.png,*.jpg,*.jpeg,*.webp ; Рисунок слоя"]), false, _import_image)))
 		properties.add_child(import_button)
-	elif layer.kind == "fill":
+	elif layer.kind == "fill" and not Faces.is_card_background(layer, app._face_layer):
 		_choice("Фигура", ["Прямоугольник", "Овал"], ["rect", "ellipse"], layer.get("shape", "rect"), func(value: String): _commit("shape", value))
-	if layer.kind != "image":
+	if layer.kind == "frame":
+		properties.add_child(Style.label("Цвет рамки"))
+		var color := ColorPickerButton.new()
+		color.name = "CardFaceFrameColor"
+		color.custom_minimum_size.y = 40
+		color.color = Color.from_string(str(layer.get("color", "#30263f")), Color("30263f"))
+		color.color_changed.connect(func(value: Color): _commit("color", "#" + value.to_html()))
+		properties.add_child(color)
+		_number("Толщина рамки", float(layer.get("border", 16)), 0, 512, 1, func(value: float): _commit("border", value))
+		_number("Скругление углов", float(layer.get("radius", 24)), 0, 2048, 1, func(value: float): _commit("radius", value))
+		var inside := str(layer.get("fill", ""))
+		var filled := CheckBox.new()
+		filled.name = "CardFaceFrameFilled"
+		filled.text = "Закрасить внутри рамки"
+		filled.button_pressed = not inside.is_empty()
+		filled.toggled.connect(func(on: bool):
+			_commit("fill", "#f3ecdc" if on else "")
+			_properties())
+		properties.add_child(filled)
+		if not inside.is_empty():
+			properties.add_child(Style.label("Цвет внутри рамки"))
+			var fill := ColorPickerButton.new()
+			fill.name = "CardFaceFrameFill"
+			fill.custom_minimum_size.y = 40
+			fill.color = Color.from_string(inside, Color("f3ecdc"))
+			fill.color_changed.connect(func(value: Color): _commit("fill", "#" + value.to_html()))
+			properties.add_child(fill)
+	elif layer.kind != "image" and not Faces.is_card_background(layer, app._face_layer):
 		var color := ColorPickerButton.new()
 		color.custom_minimum_size.y = 40
 		color.color = Color.from_string(str(layer.get("color", "#30263f")), Color("30263f"))
 		color.color_changed.connect(func(value: Color): _commit("color", "#" + value.to_html()))
 		properties.add_child(color)
+	if layer.kind in ["fill", "frame", "text"] and not Faces.is_card_background(layer, app._face_layer):
+		_color_source("color_field", "Цвет из колонки" if layer.kind != "frame" else "Цвет рамки из колонки", layer)
+		if layer.kind == "frame" and not str(layer.get("fill", "")).is_empty():
+			_color_source("fill_field", "Цвет внутри из колонки", layer)
 	for index in 4:
 		_number(["X", "Y", "Ширина", "Высота"][index], float(layer.rect[index]), -4096 if index < 2 else 8, 4096, 1, func(value: float):
 			var rect: Array = _deck().face.layers[app._face_layer].rect.duplicate()
@@ -292,3 +342,22 @@ func _import_image(path: String) -> void:
 	layer.rect[3] = imported.dimensions[1]
 	document.replace(copy, "Рисунок слоя карты")
 	app._render.call_deferred()
+
+## Выбор колонки-цвета: у каждой карты свой цвет слоя. Без колонок-цветов — подсказка, как её завести.
+func _color_source(key: String, caption: String, layer: Dictionary) -> void:
+	var labels: Array = ["Один цвет для всех карт"]
+	var values: Array = [""]
+	for column: Dictionary in Faces.columns(_deck()):
+		if column.get("type", "text") == "color":
+			labels.append(str(column.id))
+			values.append(str(column.id))
+	if values.size() == 1:
+		if key == "color_field":
+			var note := Style.label("Свой цвет у каждой карты: добавьте свойство типа «Цвет» в «Свойства карт / колонки».")
+			note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+			note.modulate.a = 0.75
+			properties.add_child(note)
+		return
+	_choice(caption, labels, values, layer.get(key, ""), func(value: String):
+		_commit(key, value)
+		_properties())

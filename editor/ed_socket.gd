@@ -31,6 +31,8 @@ func _select(labels: Array, values: Array, selected: Variant, callback: Callable
 	var menu := OptionButton.new()
 	menu.custom_minimum_size.y = 40
 	menu.size_flags_horizontal = SIZE_EXPAND_FILL
+	menu.clip_text = true
+	menu.fit_to_longest_item = false
 	for text: String in labels:
 		menu.add_item(text)
 	menu.select(maxi(0, values.find(selected)))
@@ -158,6 +160,10 @@ func _entity() -> void:
 	if values.is_empty():
 		add_child(Style.label("Сначала добавьте нужный элемент / ресурс."))
 		return
+	if kind.begins_with("variable") and not values.has(selected):
+		# Пустое/удалённое значение показываем честно, а не первым пунктом списка.
+		labels.push_front("— выберите —")
+		values.push_front(selected)
 	_select(labels, values, selected, func(next: Variant): _emit(next, true))
 	if kind in ["player", "audience"] and value is Dictionary and value.get("op") == "var":
 		_nested("variable", "id", "")

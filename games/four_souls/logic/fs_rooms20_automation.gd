@@ -24,7 +24,7 @@ func _apply_card_step(step: Dictionary) -> void:
 			if id == 5:
 				source.counters = int(_shop_counters20.get(id, 3))
 			_shop_counters20.erase(id)
-			shop[int(step.item)] = _draw("treasure")
+			shop[int(step.item)] = _draw_shop_slot24()
 		else:
 			source = _remove_item(int(step.target), int(step.item))
 		source["room_item20"] = true
@@ -82,6 +82,7 @@ func _refresh_passive_stats() -> void:
 		for source: Dictionary in _extra_rooms20:
 			if bool(source.get("room_item20", false)):
 				total += PassiveRules.stat_bonus(int(source.id), source, hands[current].size(), cubes)
+				total.x += int(source.get("attack_tokens15", 0))
 				total.y += int(source.get("health_tokens15", 0))
 		attack[current] = maxi(0, int(attack[current]) + total.x)
 		max_hp[current] = maxi(1, int(max_hp[current]) + total.y)

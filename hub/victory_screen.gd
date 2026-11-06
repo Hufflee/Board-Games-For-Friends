@@ -170,17 +170,34 @@ func _refresh_avatars() -> void:
 	_avatar_check_ms = now + 500
 	for card: Control in _cards:
 		var avatar := card.get_node("Avatar") as TextureRect
-		if avatar.texture != null:
+		if not bool(avatar.get_meta("placeholder", false)):
 			continue
 		var seat: int = card.get_meta("seat")
-		var steam_id := int(players[seat].get("steam_id", 0))
+		var steam_id := _steam_id(seat)
 		if steam_id == 0:
 			continue
-		avatar.texture = _avatar_texture(Net.avatar(steam_id))
-		if avatar.texture != null:
+		var texture := _avatar_texture(Net.avatar(steam_id))
+		if texture != null:
+			avatar.texture = texture
+			avatar.set_meta("placeholder", false)
 			var initials := card.get_node_or_null("Initials") as Label
 			if initials:
 				initials.hide()
+
+## Steam ID места: из view игры, а если игра его не передала — из участников пати по нику.
+func _steam_id(seat: int) -> int:
+	if seat < 0 or seat >= players.size():
+		return 0
+	var player: Dictionary = players[seat]
+	var steam_id := int(player.get("steam_id", 0))
+	if steam_id != 0 or bool(player.get("bot", false)):
+		return steam_id
+	var nick := str(player.get("name", ""))
+	for id: Variant in Net.members:
+		var member: Dictionary = Net.members[id]
+		if str(member.get("name", "")) == nick:
+			return int(member.get("steam_id", 0))
+	return 0
 
 ## Уже скруглённый квадрат обрезаем до непрозрачных углов, затем накладываем маску слота.
 ## Проверка середин сторон отличает обычный портрет от силуэта с прозрачным окружением.
@@ -230,7 +247,12 @@ func _add_person(seat: int, winner: bool) -> void:
 	_cards.append(card)
 	var avatar := TextureRect.new()
 	avatar.name = "Avatar"
-	avatar.texture = PlayerTag.dot(Net.color_of(int(players[seat].get("color", seat))), 64) if game in ["machi_koro", "blood_on_the_clocktower"] else _avatar_texture(Net.avatar(int(players[seat].get("steam_id", 0))))
+	# Аватарка Steam для всех игр; пока её нет (офлайн, бот, Steam ещё грузит) — цветной кружок игрока
+	# с инициалами. Раньше Мачи Коро и Clocktower всегда рисовали кружок и не показывали аватарки вовсе.
+	avatar.texture = _avatar_texture(Net.avatar(_steam_id(seat)))
+	avatar.set_meta("placeholder", avatar.texture == null)
+	if avatar.texture == null:
+		avatar.texture = PlayerTag.dot(Net.color_of(int(players[seat].get("color", seat))), 64)
 	avatar.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	avatar.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	var mask := ShaderMaterial.new()
@@ -238,7 +260,7 @@ func _add_person(seat: int, winner: bool) -> void:
 	avatar.material = mask
 	avatar.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	card.add_child(avatar)
-	if avatar.texture == null:
+	if bool(avatar.get_meta("placeholder", false)):
 		var initials := Label.new()
 		initials.name = "Initials"
 		var words: PackedStringArray = str(players[seat].get("name", "?")).strip_edges().split(" ", false)

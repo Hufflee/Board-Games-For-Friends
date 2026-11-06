@@ -106,6 +106,16 @@ var _room_bonuses: Array = []
 var _extra_rooms20: Array = []
 var _converted_room_bonuses20: Dictionary = {}
 var _low_rolls21 := -1
+var _outside_starters21: Array = []
+var _first_target72: Dictionary = {}
+var _target_serial21 := 0
+var _bonus_started24: Dictionary = {}
+var _guardian_resolved24 := false
+var _primary_room24: Dictionary = {}
+var _attack_prepared24 := false
+var _mirror_turn25 := -1
+var _mandatory_attacks25 := 0
+var _pvp_attacked25: Dictionary = {}
 var _room_extra_attack := 0 # Динамический дополнительный бой комнаты808 у текущего места.
 var _room_extra_attack_used := false
 var _card_delayed: Array = [] # Отложенные эффекты карт до конца текущего хода.
@@ -117,6 +127,12 @@ var _turn_damage_taken: Array = []
 var _turn_monster_dc: Array = []
 var _turn_monster_attack: Array = []
 var _holy_saves: Dictionary = {} # Только следующая смерть до конца хода.
+var _sibling_pending26: Array = []
+var _sibling_reward26: Array = []
+var _enigma_back26: Dictionary = {}
+var _enigma_applied26: Dictionary = {}
+var _lemegeton27: Dictionary = {}
+var _tar_copied27: Dictionary = {}
 var _credit_free := false
 var _gold_deck_attacks := false
 var _jail_owner := -1
@@ -197,6 +213,34 @@ func _choose_card_effect(_index: int) -> bool:
 	return false
 func _card_choice_owner() -> int:
 	return int(resolving.get("choice_owner", resolving.get("owner", current)))
+func _can_guard21(_seat: int, _id: int) -> bool:
+	return false
+func _room_sale_tokens24() -> int:
+	return 0
+func _prepare_attack24(_seat: int) -> bool:
+	return false
+func _native_room_source24(_index: int) -> Dictionary:
+	return {}
+func _draw_shop_slot24() -> int:
+	return -1 if _room_sale_tokens24() > 0 else _draw("treasure")
+func _refill_shop24() -> void:
+	for slot in shop.size():
+		if int(shop[slot]) < 0:
+			shop[slot] = _draw_shop_slot24()
+func _must_buy24() -> bool:
+	return false
+func _tap_price24() -> int:
+	return 3 if _card_automation_enabled() and _room_has20(756) else 0
+func _character_can_pay24(seat: int) -> bool:
+	var price := _tap_price24()
+	return int(coins[seat]) >= price if price > 0 else bool(character_ready[seat])
+func _pay_character24(seat: int) -> void:
+	var price := _tap_price24()
+	if price > 0:
+		coins[seat] = int(coins[seat]) - price
+		bank += price
+	else:
+		character_ready[seat] = false
 func _effect(_argument: Dictionary) -> bool:
 	return false
 func _check_bonuses() -> void:
@@ -278,6 +322,8 @@ func _item_kind20(item: Dictionary) -> String:
 	return FSData.item_response_kind(int(item.id))
 func _treasure_amount21(seat: int, amount: int) -> int:
 	return amount + (_item_count(seat, 52) if amount > 0 and _card_automation_enabled() else 0)
+func _coin_loot_value22(effect: Dictionary) -> int:
+	return FSData.coin_loot_value(int(effect.card))
 func _give_treasures21(seat: int, amount: int) -> void:
 	var count := _treasure_amount21(seat, amount)
 	for index in count:
@@ -357,7 +403,23 @@ func new_game(members: Array, expanded: bool = false, seed_value: int = 0) -> vo
 	_turn_monster_dc = []
 	_turn_monster_attack = []
 	_holy_saves.clear()
+	_sibling_pending26.clear()
+	_sibling_reward26.clear()
+	_enigma_back26.clear()
+	_enigma_applied26.clear()
+	_lemegeton27.clear()
+	_tar_copied27.clear()
 	_low_rolls21 = -1
+	_outside_starters21.clear()
+	_first_target72.clear()
+	_target_serial21 = 0
+	_bonus_started24.clear()
+	_guardian_resolved24 = false
+	_primary_room24 = {}
+	_attack_prepared24 = false
+	_mirror_turn25 = -1
+	_mandatory_attacks25 = 0
+	_pvp_attacked25.clear()
 	_extra_rooms20.clear()
 	_converted_room_bonuses20.clear()
 	_nail_turn20 = -1
@@ -436,6 +498,8 @@ func new_game(members: Array, expanded: bool = false, seed_value: int = 0) -> vo
 		decks[kind] = FSData.pool(kind, dlc)
 		if kind == "monster":
 			decks[kind].append_array(FSData.pool("event", dlc))
+		# 06.11 (владелец): частично автоматизированные карты временно не попадают в колоды настоящей партии.
+		decks[kind] = decks[kind].filter(func(id): return int(id) not in excluded_cards28)
 		_shuffle(decks[kind]); discards[kind] = []
 	bonuses = FSData.pool("bonus", dlc)
 	var characters := FSData.characters(dlc).duplicate(true)
@@ -466,12 +530,14 @@ func new_game(members: Array, expanded: bool = false, seed_value: int = 0) -> vo
 				_starting_choices.append({"owner": seat, "cards": options})
 		if eternal >= 0:
 			# Вторая сторона ещё создаётся: общий пересчёт выполняется после раздачи всем.
-			items[seat].append(FSData.item_entry(eternal, true))
+			var starter := FSData.item_entry(eternal, true)
+			starter["starter21"] = true
+			items[seat].append(starter)
 		_draw_loot(seat, 5 if int(chosen.card) == 908 else 3, "setup")
 		if chosen.key == "cain":
 			current = seat
 	for i in 2:
-		shop.append(_draw("treasure"))
+		shop.append(_draw_shop_slot24())
 		_fill_monster(true)
 	if dlc:
 		room = _draw("room")
@@ -485,7 +551,11 @@ func _shuffle(array: Array) -> void:
 		var value = array[i]; array[i] = array[j]; array[j] = value
 func _draw(kind: String) -> int:
 	if decks[kind].is_empty() and not discards[kind].is_empty():
-		decks[kind] = discards[kind].duplicate(); discards[kind] = []; _shuffle(decks[kind])
+		# 06.11 (владелец): сброс замешивается под низ колоды — ещё не виденные карты выходят раньше.
+		var back: Array = discards[kind].duplicate(); discards[kind] = []; _shuffle(back)
+		back.append_array(decks[kind])
+		decks[kind] = back
+		_note("Сброс замешан в колоду: " + {"loot": "добыча", "treasure": "сокровища", "monster": "монстры", "room": "комнаты"}.get(kind, kind))
 	return int(decks[kind].pop_back()) if not decks[kind].is_empty() else -1
 func _draw_loot(seat: int, count: int, reason: String = "effect") -> void:
 	if reason == "effect" and count > 0:
@@ -535,6 +605,20 @@ func _gain_coins(seat: int, amount: int, poker_done: bool = false, equality_done
 func _note(text: String) -> void:
 	log.append(text)
 	if log.size() > 150: log.pop_front()
+## Лента наглядных событий для стола (06.11): срабатывания пассивов и изменения бросков.
+## Только показ: правила её не читают. Клиент показывает записи с номером больше последнего виденного.
+## Карты, убранные из колод этой партии (Net задаёт FSData.PARTIAL_OFF28; тесты и фаззер — пусто).
+var excluded_cards28: Array = []
+## Ответы в чужой ход только пока стек не разрешился (окно тишины 5 с). Net включает для настоящей партии.
+var strict_responses28 := false
+var fx28: Array = []
+var _fx_serial28 := 0
+func _fx28(entry: Dictionary) -> void:
+	_fx_serial28 += 1
+	entry["n"] = _fx_serial28
+	fx28.append(entry)
+	if fx28.size() > 24:
+		fx28 = fx28.slice(fx28.size() - 24)
 func name_of(seat: int) -> String:
 	return str(players[seat].name)
 func _roll_die(seat: int = -1) -> int:
@@ -552,6 +636,10 @@ func _card_die(seat: int, attack_roll: bool = false) -> int:
 	var count: int = int(_turn_die_throws.get(seat, 0))
 	_turn_die_throws[seat] = count + 1
 	_multi_raw_bonus = int(_turn_roll_bonus[seat]) + (_item_count(seat, 552) if count == 0 else 0)
+	if count == 0 and _item_count(seat, 552) > 0:
+		_fx28({"kind": "trigger", "seat": seat, "card": 552})
+	if _multi_raw_bonus != 0:
+		_fx28({"kind": "roll", "seat": seat, "amount": _multi_raw_bonus, "card": 552 if count == 0 and _item_count(seat, 552) > 0 else -1})
 	if _card_automation_enabled() and (not _multi_owners.is_empty() or monsters.any(func(monster): return int(monster.id) == 328 and int(monster.hp) > 0) or (attack_roll and battle >= 0 and battle < monsters.size() and int(monsters[battle].id) == 258)):
 		return _roll_die(seat)
 	var face := clampi(_roll_die(seat) + _multi_raw_bonus, 1, 6)
@@ -575,7 +663,7 @@ func _absorb_next_hit(zone: String, target: int, amount: int) -> int:
 ## Получение контроля над физической картой души, включая перенос от другого игрока.
 func _gain_soul_card(seat: int, card: Dictionary, gained: bool = true) -> void:
 	if gained and (_room_has20(779) or curses[seat].has(744)):
-		var pile: String = {"monster": "monster", "event": "monster", "loot": "loot", "treasure": "treasure"}.get(str(FSData.card(int(card.id)).get("kind", "")), "")
+		var pile: String = {"monster": "monster", "event": "monster", "loot": "loot", "treasure": "treasure", "room": "room"}.get(str(FSData.card(int(card.id)).get("kind", "")), "")
 		if not pile.is_empty() and not discards[pile].has(int(card.id)): discards[pile].append(int(card.id))
 		_note("Получение души запрещено: " + name_of(seat))
 		return
@@ -651,7 +739,8 @@ func _destroy_item(seat: int, index: int) -> void:
 		_queue_passive(seat, 87, item, [{"op": "trinket_automation", "amount": 1, "context": "destroyed", "data": {"counters": int(item.counters)}}])
 ## Брелоки остаются картами лута и после перехода в зону предметов.
 func _discard_item(id: int) -> void:
-	var kind := "loot" if FSData.card(id).get("kind", "") == "loot" else "treasure"
+	var printed_kind: String = str(FSData.card(id).get("kind", ""))
+	var kind := "loot" if printed_kind == "loot" else "monster" if printed_kind in ["monster", "event", "outside"] else "treasure"
 	discards[kind].append(id)
 func _has_item(seat: int, key: String) -> int:
 	var count := 0
@@ -720,6 +809,7 @@ func _refresh_passive_stats() -> void:
 					meat_cubes += 1
 		for entry: Dictionary in items[seat]:
 			var bonus := PassiveRules.stat_bonus(int(entry.id), entry, hands[seat].size(), meat_cubes)
+			bonus.x += int(entry.get("attack_tokens15", 0))
 			bonus.y += int(entry.get("health_tokens15", 0))
 			attack[seat] = maxi(0, int(attack[seat]) + bonus.x - int(entry.get("_attack_bonus", 0)))
 			max_hp[seat] = maxi(1, int(max_hp[seat]) + bonus.y - int(entry.get("_health_bonus", 0)))
@@ -735,6 +825,8 @@ func _refresh_passive_stats() -> void:
 		_room_extra_attack = additional
 func _bonus_targets(id: int) -> Array:
 	var result: Array = []
+	if _card_automation_enabled() and id in [692, 693, 694, 695, 696]:
+		return result
 	var ready := false
 	var least := 1000000
 	if id in [692, 693, 696]:
@@ -770,7 +862,7 @@ func _reset_room_goals() -> void:
 	_goals_rewarded = false
 
 func _room_can_discard() -> bool:
-	return not _card_automation_enabled() or not _room_has20(810) or _goals_rewarded
+	return not _card_automation_enabled() or room != 810 or _goals_rewarded
 
 func _recharge_limit(seat: int) -> int:
 	var limit: int = items[seat].size()

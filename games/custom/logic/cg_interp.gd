@@ -331,9 +331,9 @@ static func run(r: Object, frames: Array) -> String:
 					var saved := frames_snapshot(r, frames)
 					if not r.last_error.is_empty():
 						continue
-					r.state.pending = {"kind": "roll", "seat": who, "count": count, "visible": block.get("visible", "all"), "frames": saved, "context": ctx.duplicate(true)}
+					r.state.pending = {"kind": "roll", "seat": who, "count": count, "visible": block.get("visible", "all"), "set": str(block.get("dice", "")), "frames": saved, "context": ctx.duplicate(true)}
 					return ""
-				roll(r, who, count, str(block.get("visible", "all")))
+				roll(r, who, count, str(block.get("visible", "all")), str(block.get("dice", "")))
 				var rolled := ctx.duplicate(true)
 				rolled.actor = who
 				rolled.answer = r.state.dice[str(who)].values.duplicate()
@@ -420,10 +420,13 @@ static func run(r: Object, frames: Array) -> String:
 				r.state.phase = "game_over"
 	return r.last_error
 
-static func roll(r: Object, who: int, count: int, visibility: String) -> void:
+## set — id набора из «Элементы → Кубики»: по нему стол рисует цвет и грани.
+static func roll(r: Object, who: int, count: int, visibility: String, set_id: String = "") -> void:
 	var dice: Array = []
 	for i in count: dice.append(r.rng.randi_range(1, 6))
 	r.state.dice[str(who)] = {"values": dice, "visible": visibility}
+	if not set_id.is_empty():
+		r.state.dice[str(who)]["set"] = set_id
 
 static func _equal(a: Variant, b: Variant) -> bool:
 	if (a is int or a is float) and (b is int or b is float):
@@ -442,7 +445,7 @@ static func answer(r: Object, seat: int, kind: String, data: Dictionary) -> bool
 			if not (supplied is int or supplied is float) or supplied < pending.min or supplied > pending.max: return false
 		"roll":
 			# Клиент подтверждает жест, результат броска всегда выбирает хост.
-			roll(r, seat, int(pending.count), str(pending.visible))
+			roll(r, seat, int(pending.count), str(pending.visible), str(pending.get("set", "")))
 			supplied = r.state.dice[str(seat)].values.duplicate()
 		_: return false
 	var frames: Array = pending.frames.duplicate(true)
