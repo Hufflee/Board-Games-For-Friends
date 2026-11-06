@@ -27,6 +27,8 @@ var _incoming: Dictionary = {}  # сборка кусков: ключ → {count
 var _wanted: Dictionary = {}  # клиент: уже запрошенные хэши
 var _uploaded: Dictionary = {}  # клиент: какие свои картинки уже отданы хосту в этой пати
 var _textures: Dictionary = {}  # хэш → Texture2D
+var _waiters: Dictionary = {}  # хост: хэш → кто ждёт картинку, которой у хоста ещё нет
+var _pulled: Dictionary = {}  # хост: у кого уже попросили картинку (хэш → время запроса)
 
 
 func _ready() -> void:
@@ -113,10 +115,26 @@ func _poster_list() -> Array:
 ## Перевесили свой плакат (центр на задней стене, м).
 func set_poster_pos(slot: int, center: Vector2) -> void:
 	var list := _poster_list()
-	var hash: String = str(list[slot][2]) if (list[slot] as Array).size() == 3 else ""
-	list[slot] = [center.x, center.y, hash]
+	var entry: Array = list[slot]
+	list[slot] = [center.x, center.y, str(entry[2]) if entry.size() >= 3 else "", float(entry[3]) if entry.size() >= 4 else 1.0]
 	local["posters"] = list
 	_local_changed()
+
+
+## Размер своего плаката: 1 — обычный, до POSTER_SCALE_MAX (вдвое больше).
+func set_poster_scale(slot: int, center: Vector2, scale: float) -> void:
+	var list := _poster_list()
+	var entry: Array = list[slot]
+	list[slot] = [center.x, center.y, str(entry[2]) if entry.size() >= 3 else "", clampf(scale, 1.0, Stickers.POSTER_SCALE_MAX)]
+	local["posters"] = list
+	_local_changed()
+
+
+func poster_scale(peer: int, slot: int) -> float:
+	var list: Array = room_of(peer).get("posters", [])
+	if slot < list.size() and list[slot] is Array and (list[slot] as Array).size() >= 4:
+		return float(list[slot][3])
+	return 1.0
 
 
 ## Своя картинка на плакат: ужимаем до POSTER_MAX_SIDE, храним JPEG по хэшу, друзьям — через хоста.
@@ -140,11 +158,45 @@ func set_poster_picture(slot: int, image: Image, center: Vector2) -> String:
 	file.store_buffer(bytes)
 	file.close()
 	var list := _poster_list()
-	list[slot] = [center.x, center.y, hash]
+	var old: Array = list[slot]
+	list[slot] = [center.x, center.y, hash, float(old[3]) if old.size() >= 4 else 1.0]
 	local["posters"] = list
 	_local_changed()
 	_upload(hash)
 	return hash
+
+
+## Клиент полностью вошёл в пати: соединение есть и хост уже прислал список, где есть мы.
+## Раньше картинку, поставленную до входа в пати, отправляли в момент подключения — хост её отбрасывал
+## (ещё не знал игрока), а клиент считал её отправленной, и друзья так её и не видели.
+func _joined() -> bool:
+	if _net().is_host():
+		return true
+	if multiplayer.multiplayer_peer == null or multiplayer.multiplayer_peer.get_connection_status() != MultiplayerPeer.CONNECTION_CONNECTED:
+		return false
+	var me := multiplayer.get_unique_id()
+	return (_net().lobby_view.get("members", []) as Array).any(func(member): return int(member.get("peer", 0)) == me)
+
+
+## Хост: у кого из участников плакат с этим хэшем.
+func _poster_owner(hash: String) -> int:
+	for peer: Variant in rooms:
+		for entry: Variant in (rooms[peer] as Dictionary).get("posters", []):
+			if entry is Array and (entry as Array).size() >= 3 and str(entry[2]) == hash:
+				return int(peer)
+	return 0
+
+
+## Хост: картинки нет — просим её у владельца плаката (не чаще раза в 5 с на картинку).
+func _pull(hash: String) -> void:
+	var owner := _poster_owner(hash)
+	if owner <= 1 or _member(owner).is_empty():
+		return
+	var now := Time.get_ticks_msec()
+	if now - int(_pulled.get(hash, -100000)) < 5000:
+		return
+	_pulled[hash] = now
+	_rpc_poster_need.rpc_id(owner, hash)
 
 
 ## Картинка плаката по хэшу (своя или друга). Нет на диске — просим у хоста, придёт сигнал poster_ready.
@@ -161,7 +213,9 @@ func poster_texture(hash: String) -> Texture2D:
 		if texture != null:
 			_textures[hash] = texture
 		return texture
-	if _party() and not _net().is_host() and not _wanted.has(hash):
+	if _party() and _net().is_host():
+		_pull(hash)
+	elif _party() and not _wanted.has(hash):
 		_wanted[hash] = true
 		_rpc_poster_want.rpc_id(1, hash)
 	return null
@@ -189,7 +243,7 @@ static func _sha(bytes: PackedByteArray) -> String:
 
 ## Клиент отдаёт хосту картинку своего плаката (кусками) — хост раздаёт её тем, кто смотрит комнату.
 func _upload(hash: String) -> void:
-	if not _party() or _uploaded.has(hash):
+	if not _party() or _uploaded.has(hash) or not _joined():
 		return
 	var bytes := _poster_file(hash)
 	if bytes.is_empty():
@@ -229,7 +283,25 @@ func _rpc_poster_upload(hash: String, index: int, count: int, chunk: PackedByteA
 	if bytes.is_empty() or bytes.size() > Stickers.POSTER_MAX_BYTES or _sha(bytes) != hash:
 		return
 	_poster_bytes[hash] = bytes
+	_pulled.erase(hash)
+	for waiter: int in _waiters.get(hash, []):
+		if not _member(waiter).is_empty():
+			_deliver(waiter, hash, bytes)
+	_waiters.erase(hash)
 	poster_ready.emit(hash)
+
+
+func _deliver(peer: int, hash: String, bytes: PackedByteArray) -> void:
+	var count := ceili(float(bytes.size()) / CHUNK)
+	for i in count:
+		_rpc_poster_deliver.rpc_id(peer, hash, i, count, bytes.slice(i * CHUNK, mini(bytes.size(), (i + 1) * CHUNK)))
+
+
+## Хост просит у владельца его картинку (её у хоста нет, а друзья ждут).
+@rpc("authority", "reliable")
+func _rpc_poster_need(hash: String) -> void:
+	_uploaded.erase(hash)
+	_upload(hash)
 
 
 @rpc("any_peer", "reliable")
@@ -239,10 +311,14 @@ func _rpc_poster_want(hash: String) -> void:
 		return
 	var bytes: PackedByteArray = _poster_bytes.get(hash, _poster_file(hash))
 	if bytes.is_empty():
+		# Картинки у хоста ещё нет — запомнить, кто ждёт, и попросить у владельца плаката.
+		var list: Array = _waiters.get(hash, [])
+		if not list.has(sender):
+			list.append(sender)
+		_waiters[hash] = list
+		_pull(hash)
 		return
-	var count := ceili(float(bytes.size()) / CHUNK)
-	for i in count:
-		_rpc_poster_deliver.rpc_id(sender, hash, i, count, bytes.slice(i * CHUNK, mini(bytes.size(), (i + 1) * CHUNK)))
+	_deliver(sender, hash, bytes)
 
 
 @rpc("authority", "reliable")
@@ -256,6 +332,7 @@ func _rpc_poster_deliver(hash: String, index: int, count: int, chunk: PackedByte
 		file.store_buffer(bytes)
 		file.close()
 	_wanted.erase(hash)
+	_textures.erase(hash)
 	poster_ready.emit(hash)
 
 
@@ -458,6 +535,8 @@ func _process(delta: float) -> void:
 			_uploaded.clear()
 			_wanted.clear()
 			_poster_bytes.clear()
+			_waiters.clear()
+			_pulled.clear()
 			_sent = {}
 			changed.emit(0)
 		return

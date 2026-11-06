@@ -85,7 +85,7 @@ static func row_layout(
 	for id: String in FIGURINES:
 		if not ids.has(id) or capacity <= 0.0:
 			continue
-		var ratio: float = float(figure_ratio.get(id, 1.0)) if figure_ratio is Dictionary else float(figure_ratio)
+		var ratio: float = float(figure_ratio.get(id, -1.0)) if figure_ratio is Dictionary else float(figure_ratio)
 		if ratio < 0.0:
 			continue
 		var figure_size: Vector3 = sizes[id]
@@ -158,7 +158,15 @@ static func row_layout(
 
 ## Старые свободные места действуют до первого ручного переноса.
 static func figure_ratios(config: Dictionary) -> Variant:
-	return -1.0 if bool(config.get("neighbor_order", false)) else config.get("figure_positions", config.get("figure_x", 1.0))
+	if not bool(config.get("neighbor_order", false)):
+		return config.get("figure_positions", config.get("figure_x", 1.0))
+	# Порядок соседей: фигурки, которые игрок поставил в ячейку рукой (figure_cells), стоят свободно
+	# в своём месте по ширине; остальные — в общем ряду, как раньше.
+	var cells: Dictionary = config.get("figure_cells", {})
+	var out := {}
+	for id: String in FIGURINES:
+		out[id] = float(cells[id]) if cells.has(id) else -1.0
+	return out
 
 
 ## Миграция идёт по видимым группам, сохраняя внутренний порядок горизонтальных стопок.

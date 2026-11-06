@@ -13,6 +13,7 @@ var default_path := ""
 var tilt := 0.0  # небольшой наклон «как повесили»
 var picture: Texture2D
 var picture_key := ""  # что сейчас показано: путь стандартной картинки или хэш своей
+var size_scale := 1.0  # 1 — обычный плакат, до 2 — вдвое больше (по стороне)
 var _quad: MeshInstance3D
 var _frame: MeshInstance3D
 var _shape: BoxShape3D
@@ -71,13 +72,22 @@ func set_picture(texture: Texture2D, key: String) -> void:
 	picture = texture
 	picture_key = key
 	var aspect := clampf(float(texture.get_width()) / maxf(1.0, float(texture.get_height())), ASPECT_RANGE.x, ASPECT_RANGE.y)
-	var size := Vector2(sqrt(AREA * aspect), sqrt(AREA / aspect))
+	var size := Vector2(sqrt(AREA * aspect), sqrt(AREA / aspect)) * size_scale
 	(_quad.mesh as QuadMesh).size = size
 	_material.albedo_texture = texture
 	_material.emission_texture = texture
 	(_frame.mesh as BoxMesh).size = Vector3(size.x + BORDER * 2.0, size.y + BORDER * 2.0, 0.005)
 	_shape.size = Vector3(size.x + BORDER * 2.0, size.y + BORDER * 2.0, 0.03)
 	_quad.set_meta("poster_source", key)
+
+
+## Размер плаката (1..2): площадь растёт, пропорции картинки те же.
+func set_size_scale(scale: float) -> void:
+	if is_equal_approx(scale, size_scale) or picture == null:
+		size_scale = scale
+		return
+	size_scale = scale
+	set_picture(picture, picture_key)
 
 
 ## Плакат с рамкой на стене (x, y; без учёта небольшого наклона).

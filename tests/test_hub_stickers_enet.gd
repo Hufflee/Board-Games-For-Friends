@@ -55,7 +55,7 @@ func _run() -> void:
 	net.my_steam_id = 0
 	net.my_name = "Хост" if role == "host" else "Клиент"
 	if role == "host":
-		for name in ["joined", "client_box_seen", "client_added", "client_removed", "forged", "board_moved", "client_pos_ok", "poster_hash", "client_poster", "done"]:
+		for name in ["joined", "client_box_seen", "client_added", "client_removed", "forged", "board_moved", "client_pos_ok", "poster_hash", "client_poster", "early_poster", "done"]:
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(FOLDER + name + ".txt"))
 		await _host()
 	else:
@@ -95,6 +95,8 @@ func _host() -> void:
 	check(st.request_board_add(client, "pixel_heart", 0.2, 0.3, 0.0), "хост клеит стикер на доску клиента")
 	await until(func(): return seen("client_removed"), "клиент снял свой стикер")
 	await until(func(): return st.local.board.is_empty(), "стикер клиента снят с доски хоста")
+	if not st.local.board.is_empty():
+		print("ОТЛАДКА доска хоста: ", st.local.board)
 	await until(func(): return seen("forged"), "клиент отправил поддельный запрос")
 	await create_timer(0.6).timeout
 	check(st.local.board.is_empty(), "поддельный «хозяйский» RPC клиента не наклеил стикер")
@@ -125,10 +127,25 @@ func _host() -> void:
 		got = st.poster_texture(client_hash)
 		await create_timer(0.1).timeout
 	check(got != null and got.get_height() == 700, "хост получил картинку плаката клиента")
+	var early_hash := FileAccess.get_file_as_string(FOLDER + "early_poster.txt")
+	var early: Texture2D = null
+	since = Time.get_ticks_msec()
+	while early == null and Time.get_ticks_msec() - since < 10000:
+		early = st.poster_texture(early_hash)
+		await create_timer(0.1).timeout
+	check(early != null and early.get_width() == 640, "картинка, поставленная до входа в пати, тоже дошла до хоста")
 	marker("done")
 
 
 func _client() -> void:
+	# Картинка плаката поставлена ДО входа в пати (баг 0.9.0: друзья её не видели).
+	var early := Image.create(640, 360, false, Image.FORMAT_RGB8)
+	early.fill(Color(0.3, 0.9, 0.4))
+	var early_hash: String = st.set_poster_picture(1, early, Vector2(-0.5, 1.6))
+	var hf := FileAccess.open(FOLDER + "early_poster.tmp", FileAccess.WRITE)
+	hf.store_string(early_hash)
+	hf.close()
+	DirAccess.rename_absolute(ProjectSettings.globalize_path(FOLDER + "early_poster.tmp"), ProjectSettings.globalize_path(FOLDER + "early_poster.txt"))
 	check(net.join_enet("127.0.0.1", PORT) == OK, "клиент подключается")
 	await until(func(): return seen("joined") and net.multiplayer.get_unique_id() > 1, "подключение подтверждено")
 	var me: int = net.multiplayer.get_unique_id()
@@ -140,6 +157,8 @@ func _client() -> void:
 	if st.my_board_stickers(1).size() == 1:
 		st.request_board_update(1, str(st.my_board_stickers(1)[0][0]), 0.1, 0.9, 1.0, 1.7)
 	await until(func(): return st.my_board_stickers(1).size() == 1 and is_equal_approx(float(st.my_board_stickers(1)[0][7]), 1.7), "свой стикер на доске друга сдвинут, повёрнут, увеличен")
+	if st.my_board_stickers(1).size() != 1 or not is_equal_approx(float(st.my_board_stickers(1)[0][7]), 1.7):
+		print("ОТЛАДКА доска хоста у клиента: ", st.room_of(1).get("board"), " мой ключ: ", st.my_author_key())
 	marker("client_added")
 	await until(func(): return st.local.board.size() == 1, "хост наклеил стикер на мою доску")
 	if st.local.board.size() == 1:

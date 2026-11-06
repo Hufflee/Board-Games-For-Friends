@@ -32,6 +32,17 @@ static func clean(value: Variant) -> Dictionary:
 	if not source.get("neighbor_order", false) is bool:
 		return {}
 	config.neighbor_order = source.get("neighbor_order", false)
+	# Свободное место фигурок в ячейке (доля ширины) — друзья видят их там же.
+	var free: Variant = source.get("figure_cells", {})
+	if not free is Dictionary or free.size() > 2:
+		return {}
+	if not free.is_empty():
+		config.figure_cells = {}
+		for id in free:
+			var share: Variant = free[id]
+			if not id in ["shelf_girl", "shelf_andy"] or not (share is float or share is int) or not is_finite(float(share)) or float(share) < 0 or float(share) > 1:
+				return {}
+			config.figure_cells[id] = float(share)
 	var positions: Variant = source.get("figure_positions", {})
 	if not positions is Dictionary:
 		return {}

@@ -39,7 +39,7 @@ const SHELF_X := 0.25
 const PERUDO_SPACE := 0.17  # место под набор «Перудо» во второй ячейке
 
 const ShelfOrder := preload("res://hub/shelf_layout.gd")
-const BOX_HOLD := 0.45  # с: удержание на коробке — взять её и переставлять
+const BOX_HOLD := 0.32  # с: удержание на коробке — взять её и переставлять (06.11: было 0,45 — отзывчивее)
 const DRAG_LIFT := 0.07  # м: взятая коробка выдвигается из шкафа к игроку
 const PublicRoom := preload("res://hub/public_room.gd")
 var remote_view := false
@@ -1225,6 +1225,10 @@ func _rebuild_shelf_geometry() -> void:
 	for child in _shelf_root.get_children():
 		if child is GameBox and boxes.has(child):
 			continue
+		# В комнате друга свои коробки игрока спрятаны (их нет в boxes), но вернутся при возврате домой:
+		# их не удаляем, иначе дома ссылки на удалённые коробки (ошибки, а в сборке — краш).
+		if child is GameBox and not _local_room.is_empty() and (_local_room.boxes as Array).has(child):
+			continue
 		_shelf_root.remove_child(child)
 		child.queue_free()
 	var rows: int = int(_cabinet.rows)
@@ -2300,7 +2304,7 @@ func _set_home(b: GameBox, home: Transform3D, animate: bool) -> void:
 		if old.is_valid():
 			old.kill()
 	var tw := create_tween().set_trans(Tween.TRANS_CUBIC).set_ease(Tween.EASE_OUT)
-	tw.tween_property(b, "transform", home, 0.2)
+	tw.tween_property(b, "transform", home, 0.12)
 	b.set_meta("slide", tw)
 
 
@@ -2432,6 +2436,16 @@ func _drag_update(screen: Vector2) -> void:
 			r = k
 	var row: Array = _rows[r]
 	var info: Dictionary = _row_info[r]
+	var figure_changed := false
+	if _drag_box.is_figurine():
+		# Фигурка не привязана к краю ячейки: стоит там, куда её ведут, коробки обтекают её.
+		var capacity: float = float(info.right) - float(info.left)
+		var share: float = clampf((_drag_at.x - float(info.left) - _drag_box.size.x * 0.5) / maxf(0.001, capacity - _drag_box.size.x), 0.0, 1.0)
+		if not _cabinet.has("figure_cells"):
+			_cabinet.figure_cells = {}
+		var id := _shelf_id(_drag_box)
+		figure_changed = absf(float(_cabinet.figure_cells.get(id, -1.0)) - share) > 0.01
+		_cabinet.figure_cells[id] = share
 	var layout := _layout_row(row, r)
 	var index := ShelfOrder.pile_insert_index(
 		layout.piles, row.map(func(box): return _shelf_id(box)), _drag_at.x - float(info.left)
@@ -2456,7 +2470,7 @@ func _drag_update(screen: Vector2) -> void:
 		cascade = _cascade_rows(r, index)
 		fits = not cascade.is_empty()
 	var to := Vector2i(r, index) if fits else Vector2i(-1, -1)
-	if to == _drag_to and cascade == _drag_cascade:
+	if to == _drag_to and cascade == _drag_cascade and not figure_changed:
 		return
 	_drag_to = to
 	_drag_cascade = cascade
@@ -2541,6 +2555,9 @@ func _finish_drag(ok: bool) -> void:
 			_cabinet.figure_surfaces.erase(id)
 		else:
 			_cabinet.figure_surfaces[id] = _drag_surface.duplicate()
+			(_cabinet.get("figure_cells", {}) as Dictionary).erase(id)  # на тумбе/ТВ — не в ячейке
+		# Сдвинули фигурку по ячейке — это тоже перестановка (сохраняется).
+		moved = moved or _cabinet.get("figure_cells", {}) != (_drag_backup.get("config", {}) as Dictionary).get("figure_cells", {})
 	var cancelled := not ok or _drag_to.x < 0
 	if not cancelled and not _drag_cascade.is_empty():
 		_rows = _drag_cascade.duplicate()
@@ -2726,7 +2743,7 @@ func _process(delta: float) -> void:
 		if not _drag_surface.is_empty():
 			want = _drag_at
 		_drag_box.transform = _drag_box.transform.interpolate_with(
-			Transform3D(_box_basis(_drag_box), want), 1.0 - exp(-delta * 18.0)
+			Transform3D(_box_basis(_drag_box), want), 1.0 - exp(-delta * 32.0)
 		)
 	_t += delta
 	# лёгкое «дыхание» камеры и параллакс от мыши

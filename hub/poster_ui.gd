@@ -11,6 +11,7 @@ const SHOW_TIME := 6.0  # сколько висит значок после уд
 var _room: NeonRoom
 var _watch_peer: Callable
 var _icon: Button
+var _size_button: Button  # ⤢ рядом со значком галереи: размер плаката ×1 / ×1,5 / ×2
 var _slot := -1  # плакат, над которым значок
 var _icon_left := 0.0
 var _clock := 0.0
@@ -33,6 +34,13 @@ func _ready() -> void:
 	_icon.pressed.connect(_choose_picture)
 	_icon.visible = false
 	add_child(_icon)
+	_size_button = HubStyle.button("×1", 13)
+	_size_button.name = "PosterSize"
+	_size_button.custom_minimum_size = Vector2(52, ICON.y)
+	_size_button.tooltip_text = "Размер плаката: обычный, ×1,5 или ×2"
+	_size_button.pressed.connect(_cycle_size)
+	_size_button.visible = false
+	add_child(_size_button)
 	_room.poster_held.connect(_on_held)
 	_room.poster_moved.connect(func(slot: int, center: Vector2):
 		if _own_room():
@@ -59,8 +67,9 @@ func _apply() -> void:
 	for slot in _room.posters.size():
 		var poster: Node3D = _room.posters[slot]
 		var entry: Array = list[slot] if slot < list.size() and list[slot] is Array else []
-		var center: Vector2 = Vector2(float(entry[0]), float(entry[1])) if entry.size() == 3 else _room.poster_default_position(slot)
-		var hash: String = str(entry[2]) if entry.size() == 3 else ""
+		var center: Vector2 = Vector2(float(entry[0]), float(entry[1])) if entry.size() >= 3 else _room.poster_default_position(slot)
+		var hash: String = str(entry[2]) if entry.size() >= 3 else ""
+		poster.set_size_scale(float(entry[3]) if entry.size() >= 4 else 1.0)
 		if hash.is_empty():
 			poster.show_default()
 		elif poster.picture_key != hash:
@@ -89,7 +98,11 @@ func _process(delta: float) -> void:
 		_icon.visible = false
 		return
 	_icon.visible = true
-	_icon.position = _room.camera.unproject_position(top) - Vector2(ICON.x / 2.0, ICON.y + 4)
+	var at := _room.camera.unproject_position(top) - Vector2(ICON.x / 2.0, ICON.y + 4)
+	_icon.position = at - Vector2(30, 0)
+	_size_button.visible = true
+	_size_button.position = at + Vector2(ICON.x - 22, 0)
+	_size_button.text = "×%s" % _scale_text(poster.size_scale)
 
 
 func _on_held(slot: int) -> void:
@@ -103,6 +116,25 @@ func _on_held(slot: int) -> void:
 func _hide_icon() -> void:
 	_slot = -1
 	_icon.visible = false
+	_size_button.visible = false
+
+
+func _scale_text(scale: float) -> String:
+	return "2" if scale >= 1.99 else ("1,5" if scale >= 1.49 else "1")
+
+
+## Размер по кругу: обычный → ×1,5 → ×2 → обычный.
+func _cycle_size() -> void:
+	if _slot < 0 or _slot >= _room.posters.size():
+		return
+	_icon_left = SHOW_TIME
+	var poster: Node3D = _room.posters[_slot]
+	var next := 1.5 if poster.size_scale < 1.49 else (2.0 if poster.size_scale < 1.99 else 1.0)
+	poster.set_size_scale(next)
+	var center := _room.clamp_poster(poster, Vector2(poster.position.x, poster.position.y))
+	Net.stickers.set_poster_scale(_slot, center, next)
+	Sfx.play("card_place", -8, 0.08)
+	_apply()
 
 
 ## Минималистичный значок галереи: рамка со скруглёнными углами, две горы и солнце — линиями.

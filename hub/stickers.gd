@@ -16,6 +16,7 @@ const BOX_MAX := 200  # стикеров на одной коробке: не о
 const BOXES_MAX := 64
 const BOARD_MAX := 40  # на доске; лишние — самые старые — отклеиваются
 const POSTERS := 3  # плакатов в комнате
+const POSTER_SCALE_MAX := 2.0  # плакат можно сделать вдвое больше обычного
 const POSTER_MAX_SIDE := 1280  # своя картинка плаката ужимается до этого размера (качество, но не вес)
 const POSTER_MAX_BYTES := 900000
 const SCALE_MIN := 1.0 / 3.0  # втрое меньше стартового
@@ -169,19 +170,20 @@ static func clean_public(value: Variant) -> Dictionary:
 		var y := _number(pos[1], WALL_Y.x, WALL_Y.y)
 		if not is_nan(x) and not is_nan(y):
 			out["pos"] = [x, y]
-	# Плакаты комнаты: [[x, y, хэш своей картинки ("" — стандартная)] или [] — на стандартном месте], до POSTERS.
+	# Плакаты комнаты: [[x, y, хэш своей картинки ("" — стандартная), размер 1..2] или [] — на стандартном месте], до POSTERS.
 	var posters: Variant = value.get("posters", [])
 	if posters is Array and not posters.is_empty():
 		var list: Array = []
 		for i in mini(posters.size(), POSTERS):
 			var entry: Variant = posters[i]
 			var clean: Array = []
-			if entry is Array and entry.size() == 3:
+			if entry is Array and entry.size() in [3, 4]:
 				var px := _number(entry[0], -3.0, 3.0)
 				var py := _number(entry[1], 0.0, 2.8)
 				var hash := _text(entry[2], 64)
-				if not is_nan(px) and not is_nan(py) and (hash.is_empty() or (hash.length() == 64 and hash.is_valid_hex_number())):
-					clean = [px, py, hash]
+				var big := _number(entry[3], 1.0, POSTER_SCALE_MAX) if entry.size() == 4 else 1.0
+				if not is_nan(px) and not is_nan(py) and not is_nan(big) and (hash.is_empty() or (hash.length() == 64 and hash.is_valid_hex_number())):
+					clean = [px, py, hash, big]
 			list.append(clean)
 		out["posters"] = list
 	var board: Variant = value.get("board", [])

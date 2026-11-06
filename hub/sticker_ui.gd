@@ -28,6 +28,7 @@ var _panel: PanelContainer  # панель стикеров коробки ил�
 var _panel_kind := ""  # "box" | "board"
 var _catcher: Control  # во время наклеивания ловит клик по обложке
 var _placing := ""  # id стикера «в руке»
+var _placing_board := 0  # клеим на доску этого друга (0 — на свою коробку)
 var _ghost: TextureRect
 var _toast: Label
 var _toast_tween: Tween
@@ -145,8 +146,11 @@ func _apply(_force: bool) -> void:
 		_close_panel()
 	_shown_peer = peer
 	var data: Dictionary = Net.stickers.room_of(peer)
-	for box: GameBox in _room.boxes:
-		if is_instance_valid(box) and not box.is_figurine():
+	for item: Variant in _room.boxes:
+		if not is_instance_valid(item):
+			continue  # коробку только что убрали (смена комнаты)
+		var box := item as GameBox
+		if box != null and not box.is_figurine():
 			box.set_stickers(data.boxes.get(_room._shelf_id(box), []))
 	if is_instance_valid(_room.sticker_board):
 		_room.set_board_position(Net.stickers.board_pos(peer))
@@ -486,7 +490,22 @@ func _start_placing(id: String) -> void:
 	toast("Нажмите на любую сторону коробки, чтобы приклеить · правая кнопка — отмена")
 
 
+## Клик по доске друга со стикером «в руке»: наклеить в это место.
+func _place_on_board(point: Vector2) -> void:
+	var peer := _placing_board
+	var uv: Vector2 = _room.sticker_board.uv_at(_room.camera, point)
+	if uv.x < 0.0:
+		toast("Мимо доски — нажмите на саму доску")
+		return
+	var sticker := _placing
+	_stop_placing()
+	if Net.stickers.request_board_add(peer, sticker, uv.x, uv.y, randf_range(-0.45, 0.45)):
+		Sfx.play("card_place", -6, 0.08)
+		toast("Стикер «%s» на доске · его можно сразу тащить мышью" % Stickers.title(sticker))
+
+
 func _stop_placing() -> void:
+	_placing_board = 0
 	_placing = ""
 	if is_instance_valid(_ghost):
 		_ghost.visible = false
@@ -500,6 +519,9 @@ func _placing_input(event: InputEvent) -> void:
 	accept_event()
 	if event.button_index != MOUSE_BUTTON_LEFT:
 		_stop_placing()
+		return
+	if _placing_board != 0:
+		_place_on_board(event.position)
 		return
 	var box := _room.focused
 	if box == null:
@@ -546,6 +568,17 @@ func open_board(screen_point: Vector2) -> void:
 		return
 	var uv: Vector2 = board.uv_at(_room.camera, screen_point)
 	_board_uv = uv if uv.x >= 0.0 else Vector2(randf_range(0.2, 0.8), randf_range(0.25, 0.75))
+	# Нажали на свой стикер на доске друга — сразу хватаем и тащим (без отдельного выделения).
+	var peer := _peer()
+	if peer != 0 and uv.x >= 0.0:
+		_panel_kind = "board"
+		var picked := _pick_at(uv)
+		if picked != "":
+			_select_board(peer, picked)
+			if not _sel.is_empty():
+				_dragging = true
+				_drag_offset = Vector2(float(_sel[0]), float(_sel[1])) - uv
+			return
 	_open_board_panel()
 
 
@@ -578,11 +611,11 @@ func _open_board_panel() -> void:
 		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		hint.custom_minimum_size.x = COLS * TILE + (COLS - 1) * 8
 		col.add_child(hint)
+		# Выбрали стикер — он «в руке», клеится туда, куда нажмёте на доске (как на коробке).
 		_sticker_grid(col, func(id: String):
-			if Net.stickers.request_board_add(peer, id, _board_uv.x, _board_uv.y, randf_range(-0.45, 0.45)):
-				Sfx.play("card_place", -6, 0.08)
-				toast("Стикер «%s» отправлен на доску" % Stickers.title(id))
-			_close_panel())
+			_start_placing(id)
+			_placing_board = peer
+			toast("Нажмите на доску друга, чтобы приклеить · правая кнопка — отмена"))
 		var mine: Array = Net.stickers.my_board_stickers(peer)
 		if not mine.is_empty():
 			var ids: Array = mine.map(func(entry): return str(entry[1]))
