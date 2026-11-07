@@ -13,6 +13,8 @@ var nomination: Label
 var controls: VBoxContainer
 var event_label: Label
 var personal: PanelContainer
+var role_toggle: Button
+var role_folded := false
 var role_icon: TextureRect
 var role_name: Label
 var role_text: Label
@@ -36,12 +38,19 @@ var selected_option := -1
 var pick_mode := ""
 var picked: Array[int] = []
 var request_summary: Label
+## Пары (Гадалка, информация Прачки/Библиотекаря/Сыщика): левый и правый игрок, при нужде — роль.
+var slot_row: VBoxContainer
+var slot_left: OptionButton
+var slot_right: OptionButton
+var slot_role: OptionButton
+var _slot_sync := false
 var messages: RichTextLabel
 var public_log: RichTextLabel
 var log_window: PanelContainer
-var grimoire: PanelContainer
+var grimoire: Control
 var grimoire_text: RichTextLabel
 var receiver: OptionButton
+var shout_button: Button
 var private_text: LineEdit
 var statement: LineEdit
 var guess_target: Array[OptionButton] = []
@@ -115,10 +124,11 @@ func _ready() -> void:
 	controls.add_child(choose)
 	target = OptionButton.new()
 	target.name = "PublicTarget"
+	target.item_selected.connect(func(_i: int): _paint_picks())
 	target.custom_minimum_size.x = 180
 	target.size_flags_horizontal = SIZE_EXPAND_FILL
 	choose.add_child(target)
-	for operation: Array in [["nominate", "Номинировать"], ["slay", "Заявить выстрел"], ["evil_vote", "Предложить жертву"], ["hand", "Поднять руку"], ["show_victory", "Показать итоги"]]:
+	for operation: Array in [["nominate", "Номинировать"], ["slay", "Заявить выстрел"], ["evil_vote", "Предложить жертву"], ["hand", "Поднять руку"], ["cast_vote", "Проголосовать"], ["end_speech", "Закончить речь"], ["show_victory", "Показать итоги"]]:
 		var button := _action(operation[0], operation[1], choose)
 		if operation[0] == "hand": button.name = "RaiseHand"
 		# Кнопка у всех: по правилам выстрел Истребителя можно заявить блефом, иначе кнопка выдавала бы роль.
@@ -148,13 +158,21 @@ func _ready() -> void:
 	side_panel.custom_minimum_size.x = 352
 	side_panel.add_theme_stylebox_override("panel", Style.box())
 	body.add_child(side_panel)
+	# Владелец 07.11: без общей прокрутки — сверху роль (сворачивается), снизу «Прошептать/Прокричать»,
+	# всё место между ними — сообщения (новые снизу, старые уезжают вверх).
 	var side := VBoxContainer.new()
 	side.add_theme_constant_override("separation", 8)
 	side.size_flags_horizontal = SIZE_EXPAND_FILL
-	var side_scroll := ScrollContainer.new()
-	side_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	side_panel.add_child(side_scroll)
-	side_scroll.add_child(side)
+	side_panel.add_child(side)
+	role_toggle = Style.button("", Style.SMALL)
+	role_toggle.name = "RoleToggle"
+	role_toggle.alignment = HORIZONTAL_ALIGNMENT_LEFT
+	role_toggle.clip_text = true
+	role_toggle.tooltip_text = "Свернуть или развернуть карточку роли"
+	role_toggle.pressed.connect(func():
+		role_folded = not role_folded
+		_sync_role_card())
+	side.add_child(role_toggle)
 	personal = PanelContainer.new()
 	personal.name = "OwnRoleCard"
 	personal.add_theme_stylebox_override("panel", Style.box(Style.INSET))
@@ -215,9 +233,33 @@ func _ready() -> void:
 	request_options.item_selected.connect(func(index: int):
 		selected_option = request_indices[index]
 		picked.clear()
+		if pick_mode == "pair":
+			_sync_slots()
+			selected_option = request_indices[index]
 		_paint_picks()
 		request_confirm.disabled = _choice_sent)
 	request_panel.add_child(request_options)
+	# Два игрока — одной строкой, роль — второй: в 352 px три списка обрезали имена.
+	slot_row = VBoxContainer.new()
+	slot_row.name = "PairSlots"
+	slot_row.add_theme_constant_override("separation", 8)
+	request_panel.add_child(slot_row)
+	var pair_line := HBoxContainer.new()
+	pair_line.add_theme_constant_override("separation", 8)
+	slot_row.add_child(pair_line)
+	slot_left = OptionButton.new()
+	slot_right = OptionButton.new()
+	slot_role = OptionButton.new()
+	for menu: OptionButton in [slot_left, slot_right, slot_role]:
+		menu.size_flags_horizontal = SIZE_EXPAND_FILL
+		menu.custom_minimum_size.x = 64
+		menu.fit_to_longest_item = false
+		menu.add_theme_font_size_override("font_size", Style.SMALL)
+		menu.clip_text = true
+		(slot_row if menu == slot_role else pair_line).add_child(menu)
+	slot_left.item_selected.connect(func(_i: int): _slot_changed(0))
+	slot_right.item_selected.connect(func(_i: int): _slot_changed(1))
+	slot_role.item_selected.connect(func(_i: int): _slot_changed(2))
 	request_summary = Style.label("", Style.SMALL)
 	request_summary.name = "ChoiceSummary"
 	request_summary.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -231,6 +273,7 @@ func _ready() -> void:
 	messages.bbcode_enabled = false
 	messages.custom_minimum_size.y = 96
 	messages.size_flags_vertical = SIZE_EXPAND_FILL
+	messages.scroll_following = true
 	messages.add_theme_font_size_override("normal_font_size", Style.SMALL)
 	side.add_child(messages)
 	receiver = OptionButton.new()
@@ -242,13 +285,31 @@ func _ready() -> void:
 	private_text.max_length = 500
 	private_text.text_submitted.connect(func(_text: String): _send_whisper())
 	side.add_child(private_text)
-	var send := Style.button("Прошептать на ухо", Style.SMALL)
+	var talk := HBoxContainer.new()
+	talk.name = "TalkButtons"
+	talk.add_theme_constant_override("separation", 8)
+	side.add_child(talk)
+	var send := Style.button("Прошептать", Style.SMALL)
+	send.name = "Whisper"
+	send.size_flags_horizontal = SIZE_EXPAND_FILL
+	send.tooltip_text = "Лично выбранному игроку: текст видит только он, остальные — что вы шепчетесь"
 	send.pressed.connect(_send_whisper)
-	side.add_child(send)
+	talk.add_child(send)
+	shout_button = Style.button("Прокричать", Style.SMALL)
+	shout_button.name = "Shout"
+	shout_button.size_flags_horizontal = SIZE_EXPAND_FILL
+	shout_button.tooltip_text = "Всем сразу: сообщение увидят все в личных сообщениях (только днём)"
+	shout_button.pressed.connect(_send_shout)
+	talk.add_child(shout_button)
 	log_window = _window("Журнал города")
 	public_log = _text_window(log_window)
-	grimoire = _window("Закрытый гримуар")
-	grimoire_text = _text_window(grimoire)
+	# Гримуар — старая записная книга (bc_grimoire.gd): места слева, «Эта ночь» и записи справа.
+	grimoire = preload("res://games/blood_on_the_clocktower/ui/bc_grimoire.gd").new()
+	grimoire.name = "Grimoire"
+	grimoire.z_index = 105
+	add_child(grimoire)
+	grimoire.hide()
+	grimoire_text = grimoire.notes
 	_build_juggle()
 	_build_preview()
 	Net.state_changed.connect(update_view)
@@ -278,6 +339,9 @@ func _send(kind: String) -> void:
 		arg["raised"] = not bool(view.players[me].hand) if me >= 0 else false
 	if kind == "count_vote":
 		arg["voter"] = int(view.get("next_voter", -1))
+	if kind == "cast_vote":
+		var voter := int(view.get("you", -1))
+		arg["raised"] = bool(view.players[voter].hand) if voter >= 0 else false
 	if kind in ["artist", "gossip"]: arg["text"] = statement.text
 	Net.send_action(kind, arg)
 
@@ -304,6 +368,15 @@ func update_view(next: Dictionary) -> void:
 	elif int(view.get("leader", -1)) >= 0:
 		text = "На плахе: %s · %d голосов" % [_person(int(view.leader)), int(view.high_vote)]
 	if phase == "game_over": text = "Победило %s" % ("добро" if view.get("winner") == "good" else "зло")
+	# Таймер дня: кто говорит и сколько осталось.
+	var timer: Dictionary = view.get("day_timer", {})
+	if not timer.is_empty():
+		var left := ceili(float(timer.get("left", 0.0)))
+		var clock := "%d:%02d" % [floori(left / 60.0), left % 60]
+		match str(timer.kind):
+			"speech": text = "Говорит %s · %s" % [_person(int(timer.get("speaker", -1))), clock]
+			"talk": text = "Общее обсуждение · %s" % clock
+			"vote": text += " · на голос %s" % clock
 	nomination.text = text
 	nomination.tooltip_text = text
 	event_label.text = str(view.get("event", {}).get("text", ""))
@@ -316,14 +389,15 @@ func update_view(next: Dictionary) -> void:
 		var entry: Dictionary = people[seat]
 		var refs: Dictionary = seat_nodes[seat]
 		refs.name_label.text = str(entry.name)
-		# С ролью ник переносится внутри плашки прежней ширины: при 15 местах широкие плашки налезали друг на друга.
-		refs.name_label.clip_text = not role_of.has(seat)
-		refs.name_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART if role_of.has(seat) else TextServer.AUTOWRAP_OFF
-		refs.name_label.max_lines_visible = 2 if role_of.has(seat) else -1
+		refs.name_label.clip_text = true
+		refs.name_label.autowrap_mode = TextServer.AUTOWRAP_OFF
 		refs.name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		# Ник — одна строка с многоточием, роль — своей строкой под ним (длинный ник её не вытесняет).
+		refs.role.visible = role_of.has(seat)
 		if role_of.has(seat):
-			# Ник и роль в скобках; длинная роль — с многоточием, целиком в подсказке.
-			refs.name_label.text += "\n(%s)" % _role_caption(role_of[seat])
+			refs.role.text = _role_caption(role_of[seat])
+			var known: Dictionary = role_of[seat]
+			refs.role.add_theme_color_override("font_color", Style.EVIL if str(known.get("side", "")) == "evil" else Style.GOOD)
 		# Плашка узкая (текст ~104 px): состояние — одной короткой строкой, рука — стрелкой у имени,
 		# полное пояснение — в подсказке. «Мёртв» без пометки — последний голос уже потрачен.
 		var vote: bool = bool(entry.alive) or bool(entry.dead_vote)
@@ -334,7 +408,7 @@ func update_view(next: Dictionary) -> void:
 		# «…» — участник последнего дневного шёпота (виден факт разговора, не текст).
 		var whispering: bool = view.get("last_whisper", []).has(seat)
 		refs.whisper.modulate.a = 1.0 if whispering else 0.0
-		refs.panel.tooltip_text = "%s\n%s%s%s" % [refs.name_label.text.replace("\n", " "),
+		refs.panel.tooltip_text = "%s%s\n%s%s%s" % [refs.name_label.text, (" (%s)" % refs.role.text) if refs.role.visible else "",
 			"Жив" if entry.alive else ("Мёртв, остался последний голос" if vote else "Мёртв, голоса больше нет"),
 			"\nРука поднята" if entry.hand else "", "\nСейчас шепчется" if whispering else ""]
 		refs.panel.modulate = Color.WHITE if entry.alive else Color(0.7, 0.74, 0.8)
@@ -366,6 +440,7 @@ func update_view(next: Dictionary) -> void:
 			lines.append("%s → %s" % [_person(int(vote.from)), _person(int(vote.target))])
 		evil_votes_label.text = "Голоса приспешников (видит только зло, решает демон): %s" % (
 			"; ".join(lines) if not lines.is_empty() else "пока нет")
+	shout_button.disabled = me < 0 or phase == "game_over" or (phase == "night" and not is_story)
 	var current_role := str(view.get("role", ""))
 	if current_role != role_key or role_name.text.is_empty():
 		role_key = current_role
@@ -373,6 +448,7 @@ func update_view(next: Dictionary) -> void:
 		var card: Dictionary = Data.catalog().get(role_key, {})
 		role_name.text = str(card.get("name", "Рассказчик" if is_story else "Зритель"))
 		role_text.text = str(card.get("text", "Вы ведёте город и принимаете решения по правилам." if is_story else "Вам доступна только публичная информация."))
+	_sync_role_card()
 	var request: Dictionary = view.get("request", {})
 	var token := str(request.get("token", ""))
 	if token != request_token:
@@ -414,11 +490,20 @@ func update_view(next: Dictionary) -> void:
 	actions.show_victory.visible = phase == "game_over" and Net.is_host() and not bool(view.get("victory_open", false))
 	actions.hand.visible = not is_story and me >= 0 and phase == "voting"
 	if me >= 0: actions.hand.text = "Опустить руку" if bool(people[me].hand) else "Поднять руку"
+	# Своя очередь голосовать: «Проголосовать» засчитывает текущее положение руки и передаёт ход дальше.
+	var my_turn := me >= 0 and phase == "voting" and int(view.get("next_voter", -1)) == me
+	actions.cast_vote.visible = not is_story and my_turn
+	var speech: Dictionary = view.get("day_timer", {})
+	actions.end_speech.visible = str(speech.get("kind", "")) == "speech" and (is_story or int(speech.get("speaker", -1)) == me)
+	if my_turn:
+		actions.cast_vote.text = "Проголосовать: %s" % ("за" if bool(people[me].hand) else "не голосую")
+		actions.cast_vote.add_theme_stylebox_override("normal", Style.box(Style.ACCENT))
 	actions.artist.visible = not is_story and day and role_key == "artist"
 	actions.savant.visible = not is_story and day and role_key == "savant"
 	actions.gossip.visible = not is_story and alive and day and view.edition == "bmr"
 	actions.juggle.visible = not is_story and alive and day and view.edition == "sv"
 	_sync_targets(people, me, storyteller)
+	_paint_picks()
 	statement.get_parent().visible = actions.artist.visible or actions.savant.visible or actions.gossip.visible or actions.juggle.visible
 	statement.visible = actions.artist.visible or actions.gossip.visible
 	if not view.has("grimoire") and not view.get("knowledge", {}).has("grimoire"): grimoire.hide()
@@ -479,13 +564,22 @@ func _ensure_seats(people: Array) -> void:
 		hand.modulate.a = 0.0
 		hand.mouse_filter = MOUSE_FILTER_IGNORE
 		row.add_child(hand)
+		# Роль у рассказчика/в финале — своей строкой: длинный ник её больше не вытесняет.
+		var role_line := Style.label("", Style.SMALL, Style.GOOD)
+		role_line.name = "RoleLine"
+		role_line.custom_minimum_size.x = 104
+		role_line.clip_text = true
+		role_line.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		role_line.mouse_filter = MOUSE_FILTER_IGNORE
+		role_line.visible = false
+		col.add_child(role_line)
 		var state := Style.label("", Style.SMALL, Style.MUTED)
 		state.mouse_filter = MOUSE_FILTER_IGNORE
 		col.add_child(state)
 		panel.gui_input.connect(func(event: InputEvent):
 			if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 				_seat_clicked(i))
-		seat_nodes[i] = {"panel": panel, "name_label": nick, "state": state, "hand": hand, "whisper": whisper, "votes": votes}
+		seat_nodes[i] = {"panel": panel, "name_label": nick, "state": state, "hand": hand, "whisper": whisper, "votes": votes, "role": role_line}
 	_place_seats()
 
 ## Панель кнопок под площадью только растёт: кнопки появляются и прячутся от каждого действия,
@@ -592,14 +686,18 @@ func _filter_choices() -> void:
 		var option: Variant = request_data[i]
 		var text := str(option.get("label", option.get("text", "Вариант %d" % (i + 1)))) if option is Dictionary else str(option)
 		# Игроков выбирают щелчком по плашке на площади; в списке остаются особые варианты («Не использовать»).
-		if pick_mode == "pair" or (pick_mode == "one" and int(option.get("target", -1)) >= 0): continue
+		if (pick_mode == "pair" and not _pair_of(option).is_empty()) or (pick_mode == "one" and int(option.get("target", -1)) >= 0): continue
 		if not request_search.text.is_empty() and not text.to_lower().contains(request_search.text.to_lower()): continue
 		request_indices.append(i)
 		request_options.add_item(text)
 		request_options.set_item_tooltip(request_options.item_count - 1, text)
 	request_confirm.disabled = true
 	request_options.visible = request_options.item_count > 0
+	# Немного особых вариантов — список по их числу, а не на полпанели.
+	request_options.custom_minimum_size.y = clampf(request_options.item_count * 30.0 + 20.0, 50.0, 100.0)
+	request_options.size_flags_vertical = SIZE_EXPAND_FILL if request_options.item_count > 3 else SIZE_FILL
 	request_search.visible = pick_mode.is_empty() and request_data.size() > 8
+	_sync_slots()
 	_paint_picks()
 
 ## Как выбирать в текущем запросе: все игроки по одному — "one", пары игроков — "pair", иначе список.
@@ -608,22 +706,115 @@ func _pick_mode() -> String:
 	var pairs := 0
 	for option: Variant in request_data:
 		if not option is Dictionary: return ""
-		if option.get("targets") is Array and option.targets.size() == 2: pairs += 1
+		if not _pair_of(option).is_empty(): pairs += 1
 		elif int(option.get("target", -1)) >= 0: players += 1
-	if pairs > 0 and pairs == request_data.size(): return "pair"
-	if players > 0 and pairs == 0: return "one"
+	if pairs > 0: return "pair"
+	if players > 0: return "one"
 	return ""
 
-## Номер варианта запроса для выбранных плашек (пара — без учёта порядка), -1 — нет такого.
-func _option_for(seats: Array[int]) -> int:
+## Пара игроков варианта: [левый, правый] из targets (Гадалка) или left/right (информация), иначе [].
+func _pair_of(option: Variant) -> Array:
+	if not option is Dictionary: return []
+	if option.get("targets") is Array and option.targets.size() == 2: return [int(option.targets[0]), int(option.targets[1])]
+	if option.has("left") and option.has("right"): return [int(option.left), int(option.right)]
+	return []
+
+func _same_pair(pair: Array, seats: Array) -> bool:
+	return (pair[0] == seats[0] and pair[1] == seats[1]) or (pair[0] == seats[1] and pair[1] == seats[0])
+
+## Номер варианта для выбранных игроков (пара — без учёта порядка) и роли, -1 — нет такого.
+func _option_for(seats: Array[int], role: String = "") -> int:
 	for i in request_data.size():
 		var option: Variant = request_data[i]
 		if not option is Dictionary: continue
-		if seats.size() == 1 and int(option.get("target", -2)) == seats[0]: return i
-		if seats.size() == 2 and option.get("targets") is Array and option.targets.size() == 2:
-			var pair: Array = option.targets
-			if (int(pair[0]) == seats[0] and int(pair[1]) == seats[1]) or (int(pair[0]) == seats[1] and int(pair[1]) == seats[0]): return i
+		if seats.size() == 1 and int(option.get("target", -2)) == seats[0] and _pair_of(option).is_empty(): return i
+		var pair := _pair_of(option)
+		if seats.size() == 2 and not pair.is_empty() and _same_pair(pair, seats):
+			if role.is_empty() or str(option.get("role", "")) == role: return i
 	return -1
+
+## Выпадающие списки пары: левый — все игроки из вариантов, правый — допустимые с левым, роль — для пары.
+func _sync_slots() -> void:
+	slot_row.visible = pick_mode == "pair" and not request_token.is_empty()
+	if not slot_row.visible: return
+	_slot_sync = true
+	var everyone: Array[int] = []
+	var partners: Array[int] = []
+	var roles: Array[String] = []
+	for option: Variant in request_data:
+		var pair := _pair_of(option)
+		if pair.is_empty(): continue
+		for seat: int in pair:
+			if not everyone.has(seat): everyone.append(seat)
+		if not picked.is_empty() and pair.has(picked[0]):
+			var other: int = pair[1] if pair[0] == picked[0] else pair[0]
+			if not partners.has(other): partners.append(other)
+		if picked.size() == 2 and _same_pair(pair, picked):
+			var role := str(option.get("role", ""))
+			if not role.is_empty() and not roles.has(role): roles.append(role)
+	everyone.sort()
+	partners.sort()
+	_fill_slot(slot_left, "Первый игрок", everyone, picked[0] if not picked.is_empty() else -1)
+	_fill_slot(slot_right, "Второй игрок", partners if not picked.is_empty() else everyone, picked[1] if picked.size() == 2 else -1)
+	slot_right.disabled = picked.is_empty()
+	var chosen_role := str(slot_role.get_item_metadata(slot_role.selected)) if slot_role.selected > 0 else ""
+	slot_role.clear()
+	slot_role.add_item("Роль")
+	slot_role.set_item_metadata(0, "")
+	for role: String in roles:
+		slot_role.add_item(str(Data.catalog().get(role, {}).get("name", role)))
+		slot_role.set_item_metadata(slot_role.item_count - 1, role)
+	slot_role.visible = _pairs_have_roles()
+	slot_role.disabled = roles.is_empty()
+	if not roles.has(chosen_role): chosen_role = roles[0] if roles.size() == 1 else ""
+	slot_role.select(maxi(0, roles.find(chosen_role) + 1) if not chosen_role.is_empty() else 0)
+	_slot_sync = false
+	var ready := picked.size() == 2 and (not slot_role.visible or not chosen_role.is_empty())
+	selected_option = _option_for(picked, chosen_role) if ready else -1
+
+func _pairs_have_roles() -> bool:
+	for option: Variant in request_data:
+		if option is Dictionary and not _pair_of(option).is_empty() and not str(option.get("role", "")).is_empty(): return true
+	return false
+
+func _fill_slot(menu: OptionButton, title: String, seats: Array[int], chosen: int) -> void:
+	menu.clear()
+	menu.add_item(title, -1)
+	for seat: int in seats: menu.add_item(_person(seat), seat)
+	menu.select(maxi(0, seats.find(chosen) + 1) if chosen >= 0 else 0)
+
+func _slot_changed(which: int) -> void:
+	if _slot_sync or _choice_sent: return
+	if which == 0:
+		var seat := slot_left.get_selected_id()
+		var keep := picked[1] if picked.size() == 2 else -1
+		picked.clear()
+		if seat >= 0:
+			picked.append(seat)
+			# Правый остаётся, если с новым левым такая пара есть.
+			if keep >= 0 and keep != seat and _pair_exists(seat, keep): picked.append(keep)
+	elif which == 2:
+		pass
+	elif which == 1:
+		var seat := slot_right.get_selected_id()
+		if picked.is_empty(): return
+		picked.resize(1)
+		if seat >= 0: picked.append(seat)
+	_after_pick()
+
+func _pair_exists(a: int, b: int) -> bool:
+	for option: Variant in request_data:
+		var pair := _pair_of(option)
+		if not pair.is_empty() and _same_pair(pair, [a, b]): return true
+	return false
+
+## Общий хвост выбора: варианты списка сняты, кнопка и подпись обновлены.
+func _after_pick() -> void:
+	if pick_mode == "pair":
+		_sync_slots()
+	request_options.deselect_all()
+	request_confirm.disabled = selected_option < 0 or _choice_sent
+	_paint_picks()
 
 ## Щелчок по плашке: сначала — выбор в личном запросе, иначе — цель публичного действия и собеседник шёпота.
 func _seat_clicked(seat: int) -> void:
@@ -636,14 +827,13 @@ func _seat_clicked(seat: int) -> void:
 			picked.append(seat)
 		else:
 			picked.append(seat)
-		var need := 2 if pick_mode == "pair" else 1
-		var index := _option_for(picked) if picked.size() == need else -1
-		# Недопустимую цель (не из вариантов запроса) не выделяем.
-		if pick_mode == "one" and index < 0: picked.clear()
-		selected_option = index
-		request_options.deselect_all()
-		request_confirm.disabled = selected_option < 0 or _choice_sent
-		_paint_picks()
+		if pick_mode == "one":
+			selected_option = _option_for(picked)
+			# Недопустимую цель (не из вариантов запроса) не выделяем.
+			if selected_option < 0: picked.clear()
+		elif picked.size() == 2 and not _pair_exists(picked[0], picked[1]):
+			picked.pop_front()
+		_after_pick()
 		Sfx.play("click", -8)
 		return
 	for menu: OptionButton in [target, receiver]:
@@ -670,9 +860,14 @@ func _paint_picks() -> void:
 	var names: Array[String] = []
 	for seat: int in picked: names.append(_person(seat))
 	if pick_mode == "pair":
-		request_summary.text = ("Вы выбрали %s для проверки." % " и ".join(names)) if picked.size() == 2 else (
-			"Щёлкните по плашкам двух игроков на площади." if picked.is_empty() else "Выбран %s — щёлкните по второму игроку." % names[0])
-		if picked.size() == 2 and selected_option < 0: request_summary.text = "Такую пару выбрать нельзя — выберите других игроков."
+		var fortune: bool = selected_option >= 0 and request_data[selected_option] is Dictionary and request_data[selected_option].has("targets")
+		if selected_option >= 0:
+			request_summary.text = ("Вы выбрали %s для проверки." % " и ".join(names)) if fortune else (
+				"Будет показано: %s" % str(request_data[selected_option].get("label", "")))
+		elif picked.size() == 2:
+			request_summary.text = "Выберите роль в третьем списке." if slot_role.visible else "Такую пару выбрать нельзя — выберите других игроков."
+		else:
+			request_summary.text = "Выберите двух игроков в списках или щёлкните по их плашкам на площади." if picked.is_empty() else "Выбран %s — выберите второго игрока." % names[0]
 	elif pick_mode == "one":
 		request_summary.text = ("Вы выбрали: %s." % names[0]) if not picked.is_empty() else (
 			"Щёлкните по плашке игрока на площади." if request_options.item_count == 0 else "Щёлкните по плашке игрока на площади или выберите вариант в списке.")
@@ -741,14 +936,41 @@ func _update_texts() -> void:
 		public_log.text = text
 	var entries: Array = view.get("grimoire", view.get("knowledge", {}).get("grimoire", []))
 	var lines: Array[String] = []
-	for item: Dictionary in entries:
-		lines.append("%s · %s · %s · %s\n%s" % [_person(int(item.seat)), str(Data.catalog().get(str(item.role), {}).get("name", item.role)), "добро" if item.side == "good" else "зло", "жив" if item.alive else "мёртв", "Здоров" if item.get("healthy", true) else "Способность нарушена"])
-		lines.append(preload("res://games/blood_on_the_clocktower/ui/bc_status.gd").describe(item.get("status", {}), view.get("players", [])))
+	# Рассказчику: кто ещё не ходил этой ночью (Шпиону очередь не приходит).
+	var queue: Array = view.get("night_queue", [])
+	if view.has("night_queue"):
+		var now: Array[String] = []
+		var later: Array[String] = []
+		for item: Dictionary in queue:
+			var who := "%s (%s)" % [_person(int(item.seat)), str(Data.catalog().get(str(item.role), {}).get("name", item.role))]
+			if bool(item.get("now", false)): now.append(who)
+			else: later.append(who)
+		lines.append("— Эта ночь —\nСейчас выбирает: %s\nЕщё не ходили: %s" % [
+			", ".join(now) if not now.is_empty() else "—", ", ".join(later) if not later.is_empty() else "все сходили"])
+	grimoire.set_entries(entries, view.get("players", []), int(view.get("day", 0)), str(view.get("phase", "")) == "night")
+	var acted: Array = view.get("story_log", [])
+	if not acted.is_empty():
+		lines.append("— Действия игроков —\n" + "\n".join(acted.slice(maxi(0, acted.size() - 40))))
 	text = "\n\n".join(lines)
+	if text.is_empty() and not entries.is_empty() and view.has("grimoire"):
+		text = "Пока тихо. Здесь появятся ночная очередь и всё, что выбирают игроки."
 	if text != _last_grimoire:
 		_last_grimoire = text
 		grimoire_text.text = text
 	actions.grimoire.visible = not entries.is_empty()
+
+## Крик — общий чат в той же панели сообщений.
+func _send_shout() -> void:
+	if private_text.text.strip_edges().is_empty(): return
+	Net.send_action("shout", {"text": private_text.text})
+	private_text.clear()
+	private_text.grab_focus()
+
+## Карточка роли свёрнута — остаётся одна строка-кнопка с ролью и командой.
+func _sync_role_card() -> void:
+	var side_text := side_label.text if side_label.visible else ""
+	role_toggle.text = ("▸ " if role_folded else "▾ ") + role_name.text + (" · " + side_text if not side_text.is_empty() else "")
+	personal.visible = not role_folded
 
 func _send_whisper() -> void:
 	if private_text.text.strip_edges().is_empty() or receiver.selected < 0: return

@@ -29,12 +29,31 @@ var _uploaded: Dictionary = {}  # клиент: какие свои картин
 var _textures: Dictionary = {}  # хэш → Texture2D
 var _waiters: Dictionary = {}  # хост: хэш → кто ждёт картинку, которой у хоста ещё нет
 var _pulled: Dictionary = {}  # хост: у кого уже попросили картинку (хэш → время запроса)
+## Самовосстановление (07.11): плакаты друга после партии были стандартными, пока он не сдвинет плакат —
+## у хоста пропадал снимок комнаты, а владелец заново шлёт его только при изменениях.
+const ASK_EVERY := 4000  # мс: как часто повторять запрос пропавшего снимка / картинки
+var _asked: Dictionary = {}  # хост: peer → когда просили переслать снимок; клиент: peer → когда просили снимок у хоста
 
 
 func _ready() -> void:
 	name = "Stickers"
 	local = Stickers.load_local()
 	multiplayer.peer_disconnected.connect(_on_peer_gone)
+
+
+## Сменился хост пати: всё, что знал старый хост, забыть и заново опубликовать своё.
+func reset_party() -> void:
+	rooms.clear()
+	_known.clear()
+	_uploaded.clear()
+	_wanted.clear()
+	_poster_bytes.clear()
+	_waiters.clear()
+	_pulled.clear()
+	_asked.clear()
+	_sent = {}
+	_pending = true
+	changed.emit(0)
 
 
 func _net() -> Node:
@@ -54,6 +73,11 @@ func my_peer() -> int:
 func room_of(peer: int) -> Dictionary:
 	if peer == 0 or peer == my_peer():
 		return local
+	if not rooms.has(peer) and _party() and not _net().is_host() and _joined():
+		var now := Time.get_ticks_msec()
+		if now - int(_asked.get(peer, -ASK_EVERY)) >= ASK_EVERY:
+			_asked[peer] = now
+			_rpc_room_want.rpc_id(1, peer)
 	return rooms.get(peer, {"boxes": {}, "board": []})
 
 
@@ -112,8 +136,24 @@ func _poster_list() -> Array:
 	return list
 
 
+## Плакат, который трогали последним, — в верхнем слое (плакаты могут наслаиваться друг на друга).
+func _poster_to_top(slot: int) -> void:
+	var order: Array = (local.get("poster_order", []) as Array).duplicate()
+	order.erase(slot)
+	order.append(slot)
+	local["poster_order"] = order
+
+
+## Слой плаката в комнате (0 — нижний): по порядку, который сохранил хозяин комнаты.
+func poster_layer(peer: int, slot: int) -> int:
+	var order: Array = room_of(peer).get("poster_order", [])
+	var index := order.find(slot)
+	return index if index >= 0 else -1
+
+
 ## Перевесили свой плакат (центр на задней стене, м).
 func set_poster_pos(slot: int, center: Vector2) -> void:
+	_poster_to_top(slot)
 	var list := _poster_list()
 	var entry: Array = list[slot]
 	list[slot] = [center.x, center.y, str(entry[2]) if entry.size() >= 3 else "", float(entry[3]) if entry.size() >= 4 else 1.0]
@@ -123,6 +163,7 @@ func set_poster_pos(slot: int, center: Vector2) -> void:
 
 ## Размер своего плаката: 1 — обычный, до POSTER_SCALE_MAX (вдвое больше).
 func set_poster_scale(slot: int, center: Vector2, scale: float) -> void:
+	_poster_to_top(slot)
 	var list := _poster_list()
 	var entry: Array = list[slot]
 	list[slot] = [center.x, center.y, str(entry[2]) if entry.size() >= 3 else "", clampf(scale, 1.0, Stickers.POSTER_SCALE_MAX)]
@@ -157,6 +198,7 @@ func set_poster_picture(slot: int, image: Image, center: Vector2) -> String:
 		return ""
 	file.store_buffer(bytes)
 	file.close()
+	_poster_to_top(slot)
 	var list := _poster_list()
 	var old: Array = list[slot]
 	list[slot] = [center.x, center.y, hash, float(old[3]) if old.size() >= 4 else 1.0]
@@ -215,9 +257,11 @@ func poster_texture(hash: String) -> Texture2D:
 		return texture
 	if _party() and _net().is_host():
 		_pull(hash)
-	elif _party() and not _wanted.has(hash):
-		_wanted[hash] = true
-		_rpc_poster_want.rpc_id(1, hash)
+	elif _party():
+		var now := Time.get_ticks_msec()
+		if now - int(_wanted.get(hash, -ASK_EVERY)) >= ASK_EVERY:  # не пришла — через 4 с спросить снова
+			_wanted[hash] = now
+			_rpc_poster_want.rpc_id(1, hash)
 	return null
 
 
@@ -386,6 +430,15 @@ func request_board_remove(owner: int, uid: String) -> void:
 		_rpc_remove.rpc_id(1, owner, uid)
 
 
+## Хозяин доски снимает стикер со своей доски (выборочно, любого друга).
+func remove_own_board_sticker(uid: String) -> void:
+	for i in local.board.size():
+		if str(local.board[i][0]) == uid:
+			local.board.remove_at(i)
+			_local_changed()
+			return
+
+
 ## Изменить свой стикер на доске участника owner (место, поворот, размер).
 func request_board_update(owner: int, uid: String, u: float, v: float, r: float, k: float) -> void:
 	if not _party() or owner == my_peer() or Stickers.clean_box_sticker(["fire", u, v, r, k]).is_empty():
@@ -541,7 +594,7 @@ func _process(delta: float) -> void:
 			changed.emit(0)
 		return
 	for entry: Variant in local.get("posters", []):
-		if entry is Array and (entry as Array).size() == 3 and str(entry[2]) != "" and not _uploaded.has(str(entry[2])):
+		if entry is Array and (entry as Array).size() >= 3 and str(entry[2]) != "" and not _uploaded.has(str(entry[2])):
 			_upload(str(entry[2]))
 	if net.is_host():
 		# Новым участникам — все известные снимки (свой тоже лежит в rooms[1]).
@@ -551,6 +604,12 @@ func _process(delta: float) -> void:
 			_known[peer] = true
 			for owner: Variant in rooms:
 				_rpc_room.rpc_id(int(peer), int(owner), rooms[owner])
+		# У хоста нет снимка участника (потерялся) — попросить переслать, а не ждать его изменений.
+		var now := Time.get_ticks_msec()
+		for peer: Variant in net.members:
+			if int(peer) != 1 and not rooms.has(peer) and now - int(_asked.get(peer, -ASK_EVERY)) >= ASK_EVERY:
+				_asked[peer] = now
+				_rpc_republish.rpc_id(int(peer))
 	if _pending or local != _sent:
 		_pending = false
 		_sent = local.duplicate(true)
@@ -558,6 +617,21 @@ func _process(delta: float) -> void:
 			_store(1, _sent)
 		elif multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED:
 			_rpc_publish.rpc_id(1, _sent)
+
+
+## Хост потерял наш снимок — переслать его и картинки плакатов заново.
+@rpc("authority", "reliable")
+func _rpc_republish() -> void:
+	_pending = true
+	_uploaded.clear()
+
+
+## Клиент: у меня нет снимка комнаты участника peer — пришли.
+@rpc("any_peer", "reliable")
+func _rpc_room_want(peer: int) -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if _net().is_host() and not _member(sender).is_empty() and rooms.has(peer):
+		_rpc_room.rpc_id(sender, peer, rooms[peer])
 
 
 @rpc("any_peer", "reliable")

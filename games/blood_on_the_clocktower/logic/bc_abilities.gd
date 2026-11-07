@@ -133,6 +133,7 @@ func receive(recipient: int, selected: Variant) -> void:
 	var context := pending.duplicate(true)
 	pending.clear()
 	var actor := int(context.get("actor", -1))
+	_note_choice(recipient, context, selected)
 	match str(context.op):
 		"red_herring":
 			red_herring = int(selected.target)
@@ -169,6 +170,41 @@ func receive(recipient: int, selected: Variant) -> void:
 		var deferred: Dictionary = waiting_choices.pop_front()
 		_choice(int(deferred.recipient), str(deferred.title), deferred.options, deferred.context, str(deferred.get("hint", "")))
 	_advance()
+
+## Рассказчику — запись, что выбрал игрок (Гадалка, Монах, Отравитель…). Роль — та, которой игрок
+## себя считает; у Пьяницы/Лунатика рядом настоящая.
+func _note_choice(recipient: int, context: Dictionary, selected: Variant) -> void:
+	if recipient == g.storyteller or recipient < 0:
+		return
+	var label := str(selected.get("label", selected.get("text", ""))) if selected is Dictionary else str(selected)
+	var role_name := _story_role(recipient)
+	var when := ("Ночь %d" % night_no) if g.phase in ["first_night", "night"] else ("День %d" % g.day)
+	g.story_log.append("%s · %s (%s): %s" % [when, g.players[recipient].name, role_name, label])
+
+## Роль для записей рассказчика: та, которой игрок себя считает, и настоящая, если отличается.
+func _story_role(seat: int) -> String:
+	var shown := str(g.shown_roles[seat])
+	var role_name := str(g.catalog.get(shown, {}).get("name", shown))
+	if shown != str(g.roles[seat]):
+		role_name += ", на деле %s" % str(g.catalog.get(str(g.roles[seat]), {}).get("name", g.roles[seat]))
+	return role_name
+
+## Ночная очередь для рассказчика: кто сейчас выбирает и кто ещё не ходил этой ночью.
+func night_queue() -> Array:
+	var result: Array = []
+	if not pending.is_empty():
+		var who := int(pending.get("recipient", -1))
+		if who >= 0 and who != g.storyteller:
+			result.append({"seat": who, "role": scheduled_role(who), "now": true})
+	for job: Dictionary in jobs:
+		match str(job.get("op", "")):
+			"wake":
+				result.append({"seat": int(job.actor), "role": str(job.role), "now": false})
+			"slot":
+				for s: int in g.seats_in_circle():
+					if scheduled_role(s) == str(job.role):
+						result.append({"seat": s, "role": str(job.role), "now": false})
+	return result
 
 func _advance() -> void:
 	while pending.is_empty() and g.event.is_empty() and not jobs.is_empty() and g.phase != "game_over":
@@ -251,6 +287,9 @@ func _wake(actor: int, id: String) -> void:
 		"undertaker":
 			if int(g.execution_death) >= 0:
 				_role_information(actor, int(g.execution_death), "Казнённый был: %s.")
+			else:
+				# По альманаху Гробовщик (и Пьяница в его роли) узнаёт только казнённого; ночная смерть — не повод.
+				g.story_log.append("Ночь %d · %s (%s) не просыпается: сегодня никто не казнён." % [night_no, g.players[actor].name, _story_role(actor)])
 		"spy":
 			_spy(actor)
 
@@ -331,7 +370,7 @@ func _first_information(actor: int, id: String) -> void:
 					continue
 				if impaired or _role_options(left).has(role) or _role_options(right).has(role):
 					var text := "%s или %s — %s." % [g.players[left].name, g.players[right].name, g.catalog[role].name]
-					options.append({"label": text, "text": text})
+					options.append({"label": text, "text": text, "left": left, "right": right, "role": role})
 	if id == "librarian" and (impaired or not has_candidate or _can_hide_all_outsiders()):
 		options.append({"label": "Изгоев нет", "text": "Изгоев в партии нет."})
 	_information(actor, options)

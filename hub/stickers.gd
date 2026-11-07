@@ -186,6 +186,14 @@ static func clean_public(value: Variant) -> Dictionary:
 					clean = [px, py, hash, big]
 			list.append(clean)
 		out["posters"] = list
+	# Порядок слоёв плакатов: номера снизу вверх (последний перевешенный — сверху).
+	var order: Variant = value.get("poster_order", [])
+	if order is Array and not order.is_empty() and order.size() <= POSTERS:
+		var layers: Array = []
+		for slot: Variant in order:
+			if (slot is int or slot is float) and int(slot) >= 0 and int(slot) < POSTERS and not layers.has(int(slot)):
+				layers.append(int(slot))
+		out["poster_order"] = layers
 	var board: Variant = value.get("board", [])
 	if board is Array:
 		for entry: Variant in board.slice(maxi(0, board.size() - BOARD_MAX)):

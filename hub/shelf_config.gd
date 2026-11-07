@@ -8,7 +8,7 @@ const GAP := 0.006
 const CUP_SPACE := 0.17
 const CELL_DEPTH := 0.36
 const SCATTER := 1.1
-const FIGURINES := ["shelf_girl", "shelf_andy"]
+const FIGURINES := ["shelf_girl", "shelf_andy", "shelf_mummy", "shelf_fighter", "shelf_anime"]  # последние три — ShelfFigurine.TRIPO
 const MIN_WIDTH := 0.20
 # При центре шкафа x=0,25 и масштабе 0,95 правая грань остаётся левее тумбы (x=1,17),
 # левая — правее скейтборда. Верх вместе с кубом остаётся ниже потолка комнаты.

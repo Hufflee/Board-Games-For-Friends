@@ -15,7 +15,8 @@ var _panel: PanelContainer
 var _body: VBoxContainer
 var _drag_from := Vector2.INF
 var _placed := false
-var _open_sections := {"game": true}  # какие категории раскрыты (ключ — "game" / место)
+var _open_sections := {"game": true}
+var _rebuild_pending := false  # состояние сменилось, пока был открыт выпадающий список  # какие категории раскрыты (ключ — "game" / место)
 static var _last_pos := Vector2(-1, -1)
 
 
@@ -114,6 +115,18 @@ func _on_head_input(e: InputEvent) -> void:
 func _process(_d: float) -> void:
 	if not Net.in_game or not Net.is_host():
 		queue_free()
+		return
+	if _rebuild_pending and not _popup_open():
+		_rebuild_pending = false
+		_rebuild()
+
+
+## 07.11: открытый выпадающий список в панели не закрывается от чужих действий — пересборка ждёт.
+func _popup_open() -> bool:
+	for node: Node in _panel.find_children("*", "OptionButton", true, false):
+		if (node as OptionButton).get_popup().visible:
+			return true
+	return false
 
 
 func _rebuild() -> void:
@@ -122,6 +135,9 @@ func _rebuild() -> void:
 		return
 	var focus := get_viewport().gui_get_focus_owner()
 	if focus != null and _panel.is_ancestor_of(focus) and focus is LineEdit:
+		return
+	if _popup_open():
+		_rebuild_pending = true
 		return
 	for c: Node in _body.get_children():
 		_body.remove_child(c)

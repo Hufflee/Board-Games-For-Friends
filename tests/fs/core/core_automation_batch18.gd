@@ -31,7 +31,7 @@ func run(t: Check) -> void:
 	t.equal(peek.g.peek.cards.size(), 5, "375 пять верхних карт")
 	while not peek.g.peek.is_empty():
 		peek.choose(0, "order_card", {"card": int(peek.g.peek.cards[0])})
-	t.equal(peek.g._printed_monster_reward(375), {"treasure": 1}, "375 лишняя душа удалена из награды")
+	t.equal(peek.g._printed_monster_reward(375), {"treasure": 1, "souls": 1}, "375 босс: душа «+1» напечатана в нижней строке (сверено с изображением 07.11)")
 	var cursed = _monster(t, 376)
 	_trigger(cursed, "roll", {"seat": 2, "value": 4})
 	t.equal(cursed.g.hp, [1, 1, 1], "376 любой результат4повреждает всех игроков")
@@ -122,7 +122,7 @@ func run(t: Check) -> void:
 	hand.choose(1, "discard_victim_card16", {"target": 1, "item": 0})
 	hand.choose(1, "discard_victim_card16", {"target": 1, "item": 0})
 	t.equal(hand.g.hands[1].size(), 0, "396 получатель сам сбросил2карты")
-	t.equal(hand.g._printed_monster_reward(396), {"coins": 5}, "396 лишняя душа удалена")
+	t.equal(hand.g._printed_monster_reward(396), {"coins": 5, "souls": 1}, "396 босс: душа «+1» напечатана (сверено с изображением 07.11)")
 	var stone = _monster(t, 397)
 	stone.g.battle = 0
 	_trigger(stone, "activate", {"seat": 0, "card": 822})

@@ -50,9 +50,21 @@ var last_whisper: Array = []
 var victory_open := false
 ## Домашнее правило: ночные голоса живых приспешников за жертву демона {место: цель}. Видят только злые.
 var evil_votes: Dictionary = {}
+## Журнал выборов игроков для рассказчика («Ночь 2 · Монах (Игрок 4): Игрок 6»). Только рассказчику:
+## в снимок гримуара Шпиона не входит.
+var story_log: Array = []
+## Владелец 07.11, режим с таймером: днём каждому живому по минуте на речь по кругу, затем 2 минуты
+## общего обсуждения (потом номинации открываются сами), в голосовании — 15 с на голос каждому.
+const SPEECH_TIME := 60.0
+const TALK_TIME := 120.0
+const VOTE_TIME := 15.0
+var timer_on := false
+var day_timer: Dictionary = {}
+var _timer_second := -1
 var rng := RandomNumberGenerator.new()
 
 func new_game(seats: Array, options: Dictionary = {}, seed_value: int = -1) -> String:
+	timer_on = bool(options.get("bc_timer", false))
 	var selected_edition := str(options.get("bc_edition", "tb"))
 	if not Data.EDITIONS.has(selected_edition):
 		return "Неизвестный сценарий."
@@ -234,7 +246,67 @@ func dawn() -> void:
 	high_vote = 0
 	executed = -1
 	execution_death = -1
+	_start_speeches()
 	public_revision += 1
+
+## Таймер дня: речи живых по кругу, затем общее обсуждение.
+func _start_speeches() -> void:
+	day_timer = {}
+	if not timer_on:
+		return
+	var order: Array = []
+	for seat: int in seats_in_circle():
+		if bool(announced_alive[seat]):
+			order.append(seat)
+	if order.is_empty():
+		day_timer = {"kind": "talk", "left": TALK_TIME}
+	else:
+		day_timer = {"kind": "speech", "left": SPEECH_TIME, "order": order, "index": 0}
+
+func _next_speech() -> void:
+	var index := int(day_timer.get("index", 0)) + 1
+	if index < day_timer.get("order", []).size():
+		day_timer.index = index
+		day_timer.left = SPEECH_TIME
+	else:
+		day_timer = {"kind": "talk", "left": TALK_TIME}
+
+func _start_vote_timer() -> void:
+	day_timer = {"kind": "vote", "left": VOTE_TIME} if timer_on and phase == "voting" else {}
+
+## Время таймера дня идёт только в своей фазе; при смене этапа растёт ревизия, иначе снимок шлётся раз в секунду.
+func _tick_day_timer(delta: float) -> bool:
+	if day_timer.is_empty() or not event.is_empty():
+		return false
+	var kind := str(day_timer.kind)
+	if (kind in ["speech", "talk"] and phase != "discussion") or (kind == "vote" and phase != "voting"):
+		day_timer = {}
+		return true
+	day_timer.left = maxf(0.0, float(day_timer.left) - delta)
+	if float(day_timer.left) > 0.0:
+		var second := ceili(float(day_timer.left))
+		if second != _timer_second:
+			_timer_second = second
+			return true
+		return false
+	_timer_second = -1
+	match kind:
+		"speech":
+			_next_speech()
+		"talk":
+			day_timer = {}
+			phase = "nominations"
+			public_log.append("Время обсуждения вышло — номинации открыты.")
+		"vote":
+			# Не нажал «Проголосовать» за 15 с — засчитывается текущее положение руки.
+			if vote_cursor < vote_order.size():
+				var voter := int(vote_order[vote_cursor])
+				if not is_living_player(voter) and not bool(dead_votes[voter]):
+					hands[voter] = false
+				_count_vote()
+			_start_vote_timer()
+	public_revision += 1
+	return true
 
 func action(seat: int, kind: String, arg: Variant = {}) -> bool:
 	if seat < 0 or seat >= players.size() or not arg is Dictionary or not event.is_empty() or phase == "game_over":
@@ -256,6 +328,27 @@ func action(seat: int, kind: String, arg: Variant = {}) -> bool:
 		return true
 	if kind == "private_reply":
 		return _private_reply(seat, arg)
+	if kind == "end_speech":
+		if phase != "discussion" or str(day_timer.get("kind", "")) != "speech":
+			return false
+		var speaker := int(day_timer.order[int(day_timer.index)])
+		if seat != speaker and seat != storyteller:
+			return false
+		_next_speech()
+		public_revision += 1
+		return true
+	# Владелец 07.11: «Прокричать» — общий чат в панели личных сообщений, видят все игроки и рассказчик.
+	# Ночью глаза закрыты — кричать может только рассказчик. Ревизию не трогает, как и шёпот.
+	if kind == "shout":
+		if not arg.get("text") is String or (phase in ["first_night", "night"] and seat != storyteller):
+			return false
+		var shout := str(arg.text).strip_edges()
+		if shout.is_empty() or shout.length() > 500:
+			return false
+		var who: String = "Рассказчик" if seat == storyteller else str(players[seat].name)
+		for other in players.size():
+			add_private(other, "%s кричит: %s" % [who, shout])
+		return true
 	# Голос приспешника приватный: ревизию не трогает, видят только злые.
 	if kind == "evil_vote":
 		return _evil_vote(seat, arg)
@@ -263,10 +356,13 @@ func action(seat: int, kind: String, arg: Variant = {}) -> bool:
 		return abilities.private_action(seat, kind, arg)
 	# Рука и подсчёт не сверяют общую ревизию: при голосовании руки поднимают одновременно,
 	# и первое принятое нажатие не должно молча отклонять остальные.
-	if kind in ["hand", "count_vote"]:
+	if kind in ["hand", "count_vote", "cast_vote"]:
 		if abilities != null and abilities.blocking_choice():
 			return false
-		var accepted := _hand(seat, arg) if kind == "hand" else _count_request(seat, arg)
+		var accepted := false
+		if kind == "hand": accepted = _hand(seat, arg)
+		elif kind == "count_vote": accepted = _count_request(seat, arg)
+		else: accepted = _cast_vote(seat, arg)
 		if accepted:
 			public_revision += 1
 		return accepted
@@ -290,6 +386,7 @@ func action(seat: int, kind: String, arg: Variant = {}) -> bool:
 		"open_nominations":
 			if seat == storyteller and phase == "discussion":
 				phase = "nominations"
+				day_timer = {}
 				ok = true
 		"nominate":
 			if phase == "nominations" and seat != storyteller and is_living_player(seat) and not nominators.has(seat):
@@ -312,6 +409,7 @@ func action(seat: int, kind: String, arg: Variant = {}) -> bool:
 				vote_order = _order_after(nominee)
 				vote_cursor = 0
 				vote_total = 0
+				_start_vote_timer()
 				ok = true
 		"close_day":
 			if seat == storyteller and phase == "nominations":
@@ -398,6 +496,18 @@ func _hand(seat: int, arg: Dictionary) -> bool:
 	hands[seat] = bool(arg.raised)
 	return true
 
+## Владелец 07.11: игрок сам голосует в свою очередь — выбирает руку и жмёт «Проголосовать»;
+## голос (или его отсутствие) засчитывается, очередь сама переходит к следующему. Рассказчик не нужен.
+func _cast_vote(seat: int, arg: Dictionary) -> bool:
+	if phase != "voting" or seat == storyteller or vote_cursor >= vote_order.size() or int(vote_order[vote_cursor]) != seat:
+		return false
+	if not arg.get("raised") is bool:
+		return false
+	var raised := bool(arg.raised) and (is_living_player(seat) or bool(dead_votes[seat]))
+	hands[seat] = raised
+	_count_vote()
+	return true
+
 ## Подсчёт сверяет ожидаемого голосующего: двойное нажатие не посчитает следующего игрока.
 ## Без поля voter — прежняя сверка общей ревизии.
 func _count_request(seat: int, arg: Dictionary) -> bool:
@@ -422,7 +532,10 @@ func _count_vote() -> void:
 			dead_votes[voter] = false
 	vote_cursor += 1
 	if vote_cursor < vote_order.size():
+		if timer_on:
+			day_timer = {"kind": "vote", "left": VOTE_TIME}
 		return
+	day_timer = {}
 	public_log.append("За %s: %d. Нужно не меньше %d." % [players[nominee].name, vote_total, ceili(voting_population() / 2.0)])
 	if vote_total >= ceili(voting_population() / 2.0):
 		if vote_total > high_vote:
@@ -436,8 +549,10 @@ func _count_vote() -> void:
 
 ## Изменение смерти только после показа. Защиты и триггеры должен обработать планировщик способностей.
 func tick(delta: float) -> bool:
-	if event.is_empty() or not is_finite(delta) or delta <= 0.0:
+	if not is_finite(delta) or delta <= 0.0:
 		return false
+	if event.is_empty():
+		return _tick_day_timer(delta) if phase != "game_over" else false
 	event_left = maxf(0.0, event_left - delta)
 	if event_left > 0.0:
 		return false
@@ -510,6 +625,11 @@ func get_view(seat: int) -> Dictionary:
 		"event": event.duplicate(true), "event_left": event_left, "winner": winner,
 		"clock": false, "executed": executed, "last_whisper": last_whisper.duplicate(), "victory_open": victory_open,
 		"nominated": nominated.duplicate(), "nominators": nominators.duplicate()}
+	if not day_timer.is_empty():
+		var shown := {"kind": day_timer.kind, "left": float(day_timer.left)}
+		if day_timer.kind == "speech":
+			shown["speaker"] = int(day_timer.order[int(day_timer.index)])
+		result["day_timer"] = shown
 	result["storyteller"] = storyteller
 	if phase == "game_over":
 		var winners: Array = []
@@ -541,6 +661,9 @@ func get_view(seat: int) -> Dictionary:
 				result["evil_votes"] = votes
 		if seat == storyteller:
 			result["grimoire"] = grimoire()
+			result["story_log"] = story_log.duplicate()
+			if abilities != null and phase in ["first_night", "night"]:
+				result["night_queue"] = abilities.night_queue()
 	return result
 
 func can_spectate() -> bool:

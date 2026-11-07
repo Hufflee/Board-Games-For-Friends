@@ -72,6 +72,7 @@ func _purchase_cost(seat: int, slot: int) -> int:
 		return 0
 	if _card_automation_enabled() and slot != -1 and seat == current and _shop_buys_turn == 0 and _item_count(seat, 76) > 0:
 		return 0
+	# 07.11 (владелец, по тексту карт): скидки действуют на «предметы магазина»; вслепую с верха колоды — 10¢.
 	if slot == -1:
 		return 10
 	# Скидки: 229 −5, 473/76 −1, Членская карта 91 −4, Сделка Хранителя 889 −3, комната 771 −5.

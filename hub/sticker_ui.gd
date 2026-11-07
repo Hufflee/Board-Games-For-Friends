@@ -24,6 +24,8 @@ var _room: NeonRoom
 var _watch_peer: Callable
 var _watch_name: Callable
 var _smiley: Button
+var _board_smiley: Button  # смайлик над своей доской после удержания
+var _board_smiley_left := 0.0
 var _panel: PanelContainer  # панель стикеров коробки или доски
 var _panel_kind := ""  # "box" | "board"
 var _catcher: Control  # во время наклеивания ловит клик по обложке
@@ -100,6 +102,20 @@ func _ready() -> void:
 	_toast.modulate.a = 0.0
 	add_child(_toast)
 	_room.board_requested.connect(open_board)
+	_board_smiley = HubStyle.button("", 14)
+	_board_smiley.name = "BoardSmiley"
+	_board_smiley.custom_minimum_size = Vector2(44, 44)
+	_board_smiley.tooltip_text = "Разобрать свою доску: приблизить и снять ненужные стикеры"
+	_board_smiley.draw.connect(func(): _draw_face(_board_smiley, HubStyle.CYAN))
+	_board_smiley.pressed.connect(func():
+		_board_smiley.visible = false
+		open_board(_room.camera.unproject_position(_room.sticker_board.global_position)))
+	_board_smiley.visible = false
+	add_child(_board_smiley)
+	_room.board_held.connect(func():
+		if _own_room():
+			_board_smiley_left = 6.0
+			_board_smiley.visible = true)
 	_room.board_moved.connect(func(center: Vector2):
 		if _own_room():
 			Net.stickers.set_board_pos(center))
@@ -124,6 +140,7 @@ func _own_room() -> bool:
 
 func _process(delta: float) -> void:
 	_place_smiley()
+	_place_board_smiley(delta)
 	if _placing != "":
 		_ghost.position = get_local_mouse_position() - _ghost.size * 0.5
 	_clock += delta
@@ -191,6 +208,27 @@ func _place_smiley() -> void:
 	_smiley.position = at - Vector2(_smiley.size.x * 0.5, _smiley.size.y + 6)
 
 
+## Смайлик над своей доской: виден несколько секунд после удержания (и пока доску переносят).
+func _place_board_smiley(delta: float) -> void:
+	if not _board_smiley.visible:
+		return
+	_board_smiley_left -= delta
+	if (_board_smiley_left <= 0.0 and not _room.board_dragging) or not _own_room() or _panel_kind != "":
+		_board_smiley.visible = false
+		return
+	var board: Node3D = _room.sticker_board
+	var top := board.global_position + Vector3(0, 0.26, 0.03)
+	_board_smiley.position = _room.camera.unproject_position(top) - Vector2(22, 48)
+
+
+func _draw_face(button: Button, color: Color) -> void:
+	var c := button.size * 0.5
+	button.draw_arc(c, 14, 0, TAU, 40, color, 2.0, true)
+	button.draw_circle(c + Vector2(-5, -4), 2.2, color)
+	button.draw_circle(c + Vector2(5, -4), 2.2, color)
+	button.draw_arc(c + Vector2(0, 1), 8, 0.35, PI - 0.35, 16, color, 2.0, true)
+
+
 ## Плоский одноцветный смайлик (как остальные значки хаба — линиями).
 func _draw_smiley() -> void:
 	var c := _smiley.size * 0.5
@@ -212,6 +250,8 @@ func _draw() -> void:
 	var radius: float = frame.radius
 	draw_arc(center, radius + 3, 0, TAU, 48, Color(0, 0, 0, 0.45), 4.0, true)
 	draw_arc(center, radius, 0, TAU, 48, HubStyle.YELLOW, 2.0, true)
+	if _sel_kind == "own_board":
+		return  # на своей доске стикеры друзей только выделяются, не крутятся
 	# Точка поворота на ножке снаружи круга: зажать и вести — стикер крутится за курсором.
 	var tick: Vector2 = frame.up
 	var handle := center + tick * (radius + HANDLE_GAP + HANDLE_R)
@@ -224,6 +264,8 @@ func _draw() -> void:
 
 
 func _handle_pos() -> Vector2:
+	if _sel_kind == "own_board":
+		return Vector2(-1e6, -1e6)
 	var frame := _sel_frame()
 	if frame.is_empty():
 		return Vector2(-1e6, -1e6)
@@ -274,6 +316,8 @@ func _close_panel(keep_selection: bool = false) -> void:
 		_spinning = false
 		if _room.focused != null and _room.focused.spin_ready() and _room.focused.view_spin != Vector2.ZERO:
 			_spin_by(Vector2.INF)  # закрыли стикеры — коробка снова обложкой к игроку
+	if _panel_kind == "board" and not keep_selection:
+		_room.focus_board(false)
 	_panel_kind = ""
 	_stop_placing()
 	if not keep_selection:
@@ -568,6 +612,7 @@ func open_board(screen_point: Vector2) -> void:
 		return
 	var uv: Vector2 = board.uv_at(_room.camera, screen_point)
 	_board_uv = uv if uv.x >= 0.0 else Vector2(randf_range(0.2, 0.8), randf_range(0.25, 0.75))
+	_room.focus_board(true)  # камера подлетает к доске — клеить и разбирать удобнее
 	# Нажали на свой стикер на доске друга — сразу хватаем и тащим (без отдельного выделения).
 	var peer := _peer()
 	if peer != 0 and uv.x >= 0.0:
@@ -595,6 +640,41 @@ func _open_board_panel() -> void:
 		note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		note.custom_minimum_size.x = 340
 		col.add_child(note)
+		var help := HubStyle.label("Нажмите на стикер на доске, чтобы выделить, и «Снять» — так можно убрать ненужные.", 13, HubStyle.MUTED)
+		help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		help.custom_minimum_size.x = 340
+		col.add_child(help)
+		if _sel_kind == "own_board":
+			var picked: Array = []
+			for entry: Array in Net.stickers.local.board:
+				if str(entry[0]) == _sel_key:
+					picked = entry
+			if not picked.is_empty():
+				var frame := HubStyle.panel(HubStyle.YELLOW)
+				col.add_child(frame)
+				var inner := HubStyle.vbox(8)
+				frame.add_child(inner)
+				inner.add_child(HubStyle.label("Выделен: «%s» от %s" % [Stickers.title(str(picked[1])), str(picked[6])], 15, HubStyle.YELLOW, HORIZONTAL_ALIGNMENT_LEFT, "medium"))
+				var row := HubStyle.hbox(8)
+				var remove := HubStyle.primary("Снять", 14)
+				remove.name = "OwnBoardRemove"
+				var uid := _sel_key
+				remove.pressed.connect(func():
+					Net.stickers.remove_own_board_sticker(uid)
+					_sel_kind = ""
+					_sel_key = ""
+					_sel = []
+					_apply(true)
+					_open_board_panel())
+				row.add_child(remove)
+				var keep := HubStyle.button("Оставить", 14)
+				keep.pressed.connect(func():
+					_sel_kind = ""
+					_sel_key = ""
+					_sel = []
+					_open_board_panel())
+				row.add_child(keep)
+				inner.add_child(row)
 		var authors := {}
 		for entry: Array in Net.stickers.local.board:
 			authors[str(entry[6])] = int(authors.get(str(entry[6]), 0)) + 1
@@ -631,11 +711,8 @@ func _open_board_panel() -> void:
 	close.pressed.connect(_close_panel)
 	col.add_child(close)
 	_panel.reset_size()
-	var rect: Rect2 = board.screen_rect(_room.camera)
-	var x := rect.position.x - _panel.size.x - 16
-	if x < 330:
-		x = rect.end.x + 16
-	_panel.position = Vector2(clampf(x, 330, size.x - _panel.size.x - 16), clampf(rect.get_center().y - _panel.size.y * 0.5, 72, maxf(72, size.y - _panel.size.y - 56)))
+	# Камера приближена к доске — панель справа, доска по центру остаётся открытой.
+	_panel.position = Vector2(size.x - 40 - _panel.size.x, clampf((size.y - _panel.size.y) * 0.5, 72, maxf(72, size.y - _panel.size.y - 56)))
 
 
 # --- Выделенный стикер --------------------------------------------------------------------
@@ -741,7 +818,7 @@ func _surface_uv(point: Vector2, clamp_edges: bool = false) -> Vector2:
 			return Vector2(-1, -1)
 		_hit_face = int(hit.face)
 		return hit.uv
-	if _panel_kind == "board" and _peer() != 0 and is_instance_valid(_room.sticker_board):
+	if _panel_kind == "board" and is_instance_valid(_room.sticker_board):
 		var uv: Vector2 = _room.sticker_board.uv_at(_room.camera, point)
 		if uv.x < 0.0 and clamp_edges and _dragging:
 			return Vector2(-2, -2)  # мимо доски: стикер не прыгает
@@ -764,7 +841,8 @@ func _pick_at(uv: Vector2) -> String:
 			if d.length() <= box.sticker_side() * k * 0.45:
 				return str(i)
 		return ""
-	var mine: Array = Net.stickers.my_board_stickers(_peer())
+	# На своей доске можно выделить любой стикер (чтобы снять), на чужой — только свои.
+	var mine: Array = Net.stickers.local.board if _peer() == 0 else Net.stickers.my_board_stickers(_peer())
 	for i in range(mine.size() - 1, -1, -1):
 		var entry: Array = mine[i]
 		var k := float(entry[7]) if entry.size() > 7 else 1.0
@@ -859,6 +937,17 @@ func _input(event: InputEvent) -> void:
 			_deselect()
 		return
 	var picked := _pick_at(uv)
+	if picked != "" and _panel_kind == "board" and _peer() == 0:
+		# Своя доска: стикер только выделяется (снять — кнопкой), двигать чужие нельзя.
+		_sel_kind = "own_board"
+		_sel_key = picked
+		_sel = []
+		for entry: Array in Net.stickers.local.board:
+			if str(entry[0]) == picked:
+				_sel = [float(entry[2]), float(entry[3]), float(entry[4]), float(entry[7]) if entry.size() > 7 else 1.0]
+		_open_board_panel()
+		get_viewport().set_input_as_handled()
+		return
 	if picked != "":
 		var same := _sel_kind != "" and picked == (str(_sel_index) if _sel_kind == "box" else _sel_key)
 		if not same:

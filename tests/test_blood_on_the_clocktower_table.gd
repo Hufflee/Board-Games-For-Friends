@@ -93,6 +93,47 @@ func _seat_picks(table: Control) -> void:
 	check(table.selected_option == others.find(c) + 1 and picked_border(table, c), "Щелчок по плашке выбирает игрока")
 	await click_seat(table, a)
 	check(table.selected_option == others.find(a) + 1 and not picked_border(table, c), "Щелчок по другой плашке меняет выбор")
+	# Информация с парой и ролью (Прачка, отравленная или Пьяница): три списка вместо сотни строк.
+	var info: Array = []
+	for i in others.size():
+		for j in range(i + 1, others.size()):
+			for role: String in ["chef", "empath"]:
+				info.append({"label": "%d/%d %s" % [others[i], others[j], role], "text": "т", "left": others[i], "right": others[j], "role": role})
+	info.append({"label": "Изгоев нет", "text": "Изгоев в партии нет."})
+	v.request = {"token": "test_info", "title": "Информация для Игрок · Прачка", "options": info}
+	table.update_view(v)
+	await frames()
+	check(table.pick_mode == "pair" and table.slot_row.visible and table.slot_role.visible, "Пара с ролью: три выпадающих списка")
+	check(table.request_options.item_count == 1, "В списке остался только особый вариант «Изгоев нет»")
+	table.slot_left.select(table.slot_left.get_item_index(b))
+	table.slot_left.item_selected.emit(table.slot_left.selected)
+	table.slot_right.select(table.slot_right.get_item_index(a))
+	table.slot_right.item_selected.emit(table.slot_right.selected)
+	check(table.selected_option < 0 and table.request_confirm.disabled, "Без роли подтверждать рано")
+	table.slot_role.select(2)
+	table.slot_role.item_selected.emit(2)
+	var chosen: Dictionary = info[table.selected_option] if table.selected_option >= 0 else {}
+	check(not chosen.is_empty() and [int(chosen.left), int(chosen.right)].has(a) and [int(chosen.left), int(chosen.right)].has(b) and chosen.role == "empath", "Левый, правый и роль дают нужный вариант: %s" % [chosen])
+	check(not table.request_confirm.disabled and table.request_summary.text.begins_with("Будет показано"), "Можно подтверждать, видно, что получит игрок")
+	await shot("info_slots_1280x720")
+	# Сворачивание карточки роли.
+	table.role_toggle.pressed.emit()
+	check(not table.personal.visible and table.role_toggle.text.begins_with("▸"), "Карточка роли сворачивается")
+	table.role_toggle.pressed.emit()
+	check(table.personal.visible, "И разворачивается")
+	# Своя очередь голосовать — кнопка «Проголосовать».
+	var voting: Dictionary = net.view.duplicate(true)
+	voting.erase("request")
+	voting.phase = "voting"
+	voting.nominee = c
+	voting.next_voter = me
+	table.update_view(voting)
+	await frames()
+	check(table.actions.cast_vote.visible and table.actions.hand.visible, "В свою очередь — «Проголосовать» рядом с рукой")
+	voting.next_voter = a
+	table.update_view(voting)
+	await frames()
+	check(not table.actions.cast_vote.visible, "Не в свою очередь «Проголосовать» нет")
 	# Голоса приспешников — квадратики цвета голосующих у ника жертвы.
 	v.erase("request")
 	v.evil_votes = [{"from": a, "target": c}, {"from": b, "target": c}]
@@ -196,6 +237,18 @@ func _run() -> void:
 		net.send_action("private_reply", {"token": request.get("token", ""), "index": 0})
 		await frames()
 	check(net.bc.phase == "discussion", "Первая ночь завершена через адресные кнопки")
+	# Гримуар-книга у рассказчика: 7 записей, справа — журнал действий.
+	net.send_action("view_seat", {"seat": 0})
+	await frames()
+	table._send("grimoire")
+	await frames()
+	var book: Control = table.grimoire
+	check(book.visible and book.entries_box.get_child_count() == 7, "Гримуар-книга открыта, в ней 7 записей")
+	check(net.bc.story_log.is_empty() or book.notes.text.contains("Действия игроков"), "Справа — записи о действиях игроков")
+	check(book.book.get_global_rect().end.y <= 720 and book.book.position.x >= 0, "Книга помещается в 1280×720")
+	await shot("grimoire_1280x720")
+	book.find_child("CloseGrimoire", true, false).pressed.emit()
+	check(not book.visible, "Гримуар закрывается")
 	net.send_action("view_seat", {"seat": 1})
 	await frames()
 	await shot("player_1280x720")

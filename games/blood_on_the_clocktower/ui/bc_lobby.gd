@@ -6,6 +6,8 @@ const Setup := preload("res://games/blood_on_the_clocktower/logic/bc_setup.gd")
 var app: Control
 var edition: OptionButton
 var teller: OptionButton
+var random_teller: Button
+var timer_box: CheckBox
 var roster: GridContainer
 var roster_title: Label
 var roster_key := ""
@@ -45,13 +47,41 @@ func _ready() -> void:
 	for id: String in Data.EDITIONS:
 		edition.add_item(Data.EDITIONS[id].name)
 	edition.item_selected.connect(func(index: int):
-		if not updating: Net.set_setting("bc_edition", Data.EDITIONS.keys()[index]))
+		if updating: return
+		var picked: String = Data.EDITIONS.keys()[index]
+		# Сценарий выбирает рассказчик; хост меняет его сам, только если ведущий — он.
+		if Net.is_host(): Net.set_setting("bc_edition", picked)
+		else: Net.bc_configure({"bc_edition": picked}))
 	public.add_child(edition)
 	public.add_child(Style.label("Рассказчик — отдельный участник", Style.SMALL))
+	var teller_row := HBoxContainer.new()
+	teller_row.add_theme_constant_override("separation", 8)
+	public.add_child(teller_row)
 	teller = OptionButton.new()
+	teller.size_flags_horizontal = SIZE_EXPAND_FILL
 	teller.item_selected.connect(func(index: int):
 		if not updating: Net.set_setting("bc_storyteller", index))
-	public.add_child(teller)
+	teller_row.add_child(teller)
+	random_teller = Style.button("Случайный ведущий", Style.SMALL)
+	random_teller.name = "RandomStoryteller"
+	random_teller.tooltip_text = "Выбрать рассказчика случайно среди участников"
+	random_teller.pressed.connect(func():
+		var count := teller.item_count
+		if count < 2: return
+		var current := teller.selected
+		var choice := randi_range(0, count - 2)
+		if choice >= current: choice += 1
+		Net.set_setting("bc_storyteller", choice))
+	teller_row.add_child(random_teller)
+	timer_box = CheckBox.new()
+	timer_box.name = "DayTimer"
+	timer_box.text = "Таймер дня: речь по минуте, 2 мин обсуждения, 15 с на голос"
+	timer_box.add_theme_font_size_override("font_size", Style.SMALL)
+	timer_box.toggled.connect(func(on: bool):
+		if updating: return
+		if Net.is_host(): Net.set_setting("bc_timer", on)
+		else: Net.bc_configure({"bc_timer": on}))
+	public.add_child(timer_box)
 	# Участники: заголовок со счётом и сетка ников в 3 колонки (16 мест помещаются без прокрутки в 720p).
 	# Заголовок списка и кнопки соло-мест — одной строкой, чтобы 16 ников влезали без прокрутки.
 	var roster_head := HBoxContainer.new()
@@ -165,8 +195,12 @@ func refresh() -> void:
 	var options: Dictionary = Net.lobby_view.get("settings", Net.settings)
 	var id := str(options.get("bc_edition", "tb"))
 	edition.select(Data.EDITIONS.keys().find(id))
-	edition.disabled = not Net.is_host()
+	# Сценарий — у рассказчика (и у хоста, пока он сам ведущий или офлайн); ведущего назначает хост.
+	edition.disabled = not Net.bc_bridge.is_story_lobby()
 	teller.disabled = not Net.is_host()
+	random_teller.visible = Net.is_host()
+	timer_box.set_pressed_no_signal(bool(options.get("bc_timer", false)))
+	timer_box.disabled = not Net.bc_bridge.is_story_lobby()
 	var names: Array[String] = []
 	for member: Dictionary in members:
 		names.append(str(member.get("name", "Игрок")))

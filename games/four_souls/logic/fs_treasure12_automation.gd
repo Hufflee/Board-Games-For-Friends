@@ -184,6 +184,10 @@ func _apply_card_step(step: Dictionary) -> void:
 			_death_queue.erase(owner)
 			if battle >= 0 or battle_player >= 0:
 				_end_battle()
+			# 07.11: атака отменена — продолжаем обычный ход, а не прежний «бросок атаки» без боя.
+			resolving["_resume"] = "turn"
+			_after_stack = "turn"
+			stack = stack.filter(func(e): return str(e.kind) not in ["attack", "player_attack"])
 			attack_left += 1
 			attacked = false
 		"rainbow_mode":

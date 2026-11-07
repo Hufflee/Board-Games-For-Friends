@@ -360,10 +360,12 @@ func _party_panel() -> Control:
 		var invite := HubStyle.primary("Пригласить друзей (Steam)", 14)
 		invite.pressed.connect(Net.invite_friends)
 		v.add_child(invite)
-	var leave := HubStyle.button("Распустить пати" if Net.is_host() else "Покинуть пати", 14)
+	var leave := HubStyle.button("Покинуть пати", 14)
+	# Хост уходит — пати не распадается: ведущим становится тот, кто вошёл первым (Net._hand_over_host).
+	var alone: bool = humans.size() <= 1
 	LeaveGuard.hold(leave, func():
 		Net.leave()
-		_rebuild(), "Распустить пати: все вернутся в главное меню." if Net.is_host() else "Покинуть пати друзей.")
+		_rebuild(), ("Покинуть пати: ведущим станет следующий участник." if not alone else "Покинуть пати.") if Net.is_host() else "Покинуть пати друзей.")
 	v.add_child(leave)
 	return p
 

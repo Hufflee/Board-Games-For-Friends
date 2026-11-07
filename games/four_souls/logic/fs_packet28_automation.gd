@@ -237,6 +237,13 @@ func _apply_card_step(step: Dictionary) -> void:
 				var title := FSData.title(int(soul_cards[owner][index].id))
 				_destroy_soul28(owner, index)
 				_note("Проклятие потери: %s теряет душу %s" % [name_of(owner), title])
+		"attach_curse28":
+			var target: int = int(step.target)
+			if target >= 0 and target < players.size() and not bool(resolving.get("attached", false)):
+				curses[target].append(int(resolving.card))
+				resolving["attached"] = true
+				_note("%s получает проклятие: %s" % [name_of(target), FSData.title(int(resolving.card))])
+				_refresh_passive_stats()
 		"curse_pass28":
 			if curses[owner].has(744):
 				curses[owner].erase(744)
@@ -303,6 +310,23 @@ func _replace_monster_death(slot: int) -> bool:
 		return true
 	return super._replace_monster_death(slot)
 
+## 07.11 (владелец): предмет с «дополнительной покупкой/атакой/розыгрышем в свой ход» (105, 173, 24…)
+## действует сразу, если получен в свой ход (раньше прибавка считалась только в начале хода).
+func _gain_item(seat: int, id: int, eternal: bool = false) -> void:
+	var track: bool = _card_automation_enabled() and not _setting_up and seat == current and phase != "starting_item"
+	var before := _copy_allowances13(seat) if track else Vector3i.ZERO
+	super._gain_item(seat, id, eternal)
+	if not track:
+		return
+	var change := _copy_allowances13(seat) - before
+	if change == Vector3i.ZERO:
+		return
+	free_loot += maxi(0, change.x)
+	buy_left += maxi(0, change.y)
+	attack_left = mini(99, attack_left + maxi(0, change.z))
+	bought = buy_left <= 0
+	attacked = attack_left <= 0
+
 ## Пассив, поставленный сразу после завершения эффекта (фаза ещё effect, resolving уже пуст —
 ## например награда напарнику 754/863 после награды монстра), продолжает прежний ход партии,
 ## а не «effect»: иначе после него стол оставался в фазе effect без эффекта (фазз seed 281128).
@@ -348,3 +372,66 @@ func _treasure12_passives(event: String, data: Dictionary) -> void:
 				if bool(source.get("club_off28", false)) and int(source.get("club_owner28", -1)) == current:
 					source.erase("club_off28")
 					source.erase("club_owner28")
+
+
+## 07.11 (владелец): аварийные действия «Панели хоста», доступные всегда — даже когда эффекта нет
+## и панель раньше показывала лишь выбор игрока. Ничего не теряется: добыча из снятого стека — в сброс.
+func host_unstick28(mode: String) -> bool:
+	match mode:
+		"resolve":
+			if phase != "priority" or stack.is_empty():
+				return false
+			_finish_responses()
+		"recover":
+			resolving = {}
+			peek = {}
+			stack = stack.filter(func(e): return str(e.kind) not in ["resume_effect", "resume_deaths"])
+			_resolving_base = 0
+			if not stack.is_empty():
+				phase = "priority"
+				_after_stack = "battle_roll" if battle >= 0 or battle_player >= 0 else "turn"
+			else:
+				phase = "battle_roll" if battle >= 0 or battle_player >= 0 else "turn"
+				_after_stack = phase
+			_note("Хост снял зависание: фаза " + phase)
+		"end_turn":
+			for entry: Dictionary in stack:
+				if str(entry.kind) == "loot" and not bool(entry.get("loot_copy14", false)):
+					discards.loot.append(int(entry.card))
+			stack.clear()
+			resolving = {}
+			peek = {}
+			_resolving_base = 0
+			_death_queue.clear()
+			battle = -1
+			battle_player = -1
+			phase = "turn"
+			_after_stack = "turn"
+			_note("Хост завершил ход принудительно")
+			_end_turn()
+		_:
+			return false
+	revision += 1
+	return true
+
+
+## 07.11 (владелец): «Панель хоста» применяет любую операцию и без текущего эффекта — временный
+## аварийный эффект от имени seat, сразу завершается (ход партии продолжается, где был).
+func host_apply28(seat: int, arg: Dictionary) -> bool:
+	if seat < 0 or seat >= players.size():
+		return false
+	var temporary := resolving.is_empty()
+	if temporary:
+		var resume: String = _after_stack if phase == "priority" else phase
+		if resume in ["effect", ""]:
+			resume = "battle_roll" if battle >= 0 or battle_player >= 0 else "turn"
+		_begin_resolving({"kind": "host_fix28", "card": -1, "owner": seat, "_resume": resume})
+	_host_manual = true
+	var ok := _effect(arg)
+	if temporary:
+		_automation_internal = true
+		action(seat, "effect_done")
+		_automation_internal = false
+	_host_manual = false
+	revision += 1
+	return ok

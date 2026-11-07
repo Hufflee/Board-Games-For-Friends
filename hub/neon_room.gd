@@ -13,6 +13,7 @@ signal editor_mode_changed(on:bool)
 signal game_editor_requested
 signal board_requested(screen_point: Vector2)  # клик по доске друзей (своя или в комнате друга)
 signal board_moved(center: Vector2)
+signal board_held  # свою доску зажали — над ней смайлик (hub/sticker_ui.gd)
 signal poster_held(slot: int)  # плакат зажали — над ним значок галереи (hub/poster_ui.gd)
 signal poster_moved(slot: int, center: Vector2)  # плакат перевесили (центр на стене, м)  # свою доску перевесили (центр на задней стене, x/y в метрах)
 
@@ -64,6 +65,7 @@ var boxes: Array = []  # GameBox
 var focused: GameBox
 var sticker_board: Node3D  # hub/sticker_board.gd — доска, на которую клеят стикеры друзья
 var board_dragging := false  # свою доску переносят по стене
+var _board_cam_saved: Variant = null  # куда вернуть камеру после приближения к доске
 var _board_home := Vector2(INF, INF)  # где игрок повесил доску (сохранено)
 var _board_target := Vector2(INF, INF)  # где она висит сейчас (сдвинута, если там шкаф)
 var _wall_decor: Array = []  # [Rect2 на задней стене (x, y), глубина, на которой доска их перекрывает]
@@ -487,6 +489,7 @@ func _stars() -> void:
 
 
 ## Три плаката — отдельные узлы (hub/wall_poster.gd): их можно перевесить и заменить своей картинкой.
+const POSTER_LAYER := 0.008  # м между слоями плакатов
 const POSTER_DEFAULTS := [
 	["res://games/ready_set_bet/art/cover.jpg", Vector2(1.05, 1.55), 0.03],
 	["res://hub/art/posters/coin_heap.png", Vector2(1.62, 1.66), -0.04],
@@ -1104,6 +1107,13 @@ func _add_shelf_figurine() -> void:
 	andy.size = Vector3(0.15, 0.152, 0.30)
 	_shelf_root.add_child(andy)
 	boxes.append(andy)
+	# Фигурки из Tripo AI (ShelfFigurine.TRIPO) встают на свободное место, как новая игра (нет места — шкаф расширяется).
+	for fig: Array in [["shelf_mummy", "Мумия", Vector3(0.17, 0.25, 0.13)], ["shelf_fighter", "Боец", Vector3(0.14, 0.26, 0.16)], ["shelf_anime", "Девочка", Vector3(0.19, 0.27, 0.2)]]:
+		var item := ShelfFigurine.new()
+		item.game = {"id": fig[0], "title": fig[1], "shelf": false}
+		item.size = fig[2]
+		_shelf_root.add_child(item)
+		boxes.append(item)
 
 
 func _shelf_id(box: GameBox) -> String:
@@ -1749,14 +1759,17 @@ func clamp_poster(poster: Node3D, center: Vector2) -> Vector2:
 
 
 ## Повесить плакат (своя комната — из сохранения, у друга — где повесил он). Во время переноса не трогаем.
-func set_poster_position(slot: int, center: Vector2) -> void:
+## layer — слой плаката (0 — нижний): каждый слой на 8 мм ближе, пересекающиеся плакаты не мерцают.
+func set_poster_position(slot: int, center: Vector2, layer: int = -1) -> void:
 	if slot < 0 or slot >= posters.size():
 		return
 	var poster: Node3D = posters[slot]
 	if poster == poster_dragging:
 		return
+	if layer < 0:
+		layer = slot  # порядок по умолчанию
 	var at := clamp_poster(poster, center)
-	poster.position = Vector3(at.x, at.y, _poster_depth(Rect2(at - poster.wall_size() / 2.0, poster.wall_size())))
+	poster.position = Vector3(at.x, at.y, _poster_depth(Rect2(at - poster.wall_size() / 2.0, poster.wall_size())) + layer * POSTER_LAYER)
 
 
 func poster_default_position(slot: int) -> Vector2:
@@ -1791,7 +1804,7 @@ func _drag_poster(point: Vector2) -> void:
 	if hit == null or poster_dragging == null:
 		return
 	var at := clamp_poster(poster_dragging, Vector2((hit as Vector3).x + _poster_grab.x, (hit as Vector3).y + _poster_grab.y))
-	poster_dragging.position = Vector3(at.x, at.y, _poster_depth(Rect2(at - poster_dragging.wall_size() / 2.0, poster_dragging.wall_size())))
+	poster_dragging.position = Vector3(at.x, at.y, _poster_depth(Rect2(at - poster_dragging.wall_size() / 2.0, poster_dragging.wall_size())) + posters.size() * POSTER_LAYER)
 
 
 func _end_poster_drag() -> void:
@@ -1804,6 +1817,26 @@ func _end_poster_drag() -> void:
 	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 	shelf_hint.emit(HINT if not _editor_on else "Плакат повешен")
 	poster_moved.emit(int(poster.slot), Vector2(poster.position.x, poster.position.y))
+
+
+## Камера подлетает к доске (наклеить другу / разобрать свою) и возвращается обратно. Плавно — через _cam_home.
+func focus_board(on: bool) -> void:
+	if not is_instance_valid(sticker_board) or not is_instance_valid(camera):
+		return
+	if on:
+		if _board_cam_saved == null:
+			_board_cam_saved = _cam_home
+		var center := sticker_board.global_position
+		var eye := center + Vector3(0.0, 0.02, 0.78)
+		var view := Transform3D(Basis.IDENTITY, eye)
+		_cam_home = view.looking_at(center, Vector3.UP)
+	elif _board_cam_saved != null:
+		_cam_home = _board_cam_saved
+		_board_cam_saved = null
+
+
+func board_focused() -> bool:
+	return _board_cam_saved != null
 
 
 ## Повесить доску (своя — из сохранения, в комнате друга — где её повесил друг). Во время переноса не трогаем.
@@ -2706,6 +2739,7 @@ func _process(delta: float) -> void:
 		if _board_hold >= BOX_HOLD:
 			_board_press = false
 			_begin_board_drag(get_viewport().get_mouse_position())
+			board_held.emit()
 	if (
 		is_instance_valid(panels)
 		and panels.is_open

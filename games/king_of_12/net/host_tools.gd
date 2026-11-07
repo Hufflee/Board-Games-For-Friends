@@ -304,6 +304,30 @@ func four_souls_effect(kind: String, argument: Dictionary, trigger_seat: int = -
 		_pending = null
 	return accepted
 
+## Four Souls 07.11: операция «Панели хоста» без текущего эффекта (временный аварийный эффект).
+func four_souls_host_apply(seat: int, argument: Dictionary) -> bool:
+	if not net.is_host() or net.fours == null:
+		return false
+	before_action("host")
+	var accepted: bool = net.fours.host_apply28(seat, argument)
+	if accepted:
+		net._push_state()
+	else:
+		_pending = null
+	return accepted
+
+## Four Souls 07.11: аварийные действия без текущего эффекта (разрешить стек, снять зависание, закончить ход).
+func four_souls_unstick(mode: String) -> bool:
+	if not net.is_host() or net.fours == null:
+		return false
+	before_action("host")
+	var accepted: bool = net.fours.host_unstick28(mode)
+	if accepted:
+		net._push_state()
+	else:
+		_pending = null
+	return accepted
+
 func set_stat(seat: int, key: String, value: int) -> bool:
 	var g: Object = net._game_obj()
 	if g == null or not g.has_method("host_set_stat"):

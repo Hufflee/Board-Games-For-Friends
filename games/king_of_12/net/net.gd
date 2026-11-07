@@ -143,6 +143,19 @@ var _client_expected_match := ""
 var _seat_perm: Array = []  # рассадка партии: новое место → место по порядку входа (см. start_game)
 
 var _hosting_steam := false
+## Передача хоста (07.11): хост уходит — пати не распадается, ведущим становится следующий участник.
+var _host_steam_id := 0  # владелец Steam-лобби, к которому мы подключены
+var _enet_successor: Dictionary = {}  # ENet: {"peer": id, "ip": адрес} — кому перейти, когда хост уйдёт
+var _migrating := false  # клиент ждёт нового хоста
+## Снимок партии для продолжения у преемника (games/king_of_12/net/host_handoff.gd).
+const HANDOFF_EVERY := 3.0  # хост шлёт снимок преемнику не чаще раза в 3 с (и при уходе)
+const HANDOFF_CHUNK := 48000
+const Handoff := preload("res://games/king_of_12/net/host_handoff.gd")
+var _handoff: Dictionary = {}  # преемник: последний полный снимок {"bytes", "me", "seq"}
+var _handoff_parts: Dictionary = {}  # преемник: снимок, который ещё докачивается
+var _handoff_clock := 0.0
+var _handoff_dirty := false
+var _handoff_seq := 0
 var steam_public_lobbies: Array[Dictionary] = []
 var steam_lobbies_loading := false
 var steam_lobbies_error := ""
@@ -481,6 +494,7 @@ func _on_lobby_invite(inviter: int, lobby: int, _game: int) -> void:
 func leave(reason: String = "Добровольный выход или смена подключения") -> void:
 	if _leaving:
 		return
+	_hand_over_host()
 	_leaving = true
 	Sfx.stop_victory()
 	if not mode.is_empty():
@@ -526,6 +540,12 @@ func leave(reason: String = "Добровольный выход или смен
 		steam.leaveLobby(lobby_id)
 	lobby_id = 0
 	_hosting_steam = false
+	_host_steam_id = 0
+	_enet_successor = {}
+	_migrating = false
+	_handoff = {}
+	_handoff_parts = {}
+	_handoff_dirty = false
 	if multiplayer.multiplayer_peer != null and not (multiplayer.multiplayer_peer is OfflineMultiplayerPeer):
 		multiplayer.multiplayer_peer.close()
 	multiplayer.multiplayer_peer = OfflineMultiplayerPeer.new()
@@ -618,6 +638,233 @@ func _on_lobby_created(result: int, id: int) -> void:
 	_broadcast_lobby()
 
 
+# --- Передача хоста ----------------------------------------------------------
+
+## Люди в пати, кроме хоста, по порядку входа.
+func _other_humans() -> Array:
+	return join_order.filter(func(id): return int(id) != 1 and members.has(id))
+
+
+## Хост уходит из пати, а в ней остаются люди: пати живёт дальше с новым ведущим (первый вошедший).
+## Steam — лобби передаётся владельцу-преемнику (его и находят остальные); ENet — всем рассылается адрес преемника.
+func _hand_over_host() -> void:
+	if not is_party() or not is_host() or _other_humans().is_empty():
+		return
+	var successor: int = int(_other_humans()[0])
+	var name := str(members[successor].get("name", "Игрок"))
+	Diag.mark("Хост уходит — пати передаётся", {"преемник": name, "сеть": mode})
+	if mode == "steam" and steam_ok and lobby_id != 0:
+		var steam_id := int(members[successor].get("steam_id", 0))
+		if steam_id != 0 and steam.has_method("setLobbyOwner"):
+			steam.setLobbyOwner(lobby_id, steam_id)
+	elif mode == "enet":
+		_send_enet_successor()
+	if in_game:
+		_send_handoff()
+	if mode == "enet":
+		var peer := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+		if peer != null and peer.host != null:
+			peer.host.flush()
+
+
+## ENet: разослать всем, кто станет хостом после нас (первый вошедший) и его адрес. Шлётся с каждым
+## обновлением лобби — так пати переживёт и внезапный уход хоста, а не только кнопку «Покинуть».
+func _send_enet_successor() -> void:
+	if not is_host() or _other_humans().is_empty():
+		return
+	var peer := multiplayer.multiplayer_peer as ENetMultiplayerPeer
+	if peer == null:
+		return
+	var successor: int = int(_other_humans()[0])
+	if not multiplayer.get_peers().has(successor):
+		return
+	var remote := peer.get_peer(successor)
+	var ip := remote.get_remote_address() if remote != null else ""
+	if ip == "" or ip == "0.0.0.0":
+		return
+	_rpc_enet_successor.rpc(successor, ip, str(members[successor].get("name", "Игрок")))
+
+
+@rpc("authority", "reliable")
+func _rpc_enet_successor(successor: int, ip: String, name: String) -> void:
+	# Свой id запоминаем сразу: после обрыва связи с хостом multiplayer уже неактивен.
+	_enet_successor = {"peer": successor, "ip": ip, "name": name, "me": multiplayer.get_unique_id()}
+
+
+## Steam: хост вышел — Steam передал лобби следующему владельцу. Ждём, кто им стал (до 12 с):
+## мы — поднимаем хост в том же лобби; другой — переподключаемся к нему. Не дождались — как раньше.
+func _follow_steam_owner() -> void:
+	if _migrating:
+		return
+	_migrating = true
+	var handoff := _handoff
+	var old_owner := _host_steam_id
+	var lobby := lobby_id
+	status_changed.emit("Хост вышел — передаём пати…")
+	Diag.mark("Хост пропал — ждём нового владельца лобби", {"лобби": lobby})
+	var started := Time.get_ticks_msec()
+	var owner := 0
+	while Time.get_ticks_msec() - started < 12000:
+		if _leaving or lobby_id != lobby:
+			_migrating = false
+			return
+		owner = int(steam.getLobbyOwner(lobby))
+		if owner != 0 and owner != old_owner:
+			break
+		await get_tree().create_timer(0.25).timeout
+	_migrating = false
+	if owner == 0 or owner == old_owner:
+		var was_playing := not view.is_empty()
+		leave("server_disconnected: хост вышел, новый владелец лобби не найден")
+		session_closed.emit("Связь с хостом потеряна. Если партия ещё идёт — нажмите «Вернуться в партию»." if was_playing else "Хост покинул игру.")
+		return
+	_reset_party_session()
+	if owner == my_steam_id or owner == int(steam.getSteamID()):
+		var peer: MultiplayerPeer = ClassDB.instantiate("SteamMultiplayerPeer")
+		if peer.create_host(0) != OK:
+			leave("migration: не удалось стать хостом")
+			session_closed.emit("Хост вышел, а стать новым хостом не получилось.")
+			return
+		multiplayer.multiplayer_peer = peer
+		mode = "steam"
+		_hosting_steam = true
+		_reset_host()
+		party_game = party_game if not handoff.is_empty() else ""
+		_publish_steam_lobby(lobby)
+		if not _resume_handoff(handoff):
+			_broadcast_lobby()
+			party_game_changed.emit("")
+		status_changed.emit("Хост вышел — теперь вы ведущий пати.")
+		Diag.mark("Мы — новый хост пати", {"лобби": lobby})
+		return
+	_host_steam_id = owner
+	var client: MultiplayerPeer = ClassDB.instantiate("SteamMultiplayerPeer")
+	if client.create_client(owner, 0) != OK:
+		leave("migration: не удалось подключиться к новому хосту")
+		session_closed.emit("Хост вышел, а подключиться к новому хосту не получилось.")
+		return
+	multiplayer.multiplayer_peer = client
+	mode = "steam"
+	status_changed.emit("Хост вышел — переходим к новому ведущему…")
+
+
+## ENet: хост перед уходом сообщил преемника. Мы — поднимаем хост; иначе через 1,5 с подключаемся к нему.
+func _follow_enet_successor() -> void:
+	var target := _enet_successor.duplicate()
+	var handoff := _handoff
+	var me := int(target.get("me", 0))
+	status_changed.emit("Хост вышел — передаём пати…")
+	if stickers != null and stickers.has_method("reset_party"):
+		stickers.reset_party()
+	if int(target.peer) == me:
+		host_enet(PORT, party_game if not handoff.is_empty() else "")  # с партией — сразу в ту же игру, без хаба
+		_resume_handoff(handoff)
+		status_changed.emit("Хост вышел — теперь вы ведущий пати.")
+		return
+	await get_tree().create_timer(1.5).timeout
+	if mode == "enet" and not _leaving:
+		join_enet(str(target.ip))
+		status_changed.emit("Хост вышел — переходим к ведущему «%s»…" % str(target.get("name", "")))
+
+
+## Хост: раз в HANDOFF_EVERY с, если состояние менялось, — снимок партии преемнику.
+func _handoff_tick(delta: float) -> void:
+	if not in_game or mode == "offline" or mode.is_empty() or not is_host():
+		return
+	_handoff_clock += delta
+	if _handoff_clock >= HANDOFF_EVERY and _handoff_dirty:
+		_send_handoff()
+
+
+func _send_handoff() -> void:
+	_handoff_clock = 0.0
+	_handoff_dirty = false
+	if not is_host() or _other_humans().is_empty():
+		return
+	var successor: int = int(_other_humans()[0])
+	if not multiplayer.get_peers().has(successor):
+		return
+	var bytes := Handoff.pack_net(self)
+	_handoff_seq += 1
+	var count := maxi(1, ceili(bytes.size() / float(HANDOFF_CHUNK)))
+	for i in count:
+		_rpc_handoff_part.rpc_id(successor, _handoff_seq, i, count, bytes.slice(i * HANDOFF_CHUNK, (i + 1) * HANDOFF_CHUNK))
+
+
+@rpc("authority", "reliable")
+func _rpc_handoff_part(seq: int, index: int, count: int, chunk: PackedByteArray) -> void:
+	if int(_handoff_parts.get("seq", -1)) != seq:
+		_handoff_parts = {"seq": seq, "parts": {}}
+	_handoff_parts.parts[index] = chunk
+	if (_handoff_parts.parts as Dictionary).size() < count:
+		return
+	var bytes := PackedByteArray()
+	for i in count:
+		bytes.append_array(_handoff_parts.parts[i])
+	# свой id запоминаем сейчас: после обрыва связи с хостом multiplayer уже неактивен
+	_handoff = {"bytes": bytes, "me": multiplayer.get_unique_id(), "seq": seq}
+	_handoff_parts = {}
+
+
+## Мы стали хостом, а у нас есть снимок партии: продолжаем её. Наше место — наше, место ушедшего хоста —
+## как у любого вышедшего (бот или ожидание), остальные места ждут, пока игроки переподключатся.
+func _resume_handoff(handoff: Dictionary) -> bool:
+	if handoff.is_empty():
+		return false
+	var vars := Handoff.unpack(handoff.bytes, get_tree())
+	if vars.is_empty() or not bool(vars.get("in_game", false)):
+		return false
+	var keep_members := members.duplicate(true)
+	Handoff.apply_net(self, vars)
+	members = keep_members
+	host_tools.reset()
+	var old_me := int(handoff.me)
+	var host_seat := -1
+	var host_name := ""
+	for s in seat_peers.size():
+		var p := seat_peers[s]
+		if p == 0:
+			continue
+		if p == old_me:
+			seat_peers[s] = 1
+		elif p == 1:
+			host_seat = s
+			host_name = str(_gp()[s].get("name", "Хост"))
+		else:
+			seat_peers[s] = 0
+			disconnected[s] = str(_gp()[s].get("name", "Игрок"))
+	var was_ready := ready_peers.has(old_me)
+	ready_peers.clear()
+	if was_ready:
+		ready_peers[1] = true
+	in_game = true
+	if host_seat >= 0:
+		_seat_left(host_seat, host_name, true)
+	Diag.mark("Партия продолжается у нового хоста", {"игра": party_game, "место_хоста": host_seat})
+	_broadcast_lobby()
+	_push_state()
+	game_started.emit()  # стол открывается заново уже у хоста (view готов)
+	return true
+
+
+## Партия и снимки комнат прошлого хоста больше не действуют; пати (лобби Steam) сохраняется.
+func _reset_party_session() -> void:
+	var old := multiplayer.multiplayer_peer
+	if old != null and not (old is OfflineMultiplayerPeer):
+		old.close()
+	public_rooms.clear()
+	_room_pending.clear()
+	_room_sent.clear()
+	_room_known.clear()
+	public_room_changed.emit(0)
+	view = {}
+	in_game = false
+	paused = false
+	disconnected.clear()
+	if stickers != null and stickers.has_method("reset_party"):
+		stickers.reset_party()
+
+
 func _publish_steam_lobby(id: int) -> void:
 	steam.setLobbyData(id, "game", LOBBY_TAG)
 	steam.setLobbyData(id, "host", my_name)
@@ -639,6 +886,7 @@ func _on_lobby_joined(id: int, _permissions: int, _locked: bool, response: int) 
 	if owner == steam.getSteamID():
 		return
 	lobby_id = id
+	_host_steam_id = owner
 	var peer: MultiplayerPeer = ClassDB.instantiate("SteamMultiplayerPeer")
 	var err: int = peer.create_client(owner, 0)
 	if err != OK:
@@ -670,6 +918,12 @@ func _on_connection_failed() -> void:
 
 func _on_server_disconnected() -> void:
 	if _leaving or mode.is_empty():
+		return
+	if mode == "steam" and steam_ok and lobby_id != 0:
+		_follow_steam_owner()
+		return
+	if mode == "enet" and not _enet_successor.is_empty():
+		_follow_enet_successor()
 		return
 	var was_playing := not view.is_empty()
 	leave("server_disconnected: транспорт потерял связь с хостом")
@@ -719,18 +973,25 @@ func _on_peer_disconnected(id: int) -> void:
 	if in_game:
 		var seat := seat_peers.find(id)
 		if seat >= 0:
-			seat_peers[seat] = 0
-			disconnected[seat] = pname
-			if phantom == null and fours == null and gang == null and mind == null and mk == null and bc == null and cg == null and tir == null and khr == null:
-				_gp()[seat]["bot"] = true
-				_gp()[seat]["name"] = pname + " (бот)"
-			if gang != null:
-				_system_chat("%s отключился. Пропущенный выбор за его место будет сделан случайно по таймеру. Он может вернуться в партию." % pname)
-			else:
-				_system_chat("%s отключился. Ждём его возвращения — место в этой игре нельзя заменить ботом." % pname if phantom != null or fours != null or mind != null or mk != null or bc != null or cg != null or tir != null or khr != null else "%s отключился — пока за него играет бот. Он может вернуться в партию." % pname)
+			_seat_left(seat, pname)
 		_push_state()
 	else:
 		_broadcast_lobby()
+
+
+## Игрок за местом seat вышел: место ждёт его возвращения, а в играх с ботами за него пока играет бот.
+func _seat_left(seat: int, pname: String, was_host: bool = false) -> void:
+	seat_peers[seat] = 0
+	disconnected[seat] = pname
+	var no_bots := phantom != null or fours != null or mind != null or mk != null or bc != null or cg != null or tir != null or khr != null
+	if not no_bots and gang == null:
+		_gp()[seat]["bot"] = true
+		_gp()[seat]["name"] = pname + " (бот)"
+	var who := ("Хост %s вышел" if was_host else "%s отключился") % pname
+	if gang != null:
+		_system_chat("%s. Пропущенный выбор за его место будет сделан случайно по таймеру. Он может вернуться в партию." % who)
+	else:
+		_system_chat("%s. Ждём его возвращения — место в этой игре нельзя заменить ботом." % who if no_bots else "%s — пока за него играет бот. Он может вернуться в партию." % who)
 
 
 # =============================================================================
@@ -868,6 +1129,8 @@ func _broadcast_lobby() -> void:
 	_apply_lobby(data)
 	if mode != "offline":
 		_rpc_lobby.rpc(data)
+	if mode == "enet":
+		_send_enet_successor()  # клиенты заранее знают, к кому идти, если хост пропадёт
 	bc_bridge.send_setup()
 
 
@@ -1515,6 +1778,7 @@ func _process(delta: float) -> void:
 		_steam_refresh_clock = 0.0
 		refresh_steam_session()
 	_flush_public_rooms(delta)
+	_handoff_tick(delta)
 	if not in_game or not is_host() or paused:
 		return
 	if _stamp_turn:
@@ -1639,6 +1903,7 @@ func _push_state() -> void:
 	if bc == null:
 		_match_metrics.observe(game_id,party_game,_game_obj(),seat_peers)
 	host_tools.committed()
+	_handoff_dirty = true
 	var phase: String
 	if cg != null:
 		phase = cg.phase

@@ -108,18 +108,28 @@ func _plan() -> void:
 		var dir := Updater.install_dir()
 		_set_state(State.AVAILABLE if dir != "" and _writable(dir) else State.MANUAL)
 		return
+	# Полная сборка новее базы манифеста (игрок скачал архив сразу последней версии, а не базу):
+	# её содержимое = база + патчи до её версии, поэтому докачиваем только патчи после неё.
+	var start := 0
 	if mb != Updater.base_version:
-		_set_state(State.NONE)
-		return
+		start = -1
+		for i in patches.size():
+			if Updater.compare(str(patches[i].get("version", "")), Updater.base_version) == 0:
+				start = i + 1
+		if start < 0:
+			_set_state(State.NONE)
+			return
+	var tail: Array = patches.slice(start)
 	# Установленная цепочка должна совпадать с началом манифеста, иначе ставим заново.
 	var have := Updater.chain()
-	var same := have.size() <= patches.size()
+	var same := have.size() <= tail.size()
 	for i in have.size():
 		if not same:
 			break
-		same = str(have[i].get("sha256", "")) == str(patches[i].get("sha256", ""))
+		same = str(have[i].get("sha256", "")) == str(tail[i].get("sha256", ""))
 	_keep = have if same else []
 	_queue = []
+	patches = tail
 	for i in range(_keep.size(), patches.size()):
 		var p: Dictionary = patches[i]
 		_queue.append(_entry(p, "patch-%s.pck" % str(p.get("version", i))))

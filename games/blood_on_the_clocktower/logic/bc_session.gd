@@ -111,7 +111,7 @@ func receive_setup(packet: Dictionary) -> void:
 func public_settings() -> Dictionary:
 	var result: Dictionary = net.settings.duplicate(true)
 	for key: String in result.keys():
-		if key.begins_with("bc_") and not key in ["bc_edition", "bc_storyteller"]:
+		if key.begins_with("bc_") and not key in ["bc_edition", "bc_storyteller", "bc_timer"]:
 			result.erase(key)
 	return result
 
@@ -121,6 +121,20 @@ func configure(peer: int, candidate: Dictionary, revision: int) -> void:
 	if net.mode != "offline" and peer != story_peer():
 		return
 	if net.mode == "offline" and peer != 1:
+		return
+	# Владелец 07.11: игру настраивает рассказчик — и сценарий тоже, а не только состав.
+	if candidate.has("bc_timer"):
+		net.settings["bc_timer"] = bool(candidate.bc_timer)
+		net._broadcast_lobby()
+		return
+	if candidate.has("bc_edition"):
+		var edition := str(candidate.bc_edition)
+		if Data.EDITIONS.has(edition) and edition != str(net.settings.get("bc_edition", "tb")):
+			net.settings["bc_edition"] = edition
+			setup_key = ""
+			prepare_lobby()
+			net._broadcast_lobby()
+			send_setup()
 		return
 	var accepted: Dictionary = {}
 	for key: String in ["bc_roles", "bc_bluffs", "bc_drunk_role", "bc_lunatic_role", "bc_godfather_delta"]:
@@ -155,6 +169,7 @@ func create(players: Array) -> String:
 		prepare_lobby()
 	var options := setup_private.duplicate(true)
 	options["bc_edition"] = str(net.settings.get("bc_edition", "tb"))
+	options["bc_timer"] = bool(net.settings.get("bc_timer", false))
 	options["bc_storyteller"] = net._new_seat(story_index())
 	net.bc = Rules.new()
 	var error: String = net.bc.new_game(players, options)

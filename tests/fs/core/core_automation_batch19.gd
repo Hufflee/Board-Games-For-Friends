@@ -4,7 +4,7 @@ func run(t: Check) -> void:
 	t.equal(preload("res://games/four_souls/logic/fs_monster19_cards.gd").IDS.size(), 40, "Пакет19: сорок полных текстов")
 	for id in [409, 412, 415, 422, 423, 425, 426, 427, 430, 431, 450, 451]:
 		var vanilla = _monster(t, id)
-		var rewards: Dictionary = {409: {"coins": 1}, 412: {"coins": 5}, 415: {"loot": 2, "souls": 1}, 422: {"coins": 6}, 423: {"coins": 1}, 425: {"loot": 2}, 426: {"loot": 1}, 427: {"loot": 1}, 430: {"loot": 1}, 431: {"loot": 1}, 450: {"coins": 4}, 451: {"loot": 2}}
+		var rewards: Dictionary = {409: {"coins": 1}, 412: {"coins": 5}, 415: {"loot": 2, "souls": 1}, 422: {"coins": 6, "souls": 1}, 423: {"coins": 1}, 425: {"loot": 2}, 426: {"loot": 1}, 427: {"loot": 1}, 430: {"loot": 1}, 431: {"loot": 1}, 450: {"coins": 4}, 451: {"loot": 2}}
 		t.equal(vanilla.g._printed_monster_reward(id), rewards[id], "%d только напечатанная награда" % id)
 	var thief = _monster(t, 410)
 	thief.g.battle = 0

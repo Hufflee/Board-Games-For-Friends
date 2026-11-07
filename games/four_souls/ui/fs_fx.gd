@@ -104,11 +104,32 @@ static func wiggle(card: Control) -> void:
 	glow.size = drawn.size
 	face.add_child(glow)
 	face.pivot_offset = face.size * 0.5
+	# 07.11: плавный подскок с покачиванием вместо мелкой дрожи. Фаза общая по часам: пересборка стола
+	# не начинает движение заново, а при наведении/перетаскивании карта стоит ровно.
 	var tween := face.create_tween().set_loops()
-	for step in [[-3.0, -7.0, 0.11], [3.0, -4.0, 0.11], [-2.0, -6.0, 0.1], [0.0, 0.0, 0.14]]:
-		tween.tween_property(face, "rotation_degrees", step[0], step[2]).set_trans(Tween.TRANS_SINE)
-		tween.parallel().tween_property(face, "position:y", step[1], step[2]).set_trans(Tween.TRANS_SINE)
-	tween.tween_interval(0.9)
+	var period := 0.0
+	for step in [[-2.5, -9.0, 0.22], [2.5, -6.0, 0.24], [0.0, 0.0, 0.26]]:
+		tween.tween_property(face, "rotation_degrees", step[0], step[2]).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		tween.parallel().tween_property(face, "position:y", step[1], step[2]).set_trans(Tween.TRANS_SINE).set_ease(Tween.EASE_IN_OUT)
+		period += float(step[2])
+	tween.tween_interval(1.1)
+	period += 1.1
+	tween.custom_step(fmod(Time.get_ticks_msec() / 1000.0, period))
+	var still := func(stop: bool) -> void:
+		if not is_instance_valid(face):
+			return
+		if stop:
+			tween.pause()
+			face.rotation_degrees = 0.0
+			face.position.y = 0.0
+		else:
+			tween.play()
+	if card.has_signal("hovered"):
+		card.hovered.connect(func(_c, on): still.call(on))
+	if card.has_signal("drag_started"):
+		card.drag_started.connect(func(_c): still.call(true))
+	if card.has_signal("dropped"):
+		card.dropped.connect(func(_c, _at): still.call(false))
 	var pulse := glow.create_tween().set_loops()
 	pulse.tween_property(glow, "modulate:a", 0.45, 0.6)
 	pulse.tween_property(glow, "modulate:a", 1.0, 0.6)
@@ -171,7 +192,7 @@ class Marker extends Control:
 
 ## Разыгранная карта: крупно в центре экрана, затем летит и ложится на стопку сброса.
 ## from_rect пустой — карта появляется в центре; to_rect пустой — гаснет на месте (активация предмета).
-static func fly_card(layer: Control, texture: Texture2D, from_rect: Rect2, to_rect: Rect2, hold: float = 0.7) -> void:
+static func fly_card(layer: Control, texture: Texture2D, from_rect: Rect2, to_rect: Rect2, hold: float = 1.4) -> void:  # 07.11: вдвое дольше в центре
 	if not is_instance_valid(layer) or texture == null:
 		return
 	var image := TextureRect.new()

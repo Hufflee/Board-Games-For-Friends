@@ -642,10 +642,16 @@ func _card_die(seat: int, attack_roll: bool = false) -> int:
 		_fx28({"kind": "roll", "seat": seat, "amount": _multi_raw_bonus, "card": 552 if count == 0 and _item_count(seat, 552) > 0 else -1})
 	if _card_automation_enabled() and (not _multi_owners.is_empty() or monsters.any(func(monster): return int(monster.id) == 328 and int(monster.hp) > 0) or (attack_roll and battle >= 0 and battle < monsters.size() and int(monsters[battle].id) == 258)):
 		return _roll_die(seat)
-	var face := clampi(_roll_die(seat) + _multi_raw_bonus, 1, 6)
+	var raw := _roll_die(seat)
+	var face := clampi(raw + _multi_raw_bonus, 1, 6)
 	if _era_left > 0:
 		_era_left -= 1
 		face = _era_face
+	# 07.11: в журнале видно, к какому броску ушла прибавка «Рака» (только к первому броску игрока за ход).
+	if count == 0 and _item_count(seat, 552) > 0:
+		_note("Рак: +1 к первому броску хода — выпало %d, итог %d" % [raw, face])
+	elif _item_count(seat, 552) > 0:
+		_note("Рак: не первый бросок за ход (%d-й) — без прибавки" % (count + 1))
 	return face
 
 func _absorb_next_hit(zone: String, target: int, amount: int) -> int:

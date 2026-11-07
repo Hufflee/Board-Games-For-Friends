@@ -44,6 +44,8 @@ func _run() -> void:
 	_simultaneous_hands()
 	_public_whispers()
 	_owner_rules_06()
+	_owner_rules_07()
+	_drunk_undertaker()
 	print("Clocktower: %d проверок, %d ошибок. Способности/Net/UI ещё не проверены." % [checks, failures])
 	quit(1 if failures > 0 else 0)
 
@@ -189,6 +191,143 @@ func _votes() -> void:
 ## 06.11, решение владельца: днём все видят, кто с кем шепчется, но не текст; ночью — ничего.
 ## 06.11, решения владельца: мёртвых не номинировать (кроме «Дурной луны»), ночные голоса зла,
 ## экран победы по кнопке хоста.
+## Пакет владельца 07.11: «Проголосовать», крик, таймер дня, журнал действий и очередь ночи, Пьяница.
+func _owner_rules_07() -> void:
+	# 1. Игрок сам голосует в свою очередь — без рассказчика.
+	var game := base()
+	game.dawn()
+	act(game, 0, "open_nominations")
+	act(game, 1, "nominate", {"target": 2})
+	act(game, 0, "start_vote")
+	var first: int = game.vote_order[0]
+	var second: int = game.vote_order[1]
+	check(not game.action(second, "cast_vote", {"raised": true}), "Не в свою очередь проголосовать нельзя")
+	check(game.action(first, "cast_vote", {"raised": true}), "Голосующий жмёт «Проголосовать»")
+	check(game.vote_total == 1 and game.vote_cursor == 1, "Голос засчитан, очередь перешла дальше")
+	check(game.action(second, "cast_vote", {"raised": false}), "Можно проголосовать «не голосую»")
+	check(game.vote_total == 1 and game.vote_cursor == 2, "Отсутствие голоса тоже передаёт очередь")
+	check(not game.action(0, "cast_vote", {"raised": true}), "Рассказчик не голосует")
+	# 4. Крик: днём видят все, ночью — только рассказчик может.
+	check(game.action(3, "shout", {"text": "Я Монах!"}), "Днём можно прокричать")
+	check(str(game.get_view(5).messages.back()) == "Игрок 3 кричит: Я Монах!" and str(game.get_view(0).messages.back()).contains("Я Монах"), "Крик видят все, включая рассказчика")
+	game.phase = "night"
+	check(not game.action(3, "shout", {"text": "ночью"}), "Ночью игрок не кричит")
+	check(game.action(0, "shout", {"text": "Утро скоро"}), "Рассказчик может обратиться ко всем и ночью")
+	# 11. Таймер дня.
+	var timed := Rules.new()
+	check(timed.new_game(seats(6), {"bc_roles": ["washerwoman", "empath", "monk", "poisoner", "imp"],
+		"bc_bluffs": ["chef", "soldier", "mayor"], "bc_timer": true}, 5).is_empty(), "Подготовка с таймером")
+	timed.dawn()
+	var view: Dictionary = timed.get_view(2)
+	check(view.day_timer.kind == "speech" and int(view.day_timer.speaker) == timed.seats_in_circle()[0], "День начинается с речи первого игрока")
+	var speaker := int(view.day_timer.speaker)
+	check(not timed.action(3 if speaker != 3 else 4, "end_speech", {}), "Чужую речь закончить нельзя")
+	check(timed.action(speaker, "end_speech", {}), "Говорящий заканчивает речь досрочно")
+	check(int(timed.get_view(2).day_timer.speaker) != speaker, "Слово у следующего")
+	for i in 10:
+		timed.tick(61.0)
+	check(timed.phase == "nominations" and timed.day_timer.is_empty(), "После речей и 2 минут номинации открылись сами")
+	check(timed.action(1, "nominate", {"target": 2, "revision": timed.public_revision}), "Номинация в режиме таймера")
+	check(timed.action(0, "start_vote", {"revision": timed.public_revision}), "Голосование в режиме таймера")
+	check(timed.get_view(3).day_timer.kind == "vote" and is_equal_approx(float(timed.get_view(3).day_timer.left), 15.0), "На голос — 15 секунд")
+	var voter: int = timed.vote_order[0]
+	timed.action(voter, "hand", {"raised": true})
+	timed.tick(15.5)
+	check(timed.vote_cursor == 1 and timed.vote_total == 1, "За 15 с не нажал — засчитана поднятая рука")
+	timed.tick(15.5)
+	check(timed.vote_cursor == 2 and timed.vote_total == 1, "Опущенная рука по времени — без голоса")
+	check(not base().get_view(2).has("day_timer"), "Без режима таймера времени нет")
+	# 8–10, 12. Рассказчик видит очередь ночи и действия игроков, Шпиону это не приходит.
+	var night := base()
+	check(act(night, 0, "begin_night"), "Первая ночь")
+	var story: Dictionary = night.get_view(0)
+	check(story.has("night_queue"), "Рассказчик видит очередь ночи")
+	check(not night.get_view(1).has("night_queue") and not night.get_view(1).has("story_log"), "Игрок не видит очередь и журнал действий")
+	var steps := 0
+	while not night.requests.is_empty() and steps < 50:
+		steps += 1
+		var who: int = night.requests.keys()[0]
+		night.action(who, "private_reply", {"token": night.requests[who].token, "index": 0})
+	act(night, 0, "open_nominations")
+	act(night, 0, "close_day")
+	check(act(night, 0, "begin_night"), "Вторая ночь")
+	steps = 0
+	var monk_seen := false
+	while not night.requests.is_empty() and steps < 50:
+		steps += 1
+		var who: int = night.requests.keys()[0]
+		if who != 0 and night.shown_roles[who] == "monk":
+			check(night.get_view(0).night_queue.any(func(q: Dictionary): return bool(q.now) and int(q.seat) == who), "Рассказчик видит, что сейчас ходит Монах")
+		night.action(who, "private_reply", {"token": night.requests[who].token, "index": 0})
+	for line: String in night.get_view(0).story_log:
+		if line.contains("Монах"): monk_seen = true
+	check(monk_seen, "Журнал действий: кого защитил Монах — %s" % [night.get_view(0).story_log])
+	# 6, 14. Пьяница-Прачка: у рассказчика — слоты пары и роли, у Пьяницы — карточка Прачки.
+	var drunk := Rules.new()
+	var drunk_error := drunk.new_game(seats(7), {"bc_roles": ["drunk", "empath", "monk", "chef", "poisoner", "imp"],
+		"bc_bluffs": ["soldier", "mayor", "slayer"], "bc_drunk_role": "washerwoman"}, 11)
+	check(drunk_error.is_empty(), "Подготовка с Пьяницей: " + drunk_error)
+	var fake := drunk.roles.find("drunk")
+	check(drunk.get_view(fake).role == "washerwoman", "Пьяница видит роль Прачки")
+	act(drunk, 0, "begin_night")
+	steps = 0
+	var drunk_options: Array = []
+	while not drunk.requests.is_empty() and steps < 50:
+		steps += 1
+		var who: int = drunk.requests.keys()[0]
+		var request: Dictionary = drunk.requests[who]
+		if str(request.title).contains("Прачка"): drunk_options = request.options
+		drunk.action(who, "private_reply", {"token": request.token, "index": 0})
+	check(drunk_options.size() > 20, "Пьянице рассказчик может дать любую ложь Прачки (%d вариантов)" % drunk_options.size())
+	check(not drunk_options.is_empty() and drunk_options[0].has("left") and drunk_options[0].has("right") and drunk_options[0].has("role"), "Варианты Прачки разложены на слоты: левый, правый, роль")
+	check(drunk.grimoire()[drunk.seats_in_circle().find(fake)].shown_role == "washerwoman", "В гримуаре видна подставная роль Пьяницы")
+
+## Владелец 07.11: Пьяница-Гробовщик — после казни рассказчик даёт ему любую ложь; без казни он не просыпается.
+func _drunk_undertaker() -> void:
+	var g := Rules.new()
+	check(g.new_game(seats(7), {"bc_roles": ["drunk", "empath", "monk", "chef", "poisoner", "imp"],
+		"bc_bluffs": ["soldier", "mayor", "slayer"], "bc_drunk_role": "undertaker"}, 11).is_empty(), "Пьяница-Гробовщик: подготовка")
+	var drunk := g.roles.find("drunk")
+	act(g, 0, "begin_night")
+	var steps := 0
+	while not g.requests.is_empty() and steps < 40:
+		steps += 1
+		var who: int = g.requests.keys()[0]
+		g.action(who, "private_reply", {"token": g.requests[who].token, "index": 0})
+	# Первый день без казни → вторая ночь: Гробовщик не просыпается, рассказчик видит почему.
+	act(g, 0, "open_nominations")
+	act(g, 0, "close_day")
+	act(g, 0, "begin_night")
+	steps = 0
+	while not g.requests.is_empty() and steps < 40:
+		steps += 1
+		var who: int = g.requests.keys()[0]
+		g.action(who, "private_reply", {"token": g.requests[who].token, "index": 0})
+	check(g.story_log.any(func(line: String): return line.contains("не просыпается: сегодня никто не казнён") and line.contains("Пьяница")), "Без казни рассказчик видит, что Гробовщик-Пьяница не просыпается")
+	# Казнь → третья ночь: рассказчику — выбор любой роли для Пьяницы.
+	if g.phase != "discussion": return
+	act(g, 0, "open_nominations")
+	var victim := g.roles.find("chef")
+	var nominator := g.roles.find("empath")
+	if not g.alive[victim] or not g.alive[nominator]: return
+	act(g, nominator, "nominate", {"target": victim})
+	act(g, 0, "start_vote")
+	while g.phase == "voting":
+		g.action(int(g.vote_order[g.vote_cursor]), "cast_vote", {"raised": true})
+	act(g, 0, "close_day")
+	g.tick(2.0)
+	check(g.execution_death == victim, "Казнь состоялась")
+	act(g, 0, "begin_night")
+	var offered := 0
+	steps = 0
+	while not g.requests.is_empty() and steps < 40:
+		steps += 1
+		var who: int = g.requests.keys()[0]
+		if who == 0 and str(g.requests[who].title).contains("Гробовщик"): offered = g.requests[who].options.size()
+		g.action(who, "private_reply", {"token": g.requests[who].token, "index": 0})
+	check(offered > 10, "После казни рассказчик выбирает ложь для Пьяницы-Гробовщика (%d ролей)" % offered)
+	check(str(g.private_log[drunk].back()).begins_with("Казнённый был:"), "Пьяница получил «Казнённый был: …»")
+
 func _owner_rules_06() -> void:
 	var game := base()
 	game.dawn()

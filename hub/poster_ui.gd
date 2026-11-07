@@ -76,7 +76,7 @@ func _apply() -> void:
 			var texture: Texture2D = Net.stickers.poster_texture(hash)
 			if texture != null:
 				poster.set_picture(texture, hash)
-		_room.set_poster_position(slot, center)
+		_room.set_poster_position(slot, center, Net.stickers.poster_layer(_peer(), slot))
 
 
 func _process(delta: float) -> void:

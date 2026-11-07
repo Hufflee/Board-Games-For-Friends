@@ -10,6 +10,10 @@ var _fx_seen28 := -1  # номер последнего показанного �
 var _fx_ready28 := false
 var _rects28: Dictionary = {}  # прошлые экранные прямоугольники якорей (монстры, стопка) — откуда летят карты
 var _feed_seen28 := -1  # последняя показанная запись ленты сброса
+var _pile_shown28 := 0
+var _response_bar28: ProgressBar  # таймер окна ответов (07.11)
+var _response_label28: Label
+var _response_left_at28 := 0  # верхняя карта стопки, уже показанная (её больше не прячем)
 var _fly_seen28 := -1  # последний розыгрыш, показанный полётом через центр  # первое состояние уже принято (его события не проигрываются)
 var app: Node
 var _v: Dictionary = {}
@@ -93,8 +97,18 @@ func _ready() -> void:
 	_changed(Net.view)
 
 
+## Таймер окна ответов: остаток с хоста минус время с прихода состояния.
+func _tick_response28() -> void:
+	if not is_instance_valid(_response_bar28):
+		return
+	var left := maxf(0.0, float(_v.get("response_left28", 0.0)) - (Time.get_ticks_msec() - _response_left_at28) / 1000.0)
+	_response_bar28.value = left
+	_response_label28.text = "Ответить: %.1f с" % left if left > 0.0 else "Ответы закрываются…"
+
+
 ## После возврата кубика состояние сети уже может ждать следующий бросок.
 func _process(_delta: float) -> void:
+	_tick_response28()
 	if _v.is_empty() or not is_instance_valid(_die):
 		return
 	if (
@@ -133,7 +147,9 @@ func _can_roll_die() -> bool:
 		and (
 			_v.phase == "battle_roll"
 			or (
-				_v.phase == "priority"
+				# 07.11: в настоящей партии бросать во время окна ответов нельзя — дождаться 5 с.
+				not bool(_v.get("strict_responses28", false))
+				and _v.phase == "priority"
 				and _v.stack.any(
 					_is_roll_event
 				)
@@ -459,6 +475,23 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 			b.mouse_entered.connect(func(): _schedule_preview(int(id)))
 			b.mouse_exited.connect(_hide_preview)
 			bonus_row.add_child(b)
+	# 07.11 (владелец): видимый таймер окна ответов — сколько секунд осталось, пока стек не разрешится сам.
+	_response_bar28 = null
+	if float(view.get("response_left28", -1.0)) >= 0.0:
+		var timer_box := FSStyle.hbox(8)
+		timer_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		top_row28.add_child(timer_box)
+		_response_label28 = FSStyle.label("", FSStyle.BODY)
+		_response_label28.add_theme_color_override("font_color", FSStyle.GOLD.lightened(0.2))
+		timer_box.add_child(_response_label28)
+		_response_bar28 = ProgressBar.new()
+		_response_bar28.show_percentage = false
+		_response_bar28.custom_minimum_size = Vector2(160, 12)
+		_response_bar28.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		_response_bar28.max_value = float(view.get("response_window", 5.0))
+		timer_box.add_child(_response_bar28)
+		_response_left_at28 = Time.get_ticks_msec()
+		_tick_response28()
 	var side := FSStyle.panel()
 	side.custom_minimum_size.x = 300
 	main.add_child(side)
@@ -492,11 +525,21 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 	if int(view.roll_no) > _last_roll:
 		if _last_roll >= 0 and int(view.last_roll) > 0:
 			_die.max_face = int(view.get("last_die_sides20", 6))
-			var face: int = int(view.get("last_raw_die20", view.last_roll)) if _die.max_face == 8 else int(view.last_roll)
+			# 07.11: кубик показывает выпавшую грань, итог с прибавками («Рак» и т.п.) — отдельной надписью.
+			var raw: int = int(view.get("last_raw_die20", view.last_roll))
+			var face: int = raw if _die.max_face == 8 or (raw >= 1 and raw <= 6) else int(view.last_roll)
+			if int(view.last_roll) != face and _die.max_face != 8:
+				var total: int = int(view.last_roll)
+				get_tree().create_timer(0.9).timeout.connect(func():
+					if is_instance_valid(_die) and is_instance_valid(_fx_layer28):
+						FX.float_label(_fx_layer28, _die, "итог броска: %d" % total, FX.GLOW, 0, 24))
 			if _die.state == "flying":
 				_die.set_result(face)
 			else:
 				_die.throw(Vector2(-800, -250), face)
+			# 07.11: чужой бросок виден всем, даже если хост уже разрешил его к приходу состояния
+			# (видимость выше считалась до запуска броска — у остальных кубик оставался скрытым).
+			_die.visible = true
 		_last_roll = int(view.roll_no)
 	elif _die.state in ["idle", "waiting"]:
 		_die.max_face = int(view.get("die_sides20", 6))
@@ -759,14 +802,15 @@ func _drop_card(entry: Dictionary, screen: Vector2) -> bool:
 	return true
 
 
+## 07.11: предметы (поворот/платно) в чужой ход — в любой момент; «только в ответ» — для добычи и персонажа.
 func _can_use_item() -> bool:
-	return _v.seat >= 0 and _off_turn_ok() and not _v.players[int(_v.seat)].dead and _v.phase in ["turn","priority","battle_roll","death"]
+	return _v.seat >= 0 and not _v.players[int(_v.seat)].dead and _v.phase in ["turn","priority","battle_roll","death"]
 func _item_kind20(item: Dictionary) -> String:
 	if int(item.id) == 1:
 		return "tap" if item.get("prototype_texts20", []).any(func(text): return int(text.begin) == 2) else "passive"
 	return FSData.item_response_kind(int(item.id))
 func _can_use_character() -> bool:
-	return _can_use_item() and _character_can_pay24()
+	return _can_use_item() and _off_turn_ok() and _character_can_pay24()
 func _character_can_pay24() -> bool:
 	if int(_v.seat) < 0:
 		return false
@@ -976,7 +1020,7 @@ func _show_preview(id: int) -> void:
 	_hide_preview()
 	_preview = TextureRect.new(); _preview.texture = FSData.texture(id); _preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE; _preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_round_image(_preview)
-	_preview.position = Vector2(size.x*0.5-160,80); _preview.size = Vector2(320,minf(size.y-100,500)); _preview.mouse_filter = Control.MOUSE_FILTER_IGNORE; _preview.z_index = 60; add_child(_preview)
+	_preview.position = Vector2(size.x*0.5-160,80); _preview.size = Vector2(320,minf(size.y-100,500)); _preview.mouse_filter = Control.MOUSE_FILTER_IGNORE; _preview.z_index = 70; add_child(_preview)  # 07.11: выше окон (65) — история сброса
 	if Support.status(id) != "auto":
 		var panel := FSStyle.panel()
 		panel.name = "CardSupportPanel"
@@ -1023,18 +1067,18 @@ func _played_pile(parent: Control, view: Dictionary) -> void:
 		var holder := Control.new()
 		holder.position = Vector2(12 + depth * 8, depth * 6)
 		holder.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		pile.add_child(holder)
-		pile.move_child(holder, 0)
+		pile.add_child(holder)  # 07.11: старые добавляются раньше — новая карта рисуется сверху
 		if depth == 0:
 			_card(holder, int(entry.card), Vector2(104, 128), _played_history)
 			var top: Control = holder.get_child(0)
 			top.tooltip_text = "История сброса"
-			if int(entry.get("n", 0)) > _feed_seen28 and _feed_seen28 >= 0:
+			if int(entry.get("n", 0)) > _pile_shown28 and _pile_shown28 >= 0 and _feed_seen28 >= 0:
 				# карта ещё летит на стопку — показываем её после приземления
 				top.modulate.a = 0.0
 				var land := top.create_tween()
-				land.tween_interval(1.25)
+				land.tween_interval(1.95)  # 07.11: карта дольше в центре
 				land.tween_property(top, "modulate:a", 1.0, 0.15)
+			_pile_shown28 = int(entry.get("n", 0))  # 07.11: прятать до приземления один раз, не на каждой пересборке
 		else:
 			var image := TextureRect.new()
 			image.texture = FSData.texture(int(entry.card))
@@ -1195,11 +1239,14 @@ func _controls(col: Control) -> void:
 		_note(col, "Свои карты в чужой ход — только в ответ: пока стек не разрешился (5 с тишины)")
 	if _v.seat >= 0 and int(_v.get("spider_tokens15", 0)) > 0 and _v.phase in ["turn", "priority", "battle_roll", "death"]:
 		var spider := _button(col, "Повернуть персонажа → убрать паука", "remove_spider15")
-		spider.disabled = not bool(_v.players[int(_v.seat)].ready) or not _off_turn_ok()
+		spider.disabled = not bool(_v.players[int(_v.seat)].ready)
 	if _v.phase == "priority":
 		for e in _v.stack:
 			_note(col,FSData.effect_title(e))
-		_note(col,"Ответы — до следующего действия активного игрока; без ответов стек разрешится сам через %d с." % int(_v.get("response_window", 5)))
+		if bool(_v.get("strict_responses28", false)):
+			_note(col,"Ответить можно %d с — таймер сверху; каждый ответ запускает его заново. Потом стек разрешится сам." % int(_v.get("response_window", 5)))
+		else:
+			_note(col,"Ответы — до следующего действия активного игрока; без ответов стек разрешится сам через %d с." % int(_v.get("response_window", 5)))
 		if _v.stack.any(func(e): return e.kind in ["roll", "combat"]):
 			_note(col, "Урон применится перед следующим броском, после ответов игроков.")
 	if _v.phase == "priority" and int(_v.get("death_actor", -1)) == int(_v.seat) and _v.seat >= 0:
@@ -1236,7 +1283,8 @@ func _controls(col: Control) -> void:
 		var blind_attack := FSStyle.button("Атаковать верх колоды",FSStyle.CAP)
 		blind_attack.disabled = not _v.get("forced_monster_slots", []).is_empty() or (_v.attacked and not bool(_v.get("gold_deck_attacks", false))) or (player_required > 0 and required == 0)
 		blind_attack.pressed.connect(_choose_top_attack); col.add_child(blind_attack)
-		_button(col,"Купить вслепую · 10¢","buy",{"slot":-1}).disabled = _v.bought
+		var blind_price: int = int(_v.get("blind_price28", 10))
+		_button(col,"Купить вслепую · %d¢" % blind_price,"buy",{"slot":-1}).disabled = _v.bought or int(_v.players[int(_v.seat)].coins) < blind_price
 		if int(_v.get("discard_treasure", -1)) >= 0:
 			_button(col, "Купить из сброса · %d¢" % int(_v.get("shop_price", 10)), "buy", {"slot": -2}).disabled = _v.bought
 	elif _v.phase == "battle_roll":
@@ -1314,28 +1362,38 @@ func _card_choice_dialog() -> void:
 	var options := FSStyle.vbox(8)
 	options.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.add_child(options)
+	# 07.11 (владелец): просмотренные карты видны целиком — картинками, а не только названием.
+	var peeked: Array = []
+	for revealed: Dictionary in _v.peek.get("hands", []):
+		peeked.append({"title": str(_v.players[int(revealed.seat)].name), "cards": revealed.cards})
+	var deck_cards: Array = _v.peek.get("cards", []).filter(func(id): return int(id) not in _v.get("card_choice_previews", []))
+	if not deck_cards.is_empty():
+		peeked.append({"title": "", "cards": deck_cards})
+	for group: Dictionary in peeked:
+		if str(group.title) != "":
+			_note(options, str(group.title))
+		var flow := HFlowContainer.new()
+		flow.add_theme_constant_override("h_separation", 8)
+		flow.add_theme_constant_override("v_separation", 8)
+		options.add_child(flow)
+		for id in group.cards:
+			_card(flow, int(id), Vector2(104, 146), func(): _show_preview(int(id)))
 	for index in _v.get("card_choices", []).size():
-		var option := _button(options, str(_v.card_choices[index]), "card_choice", {"index": index, "revision": int(_v.revision)})
+		var card_id: int = int(_v.get("card_choice_previews", [])[index]) if index < _v.get("card_choice_previews", []).size() else -1
+		var holder: Control = options
+		if card_id >= 0:
+			var line := FSStyle.hbox(8)
+			options.add_child(line)
+			_card(line, card_id, Vector2(64, 90), func(): _show_preview(card_id))
+			holder = line
+		var option := _button(holder, str(_v.card_choices[index]), "card_choice", {"index": index, "revision": int(_v.revision)})
 		option.clip_text = true
 		option.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
-		var card_id: int = int(_v.get("card_choice_previews", [])[index]) if index < _v.get("card_choice_previews", []).size() else -1
+		option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		option.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		if card_id >= 0:
-			option.mouse_entered.connect(func(): _show_preview(card_id))
+			option.mouse_entered.connect(func(): _schedule_preview(card_id))
 			option.mouse_exited.connect(_hide_preview)
-	for revealed: Dictionary in _v.peek.get("hands", []):
-		_note(options, str(_v.players[int(revealed.seat)].name))
-		for id in revealed.cards:
-			var card := FSStyle.button(FSData.title(int(id)), FSStyle.CAP)
-			options.add_child(card)
-			card.mouse_entered.connect(func(): _show_preview(int(id)))
-			card.mouse_exited.connect(_hide_preview)
-	for id in _v.peek.get("cards", []):
-		if int(id) in _v.get("card_choice_previews", []):
-			continue
-		var card := FSStyle.button(FSData.title(int(id)), FSStyle.CAP)
-		options.add_child(card)
-		card.mouse_entered.connect(func(): _show_preview(int(id)))
-		card.mouse_exited.connect(_hide_preview)
 	_close_button(col)
 
 func _death_controls(col: Control) -> void:
@@ -1451,7 +1509,7 @@ func _fly_cards28(prev: Dictionary, view: Dictionary) -> void:
 			FX.fly_card(_fx_layer28, FSData.texture(int(entry.card)), Rect2(), pile_rect)
 			flown[int(entry.card)] = true
 		elif kind == "activate":
-			FX.fly_card(_fx_layer28, FSData.texture(int(entry.card)), Rect2(), Rect2(), 0.5)
+			FX.fly_card(_fx_layer28, FSData.texture(int(entry.card)), Rect2(), Rect2(), 1.0)
 	var old_monsters: Array = prev.get("monsters", [])
 	var now_ids: Array = view.get("monsters", []).map(func(m): return int(m.id))
 	for entry: Dictionary in view.get("discard_feed28", []):
