@@ -16,7 +16,7 @@ func rules_cases() -> void:
 		w.set_ready(w.storytellers[0])
 		check(w.catalog_order == before, "Каталог не меняется до второго «Слэм»")
 		w.set_ready(w.storytellers[1])
-		check(w.catalog_order == before, "08.11: подсказки раунда не перемешиваются при «Слэм» (слово не «пропадает»)")
+		check((w.catalog_order != before) == (catalog == "basic"), "Базовый перемешивает; упрощённый сохраняет порядок")
 		for cat in WSData.CATEGORIES:
 			var ids: Array = w.catalog_order[cat].duplicate()
 			ids.sort()
@@ -44,7 +44,7 @@ func rules_cases() -> void:
 		check((next_round != shuffled) == (catalog == "basic") or catalog == "simplified", "Новый раунд — новые подсказки (основной набор)")
 		for storyteller in w.storytellers:
 			w.set_ready(storyteller)
-		check(w.catalog_order == next_round, "«Слэм» нового раунда подсказки не меняет")
+		check((w.catalog_order != next_round) == (catalog == "basic"), "Следующий «Слэм» вновь перемешивает только базовый каталог")
 
 
 func mouse(at: Vector2, down: int = -1) -> void:

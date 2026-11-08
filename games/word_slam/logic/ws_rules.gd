@@ -144,8 +144,8 @@ func _roll() -> void:
 	skip_votes = []
 
 
-## Подсказки раунда: собираются один раз (не меняются ни при «ВОРД!—СЛЭМ!», ни при смене слова —
-## раньше перемешивание в начале хода выглядело как «пропавшее» слово). Однокоренных к слову нет.
+## Подсказки раунда (первое перемешивание): случайные слова из пула раскладываются по категориям.
+## При смене слова состав не пересобирается (заменяются только однокоренные). Однокоренных к слову нет.
 func _build_catalog() -> void:
 	for category: String in WSData.CATEGORIES:
 		var pool := WSData.story_pool(category)
@@ -216,6 +216,16 @@ func set_ready(seat: int) -> bool:
 		return false
 	ready[i] = true
 	if not ready.has(false):
+		# Второе перемешивание (владелец, 08.11): объяснение началось — уже знакомые рассказчикам слова
+		# перемешиваются внутри своих категорий (состав тот же). Первое — в начале раунда (_build_catalog).
+		if catalog_mode == "basic":
+			for category in WSData.CATEGORIES:
+				var ids: Array = catalog_order[category]
+				for j in range(ids.size() - 1, 0, -1):
+					var other := rng.randi_range(0, j)
+					var previous: String = ids[j]
+					ids[j] = ids[other]
+					ids[other] = previous
 		phase = "play"
 		flipped = true  # время на ход идёт сразу (переворачивать часы не нужно)
 	return true

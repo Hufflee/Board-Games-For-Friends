@@ -1576,6 +1576,7 @@ func _handle_action(peer: int, kind: String, arg) -> void:
 	if not in_game or (rules == null and perudo == null and wavelength == null and dwords == null and hues == null and rsb == null and wslam == null and tiptop == null and nothat == null and gloom == null and brod == null and phantom == null and fours == null and stillion == null and gang == null and mind == null and mk == null and bc == null and cg == null and tir == null and khr == null and pkr == null):
 		return
 	var seat := seat_peers.find(peer)
+	Diag.last_action = "%s · место %d · %s" % [kind, seat, Time.get_time_string_from_system()]  # для сторожа зависаний
 	if seat < 0 or paused:
 		return
 	if fours != null and kind in ["effect", "effect_done", "peek_take", "item_trigger", "monster_trigger"]:

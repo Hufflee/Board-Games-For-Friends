@@ -19,6 +19,16 @@ var _state_identity := ""
 var _native_pid := -1
 var _native_started_msec := 0
 var _logger_registered := false
+## Сторож зависаний (08.11): отдельный поток раз в секунду смотрит, жив ли главный. Молчит дольше
+## HANG_MSEC — в журнал «Главный поток не отвечает» с последним известным состоянием (сцена, фаза,
+## последнее действие игрока); ожил — «снова отвечает» и сколько стоял.
+const HANG_MSEC := 8000
+var last_action := ""  # Net пишет сюда каждое действие игрока (вид, место)
+var _alive_msec := 0
+var _context_cache := "{}"
+var _context_clock := 0.0
+var _watch: Thread
+var _watch_run := true
 
 
 func _ready() -> void:
@@ -52,6 +62,9 @@ func _ready() -> void:
 		OS.add_logger(sink)
 		_logger_registered = true
 	mark("Запуск приложения", _environment())
+	_alive_msec = Time.get_ticks_msec()
+	_watch = Thread.new()
+	_watch.start(_watchdog)
 	_snapshot_engine(session)
 	if not previous_session.is_empty():
 		mark("Предыдущий запуск не завершён штатно")
@@ -208,6 +221,13 @@ func _safe_details(details: Dictionary) -> Dictionary:
 
 
 func _process(delta: float) -> void:
+	_alive_msec = Time.get_ticks_msec()
+	_context_clock += delta
+	if _context_clock >= 0.5:
+		_context_clock = 0.0
+		var ctx := _context()
+		ctx["последнее_действие"] = last_action
+		_context_cache = JSON.stringify(ctx)
 	_sync_state_identity()
 	var scene := get_tree().current_scene
 	var path := scene.scene_file_path if is_instance_valid(scene) else ""
@@ -252,7 +272,26 @@ func _save_marker() -> void:
 		DirAccess.rename_absolute(FLAG + ".tmp", FLAG)
 
 
+func _watchdog() -> void:
+	var stuck_since := 0
+	while _watch_run:
+		OS.delay_msec(1000)
+		var now := Time.get_ticks_msec()
+		var silent := now - _alive_msec
+		if silent > HANG_MSEC and stuck_since == 0:
+			stuck_since = _alive_msec
+			if sink:
+				sink.checkpoint("Главный поток не отвечает %d с (игра зависла)" % (silent / 1000), _context_cache)
+		elif silent < 1000 and stuck_since != 0:
+			if sink:
+				sink.checkpoint("Главный поток снова отвечает — стоял %d с" % ((now - stuck_since) / 1000), _context_cache)
+			stuck_since = 0
+
+
 func _exit_tree() -> void:
+	_watch_run = false
+	if _watch != null and _watch.is_started():
+		_watch.wait_to_finish()
 	_snapshot_engine(session)
 	if sink:
 		sink.checkpoint("Штатное завершение приложения", JSON.stringify(_context()))

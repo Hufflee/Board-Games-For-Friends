@@ -18,12 +18,12 @@ func _initialize() -> void:
 			check(basic.deck == simple.deck and basic.card == simple.card and basic.word == simple.word)
 			check(basic.names_on == not intro and simple.names_on == not intro)
 			var old := basic.catalog_order.duplicate(true)
+			var simple_old := simple.catalog_order.duplicate(true)
 			for seat in basic.storytellers:
 				basic.set_ready(seat)
 			for seat in simple.storytellers:
 				simple.set_ready(seat)
-			# 08.11: подсказки раунда не перемешиваются при начале хода (иначе слово «пропадало» с глаз)
-			check(basic.phase == "play" and simple.phase == "play" and basic.catalog_order == old)
+			check(basic.phase == "play" and simple.phase == "play" and basic.catalog_order != old and simple.catalog_order == simple_old)
 			var sparse := []
 			sparse.resize(12)
 			sparse.fill("")
