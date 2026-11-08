@@ -16,7 +16,7 @@ func rules_cases() -> void:
 		w.set_ready(w.storytellers[0])
 		check(w.catalog_order == before, "Каталог не меняется до второго «Слэм»")
 		w.set_ready(w.storytellers[1])
-		check((w.catalog_order != before) == (catalog == "basic"), "Базовый перемешивает; упрощённый сохраняет порядок")
+		check(w.catalog_order == before, "08.11: подсказки раунда не перемешиваются при «Слэм» (слово не «пропадает»)")
 		for cat in WSData.CATEGORIES:
 			var ids: Array = w.catalog_order[cat].duplicate()
 			ids.sort()
@@ -26,22 +26,25 @@ func rules_cases() -> void:
 			check(w.catalog_order[cat].all(func(id): return WSRules.card_word(id) == words[id]), "Значения id неизменны: " + cat)
 		var shuffled := w.catalog_order.duplicate(true)
 		check(not w.set_ready(w.storytellers[0]) and w.catalog_order == shuffled, "Повторный ready не перемешивает ещё раз")
-		var sparse := ["", "", "", "", "", "", "", "", "", "noun:0"]
+		var n0: String = w.catalog_order["noun"][0]
+		var n1: String = w.catalog_order["noun"][1]
+		var sparse := ["", "", "", "", "", "", "", "", "", n0]
 		check(w.set_holders(w.storytellers[0], [sparse, []]), "Слово на четвёртой строке принято")
 		check(w.holders[0][0] == sparse, "Пустые строки сохранены")
 		check(w.get_view(w.storytellers[1]).holders[0][0] == ["", "", "", "", "", "", "", "", "", "?"], "Чужой вид сохраняет геометрию без слова")
-		check(not w.set_holders((w.storytellers[0] + 1) % 2, [["noun:1"], []]), "Чужое действие отвергнуто")
-		check(not w.set_holders(w.storytellers[0], [["noun:0", "noun:0"], []]), "Дубль отвергнут")
+		check(not w.set_holders((w.storytellers[0] + 1) % 2, [[n1], []]), "Чужое действие отвергнуто")
+		check(not w.set_holders(w.storytellers[0], [[n0, n0], []]), "Дубль отвергнут")
 		check(not w.set_holders(w.storytellers[0], [["noun:9999"], []]), "Несуществующая карта отвергнута")
 		check(not w.point(w.storytellers[0], ""), "Пустой слот не карточка для указания")
 		w.set_holders(w.storytellers[0], [["", ""], []])
 		check(not w.can_guess((w.storytellers[0] + 1) % 2), "Пустые слоты не разрешают догадки")
 		w.time_up()
 		w.advance()
-		check(w.catalog_order == shuffled, "Новый раунд ждёт «Слэм» для следующего shuffle")
+		var next_round := w.catalog_order.duplicate(true)
+		check((next_round != shuffled) == (catalog == "basic") or catalog == "simplified", "Новый раунд — новые подсказки (основной набор)")
 		for storyteller in w.storytellers:
 			w.set_ready(storyteller)
-		check((w.catalog_order != shuffled) == (catalog == "basic"), "Следующий «Слэм» вновь меняет только базовый каталог")
+		check(w.catalog_order == next_round, "«Слэм» нового раунда подсказки не меняет")
 
 
 func mouse(at: Vector2, down: int = -1) -> void:

@@ -22,15 +22,16 @@ func _initialize() -> void:
 				basic.set_ready(seat)
 			for seat in simple.storytellers:
 				simple.set_ready(seat)
-			check(basic.phase == "play" and simple.phase == "play" and basic.catalog_order != old and simple.catalog_order == old)
+			# 08.11: подсказки раунда не перемешиваются при начале хода (иначе слово «пропадало» с глаз)
+			check(basic.phase == "play" and simple.phase == "play" and basic.catalog_order == old)
 			var sparse := []
 			sparse.resize(12)
 			sparse.fill("")
-			sparse[11] = "noun:0"
+			sparse[11] = basic.catalog_order["noun"][0]
 			var seat: int = basic.storytellers[0]
 			check(basic.set_holders(seat, [sparse, []]) and basic.holders[0][0] == sparse)
 			var before := basic.holders.duplicate(true)
-			sparse.append("noun:1")
+			sparse.append(basic.catalog_order["noun"][1])
 			check(not basic.set_holders(seat, [sparse, []]) and basic.holders == before)
-	print("WS29 REVIEW BOUNDARIES: %d проверок, 0 ошибок" % checks)
+	print("WS29 REVIEW BOUNDARIES: %d проверок" % checks)
 	quit(0)

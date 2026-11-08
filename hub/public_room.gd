@@ -1,6 +1,11 @@
 extends RefCounted
 ## Только публичные данные шкафа. Сетевые поля не становятся путями ресурсов или настройками игрока.
 const MAX_BYTES := 16384
+## Фигурки шкафа — общий список (раньше тут были только две старые, и комнаты с новыми фигурками
+## отбрасывались целиком: в 0.9.0.2 «глазик» наблюдения перестал включаться).
+const Shelf := preload("res://hub/shelf_config.gd")
+const FIGURINES: Array = Shelf.FIGURINES
+## Друг может быть на другой версии: незнакомые игры и фигурки пропускаем, а не отбрасываем всю комнату.
 
 static func clean(value: Variant) -> Dictionary:
 	if not value is Dictionary or value.size() > 8:
@@ -29,39 +34,54 @@ static func clean(value: Variant) -> Dictionary:
 		config[key] = number
 	if config.cols * config.width + (config.cols + 1) * 0.03 > 1.801 or config.rows * config.height + (config.rows + 1) * 0.03 > 2.401:
 		return {}
+	# свои размеры колонок / полок (08.11): списки чисел по числу колонок / рядов
+	for pair in [["col_widths", "cols", 0.2, 0.9], ["row_heights", "rows", 0.14, 0.7]]:
+		var list: Variant = source.get(pair[0], null)
+		if list == null:
+			continue
+		if not list is Array or (list as Array).size() != int(config[pair[1]]):
+			return {}
+		var clean_list: Array = []
+		for item: Variant in list:
+			if not (item is float or item is int) or not is_finite(float(item)) or float(item) < float(pair[2]) - 0.0001 or float(item) > float(pair[3]) + 0.0001:
+				return {}
+			clean_list.append(float(item))
+		config[pair[0]] = clean_list
 	if not source.get("neighbor_order", false) is bool:
 		return {}
 	config.neighbor_order = source.get("neighbor_order", false)
 	# Свободное место фигурок в ячейке (доля ширины) — друзья видят их там же.
 	var free: Variant = source.get("figure_cells", {})
-	if not free is Dictionary or free.size() > 2:
+	if not free is Dictionary or free.size() > 16:
 		return {}
 	if not free.is_empty():
 		config.figure_cells = {}
 		for id in free:
 			var share: Variant = free[id]
-			if not id in ["shelf_girl", "shelf_andy"] or not (share is float or share is int) or not is_finite(float(share)) or float(share) < 0 or float(share) > 1:
+			if not Shelf.is_figure(id):
+				continue
+			if not (share is float or share is int) or not is_finite(float(share)) or float(share) < 0 or float(share) > 1:
 				return {}
 			config.figure_cells[id] = float(share)
 	var positions: Variant = source.get("figure_positions", {})
 	if not positions is Dictionary:
 		return {}
 	config.figure_positions = {}
-	for id in ["shelf_girl", "shelf_andy"]:
+	for id in FIGURINES:
 		var number: Variant = positions.get(id, source.get("figure_x", 1.0))
 		if not (number is float or number is int) or not is_finite(float(number)) or float(number) < 0 or float(number) > 1:
 			return {}
 		config.figure_positions[id] = float(number)
 	for field in ["figure_yaw", "figure_surfaces"]:
 		var entries: Variant = source.get(field, {})
-		if not entries is Dictionary or entries.size() > 2:
+		if not entries is Dictionary or entries.size() > 16:
 			return {}
 		if not source.has(field):
 			continue
 		config[field] = {}
 		for id in entries:
-			if not id in ["shelf_girl", "shelf_andy"]:
-				return {}
+			if not Shelf.is_figure(id):
+				continue
 			var entry: Variant = entries[id]
 			if field == "figure_yaw":
 				if not (entry is float or entry is int) or not is_finite(float(entry)) or absf(float(entry)) > PI + 0.0001:
@@ -74,7 +94,7 @@ static func clean(value: Variant) -> Dictionary:
 				if not (fraction is float or fraction is int) or not is_finite(float(fraction)) or float(fraction) < 0 or float(fraction) > 1:
 					return {}
 				config[field][id] = {"surface": entry.surface, "x": float(fraction)}
-	var allowed: Array = ["shelf_girl", "shelf_andy"]
+	var allowed: Array = FIGURINES.duplicate()
 	var custom: Dictionary = {}
 	var entries: Variant = value.get("custom", {})
 	if not entries is Dictionary or entries.size() > 24:
@@ -96,26 +116,35 @@ static func clean(value: Variant) -> Dictionary:
 	if placements.size() != config.rows * config.cols:
 		return {}
 	var seen: Dictionary = {}
+	var rows: Array = []
 	for row in placements:
 		if not row is Array or row.size() > 48:
 			return {}
+		var kept: Array = []
 		for id in row:
-			if not id is String or not allowed.has(id) or seen.has(id):
+			if not id is String or seen.has(id):
 				return {}
+			if not allowed.has(id) and not Shelf.is_figure(id):
+				continue  # игра из более новой версии — у нас её нет
 			seen[id] = true
+			kept.append(id)
+		rows.append(kept)
+	placements = rows
 	if seen.is_empty() or seen.size() > 48:
 		return {}
 	for id: String in custom.keys():
 		if not seen.has(id): custom.erase(id)
 	var poses: Dictionary = {}
 	for id in value.poses:
-		if not allowed.has(id) or not value.poses[id] is int or value.poses[id] < 0 or value.poses[id] > 3:
+		if not value.poses[id] is int or value.poses[id] < 0 or value.poses[id] > 3:
 			return {}
 		if seen.has(id):
 			poses[id] = value.poses[id]
 	var selected: Variant = value.get("selected", "")
-	if not selected is String or (selected != "" and (not allowed.has(selected) or selected in ["shelf_girl", "shelf_andy"])) or not value.get("editor", false) is bool:
+	if not selected is String or not value.get("editor", false) is bool:
 		return {}
+	if selected != "" and (not allowed.has(selected) or Shelf.is_figure(selected)):
+		selected = ""
 	return {"config": config, "placements": placements.duplicate(true), "poses": poses, "selected": selected, "editor": value.get("editor", false), "custom": custom}
 
 static func _bounded(value: Variant, depth: int, budget: Array = [512]) -> bool:

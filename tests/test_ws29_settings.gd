@@ -27,7 +27,7 @@ func run() -> void:
 		for cat in WSData.CATEGORIES:
 			expected.append_array(net.wslam.catalog_order[cat])
 		check(shown == expected, "Видимый каталог следует порядку хоста " + catalog)
-		check((initial != net.wslam.catalog_order) == (catalog == "basic"), "Net сохраняет различие режимов " + catalog)
+		check(initial == net.wslam.catalog_order, "08.11: подсказки раунда не перемешиваются при начале хода " + catalog)
 		app.queue_free()
 		await settle()
 		net.end_game()

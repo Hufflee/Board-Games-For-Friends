@@ -84,8 +84,8 @@ func prepare() -> void:
 	w.word = "арбуз"
 	w.set_ready(2)
 	w.set_ready(3)
-	check(w.set_holders(2, [["noun:0"], []]), "Синие выложили настоящую карточку")
-	check(w.set_holders(3, [["noun:0"], []]), "Оранжевые выложили настоящую карточку")
+	check(w.set_holders(2, [[w.catalog_order["noun"][0]], []]), "Синие выложили настоящую карточку")
+	check(w.set_holders(3, [[w.catalog_order["noun"][0]], []]), "Оранжевые выложили настоящую карточку")
 	net._push_state()
 
 func build_app() -> void:

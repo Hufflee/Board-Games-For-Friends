@@ -386,5 +386,45 @@ const EXTRA_STORY := {
 	]
 }
 
+## Однокоренные ли слова (для подсказок: к слову «суп» не дать «суп», «супы»; к «волшебник» — «волшебный»).
+## Грубо, но надёжно: основа без окончания; одна основа — начало другой, либо общее начало ≥ 4 букв и ≥ 70 % короткой.
+## Многословное слово — по каждому слову.
+static func same_root(a: String, b: String) -> bool:
+	for x: String in _words(a):
+		for y: String in _words(b):
+			if _root_match(x, y):
+				return true
+	return false
+
+
+static func _words(text: String) -> Array:
+	var clean := text.to_lower().replace("ё", "е").replace("-", " ")
+	return Array(clean.split(" ", false))
+
+
+const _ENDINGS := ["ость", "ение", "ание", "ий", "ый", "ой", "ая", "яя", "ое", "ее", "ые", "ие", "ть", "ти", "ся", "ов", "ев", "ей", "ам", "ям", "ах", "ях", "ом", "ем", "ую", "юю", "а", "я", "о", "е", "ы", "и", "у", "ю", "ь", "й"]
+
+
+static func _stem(w: String) -> String:
+	for ending: String in _ENDINGS:
+		if w.ends_with(ending) and w.length() - ending.length() >= 3:
+			return w.left(w.length() - ending.length())
+	return w
+
+
+static func _root_match(x: String, y: String) -> bool:
+	if x == y:
+		return true
+	var a := _stem(x)
+	var b := _stem(y)
+	var short := mini(a.length(), b.length())
+	if short < 3:
+		return false
+	var common := 0
+	while common < short and a[common] == b[common]:
+		common += 1
+	return common == short or (common >= 4 and common >= short * 0.7)
+
+
 static func story_pool(category: String) -> Array:
 	return STORY[category] + EXTRA_STORY.get(category, [])

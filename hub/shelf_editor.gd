@@ -43,7 +43,7 @@ func _ready() -> void:
 	var help := (
 		HubStyle
 		. label(
-			"Потяните за боковое ребро шкафа, чтобы изменить ширину всех столбцов. За горизонтальное ребро — высоту всех полок.",
+			"Боковое ребро шкафа меняет ширину всех столбцов, дно и крыша — высоту всех полок. Внутренняя перегородка или средняя полка меняет только соседние ящики.",
 			14,
 			HubStyle.MUTED
 		)
@@ -73,6 +73,12 @@ func sync(message: String = "") -> void:
 
 func _change() -> void:
 	var geometry: Dictionary = (room.get("_cabinet") as Dictionary).duplicate(true)
+	# Число в поле «Ширина / Высота ячейки» — для всех ячеек сразу (свои размеры ящиков сбрасываются).
+	var current: Dictionary = room.get("_cabinet")
+	if absf(float((_values["width"] as SpinBox).value) / 100.0 - float(current.width)) > 0.006 or int((_values["cols"] as SpinBox).value) != int(current.cols):
+		geometry.erase("col_widths")
+	if absf(float((_values["height"] as SpinBox).value) / 100.0 - float(current.height)) > 0.006 or int((_values["rows"] as SpinBox).value) != int(current.rows):
+		geometry.erase("row_heights")
 	for key in _values:
 		geometry[key] = (
 			float((_values[key] as SpinBox).value) / (100.0 if key in ["width", "height"] else 1.0)

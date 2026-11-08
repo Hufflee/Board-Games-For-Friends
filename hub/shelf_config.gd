@@ -9,6 +9,14 @@ const CUP_SPACE := 0.17
 const CELL_DEPTH := 0.36
 const SCATTER := 1.1
 const FIGURINES := ["shelf_girl", "shelf_andy", "shelf_mummy", "shelf_fighter", "shelf_anime"]  # последние три — ShelfFigurine.TRIPO
+## Свои фигурки игроков (будущая мастерская) — id «figure:<код>». Все проверки шкафа и наблюдения
+## спрашивают is_figure(), а не список выше, поэтому новые фигурки не ломают ни раскладку, ни комнаты друзей.
+const WORKSHOP_PREFIX := "figure:"
+
+
+static func is_figure(id: Variant) -> bool:
+	var text := str(id)
+	return text in FIGURINES or (text.begins_with(WORKSHOP_PREFIX) and text.length() <= WORKSHOP_PREFIX.length() + 64)
 const MIN_WIDTH := 0.20
 # При центре шкафа x=0,25 и масштабе 0,95 правая грань остаётся левее тумбы (x=1,17),
 # левая — правее скейтборда. Верх вместе с кубом остаётся ниже потолка комнаты.
@@ -17,6 +25,79 @@ const MAX_HEIGHT := 2.4
 ## Фигурка по умолчанию стоит на телевизоре слева (доля ширины свободного верха ТВ).
 ## Новым игрокам — сразу, в старом сохранении — один раз (метка fig_tv_31).
 const DEFAULT_FIGURE_SURFACES := {"shelf_girl": {"surface": "tv", "x": 0.15}}
+
+
+# --- Размеры колонок и полок (08.11) ------------------------------------------------------
+## Ширина каждой колонки — col_widths, высота каждого ряда (сверху вниз) — row_heights; без них все
+## ячейки одинаковые (width / height). width / height при этом — средние, для старого кода и друзей.
+const MIN_HEIGHT := 0.14
+const MAX_CELL_HEIGHT := 0.7
+
+
+static func col_width(config: Dictionary, col: int) -> float:
+	var list: Variant = config.get("col_widths", [])
+	return float(list[col]) if list is Array and col < (list as Array).size() else float(config.get("width", 0.65))
+
+
+static func row_height(config: Dictionary, row: int) -> float:
+	var list: Variant = config.get("row_heights", [])
+	return float(list[row]) if list is Array and row < (list as Array).size() else float(config.get("height", 0.36))
+
+
+static func cell_width(config: Dictionary, cell: int) -> float:
+	return col_width(config, cell % maxi(1, int(config.get("cols", 1))))
+
+
+static func cell_height(config: Dictionary, cell: int) -> float:
+	return row_height(config, cell / maxi(1, int(config.get("cols", 1))))
+
+
+## Ширина / высота всего шкафа с досками.
+static func full_width(config: Dictionary) -> float:
+	var total := (int(config.cols) + 1) * BOARD
+	for c in int(config.cols):
+		total += col_width(config, c)
+	return total
+
+
+static func full_height(config: Dictionary) -> float:
+	var total := (int(config.rows) + 1) * BOARD
+	for r in int(config.rows):
+		total += row_height(config, r)
+	return total
+
+
+static func max_row_height(config: Dictionary) -> float:
+	var best := 0.0
+	for r in int(config.rows):
+		best = maxf(best, row_height(config, r))
+	return best
+
+
+## Шкаф шире на amount в каждой колонке (новая игра не влезла).
+static func widened(config: Dictionary, amount: float) -> Dictionary:
+	var out := config.duplicate(true)
+	out.width = float(config.get("width", 0.65)) + amount
+	if out.get("col_widths", []) is Array and not (out.get("col_widths", []) as Array).is_empty():
+		out.col_widths = (config.col_widths as Array).map(func(w): return float(w) + amount)
+	return out
+
+
+static func _clean_sizes(list: Variant, count: int, low: float, high: float, total_max: float) -> Array:
+	if not list is Array or (list as Array).size() != count:
+		return []
+	var out: Array = []
+	for value: Variant in list:
+		if not (value is float or value is int) or not is_finite(float(value)):
+			return []
+		out.append(clampf(float(value), low, high))
+	var total := 0.0
+	for value: float in out:
+		total += value
+	if total > total_max:
+		var k := total_max / total
+		out = out.map(func(v): return maxf(low, v * k))
+	return out
 
 
 static func pose_basis(mode: int) -> Basis:
@@ -41,7 +122,7 @@ static func extent(size_value: Vector3, mode: int) -> Vector3:
 
 ## Перудо на полке — миниатюрный набор, в руках используется исходная крупная геометрия.
 static func item_basis(id: String, mode: int) -> Basis:
-	if id in FIGURINES:
+	if is_figure(id):
 		return Basis.IDENTITY
 	if id == "perudo":
 		return (Basis.IDENTITY if mode == 0 else Basis(Vector3.UP, -PI * 0.5)).scaled(Vector3.ONE * 0.65)
@@ -51,7 +132,7 @@ static func item_basis(id: String, mode: int) -> Basis:
 
 
 static func item_extent(id: String, size_value: Vector3, mode: int) -> Vector3:
-	if id in FIGURINES:
+	if is_figure(id):
 		return size_value
 	if id == "perudo":
 		var basis := item_basis(id, mode)
@@ -60,7 +141,7 @@ static func item_extent(id: String, size_value: Vector3, mode: int) -> Vector3:
 
 
 static func item_occupied(id: String, size_value: Vector3, mode: int) -> Vector3:
-	return item_extent(id, size_value, mode) if id == "perudo" or id in FIGURINES else occupied_extent(size_value, mode)
+	return item_extent(id, size_value, mode) if id == "perudo" or is_figure(id) else occupied_extent(size_value, mode)
 
 
 ## Запас для небольшого разворота и сдвига лежащей коробки, включая края стопки.
@@ -82,8 +163,8 @@ static func row_layout(
 	capacity: float = 0.0
 ) -> Dictionary:
 	var figures: Array = []
-	for id: String in FIGURINES:
-		if not ids.has(id) or capacity <= 0.0:
+	for id: String in ids:
+		if not is_figure(id) or capacity <= 0.0:
 			continue
 		var ratio: float = float(figure_ratio.get(id, -1.0)) if figure_ratio is Dictionary else float(figure_ratio)
 		if ratio < 0.0:
@@ -103,12 +184,12 @@ static func row_layout(
 	for id in ids:
 		if figures.any(func(figure): return figure.id == str(id)):
 			continue
-		var lying: bool = int(poses.get(id, 1)) in [2, 3] and not str(id) in FIGURINES
+		var lying: bool = int(poses.get(id, 1)) in [2, 3] and not is_figure(id)
 		var ext := item_occupied(str(id), sizes[id], int(poses.get(id, 1)))
 		if (
 			not piles.is_empty()
 			and (lying or int(poses.get(id, 1)) == 0)
-			and not str(id) in FIGURINES
+			and not is_figure(id)
 			and bool(piles.back().lying)
 			and float(piles.back().height) + ext.y <= height + 0.0005
 		):
@@ -166,6 +247,9 @@ static func figure_ratios(config: Dictionary) -> Variant:
 	var out := {}
 	for id: String in FIGURINES:
 		out[id] = float(cells[id]) if cells.has(id) else -1.0
+	for id: String in cells:
+		if is_figure(id):
+			out[id] = float(cells[id])
 	return out
 
 
@@ -173,8 +257,8 @@ static func figure_ratios(config: Dictionary) -> Variant:
 static func visible_order(ids: Array, sizes: Dictionary, poses: Dictionary, config: Dictionary) -> Array:
 	var layout := row_layout(ids, sizes, poses, float(config.height), figure_ratios(config), float(config.width) - GAP)
 	var groups: Array = layout.piles.duplicate(true)
-	for id: String in FIGURINES:
-		if ids.has(id) and not groups.any(func(group): return group.ids.has(id)):
+	for id: String in ids:
+		if is_figure(id) and not groups.any(func(group): return group.ids.has(id)):
 			var ext: Vector3 = sizes[id]
 			groups.append({"ids": [id], "x": (layout.boxes[id] as Transform3D).origin.x - ext.x * 0.5})
 	groups.sort_custom(func(a, b): return float(a.x) < float(b.x))
@@ -197,6 +281,21 @@ static func normalized(source: Dictionary) -> Dictionary:
 		minf(0.7, (MAX_HEIGHT - (int(out.rows) + 1) * BOARD) / int(out.rows))
 	)
 	out.cups = clampi(int(out.get("cups", 2)), 0, int(out.rows) * int(out.cols) - 1)
+	# Свои размеры колонок / полок: число должно совпадать с колонками / рядами, иначе — одинаковые.
+	var widths := _clean_sizes(out.get("col_widths", []), int(out.cols), MIN_WIDTH, 0.9, MAX_WIDTH - (int(out.cols) + 1) * BOARD)
+	var heights := _clean_sizes(out.get("row_heights", []), int(out.rows), MIN_HEIGHT, MAX_CELL_HEIGHT, MAX_HEIGHT - (int(out.rows) + 1) * BOARD)
+	out.erase("col_widths")
+	out.erase("row_heights")
+	if not widths.is_empty() and widths.any(func(w): return not is_equal_approx(w, widths[0])):
+		out.col_widths = widths
+		out.width = widths.reduce(func(a, b): return a + b, 0.0) / widths.size()
+	elif not widths.is_empty():
+		out.width = widths[0]
+	if not heights.is_empty() and heights.any(func(h): return not is_equal_approx(h, heights[0])):
+		out.row_heights = heights
+		out.height = heights.reduce(func(a, b): return a + b, 0.0) / heights.size()
+	elif not heights.is_empty():
+		out.height = heights[0]
 	if not out.has("figure_positions"):
 		var capacity := float(out.width) - GAP
 		out.figure_positions = {
@@ -209,7 +308,7 @@ static func normalized(source: Dictionary) -> Dictionary:
 static func limits(config: Dictionary) -> Array:
 	var out: Array = []
 	for i in int(config.rows) * int(config.cols):
-		out.append(float(config.width) - GAP)
+		out.append(cell_width(config, i) - GAP)
 	return out
 
 
@@ -243,7 +342,7 @@ static func solve(
 			ordered.append(id)
 	for id in ordered:
 		var ext := item_occupied(str(id), sizes[id], int(poses.get(id, 1)))
-		if ext.y > float(cfg.height) + 0.0005 or ext.z > CELL_DEPTH + 0.0005:
+		if ext.y > max_row_height(cfg) + 0.0005 or ext.z > CELL_DEPTH + 0.0005:
 			return {
 				"ok": false,
 				"message":
@@ -251,12 +350,18 @@ static func solve(
 			}
 		widths[id] = ext.x
 	var remaining: Array = capacities.duplicate()
+	var heights: Array = []
+	for i in count:
+		heights.append(cell_height(cfg, i))
+	var fits_height := func(id: Variant, cell: int) -> bool:
+		return item_occupied(str(id), sizes[id], int(poses.get(id, 1))).y <= float(heights[cell]) + 0.0005
 	var fitted := true
 	for id in ordered:
 		var destination: int = int(preferred[id])
 		if (
 			destination < 0
 			or destination >= count
+			or not fits_height.call(id, destination)
 			or (
 				float(
 					(
@@ -264,7 +369,7 @@ static func solve(
 							cells[destination] + [id],
 							sizes,
 							poses,
-							float(cfg.height),
+							float(heights[destination]),
 							figure_ratios(cfg),
 							float(capacities[destination])
 						)
@@ -276,6 +381,8 @@ static func solve(
 		):
 			destination = -1
 			for i in count:
+				if not fits_height.call(id, i):
+					continue
 				if (
 					float(
 						(
@@ -283,7 +390,7 @@ static func solve(
 								cells[i] + [id],
 								sizes,
 								poses,
-								float(cfg.height),
+								float(heights[i]),
 								figure_ratios(cfg),
 								float(capacities[i])
 							)
@@ -306,7 +413,7 @@ static func solve(
 						cells[destination],
 						sizes,
 						poses,
-						float(cfg.height),
+						float(heights[destination]),
 						figure_ratios(cfg),
 						float(capacities[destination])
 					)
@@ -333,7 +440,7 @@ static func solve(
 			budget,
 			sizes,
 			poses,
-			float(cfg.height),
+			heights,
 			ordered,
 			capacities,
 			figure_ratios(cfg)
@@ -357,7 +464,7 @@ static func _pack(
 	budget: Array,
 	sizes: Dictionary,
 	poses: Dictionary,
-	height: float,
+	heights: Array,
 	ordered: Array,
 	capacities: Array,
 	figure_ratio: Variant
@@ -389,6 +496,9 @@ static func _pack(
 		if before.is_empty():
 			seen[key] = true
 		var capacity: float = float(capacities[cell])
+		var height: float = float(heights[cell])
+		if item_occupied(str(id), sizes[id], int(poses.get(id, 1))).y > height + 0.0005:
+			continue
 		var candidate: Array = before + [id]
 		candidate.sort_custom(func(a, b): return ordered.find(a) < ordered.find(b))
 		var used: float = float(row_layout(candidate, sizes, poses, height, figure_ratio, capacity).width)
@@ -405,7 +515,7 @@ static func _pack(
 			budget,
 			sizes,
 			poses,
-			height,
+			heights,
 			ordered,
 			capacities,
 			figure_ratio
@@ -492,7 +602,7 @@ static func load_state(
 			continue
 		for pose in [1, 2, 3, 0]:
 			var ext := item_occupied(id, sizes[id], pose)
-			if ext.y <= float(config.height) and ext.z <= CELL_DEPTH:
+			if ext.y <= max_row_height(normalized(config)) and ext.z <= CELL_DEPTH:
 				poses[id] = pose
 				break
 	var cols := int(config.get("cols", 1))
@@ -501,12 +611,12 @@ static func load_state(
 		# Не влезает — шкаф чуть шире (все ячейки одинаково), прежние коробки остаются на своих местах,
 		# новая встаёт в появившееся место. Пока шкаф не упёрся в предел ширины.
 		var wider := config.duplicate(true)
-		var last_width := float(normalized(config).width)
+		var last_width := full_width(normalized(config))
 		for step in range(1, 46):
-			wider.width = float(config.width) + step * 0.02
-			if float(normalized(wider).width) <= last_width + 0.0001:
+			wider = widened(config, step * 0.02)
+			if full_width(normalized(wider)) <= last_width + 0.0001:
 				break  # дальше расширять некуда
-			last_width = float(normalized(wider).width)
+			last_width = full_width(normalized(wider))
 			result = solve(wider, rows, sizes, poses, cols, false)
 			if result.ok:
 				break
@@ -516,7 +626,7 @@ static func load_state(
 		# Расширяем в ширину, сохраняя предпочтения старых ячеек и все позы.
 		var expanded := config.duplicate(true)
 		for step in range(1, 25):
-			expanded.width = float(config.width) + step * 0.04
+			expanded = widened(config, step * 0.04)
 			result = solve(expanded, rows, sizes, poses, int(config.get("cols", 1)))
 			if result.ok:
 				break

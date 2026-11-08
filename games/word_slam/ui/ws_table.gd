@@ -420,6 +420,13 @@ func _update_word_panel() -> void:
 		ready.tooltip_text = "Готов рассказывать"
 		ready.disabled = i < 0 or _v["ready"][i]
 		ready.pressed.connect(func(): _send("ws_ready"))
+		var votes: Array = _v.get("skip_votes", [])
+		var tellers: Array = _v["storytellers"]
+		var skip := HCStyle.button("Сменить слово" + ((" · %d/%d" % [votes.size(), tellers.size()]) if tellers.size() > 1 else ""), HCStyle.CAP)
+		skip.tooltip_text = "Слово не нравится? Когда все рассказчики за смену — выпадет новое (и снова 15 секунд)"
+		skip.disabled = votes.has(_seat()) or not tellers.has(_seat())
+		skip.pressed.connect(func(): _send("ws_skip"))
+		row.add_child(skip)
 		row.add_child(ready)
 	elif phase == "play":
 		if _solo():
@@ -512,11 +519,28 @@ func _make_cover() -> Control:
 	c.draw.connect(func():
 		var r := Rect2(Vector2.ZERO, c.size)
 		c.draw_style_box(HCStyle.box(Color("bdb7ad"), 10, Color(edge, 0.8), 2, Color(0, 0, 0, 0.12), 3), r)
-		# лёгкая штриховка «обратной стороны»
-		for i in range(-2, 8):
-			var x := i * 10.0
-			c.draw_line(Vector2(x, r.size.y), Vector2(x + r.size.y, 0), Color(1, 1, 1, 0.14), 2.0, true))
+		# лёгкая штриховка «обратной стороны» — отрезки обрезаны по пластине (с отступом от скруглённых углов)
+		var inner := r.grow(-5.0)
+		var h := r.size.y
+		for i in range(-int(h / 10.0) - 1, int(r.size.x / 10.0) + 2):
+			var seg := _clip_diagonal(float(i) * 10.0, h, inner)
+			if not seg.is_empty():
+				c.draw_line(seg[0], seg[1], Color(1, 1, 1, 0.14), 2.0, true))
 	return c
+
+
+## Отрезок диагонали (x, h) → (x + h, 0), обрезанный прямоугольником r; пусто — если не пересекает.
+static func _clip_diagonal(x: float, h: float, r: Rect2) -> Array:
+	var t0 := 0.0
+	var t1 := 1.0
+	# x(t) = x + t·h, y(t) = h − t·h
+	t0 = maxf(t0, (r.position.x - x) / h)
+	t1 = minf(t1, (r.end.x - x) / h)
+	t0 = maxf(t0, (h - r.end.y) / h)
+	t1 = minf(t1, (h - r.position.y) / h)
+	if t1 <= t0:
+		return []
+	return [Vector2(x + t0 * h, h - t0 * h), Vector2(x + t1 * h, h - t1 * h)]
 
 
 ## Пластины спрыгивают с карточек и падают вниз (гравитация); лица карточек уже открыты под ними.
@@ -917,7 +941,7 @@ func _update_bottom() -> void:
 		col.add_child(HCStyle.label("Догадки обеих команд видны всем — как в настольной игре, где команды слышат друг друга.", HCStyle.CAP, HCStyle.MUTED))
 		_guess_edit.grab_focus.call_deferred()
 	elif phase == "word":
-		col.add_child(HCStyle.label("Рассказчики выбирают слово. Сейчас начнётся: «ВОРД!» — «СЛЭМ!»", HCStyle.BODY, HCStyle.MUTED, HORIZONTAL_ALIGNMENT_LEFT, "medium"))
+		col.add_child(HCStyle.label("Рассказчики смотрят слово и подсказки — раунд начнётся через 15 секунд или по «ВОРД!» — «СЛЭМ!»", HCStyle.BODY, HCStyle.MUTED, HORIZONTAL_ALIGNMENT_LEFT, "medium"))
 
 
 func _send_guess() -> void:
@@ -1033,7 +1057,15 @@ func _process(_delta: float) -> void:
 		return
 	var phase: String = _v["phase"]
 	var total := float(_v.get("time_total", 60.0))
-	if phase == "play" and total <= 0.0:
+	if phase == "word":
+		# 15 секунд рассказчики смотрят слово и подсказки, потом раунд начинается сам
+		var look := float(_v.get("look_time", 15.0))
+		var left_look := maxf(0.0, _time_left - (Time.get_ticks_msec() - _time_stamp) / 1000.0)
+		_timer_label.text = "⏳ 0:%02d" % ceili(left_look)
+		_timer_bar.value = left_look / look * 100.0
+		_timer_bar.visible = true
+		_timer_label.add_theme_color_override("font_color", HCStyle.CLAY if left_look < 5 else HCStyle.INK)
+	elif phase == "play" and total <= 0.0:
 		_timer_label.text = "⏳ ∞"
 		_timer_bar.visible = false
 		_timer_label.add_theme_color_override("font_color", HCStyle.INK)

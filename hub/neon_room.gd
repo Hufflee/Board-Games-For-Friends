@@ -1171,8 +1171,8 @@ func _figure_surface_span(box: GameBox, surface: String) -> Array[Vector3]:
 		var inv := _shelf_root.global_transform.affine_inverse()
 		return [inv * Vector3(1.30 + radius * SHELF_SCALE, 1.095 + box.size.y * SHELF_SCALE * 0.5, BACK + 0.39),
 			inv * Vector3(1.68 - radius * SHELF_SCALE, 1.095 + box.size.y * SHELF_SCALE * 0.5, BACK + 0.39)]
-	var full_width: float = int(_cabinet.cols) * float(_cabinet.width) + (int(_cabinet.cols) + 1) * BOARD
-	var top: float = 0.06 + int(_cabinet.rows) * float(_cabinet.height) + (int(_cabinet.rows) + 1) * BOARD
+	var full_width: float = ShelfConfig.full_width(_cabinet)
+	var top: float = 0.06 + ShelfConfig.full_height(_cabinet)
 	return [Vector3(SHELF_X - full_width * 0.5 + radius + 0.008, top + box.size.y * 0.5, BACK + 0.21),
 		Vector3(SHELF_X + full_width * 0.5 - 0.07 - 0.055 / SHELF_SCALE - radius - 0.008, top + box.size.y * 0.5, BACK + 0.21)]
 
@@ -1243,13 +1243,23 @@ func _rebuild_shelf_geometry() -> void:
 		child.queue_free()
 	var rows: int = int(_cabinet.rows)
 	var cols: int = int(_cabinet.cols)
-	var width: float = float(_cabinet.width)
-	var height: float = float(_cabinet.height)
-	var full_width: float = cols * width + (cols + 1) * BOARD
-	var full_height: float = rows * height + (rows + 1) * BOARD
+	# у колонок и полок могут быть свои размеры (ShelfConfig.col_width / row_height)
+	var col_x: Array = []  # левый край каждой колонки (внутри досок)
+	var full_width: float = ShelfConfig.full_width(_cabinet)
+	var full_height: float = ShelfConfig.full_height(_cabinet)
 	var base_y := 0.06
 	var z: float = BACK + CELL_D * 0.5 + 0.01
 	var left: float = SHELF_X - full_width * 0.5
+	var cursor := left + BOARD
+	for column in cols:
+		col_x.append(cursor)
+		cursor += ShelfConfig.col_width(_cabinet, column) + BOARD
+	var level_y: Array = []  # низ каждой доски-полки снизу вверх (уровень 0 — дно)
+	var y_cursor := base_y
+	for level in rows + 1:
+		level_y.append(y_cursor)
+		if level < rows:
+			y_cursor += BOARD + ShelfConfig.row_height(_cabinet, rows - 1 - level)
 	var wood := Color("2a1d42")
 	_soft(
 		Vector3(full_width - 0.02, base_y, CELL_D - 0.02),
@@ -1266,16 +1276,17 @@ func _rebuild_shelf_geometry() -> void:
 		_shelf_root
 	)
 	for column in cols + 1:
+		var board_x: float = (float(col_x[column]) - BOARD * 0.5) if column < cols else (left + full_width - BOARD * 0.5)
 		_soft(
 			Vector3(BOARD, full_height, CELL_D),
-			Vector3(left + BOARD * 0.5 + column * (width + BOARD), base_y + full_height * 0.5, z),
+			Vector3(board_x, base_y + full_height * 0.5, z),
 			"wood_dark",
 			wood,
 			_shelf_root
 		)
 	var strip := _mat(Color("ff3ea5"), 0.3, Color("ff3ea5"), 2.6)
 	for level in rows + 1:
-		var y: float = base_y + BOARD * 0.5 + level * (height + BOARD)
+		var y: float = float(level_y[level]) + BOARD * 0.5
 		_soft(Vector3(full_width, BOARD, CELL_D), Vector3(SHELF_X, y, z), "wood_dark", wood, _shelf_root)
 		_box(
 			Vector3(full_width - 0.02, 0.005, 0.005),
@@ -1288,8 +1299,10 @@ func _rebuild_shelf_geometry() -> void:
 	for row in rows:
 		for column in cols:
 			var cell: int = row * cols + column
-			var x: float = left + BOARD + column * (width + BOARD)
-			var floor_y: float = base_y + BOARD + (rows - 1 - row) * (height + BOARD)
+			var width: float = ShelfConfig.col_width(_cabinet, column)
+			var height: float = ShelfConfig.row_height(_cabinet, row)
+			var x: float = col_x[column]
+			var floor_y: float = float(level_y[rows - 1 - row]) + BOARD
 			var outer_right: float = x + width - 0.003
 			_row_info.append(
 				{
@@ -1407,12 +1420,8 @@ func request_shelf_geometry(geometry: Dictionary) -> String:
 func _frame_shelf() -> void:
 	if not is_instance_valid(camera):
 		return
-	var width: float = (
-		(int(_cabinet.cols) * float(_cabinet.width) + (int(_cabinet.cols) + 1) * BOARD) * SHELF_SCALE
-	)
-	var height: float = (
-		(int(_cabinet.rows) * float(_cabinet.height) + (int(_cabinet.rows) + 1) * BOARD) * SHELF_SCALE
-	)
+	var width: float = ShelfConfig.full_width(_cabinet) * SHELF_SCALE
+	var height: float = ShelfConfig.full_height(_cabinet) * SHELF_SCALE
 	# Кадр зависит только от шкафа: куда поставили фигурку (ТВ, верх шкафа, ячейка), камеру не двигает.
 	var aspect: float = (
 		get_viewport().get_visible_rect().size.x / maxf(1, get_viewport().get_visible_rect().size.y)
@@ -1593,8 +1602,8 @@ func _shelf_edges() -> Array:
 	var lines: Array = []
 	var rows: int = int(_cabinet.rows)
 	var cols: int = int(_cabinet.cols)
-	var width: float = cols * float(_cabinet.width) + (cols + 1) * BOARD
-	var height: float = rows * float(_cabinet.height) + (rows + 1) * BOARD
+	var width: float = ShelfConfig.full_width(_cabinet)
+	var height: float = ShelfConfig.full_height(_cabinet)
 	var left: float = SHELF_X - width * 0.5
 	var z: float = BACK + CELL_D + 0.016
 	for side in [-1, 1]:
@@ -1602,11 +1611,21 @@ func _shelf_edges() -> Array:
 		lines.append(
 			{"kind": "width", "index": side, "a": Vector3(x, 0.06, z), "b": Vector3(x, 0.06 + height, z)}
 		)
+	# внутренние перегородки: ширина двух соседних колонок (08.11 — свои размеры ящиков)
+	var x_cursor := left + BOARD
+	for column in cols - 1:
+		x_cursor += ShelfConfig.col_width(_cabinet, column)
+		var px := x_cursor + BOARD * 0.5
+		lines.append({"kind": "col", "index": column + 1, "a": Vector3(px, 0.06, z), "b": Vector3(px, 0.06 + height, z)})
+		x_cursor += BOARD
+	var y_cursor := 0.06
 	for level in rows + 1:
-		var y: float = 0.06 + BOARD * 0.5 + level * (float(_cabinet.height) + BOARD)
+		var y: float = y_cursor + BOARD * 0.5
 		lines.append(
 			{"kind": "height", "index": level, "a": Vector3(left, y, z), "b": Vector3(left + width, y, z)}
 		)
+		if level < rows:
+			y_cursor += BOARD + ShelfConfig.row_height(_cabinet, rows - 1 - level)
 	for edge: Dictionary in lines:
 		edge.a = camera.unproject_position(_shelf_root.global_transform * edge.a)
 		edge.b = camera.unproject_position(_shelf_root.global_transform * edge.b)
@@ -1662,13 +1681,37 @@ func _resize_shelf_edge(screen: Vector2) -> void:
 	var delta: Vector3 = _shelf_point(screen) - Vector3(_edge_drag.point)
 	var original: Dictionary = _edge_drag.state.config
 	var config: Dictionary = _cabinet.duplicate(true)
+	var cols: int = int(original.cols)
+	var rows: int = int(original.rows)
+	var widths: Array = range(cols).map(func(c): return ShelfConfig.col_width(original, c))
+	var heights: Array = range(rows).map(func(r): return ShelfConfig.row_height(original, r))
 	if _edge_drag.kind == "width":
-		config.width = float(original.width) + delta.x * int(_edge_drag.index) * 2.0 / int(original.cols)
+		# внешний край — все колонки на одинаковую величину
+		var d: float = delta.x * int(_edge_drag.index) * 2.0 / cols
+		config.width = float(original.width) + d
+		config.col_widths = widths.map(func(w): return float(w) + d)
+	elif _edge_drag.kind == "col":
+		# перегородка — меняются только две соседние колонки, ширина шкафа та же
+		var c: int = int(_edge_drag.index)
+		var d: float = clampf(delta.x, ShelfConfig.MIN_WIDTH - float(widths[c - 1]), float(widths[c]) - ShelfConfig.MIN_WIDTH)
+		widths[c - 1] = float(widths[c - 1]) + d
+		widths[c] = float(widths[c]) - d
+		config.col_widths = widths
 	else:
 		var level: int = int(_edge_drag.index)
-		config.height = (
-			float(original.height) + delta.y / (float(level) if level > 0 else -float(original.rows))
-		)
+		if level == 0 or level == rows:
+			# дно и крыша — все полки на одинаковую величину
+			var dh: float = delta.y / (float(level) if level > 0 else -float(rows))
+			config.height = float(original.height) + dh
+			config.row_heights = heights.map(func(h): return float(h) + dh)
+		else:
+			# средняя полка — меняются только ряд под ней и ряд над ней (ряды считаются сверху)
+			var below: int = rows - level
+			var above: int = rows - 1 - level
+			var dy: float = clampf(delta.y, ShelfConfig.MIN_HEIGHT - float(heights[below]), float(heights[above]) - ShelfConfig.MIN_HEIGHT)
+			heights[below] = float(heights[below]) + dy
+			heights[above] = float(heights[above]) - dy
+			config.row_heights = heights
 	var message := request_shelf_geometry(config)
 	_editor_ui.call("sync", message)
 
@@ -1855,8 +1898,8 @@ func shelf_wall_rect() -> Rect2:
 		return Rect2()
 	var cols: int = int(_cabinet.cols)
 	var rows: int = int(_cabinet.rows)
-	var full_width: float = cols * float(_cabinet.width) + (cols + 1) * BOARD
-	var full_height: float = rows * float(_cabinet.height) + (rows + 1) * BOARD
+	var full_width: float = ShelfConfig.full_width(_cabinet)
+	var full_height: float = ShelfConfig.full_height(_cabinet)
 	var left: float = SHELF_X - full_width * 0.5
 	var a := _shelf_root.transform * Vector3(left, 0.0, BACK)
 	var b := _shelf_root.transform * Vector3(left + full_width, 0.06 + full_height + 0.16, BACK)  # 0.16 — стеклянный куб
@@ -2459,7 +2502,7 @@ func _drag_update(screen: Vector2) -> void:
 		)
 		var distance: float = (
 			Vector2(
-				(_drag_at.x - midpoint.x) / maxf(0.1, float(_cabinet.get("width", 1.0))),
+				(_drag_at.x - midpoint.x) / maxf(0.1, float(cell.right) - float(cell.left)),
 				(_drag_at.y - midpoint.y) / float(cell.get("height", CELL_H))
 			)
 			. length_squared()
@@ -2830,12 +2873,14 @@ func show_remote(snapshot: Dictionary, follow: bool = true) -> bool:
 	var clean := PublicRoom.clean(snapshot)
 	if clean.is_empty():
 		return false
+	# Фигурки друга, которых у нас нет (своя из мастерской, другая версия), пока не показываем —
+	# убираем их из раскладки, остальное стоит как у него. Позже здесь можно скачивать модель.
+	var known: Array = (_local_room.get("boxes", boxes) as Array).map(func(box): return _shelf_id(box))
+	for r in clean.placements.size():
+		clean.placements[r] = (clean.placements[r] as Array).filter(func(id): return not ShelfConfig.is_figure(id) or known.has(id))
 	var ids: Array = []
 	for row in clean.placements:
 		ids.append_array(row)
-	var builtins: Array = boxes.filter(func(box): return not _shelf_id(box).begins_with("custom:"))
-	if builtins.any(func(box): return not ids.has(_shelf_id(box))) or ids.filter(func(id): return not str(id).begins_with("custom:")).size() != builtins.size():
-		return false
 	if not remote_view:
 		if _editor_on:
 			finish_shelf_editor(false)
@@ -2854,6 +2899,20 @@ func show_remote(snapshot: Dictionary, follow: bool = true) -> bool:
 		remote_view = true
 		panels.deselect()
 		panels.input_locked = true
+	# Друг на другой версии: наших игр/фигурок, которых нет у него, в его шкафу не показываем
+	# (вернутся домой — return_home покажет всё); появились у него после обновления — показываем снова.
+	for box: GameBox in boxes.duplicate():
+		var id := _shelf_id(box)
+		if not id.begins_with("custom:") and not ids.has(id):
+			if focused == box:
+				release()
+			box.hide()
+			boxes.erase(box)
+	for box: GameBox in _local_room.boxes:
+		var id := _shelf_id(box)
+		if not id.begins_with("custom:") and ids.has(id) and not boxes.has(box):
+			box.show()
+			boxes.append(box)
 	var custom_changed: bool = _local_room.custom != clean.custom
 	if custom_changed:
 		if focused != null and _local_room.remote_boxes.has(focused):

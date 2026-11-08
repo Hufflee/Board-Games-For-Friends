@@ -3019,6 +3019,8 @@ func _ws_time_total() -> float:
 
 
 func _ws_time_left() -> float:
+	if wslam != null and wslam.phase == "word":
+		return maxf(0.0, WSRules.LOOK_TIME - _phase_time)  # 15 с на просмотр слова и подсказок
 	if wslam == null or wslam.phase != "play" or _ws_time_total() <= 0.0:
 		return _ws_time_total()
 	return maxf(0.0, _ws_time_total() - _phase_time)  # время на ход идёт с «СЛЭМ!»
@@ -3032,6 +3034,8 @@ func _ws_action(peer: int, seat: int, kind: String, arg) -> bool:
 	match kind:
 		"ws_reroll":
 			return w.reroll(seat)
+		"ws_skip":
+			return w.vote_skip(seat)
 		"ws_ready":
 			return w.set_ready(seat)
 		"ws_holders":
@@ -3052,7 +3056,7 @@ func _ws_action(peer: int, seat: int, kind: String, arg) -> bool:
 
 func _ws_process(delta: float) -> void:
 	var w := wslam
-	var key := "%s/%d" % [w.phase, w.round_no]
+	var key := "%s/%d/%d" % [w.phase, w.round_no, w.word_no]  # новое слово — снова 15 с на просмотр
 	if key != _last_phase:
 		_last_phase = key
 		_phase_time = 0.0
@@ -3061,8 +3065,8 @@ func _ws_process(delta: float) -> void:
 	_phase_time += delta
 	match w.phase:
 		"word":
-			# вылетевший рассказчик («бот») — готов сам; задумавшийся — по истечении времени хода
-			var late := _phase_time >= turn_limit()
+			# вылетевший рассказчик («бот») — готов сам; через 15 с просмотра раунд начинается сам
+			var late := _phase_time >= WSRules.LOOK_TIME
 			var moved := false
 			for s in w.storytellers:
 				if w.players[s].get("bot", false) or late:
@@ -3079,7 +3083,7 @@ func _ws_process(delta: float) -> void:
 			if _phase_time >= auto_advance_time:
 				_try_advance(true)
 				_push_state()
-	if int(_phase_time) != before and w.phase == "play" and _ws_time_total() > 0.0:
+	if int(_phase_time) != before and (w.phase == "word" or (w.phase == "play" and _ws_time_total() > 0.0)):
 		_push_state()  # раз в секунду — часы
 
 

@@ -3,13 +3,15 @@ extends RefCounted
 ## Движок «Ворд Слэма». Рассказчики объясняют слово только карточками слов на двух подставках,
 ## отгадывающие пишут догадки. Хост ведёт часы (Net) и вызывает time_up().
 ##
-## Фазы: word (рассказчики видят слово, можно перебросить, «Готов») → play (карточки, догадки, часы)
+## Фазы: word (рассказчики 15 с смотрят слово и подсказки, могут голосованием сменить слово, «Готов»)
+##       → play (карточки, догадки, часы)
 ##       → round_result → … → game_over
 ## Режимы: teams — две команды и два рассказчика; solo — один рассказчик, остальные каждый за себя.
 
 const MAX_ON_HOLDER := 12
 const WORDS_PER_ROW := 3
 const LOG_SIZE := 40
+const LOOK_TIME := 15.0  # столько рассказчики смотрят слово и подсказки, потом раунд начинается сам (Net)
 
 var players: Array = []  # [{name, team}]
 var mode := "teams"
@@ -19,7 +21,8 @@ var catalog_order := {}  # категория → неизменные id, в п
 var scores: Array = []  # teams: [синие, оранжевые]; solo: по игрокам
 var won_cards: Array = []  # [{word, by}] — для итогов
 var storytellers: Array = []  # teams: [рассказчик синих, оранжевых]; solo: [рассказчик]
-var _turn: Array = [0, 0]  # чей черёд рассказывать в команде / по кругу
+var _turn: Array = [0, 0]  # сколько раз команда выбирала рассказчика (для старых сохранений)
+var _told: Array = [[], []]  # кто уже рассказывал в этом круге: рассказчик выбирается случайно из остальных
 var hourglass_team := 0  # у кого часы (и кубик); другая команда тянет карту
 var deck: Array = []
 var total_cards := 0
@@ -27,6 +30,8 @@ var card := {}
 var roll := 1
 var word := ""
 var ready: Array = []  # готовность рассказчиков («ВОРД!» — «СЛЭМ!»)
+var skip_votes: Array = []  # рассказчики, проголосовавшие сменить слово (все «за» — новое слово)
+var word_no := 0  # растёт с каждым новым словом (новый раунд, смена слова) — Net сбрасывает 15 с
 var holders := {}  # team (solo: 0) -> [[левая], [правая]] — id карточек «noun:5»
 var pointer := {}  # team -> {id, n}
 var flipped := false
@@ -64,7 +69,8 @@ func new_game(player_list: Array, solo: bool, card_count: int, intro: bool, with
 	deck = WSData.build_deck(rng, card_count, intro)
 	total_cards = card_count
 	won_cards = []
-	_turn = [rng.randi_range(0, 7), rng.randi_range(0, 7)]
+	_turn = [0, 0]
+	_told = [[], []]
 	hourglass_team = rng.randi_range(0, 1)
 	round_no = 0
 	tiebreak = false
@@ -96,18 +102,16 @@ func drawer() -> int:
 func _start_round() -> void:
 	round_no += 1
 	if mode == "solo":
-		storytellers = [_turn[0] % players.size()]
-		_turn[0] += 1
+		storytellers = [_pick_storyteller(0, range(players.size()))]
 	else:
 		storytellers = []
 		for t in 2:
-			var m := team_members(t)
-			storytellers.append(m[_turn[t] % m.size()])
-			_turn[t] += 1
+			storytellers.append(_pick_storyteller(t, team_members(t)))
 	if deck.is_empty():
 		deck = WSData.build_deck(rng, 1, false)  # дополнительная карта при ничьей
 	card = deck.pop_back()
 	_roll()
+	_build_catalog()
 	ready = []
 	for s in storytellers:
 		ready.append(false)
@@ -121,27 +125,88 @@ func _start_round() -> void:
 	phase = "word"
 
 
+## Рассказчик команды: случайно из тех, кто в этом круге ещё не рассказывал; рассказали все — новый круг.
+func _pick_storyteller(team: int, members: Array) -> int:
+	var fresh := members.filter(func(s): return not (_told[team] as Array).has(s))
+	if fresh.is_empty():
+		_told[team] = []
+		fresh = members.duplicate()
+	var seat: int = fresh[rng.randi_range(0, fresh.size() - 1)]
+	(_told[team] as Array).append(seat)
+	_turn[team] += 1
+	return seat
+
+
 func _roll() -> void:
-	if catalog_mode == "basic":
-		for category: String in WSData.CATEGORIES:
-			var indices := range(WSData.story_pool(category).size())
+	roll = 1
+	word = str(card["words"][0])
+	word_no += 1
+	skip_votes = []
+
+
+## Подсказки раунда: собираются один раз (не меняются ни при «ВОРД!—СЛЭМ!», ни при смене слова —
+## раньше перемешивание в начале хода выглядело как «пропавшее» слово). Однокоренных к слову нет.
+func _build_catalog() -> void:
+	for category: String in WSData.CATEGORIES:
+		var pool := WSData.story_pool(category)
+		var indices: Array = range(pool.size() if catalog_mode == "basic" else WSData.STORY[category].size())
+		if catalog_mode == "basic":
 			for index: int in range(indices.size() - 1, 0, -1):
 				var other := rng.randi_range(0, index)
 				var previous: int = indices[index]
 				indices[index] = indices[other]
 				indices[other] = previous
-			catalog_order[category] = []
-			for index: int in indices.slice(0, WSData.STORY[category].size()):
-				catalog_order[category].append("%s:%d" % [category, index])
-	roll = 1
-	word = str(card["words"][0])
+		var ids: Array = []
+		for index: int in indices:
+			if ids.size() >= WSData.STORY[category].size():
+				break
+			if not WSData.same_root(word, str(pool[index])):
+				ids.append("%s:%d" % [category, index])
+		catalog_order[category] = ids
+
+
+## Слово сменилось: однокоренные подсказки заменяются другими (основной набор) или убираются, остальные — на своих местах.
+func _fix_catalog() -> void:
+	for category: String in WSData.CATEGORIES:
+		var pool := WSData.story_pool(category)
+		var ids: Array = catalog_order.get(category, [])
+		var spare: Array = []
+		if catalog_mode == "basic":
+			for index in pool.size():
+				var id := "%s:%d" % [category, index]
+				if not ids.has(id) and not WSData.same_root(word, str(pool[index])):
+					spare.append(id)
+		var out: Array = []
+		for id: String in ids:
+			if not WSData.same_root(word, card_word(id)):
+				out.append(id)
+			elif not spare.is_empty():
+				out.append(spare.pop_at(rng.randi_range(0, spare.size() - 1)))
+		catalog_order[category] = out
 
 
 func reroll(seat: int) -> bool:
 	if phase != "word" or seat != drawer():
 		return false
+	_new_word()
+	return true
+
+
+func _new_word() -> void:
 	card["words"] = preload("res://hub/shared_words.gd").sample(rng)
 	_roll()
+	_fix_catalog()
+	for i in ready.size():
+		ready[i] = false
+
+
+## Рассказчик голосует сменить слово (не нравится). Все рассказчики «за» — новое слово и снова 15 с.
+func vote_skip(seat: int) -> bool:
+	if phase != "word" or not is_storyteller(seat) or skip_votes.has(seat):
+		return false
+	skip_votes.append(seat)
+	if storytellers.all(func(s): return skip_votes.has(s)):
+		_new_word()
 	return true
 
 
@@ -151,14 +216,6 @@ func set_ready(seat: int) -> bool:
 		return false
 	ready[i] = true
 	if not ready.has(false):
-		if catalog_mode == "basic":
-			for category in WSData.CATEGORIES:
-				var ids: Array = catalog_order[category]
-				for j in range(ids.size() - 1, 0, -1):
-					var other := rng.randi_range(0, j)
-					var previous: String = ids[j]
-					ids[j] = ids[other]
-					ids[other] = previous
 		phase = "play"
 		flipped = true  # время на ход идёт сразу (переворачивать часы не нужно)
 	return true
@@ -330,6 +387,9 @@ func get_view(seat: int, show_all: bool = false) -> Dictionary:
 		"roll": roll,
 		"word": word if secret else "",
 		"ready": ready.duplicate(),
+		"skip_votes": skip_votes.duplicate(),
+		"word_no": word_no,
+		"look_time": LOOK_TIME,
 		"holders": hv,
 		"pointer": pointer.duplicate(true),
 		"flipped": flipped,
@@ -419,6 +479,7 @@ func host_new_theme() -> bool:
 		card = deck.pop_back()
 		deck.insert(0, old)
 	_roll()
+	_build_catalog()
 	ready = []
 	for s in storytellers:
 		ready.append(false)
