@@ -23,7 +23,14 @@ static func clean(value: Variant) -> Dictionary:
 		config[key] = source[key]
 	if config.rows < 1 or config.rows > 8 or config.cols < 1 or config.cols > 6:
 		return {}
-	if config.cups < 0 or config.cups >= config.rows * config.cols:
+	# свои ячейки (09.11): перегородки по рядам, объединённые ячейки
+	var cell_list: Variant = source.get("cells", null)
+	if cell_list != null:
+		if not Shelf.cells_valid(cell_list, int(config.rows)):
+			return {}
+		config.cells = (cell_list as Array).map(func(c): return {"row": int(c.row), "span": int(c.span), "x": float(c.x), "w": float(c.w)})
+	var cell_total: int = (config.cells as Array).size() if config.has("cells") else config.rows * config.cols
+	if config.cups < 0 or config.cups >= cell_total:
 		return {}
 	for key in ["width", "height"]:
 		if not (source.get(key) is float or source.get(key) is int):
@@ -32,7 +39,7 @@ static func clean(value: Variant) -> Dictionary:
 		if not is_finite(number) or number < (0.2 if key == "width" else 0.14) or number > (1.8 if key == "width" else 0.7):
 			return {}
 		config[key] = number
-	if config.cols * config.width + (config.cols + 1) * 0.03 > 1.801 or config.rows * config.height + (config.rows + 1) * 0.03 > 2.401:
+	if (not config.has("cells") and config.cols * config.width + (config.cols + 1) * 0.03 > 1.801) or config.rows * config.height + (config.rows + 1) * 0.03 > 2.401:
 		return {}
 	# свои размеры колонок / полок (08.11): списки чисел по числу колонок / рядов
 	for pair in [["col_widths", "cols", 0.2, 0.9], ["row_heights", "rows", 0.14, 0.7]]:
@@ -113,7 +120,7 @@ static func clean(value: Variant) -> Dictionary:
 	for game in preload("res://hub/games.gd").LIST:
 		allowed.append(str(game.id))
 	var placements: Array = value.placements
-	if placements.size() != config.rows * config.cols:
+	if placements.size() != cell_total:
 		return {}
 	var seen: Dictionary = {}
 	var rows: Array = []

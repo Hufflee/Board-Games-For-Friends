@@ -44,16 +44,269 @@ static func row_height(config: Dictionary, row: int) -> float:
 	return float(list[row]) if list is Array and row < (list as Array).size() else float(config.get("height", 0.36))
 
 
+# --- Ячейки произвольной ширины (09.11) ---------------------------------------------------
+## cells — список ячеек [{row, span, x, w}]: ряд сверху, сколько рядов занимает (объединённые по
+## вертикали), левый край от внутренней стенки и ширина (м). Перегородки у каждого ряда свои, полки — во
+## всю ширину (меняют высоту ряда). Без cells ячейки — обычная сетка rows × cols. Порядок ячеек — по
+## ряду, затем слева направо; placements и cups — по этому порядку.
+## Ячейки объединяются (убрать перегородку или кусок полки) и разделяются обратно: merge_cells / split_cell.
+const MERGE_EPS := 0.004
+
+
+static func has_cells(config: Dictionary) -> bool:
+	return config.get("cells") is Array and not (config.cells as Array).is_empty()
+
+
+static func shelf_cells(config: Dictionary) -> Array:
+	if has_cells(config):
+		return config.cells
+	var out: Array = []
+	for r in int(config.get("rows", 1)):
+		var x := 0.0
+		for c in int(config.get("cols", 1)):
+			var w := col_width(config, c)
+			out.append({"row": r, "span": 1, "x": x, "w": w})
+			x += w + BOARD
+	return out
+
+
+static func cell_count(config: Dictionary) -> int:
+	return shelf_cells(config).size()
+
+
+static func inner_width(config: Dictionary) -> float:
+	if has_cells(config):
+		var best := 0.0
+		for cell: Dictionary in config.cells:
+			best = maxf(best, float(cell.x) + float(cell.w))
+		return best
+	var total := (int(config.cols) - 1) * BOARD
+	for c in int(config.cols):
+		total += col_width(config, c)
+	return total
+
+
 static func cell_width(config: Dictionary, cell: int) -> float:
+	if has_cells(config):
+		return float(config.cells[cell].w)
 	return col_width(config, cell % maxi(1, int(config.get("cols", 1))))
 
 
 static func cell_height(config: Dictionary, cell: int) -> float:
+	if has_cells(config):
+		var c: Dictionary = config.cells[cell]
+		var total := (int(c.span) - 1) * BOARD
+		for r in range(int(c.row), int(c.row) + int(c.span)):
+			total += row_height(config, r)
+		return total
 	return row_height(config, cell / maxi(1, int(config.get("cols", 1))))
+
+
+## Ячейки правильные: каждый ряд покрыт без дыр и наложений, ширина везде одна, размеры в пределах.
+static func cells_valid(list: Variant, rows: int) -> bool:
+	if not list is Array or (list as Array).is_empty() or (list as Array).size() > 48:
+		return false
+	var by_row: Array = []
+	for r in rows:
+		by_row.append([])
+	for item: Variant in list:
+		if not item is Dictionary:
+			return false
+		var c: Dictionary = item
+		for key in ["row", "span", "x", "w"]:
+			if not (c.get(key) is int or c.get(key) is float) or not is_finite(float(c[key])):
+				return false
+		if int(c.row) < 0 or int(c.span) < 1 or int(c.row) + int(c.span) > rows or float(c.x) < -0.0001 or float(c.w) < MIN_WIDTH - 0.0001 or float(c.w) > MAX_WIDTH:
+			return false
+		for r in range(int(c.row), int(c.row) + int(c.span)):
+			by_row[r].append([float(c.x), float(c.w)])
+	var width := -1.0
+	for r in rows:
+		var parts: Array = by_row[r]
+		if parts.is_empty():
+			return false
+		parts.sort_custom(func(a, b): return a[0] < b[0])
+		var at := 0.0
+		for p: Array in parts:
+			if absf(float(p[0]) - at) > 0.002:
+				return false
+			at = float(p[0]) + float(p[1]) + BOARD
+		var row_width := at - BOARD
+		if width < 0.0:
+			width = row_width
+		elif absf(row_width - width) > 0.002:
+			return false
+	return width + 2 * BOARD <= MAX_WIDTH + 0.002
+
+
+static func _sorted_cells(list: Array) -> Array:
+	var out := list.duplicate(true)
+	out.sort_custom(func(a, b): return int(a.row) < int(b.row) or (int(a.row) == int(b.row) and float(a.x) < float(b.x)))
+	return out
+
+
+## Ячейки шкафа явным списком (для правок отдельных ячеек); сетка переводится как есть.
+static func with_cells(config: Dictionary) -> Dictionary:
+	var out := config.duplicate(true)
+	out.cells = shelf_cells(config).duplicate(true)
+	out.erase("col_widths")
+	return out
+
+
+## Соседи справа от ячейки a в её рядах (их левый край — сразу за перегородкой a).
+static func right_neighbors(list: Array, a: int) -> Array:
+	var cell: Dictionary = list[a]
+	var edge := float(cell.x) + float(cell.w) + BOARD
+	var out: Array = []
+	for i in list.size():
+		var n: Dictionary = list[i]
+		if i != a and absf(float(n.x) - edge) < MERGE_EPS and int(n.row) < int(cell.row) + int(cell.span) and int(n.row) + int(n.span) > int(cell.row):
+			out.append(i)
+	return out
+
+
+## Перегородка справа от ячейки a сдвигается на d: a шире, соседи справа в её рядах — уже.
+## Нельзя, если чья-то ширина станет меньше минимума или сосед выходит за ряды a (сдвинул бы чужой ряд).
+static func move_divider(config: Dictionary, a: int, d: float) -> Dictionary:
+	var out := with_cells(config)
+	var list: Array = out.cells
+	var cell: Dictionary = list[a]
+	var neighbors := right_neighbors(list, a)
+	if neighbors.is_empty():
+		return {}
+	var low := MIN_WIDTH - float(cell.w)
+	var high := INF
+	for i: int in neighbors:
+		var n: Dictionary = list[i]
+		if int(n.row) < int(cell.row) or int(n.row) + int(n.span) > int(cell.row) + int(cell.span):
+			return {}  # высокий сосед: его левая стенка общая и с другими рядами
+		high = minf(high, float(n.w) - MIN_WIDTH)
+	d = clampf(d, low, high)
+	cell.w = float(cell.w) + d
+	for i: int in neighbors:
+		list[i].x = float(list[i].x) + d
+		list[i].w = float(list[i].w) - d
+	return out
+
+
+## Внешний край шкафа: крайние ячейки каждого ряда шире / уже на d (side: -1 левый, 1 правый).
+static func move_outer(config: Dictionary, side: int, d: float) -> Dictionary:
+	var out := with_cells(config)
+	var list: Array = out.cells
+	var inner := inner_width(out)
+	for c: Dictionary in list:
+		var edge_cell: bool = (absf(float(c.x)) < MERGE_EPS) if side < 0 else (absf(float(c.x) + float(c.w) - inner) < MERGE_EPS)
+		if edge_cell and float(c.w) + d < MIN_WIDTH:
+			return {}
+	for c: Dictionary in list:
+		var left_cell: bool = absf(float(c.x)) < MERGE_EPS
+		var right_cell: bool = absf(float(c.x) + float(c.w) - inner) < MERGE_EPS
+		if side < 0:
+			if left_cell:
+				c.w = float(c.w) + d
+			else:
+				c.x = float(c.x) + d
+		elif right_cell:
+			c.w = float(c.w) + d
+	return out
+
+
+## Убрать перегородку / кусок полки между ячейками a и b: две ячейки становятся одной.
+## Возвращает {config, placements, map} (map: старый номер ячейки → новый) или {} — если так нельзя
+## (у ячеек разная ширина или разные ряды — прямоугольник не получится).
+static func merge_cells(config: Dictionary, placements: Array, a: int, b: int) -> Dictionary:
+	var out := with_cells(config)
+	var list: Array = out.cells
+	if a < 0 or b < 0 or a >= list.size() or b >= list.size() or a == b:
+		return {}
+	var ca: Dictionary = list[a]
+	var cb: Dictionary = list[b]
+	var merged := {}
+	var same_rows := int(ca.row) == int(cb.row) and int(ca.span) == int(cb.span)
+	var same_cols := absf(float(ca.x) - float(cb.x)) < MERGE_EPS and absf(float(ca.w) - float(cb.w)) < MERGE_EPS
+	if same_rows and absf(float(ca.x) + float(ca.w) + BOARD - float(cb.x)) < MERGE_EPS:
+		merged = {"row": ca.row, "span": ca.span, "x": ca.x, "w": float(ca.w) + BOARD + float(cb.w)}
+	elif same_rows and absf(float(cb.x) + float(cb.w) + BOARD - float(ca.x)) < MERGE_EPS:
+		merged = {"row": ca.row, "span": ca.span, "x": cb.x, "w": float(ca.w) + BOARD + float(cb.w)}
+	elif same_cols and int(ca.row) + int(ca.span) == int(cb.row):
+		merged = {"row": ca.row, "span": int(ca.span) + int(cb.span), "x": ca.x, "w": ca.w}
+	elif same_cols and int(cb.row) + int(cb.span) == int(ca.row):
+		merged = {"row": cb.row, "span": int(ca.span) + int(cb.span), "x": ca.x, "w": ca.w}
+	else:
+		return {}
+	merged.id = a
+	var rest: Array = []
+	for i in list.size():
+		if i != a and i != b:
+			var c: Dictionary = (list[i] as Dictionary).duplicate()
+			c.id = i
+			rest.append(c)
+	rest.append(merged)
+	return _reindex(out, rest, placements, {a: a, b: a})
+
+
+## Разделить ячейку: horizontal — поставить перегородку посередине (две ячейки рядом),
+## иначе — вернуть кусок полки (ячейка на несколько рядов → верхний ряд и остальное). Коробки остаются
+## в первой части (раскладка потом сама переложит то, что не влезло).
+static func split_cell(config: Dictionary, placements: Array, a: int, horizontal: bool, top: int = 1) -> Dictionary:
+	var out := with_cells(config)
+	var list: Array = out.cells
+	if a < 0 or a >= list.size():
+		return {}
+	var c: Dictionary = list[a]
+	var first := {}
+	var second := {}
+	if horizontal:
+		var half := (float(c.w) - BOARD) * 0.5
+		if half < MIN_WIDTH:
+			return {}
+		first = {"row": c.row, "span": c.span, "x": c.x, "w": half}
+		second = {"row": c.row, "span": c.span, "x": float(c.x) + half + BOARD, "w": float(c.w) - half - BOARD}
+	else:
+		top = clampi(top, 1, int(c.span) - 1)
+		if int(c.span) < 2:
+			return {}
+		first = {"row": c.row, "span": top, "x": c.x, "w": c.w}
+		second = {"row": int(c.row) + top, "span": int(c.span) - top, "x": c.x, "w": c.w}
+	first.id = a
+	second.id = -1
+	var rest: Array = []
+	for i in list.size():
+		if i != a:
+			var other: Dictionary = (list[i] as Dictionary).duplicate()
+			other.id = i
+			rest.append(other)
+	rest.append(first)
+	rest.append(second)
+	return _reindex(out, rest, placements, {a: a})
+
+
+## Новый порядок ячеек (по ряду, слева направо) и перенос коробок / стаканчиков по старым номерам.
+static func _reindex(out: Dictionary, rest: Array, placements: Array, joined: Dictionary) -> Dictionary:
+	var ordered := _sorted_cells(rest)
+	var map := {}
+	for n in ordered.size():
+		var old := int(ordered[n].id)
+		if old >= 0:
+			map[old] = n
+		ordered[n].erase("id")
+	for old: int in joined:
+		map[old] = map[int(joined[old])]
+	var moved: Array = []
+	for n in ordered.size():
+		moved.append([])
+	for old in placements.size():
+		if map.has(old) and placements[old] is Array:
+			(moved[int(map[old])] as Array).append_array(placements[old])
+	out.cells = ordered
+	out.cups = int(map.get(int(out.get("cups", 0)), 0))
+	return {"config": out, "placements": moved, "map": map}
 
 
 ## Ширина / высота всего шкафа с досками.
 static func full_width(config: Dictionary) -> float:
+	if has_cells(config):
+		return inner_width(config) + 2 * BOARD
 	var total := (int(config.cols) + 1) * BOARD
 	for c in int(config.cols):
 		total += col_width(config, c)
@@ -76,6 +329,9 @@ static func max_row_height(config: Dictionary) -> float:
 
 ## Шкаф шире на amount в каждой колонке (новая игра не влезла).
 static func widened(config: Dictionary, amount: float) -> Dictionary:
+	if has_cells(config):
+		var grown := move_outer(config, 1, amount)
+		return grown if not grown.is_empty() else config.duplicate(true)
 	var out := config.duplicate(true)
 	out.width = float(config.get("width", 0.65)) + amount
 	if out.get("col_widths", []) is Array and not (out.get("col_widths", []) as Array).is_empty():
@@ -280,13 +536,23 @@ static func normalized(source: Dictionary) -> Dictionary:
 		0.14,
 		minf(0.7, (MAX_HEIGHT - (int(out.rows) + 1) * BOARD) / int(out.rows))
 	)
-	out.cups = clampi(int(out.get("cups", 2)), 0, int(out.rows) * int(out.cols) - 1)
+	# Свои ячейки (09.11): неправильный список — обычная сетка.
+	if out.has("cells"):
+		if cells_valid(out.cells, int(out.rows)):
+			out.cells = _sorted_cells(out.cells).map(func(c): return {"row": int(c.row), "span": int(c.span), "x": float(c.x), "w": float(c.w)})
+			out.erase("col_widths")
+			out.width = inner_width(out) / maxf(1.0, float(int(out.cols)))
+		else:
+			out.erase("cells")
+	out.cups = clampi(int(out.get("cups", 2)), 0, cell_count(out) - 1)
 	# Свои размеры колонок / полок: число должно совпадать с колонками / рядами, иначе — одинаковые.
-	var widths := _clean_sizes(out.get("col_widths", []), int(out.cols), MIN_WIDTH, 0.9, MAX_WIDTH - (int(out.cols) + 1) * BOARD)
+	var widths := [] if out.has("cells") else _clean_sizes(out.get("col_widths", []), int(out.cols), MIN_WIDTH, 0.9, MAX_WIDTH - (int(out.cols) + 1) * BOARD)
 	var heights := _clean_sizes(out.get("row_heights", []), int(out.rows), MIN_HEIGHT, MAX_CELL_HEIGHT, MAX_HEIGHT - (int(out.rows) + 1) * BOARD)
 	out.erase("col_widths")
 	out.erase("row_heights")
-	if not widths.is_empty() and widths.any(func(w): return not is_equal_approx(w, widths[0])):
+	if out.has("cells"):
+		pass
+	elif not widths.is_empty() and widths.any(func(w): return not is_equal_approx(w, widths[0])):
 		out.col_widths = widths
 		out.width = widths.reduce(func(a, b): return a + b, 0.0) / widths.size()
 	elif not widths.is_empty():
@@ -307,7 +573,7 @@ static func normalized(source: Dictionary) -> Dictionary:
 
 static func limits(config: Dictionary) -> Array:
 	var out: Array = []
-	for i in int(config.rows) * int(config.cols):
+	for i in cell_count(config):
 		out.append(cell_width(config, i) - GAP)
 	return out
 
@@ -318,7 +584,8 @@ static func solve(
 	config: Dictionary, placements: Array, sizes: Dictionary, poses: Dictionary, old_cols: int = 1, allow_repack: bool = true
 ) -> Dictionary:
 	var cfg := normalized(config)
-	var count: int = int(cfg.rows) * int(cfg.cols)
+	var count: int = cell_count(cfg)
+	var explicit := has_cells(cfg)  # свои ячейки: номера ячеек в placements уже совпадают
 	var cells: Array = []
 	var capacities := limits(cfg)
 	var widths: Dictionary = {}
@@ -332,6 +599,8 @@ static func solve(
 		var target: int = (row_index / maxi(1, old_cols)) * int(cfg.cols) + row_index % maxi(1, old_cols)
 		if row_index % maxi(1, old_cols) >= int(cfg.cols):
 			target = -1
+		if explicit:
+			target = row_index if row_index < count else -1
 		for id in placements[row_index]:
 			if sizes.has(id) and not preferred.has(id):
 				preferred[id] = target
@@ -574,7 +843,7 @@ static func load_state(
 		config.fig_tv_31 = true
 	if sizes.has("perudo") and not rows.any(func(row): return row.has("perudo")):
 		rows = rows.duplicate(true)
-		var cup_cell: int = clampi(int(config.get("cups", 2)), 0, int(config.rows) * int(config.cols) - 1)
+		var cup_cell: int = clampi(int(config.get("cups", 2)), 0, cell_count(normalized(config)) - 1)
 		while rows.size() <= cup_cell:
 			rows.append([])
 		rows[cup_cell].append("perudo")

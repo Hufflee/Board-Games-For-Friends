@@ -52,16 +52,53 @@ func _run() -> void:
 	var rows: int = int(room._cabinet.rows)
 	var before_full: float = ShelfConfig.full_width(room._cabinet)
 	var edges: Array = room._shelf_edges()
-	var divider: Dictionary = edges.filter(func(e): return e.kind == "col")[0]
+	# перегородка одной ячейки: в верхнем ряду (ячейка 0 — слева вверху)
+	var divider: Dictionary = edges.filter(func(e): return e.kind == "seg" and int(e.index) == 0)[0]
+	var cells_before: Array = ShelfConfig.shelf_cells(room._cabinet).duplicate(true)
 	room._begin_edge_drag(divider, divider.a)
-	var target: Vector2 = (divider.a as Vector2) + Vector2(60, 0)
-	room._resize_shelf_edge(target)
+	room._resize_shelf_edge((divider.a as Vector2) + Vector2(60, 0))
 	await process_frame
-	var w0 := ShelfConfig.col_width(room._cabinet, 0)
-	var w1 := ShelfConfig.col_width(room._cabinet, 1)
-	check(w0 > w1 + 0.02, "перегородка вправо: левая колонка шире правой (%.3f / %.3f)" % [w0, w1])
+	var cells_now: Array = ShelfConfig.shelf_cells(room._cabinet)
+	var w0 := float(cells_now[0].w)
+	var w1 := float(cells_now[1].w)
+	check(w0 > w1 + 0.02, "перегородка верхнего ряда вправо: левая ячейка шире (%.3f / %.3f)" % [w0, w1])
+	check(is_equal_approx(float(cells_now[2].w), float(cells_before[2].w)), "второй ряд не изменился — перегородка своя у ряда")
 	check(absf(ShelfConfig.full_width(room._cabinet) - before_full) < 0.002, "ширина шкафа не изменилась")
 	check(absf((float(room._row_info[1].right) - float(room._row_info[1].left)) - (w1 - 0.006)) < 0.003, "ячейки комнаты построены по своим ширинам")
+	room._edge_drag = {}
+	# убрать перегородку второго ряда: ячейки 2 и 3 → одна
+	var count := ShelfConfig.cell_count(room._cabinet)
+	var seg2: Dictionary = room._shelf_edges().filter(func(e): return e.kind == "seg" and int(e.index) == 2)[0]
+	room._cells_right_click(((seg2.a as Vector2) + (seg2.b as Vector2)) * 0.5)
+	await process_frame
+	check(ShelfConfig.cell_count(room._cabinet) == count - 1, "правый клик по перегородке — ячеек на одну меньше")
+	var placed := 0
+	for row: Array in room._shelf_ids():
+		placed += row.size()
+	check(placed == room.boxes.size(), "все коробки остались на шкафу после объединения")
+	# поставить перегородку обратно: правый клик в середине широкой ячейки
+	var wide_cell: Dictionary = room._row_info[2]
+	var mid := Vector3((float(wide_cell.left) + float(wide_cell.right)) * 0.5, float(wide_cell.floor) + float(wide_cell.height) * 0.5, room.BACK + room.CELL_D + 0.016)
+	room._cells_right_click(room.camera.unproject_position(room._shelf_root.global_transform * mid))
+	await process_frame
+	check(ShelfConfig.cell_count(room._cabinet) == count, "правый клик внутри ячейки — перегородка вернулась")
+	# кусок полки: объединить ячейку первого ряда с ячейкой под ней (одинаковая ширина)
+	var explicit := ShelfConfig.with_cells(room._cabinet)
+	var c0: Dictionary = explicit.cells[0]
+	var below := -1
+	for i in (explicit.cells as Array).size():
+		var c: Dictionary = explicit.cells[i]
+		if int(c.row) == 1 and absf(float(c.x) - float(c0.x)) < 0.004 and absf(float(c.w) - float(c0.w)) < 0.004:
+			below = i
+	if below < 0:
+		var merged_v := ShelfConfig.merge_cells(room._cabinet, room._shelf_ids(), 0, 2)
+		check(merged_v.is_empty(), "разная ширина — по вертикали не объединяются")
+	var tall_cfg := ShelfConfig.merge_cells({"rows": 3, "cols": 2, "cups": 0, "width": 0.4, "height": 0.3}, [[], [], [], [], [], []], 0, 2)
+	check(not tall_cfg.is_empty() and int(tall_cfg.config.cells[0].span) == 2 and (tall_cfg.config.cells as Array).size() == 5, "кусок полки убран: ячейка на два ряда")
+	var back := ShelfConfig.split_cell(tall_cfg.config, tall_cfg.placements, 0, false, 1)
+	check((back.config.cells as Array).size() == 6, "пунктир — полка вернулась")
+	check(ShelfConfig.cells_valid(tall_cfg.config.cells, 3) and ShelfConfig.cells_valid(back.config.cells, 3), "ячейки покрывают шкаф без дыр")
+	check(not ShelfConfig.cells_valid([{"row": 0, "span": 1, "x": 0.0, "w": 0.4}], 2), "неполный шкаф отвергнут")
 	room._edge_drag = {}
 	if rows >= 2:
 		var taller: Dictionary = room._cabinet.duplicate(true)
@@ -85,9 +122,11 @@ func _run() -> void:
 	await RenderingServer.frame_post_draw
 	root.get_texture().get_image().save_png("res://build/shots/shelf_cells_editor.png")
 	var snap: Dictionary = room.public_snapshot()
-	check(snap.config.has("col_widths"), "снимок для друзей несёт ширины колонок")
+	check(snap.config.has("cells"), "снимок для друзей несёт ячейки")
 	room.finish_shelf_editor(true)
 	await process_frame
-	check(room._cabinet.has("col_widths"), "сохранено после «Готово»")
+	check(room._cabinet.has("cells"), "сохранено после «Готово»")
+	var loaded := ShelfConfig.load_state(room._cabinet, room._shelf_ids(), room._shelf_sizes())
+	check(loaded.ok and loaded.config.has("cells"), "ячейки читаются из сохранения")
 	print("ШКАФ: ЯЧЕЙКИ: ", checks, " проверок, ", errors, " ошибок")
 	quit(1 if errors > 0 else 0)

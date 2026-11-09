@@ -1,3 +1,10 @@
+## 2026-11-09 — Four Souls: 13 из 32 задач владельца (релиз 0.9.0.4) · автор Claude · ревьюер Codex · статус: ждёт ревью
+
+- **Что:** см. `docs/TODO_four_souls_2026-11-09.md` (сделано / очередь) и PATCHNOTES «В разработке».
+- **Файлы:** `games/four_souls/logic/{fs_packet25_automation,fs_packet28_automation,fs_stack,fs_rules,fs_monster16_automation,fs_rune_automation,fs_tarot_automation,fs_automation}.gd`, `games/four_souls/ui/fs_table.gd`; тесты `tests/fs/fs_fuzz.gd` (проверка пустых слотов), `tests/fs/fs_scenario.gd` (принимает автовыбор единственного варианта), `tests/fs/core/core_timing.gd` (окно смерти 10 с).
+- **Проверено:** compile 374; core 5981/0, cards 762/0, regress 965/0; фазз seed 291201 20×400 — 7754 действия, 0 нарушений; проверка пустых слотов 30 партий; зонды `tools/_probe28/pitlord2.gd`, `bomb_off.gd`, `chest_refill.gd`.
+- **Риски:** автовыбор единственного обязательного варианта меняет поведение многих карт (проверено тестами и фаззом); потеря карты 910+419 (seed 291126) не исправлена; сеть не проверена.
+
 ## 2026-11-07 — Blood on the Clocktower: гримуар-книга · автор Claude · ревьюер Codex · статус: ждёт ревью
 
 - **Что:** новый `games/blood_on_the_clocktower/ui/bc_grimoire.gd` вместо текстового окна; `bc_table.gd` создаёт его, передаёт записи (`set_entries`) и текст правой страницы (`grimoire_text = grimoire.notes`). Ассеты: `tools/bc_grimoire_art.py` → `art/grimoire/` (book, blot_1–3, clock, moon), `art/roles_ink/` (72), шрифт `art/fonts/MarckScript-Regular.ttf` + OFL; `art/SOURCE.txt` дополнен.
@@ -19,6 +26,12 @@
 - **Файлы:** `games/four_souls/logic/{fs_packet28_cards,fs_packet28_automation,fs_rules,fs_combat,fs_reward_data,fs_treasure12_automation}.gd`, `games/four_souls/ui/{fs_table,fs_fx,fs_host_effects}.gd`, `games/king_of_12/net/host_tools.gd` (`four_souls_unstick`), `games/four_souls/art/table_floor.webp`, тесты `tests/fs/core/core_automation_batch29.gd` (новый), `core_automation_batch18/19.gd` (души).
 - **Проверено:** compile 373; core 5976/0, cards 762/0, regress 965/0; batch29 37/0; фазз seed 290701 20×400 — 7105 действий, 0 нарушений; `test_fs_off_turn_clock_ui` 2/0; кадры `build/shots/fx28/fx_1_ready.png` (таймер), `build/probe28/peek_dialog.png` (карты в окне просмотра).
 - **Риски:** «доп. жизнь ломает атаку» не воспроизведено; дрожь в живой сети не воспроизведена; ENet/Steam не проверены; строгое окно — только в настоящей партии (Net), тесты/реплеи в прежнем режиме.
+
+## 2026-11-09 — Шкаф: ячейки произвольной ширины, объединение/разделение; доска без прыжка · автор Claude · ревьюер Codex · статус: ждёт ревью
+
+- **Что:** `hub/shelf_config.gd` — модель `cells` [{row, span, x, w}] (без неё — сетка как раньше): `shelf_cells`, `cell_count`, `inner_width`, `cells_valid` (ряды покрыты без дыр, одна ширина), `with_cells`, `right_neighbors`, `move_divider`, `move_outer`, `merge_cells`, `split_cell`, `_reindex` (коробки и стаканчики по новым номерам); `solve` при своих ячейках не пересчитывает номера; `normalized` проверяет/отбрасывает `cells`. `hub/neon_room.gd` — корпус по ячейкам (перегородки на высоту ячейки, полки кусками), `_shelf_edges` (перегородки `seg` у ячеек, полки кусками с `above`, пунктир `ghost`), `_cells_right_click`, `_apply_cells`, перетаскивание `seg`/внешнего края при ячейках; доска: `_board_snap_frames`. `hub/public_room.gd` — `cells` для друзей. `hub/shelf_editor.gd` — подсказка, поля сбрасывают ячейки.
+- **Проверено:** compile 374; шкаф 19/0, 1294/0, 11/0, 37/0, todo24 2419/0, push29_ui 9/0, room30 20/0, совместимость 5/0, ячейки 25/0 (перегородка ряда, ширина шкафа та же, объединение/разделение правым кликом, все коробки на месте, кусок полки, сохранение/загрузка); доска на копии профиля владельца — с 1-го кадра на месте (`build/probe/hub_board_frames.gd`); кадры `shelf_cells_editor.png`, `shelf_cells_merged.png`.
+- **Риски:** руками мышью не проверено (правый клик в редакторе раньше ничего не делал — конфликтов не нашёл). Перегородку рядом с высокой ячейкой справа сдвинуть нельзя (сообщение). У друзей со старой версией комната с `cells` отбрасывается их проверкой (у них нет этого поля) — наблюдение за таким шкафом работает только на новой версии. Не выпущено.
 
 ## 2026-11-08 — Релиз 0.9.0.3: наблюдение за комнатами, ящики шкафа своего размера, Ворд Слэм (однокоренные, рассказчики, 15 с, смена слова, карточки) · автор Claude · ревьюер Codex · статус: ждёт ревью
 

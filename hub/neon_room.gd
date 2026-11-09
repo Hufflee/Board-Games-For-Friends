@@ -68,6 +68,9 @@ var board_dragging := false  # свою доску переносят по ст�
 var _board_cam_saved: Variant = null  # куда вернуть камеру после приближения к доске
 var _board_home := Vector2(INF, INF)  # где игрок повесил доску (сохранено)
 var _board_target := Vector2(INF, INF)  # где она висит сейчас (сдвинута, если там шкаф)
+## Пока комната только построена (вход в хаб, возврат из игры), доска сразу встаёт на место, без проезда
+## от стандартного места через всю стену (09.11). Потом — снова плавно (шкаф в редакторе шире/уже).
+var _board_snap_frames := 30
 var _wall_decor: Array = []  # [Rect2 на задней стене (x, y), глубина, на которой доска их перекрывает]
 var posters: Array = []  # hub/wall_poster.gd — плакаты на задней стене
 var poster_dragging: Node3D = null  # плакат, который сейчас переносят
@@ -1242,18 +1245,16 @@ func _rebuild_shelf_geometry() -> void:
 		_shelf_root.remove_child(child)
 		child.queue_free()
 	var rows: int = int(_cabinet.rows)
-	var cols: int = int(_cabinet.cols)
-	# у колонок и полок могут быть свои размеры (ShelfConfig.col_width / row_height)
-	var col_x: Array = []  # левый край каждой колонки (внутри досок)
+	# Шкаф по ячейкам (ShelfConfig.shelf_cells): перегородки у каждого ряда свои, полки — по ячейкам,
+	# поэтому объединённые ячейки (без перегородки или без куска полки) строятся как есть.
+	var cells: Array = ShelfConfig.shelf_cells(_cabinet)
 	var full_width: float = ShelfConfig.full_width(_cabinet)
 	var full_height: float = ShelfConfig.full_height(_cabinet)
 	var base_y := 0.06
 	var z: float = BACK + CELL_D * 0.5 + 0.01
 	var left: float = SHELF_X - full_width * 0.5
-	var cursor := left + BOARD
-	for column in cols:
-		col_x.append(cursor)
-		cursor += ShelfConfig.col_width(_cabinet, column) + BOARD
+	var inner_left := left + BOARD
+	var inner_width: float = full_width - 2 * BOARD
 	var level_y: Array = []  # низ каждой доски-полки снизу вверх (уровень 0 — дно)
 	var y_cursor := base_y
 	for level in rows + 1:
@@ -1275,52 +1276,61 @@ func _rebuild_shelf_geometry() -> void:
 		wood.darkened(0.45),
 		_shelf_root
 	)
-	for column in cols + 1:
-		var board_x: float = (float(col_x[column]) - BOARD * 0.5) if column < cols else (left + full_width - BOARD * 0.5)
+	for side in [-1.0, 1.0]:
 		_soft(
 			Vector3(BOARD, full_height, CELL_D),
-			Vector3(board_x, base_y + full_height * 0.5, z),
+			Vector3(SHELF_X + side * (full_width - BOARD) * 0.5, base_y + full_height * 0.5, z),
 			"wood_dark",
 			wood,
 			_shelf_root
 		)
 	var strip := _mat(Color("ff3ea5"), 0.3, Color("ff3ea5"), 2.6)
-	for level in rows + 1:
+	var shelf_board := func(x0: float, x1: float, level: int) -> void:
 		var y: float = float(level_y[level]) + BOARD * 0.5
-		_soft(Vector3(full_width, BOARD, CELL_D), Vector3(SHELF_X, y, z), "wood_dark", wood, _shelf_root)
+		_soft(Vector3(x1 - x0, BOARD, CELL_D), Vector3((x0 + x1) * 0.5, y, z), "wood_dark", wood, _shelf_root)
 		_box(
-			Vector3(full_width - 0.02, 0.005, 0.005),
-			Vector3(SHELF_X, y + BOARD * 0.5 - 0.004, z + CELL_D * 0.5 + 0.002),
+			Vector3(maxf(0.01, x1 - x0 - 0.02), 0.005, 0.005),
+			Vector3((x0 + x1) * 0.5, y + BOARD * 0.5 - 0.004, z + CELL_D * 0.5 + 0.002),
 			strip,
 			_shelf_root
 		)
+	shelf_board.call(left, left + full_width, 0)
+	shelf_board.call(left, left + full_width, rows)
 	_row_info = []
 	_shelf_placeholders = {}
-	for row in rows:
-		for column in cols:
-			var cell: int = row * cols + column
-			var width: float = ShelfConfig.col_width(_cabinet, column)
-			var height: float = ShelfConfig.row_height(_cabinet, row)
-			var x: float = col_x[column]
-			var floor_y: float = float(level_y[rows - 1 - row]) + BOARD
-			var outer_right: float = x + width - 0.003
-			_row_info.append(
-				{
-					"left": x + 0.003,
-					"right": outer_right,
-					"outer_right": outer_right,
-					"floor": floor_y,
-					"back": BACK + 0.024,
-					"height": height
-				}
-			)
-			if (
-				row == ROWS - 1
-				and column == 0
-				and (_rows[cell] as Array).is_empty()
-				and cell != int(_cabinet.cups)
-			):
-				_make_shelf_placeholder(cell, x, floor_y, width, height, row == rows - 1 and column == 0)
+	for cell in cells.size():
+		var c: Dictionary = cells[cell]
+		var row: int = int(c.row)
+		var bottom_row: int = row + int(c.span) - 1
+		var width: float = float(c.w)
+		var height: float = ShelfConfig.cell_height(_cabinet, cell)
+		var x: float = inner_left + float(c.x)
+		var floor_y: float = float(level_y[rows - 1 - bottom_row]) + BOARD
+		# перегородка справа — только на высоту этой ячейки
+		if float(c.x) + width < inner_width - 0.002:
+			_soft(Vector3(BOARD, height, CELL_D), Vector3(x + width + BOARD * 0.5, floor_y + height * 0.5, z), "wood_dark", wood, _shelf_root)
+		# кусок полки под ячейкой (кроме дна) — от середины левой перегородки до середины правой
+		if bottom_row < rows - 1:
+			shelf_board.call(x - BOARD * 0.5, x + width + BOARD * 0.5, rows - 1 - bottom_row)
+		var outer_right: float = x + width - 0.003
+		_row_info.append(
+			{
+				"left": x + 0.003,
+				"right": outer_right,
+				"outer_right": outer_right,
+				"floor": floor_y,
+				"back": BACK + 0.024,
+				"height": height
+			}
+		)
+		if (
+			bottom_row == ROWS - 1
+			and absf(float(c.x)) < 0.002
+			and cell < _rows.size()
+			and (_rows[cell] as Array).is_empty()
+			and cell != int(_cabinet.cups)
+		):
+			_make_shelf_placeholder(cell, x, floor_y, width, height, bottom_row == rows - 1)
 	_inner_right = left + full_width - BOARD
 	_cups_z = z + 0.01
 	shelf_top_right = (
@@ -1398,18 +1408,19 @@ func request_shelf_geometry(geometry: Dictionary) -> String:
 	var new_cols: int = clampi(int(proposed.cols), 1, 6)
 	var cup_row: int = old_cup / old_cols
 	var cup_column: int = old_cup % old_cols
-	proposed.cups = (
-		cup_row * new_cols + cup_column
-		if cup_column < new_cols and cup_row < int(proposed.rows)
-		else int(proposed.rows) * new_cols - 1
-	)
+	if not ShelfConfig.has_cells(proposed):
+		proposed.cups = (
+			cup_row * new_cols + cup_column
+			if cup_column < new_cols and cup_row < int(proposed.rows)
+			else int(proposed.rows) * new_cols - 1
+		)
 	var result := ShelfConfig.solve(proposed, _editor_preferences, _shelf_sizes(), _box_modes, old_cols)
 	if not result.ok:
 		return str(result.message)
 	_apply_shelf_state(result)
 	if _edge_drag.is_empty():
 		_frame_shelf()
-	if (
+	if not ShelfConfig.has_cells(proposed) and (
 		not is_equal_approx(float(proposed.width), float(result.config.width))
 		or not is_equal_approx(float(proposed.height), float(result.config.height))
 	):
@@ -1601,35 +1612,101 @@ func _update_pose_button() -> void:
 func _shelf_edges() -> Array:
 	var lines: Array = []
 	var rows: int = int(_cabinet.rows)
-	var cols: int = int(_cabinet.cols)
+	var cells: Array = ShelfConfig.shelf_cells(_cabinet)
 	var width: float = ShelfConfig.full_width(_cabinet)
 	var height: float = ShelfConfig.full_height(_cabinet)
 	var left: float = SHELF_X - width * 0.5
+	var inner_left := left + BOARD
+	var inner_width := width - 2 * BOARD
 	var z: float = BACK + CELL_D + 0.016
+	var level_y: Array = []
+	var y_cursor := 0.06
+	for level in rows + 1:
+		level_y.append(y_cursor)
+		if level < rows:
+			y_cursor += BOARD + ShelfConfig.row_height(_cabinet, rows - 1 - level)
 	for side in [-1, 1]:
 		var x: float = SHELF_X + side * width * 0.5
 		lines.append(
 			{"kind": "width", "index": side, "a": Vector3(x, 0.06, z), "b": Vector3(x, 0.06 + height, z)}
 		)
-	# внутренние перегородки: ширина двух соседних колонок (08.11 — свои размеры ящиков)
-	var x_cursor := left + BOARD
-	for column in cols - 1:
-		x_cursor += ShelfConfig.col_width(_cabinet, column)
-		var px := x_cursor + BOARD * 0.5
-		lines.append({"kind": "col", "index": column + 1, "a": Vector3(px, 0.06, z), "b": Vector3(px, 0.06 + height, z)})
-		x_cursor += BOARD
-	var y_cursor := 0.06
-	for level in rows + 1:
-		var y: float = y_cursor + BOARD * 0.5
-		lines.append(
-			{"kind": "height", "index": level, "a": Vector3(left, y, z), "b": Vector3(left + width, y, z)}
-		)
-		if level < rows:
-			y_cursor += BOARD + ShelfConfig.row_height(_cabinet, rows - 1 - level)
+	# дно и крыша — во всю ширину; средние полки — кусками под каждой ячейкой (тянется вся полка ряда,
+	# правый клик убирает только этот кусок)
+	for level in [0, rows]:
+		var y: float = float(level_y[level]) + BOARD * 0.5
+		lines.append({"kind": "height", "index": level, "a": Vector3(left, y, z), "b": Vector3(left + width, y, z)})
+	for i in cells.size():
+		var c: Dictionary = cells[i]
+		var bottom: int = int(c.row) + int(c.span) - 1
+		var x0: float = inner_left + float(c.x)
+		var x1: float = x0 + float(c.w)
+		var floor_y: float = float(level_y[rows - 1 - bottom]) + BOARD
+		var cell_h: float = ShelfConfig.cell_height(_cabinet, i)
+		if bottom < rows - 1:
+			var level: int = rows - 1 - bottom
+			var y: float = float(level_y[level]) + BOARD * 0.5
+			lines.append({"kind": "height", "index": level, "above": i, "a": Vector3(x0, y, z), "b": Vector3(x1, y, z)})
+		# перегородка справа — своя у ячейки (09.11)
+		if float(c.x) + float(c.w) < inner_width - 0.002:
+			var px := x1 + BOARD * 0.5
+			lines.append({"kind": "seg", "index": i, "a": Vector3(px, floor_y, z), "b": Vector3(px, floor_y + cell_h, z)})
+		# убранные куски полки в высокой ячейке — пунктиром, нажатие возвращает
+		for k in range(1, int(c.span)):
+			var level_k: int = rows - int(c.row) - k
+			var yk: float = float(level_y[level_k]) + BOARD * 0.5
+			lines.append({"kind": "ghost", "index": i * 16 + k, "cell": i, "top": k, "a": Vector3(x0, yk, z), "b": Vector3(x1, yk, z)})
 	for edge: Dictionary in lines:
 		edge.a = camera.unproject_position(_shelf_root.global_transform * edge.a)
 		edge.b = camera.unproject_position(_shelf_root.global_transform * edge.b)
 	return lines
+
+
+## Правка ячеек редактора (объединить / разделить): новые ячейки, коробки по новым номерам.
+func _apply_cells(result: Dictionary) -> void:
+	if result.is_empty():
+		_editor_ui.call("sync", "Так не получится: объединять можно соседние ячейки одинаковой ширины (по вертикали) или одного ряда.")
+		return
+	var before := _editor_preferences.duplicate(true)
+	_editor_preferences = result.placements
+	var message := request_shelf_geometry(result.config)
+	if message != "":
+		_editor_preferences = before
+	_editor_ui.call("sync", message)
+
+
+## Правый клик в редакторе: по перегородке / куску полки — убрать (две ячейки → одна);
+## внутри ячейки — поставить перегородку посередине.
+func _cells_right_click(screen: Vector2) -> void:
+	var edge := _edge_at(screen)
+	var point := _shelf_point(screen)
+	var cells: Array = ShelfConfig.shelf_cells(_cabinet)
+	var prefs := _shelf_ids()
+	if not edge.is_empty() and edge.kind == "seg":
+		var a: int = int(edge.index)
+		var b := -1
+		for n: int in ShelfConfig.right_neighbors(cells, a):
+			var info: Dictionary = _row_info[n]
+			if point.y >= float(info.floor) - BOARD and point.y <= float(info.floor) + float(info.height) + BOARD:
+				b = n
+		_apply_cells(ShelfConfig.merge_cells(_cabinet, prefs, a, b) if b >= 0 else {})
+		return
+	if not edge.is_empty() and edge.kind == "height" and edge.has("above"):
+		var a: int = int(edge.above)
+		var ca: Dictionary = cells[a]
+		var b := -1
+		for i in cells.size():
+			var c: Dictionary = cells[i]
+			if int(c.row) == int(ca.row) + int(ca.span) and float(_row_info[i].left) <= point.x and float(_row_info[i].right) >= point.x:
+				b = i
+		_apply_cells(ShelfConfig.merge_cells(_cabinet, prefs, a, b) if b >= 0 else {})
+		return
+	if not edge.is_empty():
+		return
+	for i in _row_info.size():
+		var info: Dictionary = _row_info[i]
+		if point.x >= float(info.left) and point.x <= float(info.right) and point.y >= float(info.floor) and point.y <= float(info.floor) + float(info.height):
+			_apply_cells(ShelfConfig.split_cell(_cabinet, prefs, i, true, 0))
+			return
 
 
 func _edge_at(screen: Vector2) -> Dictionary:
@@ -1652,6 +1729,9 @@ func _draw_shelf_edges() -> void:
 			(not _edge_hover.is_empty() and edge.kind == _edge_hover.kind and edge.index == _edge_hover.index)
 			or (not _edge_drag.is_empty() and edge.kind == _edge_drag.kind and edge.index == _edge_drag.index)
 		)
+		if edge.kind == "ghost":
+			_edge_overlay.draw_dashed_line(edge.a, edge.b, HubStyle.YELLOW if hot else Color(HubStyle.CYAN, 0.45), 2.0, 8.0)
+			continue
 		_edge_overlay.draw_line(edge.a, edge.b, Color(HubStyle.CYAN, 0.10), 10, true)
 		_edge_overlay.draw_line(
 			edge.a, edge.b, HubStyle.YELLOW if hot else Color(HubStyle.CYAN, 0.72), 4 if hot else 2, true
@@ -1685,7 +1765,20 @@ func _resize_shelf_edge(screen: Vector2) -> void:
 	var rows: int = int(original.rows)
 	var widths: Array = range(cols).map(func(c): return ShelfConfig.col_width(original, c))
 	var heights: Array = range(rows).map(func(r): return ShelfConfig.row_height(original, r))
-	if _edge_drag.kind == "width":
+	if _edge_drag.kind == "width" and ShelfConfig.has_cells(original):
+		# свои ячейки: внешний край — крайние ячейки каждого ряда
+		var moved := ShelfConfig.move_outer(original, int(_edge_drag.index), delta.x * 2.0)
+		if moved.is_empty():
+			return
+		config = moved
+	elif _edge_drag.kind == "seg":
+		# перегородка одной ячейки — только её ряд(ы)
+		var moved := ShelfConfig.move_divider(original, int(_edge_drag.index), delta.x)
+		if moved.is_empty():
+			_editor_ui.call("sync", "Эту перегородку не сдвинуть: справа высокая ячейка на несколько рядов.")
+			return
+		config = moved
+	elif _edge_drag.kind == "width":
 		# внешний край — все колонки на одинаковую величину
 		var d: float = delta.x * int(_edge_drag.index) * 2.0 / cols
 		config.width = float(original.width) + d
@@ -1890,6 +1983,8 @@ func set_board_position(center: Vector2) -> void:
 		return
 	_board_home = center
 	_board_target = board_free_spot(center)
+	if _board_snap_frames > 0:  # комната только построена — сразу на место, первый же кадр без прыжка
+		sticker_board.position = Vector3(_board_target.x, _board_target.y, _board_depth(_board_target))
 
 
 ## Прямоугольник шкафа на задней стене (x, y в метрах; с кубом окошек на крыше и небольшим зазором).
@@ -2159,12 +2254,16 @@ func _unhandled_input(event: InputEvent) -> void:
 				(
 					Input.CURSOR_ARROW
 					if _edge_hover.is_empty()
-					else (Input.CURSOR_HSIZE if _edge_hover.kind == "width" else Input.CURSOR_VSIZE)
+					else (Input.CURSOR_HSIZE if _edge_hover.kind in ["width", "seg"] else (Input.CURSOR_POINTING_HAND if _edge_hover.kind == "ghost" else Input.CURSOR_VSIZE))
 				)
 			)
+		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_RIGHT:
+			_cells_right_click(event.position)
 		elif event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 			var edge := _edge_at(event.position)
-			if not edge.is_empty():
+			if not edge.is_empty() and edge.kind == "ghost":
+				_apply_cells(ShelfConfig.split_cell(_cabinet, _shelf_ids(), int(edge.cell), false, int(edge.top)))
+			elif not edge.is_empty():
 				_begin_edge_drag(edge, event.position)
 			else:
 				var box := _box_at(event.position)
@@ -2769,7 +2868,9 @@ func _process(delta: float) -> void:
 		if _board_home.x != INF:
 			_board_target = board_free_spot(_board_home)
 		var now := Vector2(sticker_board.position.x, sticker_board.position.y)
-		var next := now.lerp(_board_target, 1.0 - exp(-10.0 * delta)) if now.distance_to(_board_target) > 0.002 else _board_target
+		var snap := _board_snap_frames > 0
+		_board_snap_frames = maxi(0, _board_snap_frames - 1)
+		var next := now.lerp(_board_target, 1.0 - exp(-10.0 * delta)) if now.distance_to(_board_target) > 0.002 and not snap else _board_target
 		sticker_board.position = Vector3(next.x, next.y, _board_depth(next))
 	if _poster_press != null:
 		_poster_hold += delta
