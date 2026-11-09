@@ -25,7 +25,8 @@ func _card_choices() -> Array:
 					out.append({"label": name_of(seat), "arg": {"op": step.op, "target": seat}})
 		"peek_cards":
 			for id in peek.get("cards", []):
-				out.append({"label": "Наверх: " + FSData.title(int(id)), "arg": {"op": "peek_keep_top", "card": int(id)}})
+				var moon_hint := " (её первой возьмёт тот, кто следующим берёт добычу — обычно активный игрок)" if int(resolving.get("card", -1)) == 640 else ""
+				out.append({"label": "Наверх: " + FSData.title(int(id)) + moon_hint, "arg": {"op": "peek_keep_top", "card": int(id)}})
 		"peek_groups":
 			for group: Dictionary in peek.get("groups", []):
 				out.append({"label": "Под низ: " + FSData.title(int(group.card)), "arg": {"op": "peek_bottom", "deck": str(group.deck), "card": int(group.card)}})
@@ -57,9 +58,10 @@ func _card_choices() -> Array:
 		if str(step.op) == "next_hit_shield":
 			var expanded: Array = []
 			for choice: Dictionary in out:
-				for amount in range(0, 3):
+				# 09.11 (владелец): «до 2» — меньший вариант не нужен, всегда предотвращаем до 2.
+				for amount in [2]:
 					var variant := choice.duplicate(true)
-					variant.label = "%s · предотвратить %d" % [str(choice.label), amount]
+					variant.label = "%s · предотвратить до %d" % [str(choice.label), amount]
 					variant.arg["amount"] = amount
 					expanded.append(variant)
 			out = expanded

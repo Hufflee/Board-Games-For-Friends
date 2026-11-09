@@ -73,7 +73,9 @@ func _apply_card_step(step: Dictionary) -> void:
 		"rune_result":
 			_insert_card_steps(_rune_result_steps(int(resolving.card), int(resolving.automation_roll)))
 		"random_gift":
-			resolving["choice_owner"] = _rng.randi_range(0, players.size() - 1)
+			# 09.11 (владелец): случайный игрок — из других (отдавать предмет самому себе бессмысленно).
+			var givers: Array = range(players.size()).filter(func(seat): return seat != owner)
+			resolving["choice_owner"] = int(givers[_rng.randi_range(0, givers.size() - 1)]) if not givers.is_empty() else owner
 			_note("Пилюля: предмет отдаёт " + name_of(_card_choice_owner()))
 		"gift_item":
 			var giver: int = int(step.target)

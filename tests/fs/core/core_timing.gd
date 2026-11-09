@@ -53,7 +53,9 @@ func _heal_applies_by_itself(t: FSCheck) -> void:
 	t.equal(s.g.phase, "effect", "Карта лута дошла до эффекта без ручного закрытия ответов")
 	s.choose(0, "damage", {"target": 1})
 	_wait(s, 5.5)
-	t.equal(s.g.phase, "death", "Смерть второго игрока — сама после тихого окна")
+	t.equal(s.g.phase, "priority", "09.11: на смерть отвечают дольше — через 5 с штраф ещё не начался")
+	_wait(s, 5.0)
+	t.equal(s.g.phase, "death", "Смерть второго игрока — сама после тихого окна 10 с")
 	t.equal(s.g.actor(), 1, "Штраф выбирает погибший (место 1)")
 
 func _off_turn_window(t: FSCheck) -> void:

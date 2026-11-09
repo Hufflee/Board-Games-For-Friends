@@ -435,3 +435,63 @@ func host_apply28(seat: int, arg: Dictionary) -> bool:
 	_host_manual = false
 	revision += 1
 	return ok
+
+
+## 09.11: страховка от зависания — «бросок атаки» без боя (атаку отменили, а приостановленный эффект
+## вернул прежнюю фазу) превращается в обычную фазу хода.
+func _continue_stack() -> void:
+	super._continue_stack()
+	if phase == "battle_roll" and battle < 0 and battle_player < 0 and stack.is_empty():
+		phase = "turn"
+		_after_stack = "turn"
+		_note("Бой уже окончен — ход продолжается")
+	# 09.11: монстр убит вне своего эффекта (Бомба/способность в чужой ход, вложенный эффект) — пометка
+	# «дозаполнить» терялась при возврате к внешнему эффекту, слот оставался пустым. Дозаполняем в спокойной фазе.
+	_refill_calm28()
+	_auto_death28()
+
+
+## 09.11 (владелец): штраф за смерть без выбора (нет добычи и невечных предметов) — сразу, без пустых списков.
+func _auto_death28() -> void:
+	if not _card_automation_enabled() or phase != "death" or _death_queue.is_empty():
+		return
+	var seat: int = int(_death_queue[0])
+	if not hands[seat].is_empty() or items[seat].any(func(entry): return not bool(entry.eternal)):
+		return
+	_note("Штраф за смерть без выбора: %s теряет только 1¢" % name_of(seat))
+	action(seat, "death", {"loot": -1, "item": -1})
+
+
+var refill_calm28 := true  # отладка: выключить страховку дозаполнения
+
+func _refill_calm28() -> void:
+	if not refill_calm28 or not _card_automation_enabled() or _setting_up or phase not in ["turn", "battle_roll"] or not stack.is_empty() or not resolving.is_empty():
+		return
+	var guard := 0
+	while monsters.size() < monster_slots and phase in ["turn", "battle_roll"] and guard < 6 and (not decks.monster.is_empty() or not discards.monster.is_empty()):
+		guard += 1
+		var before := monsters.size()
+		_fill_monster()
+		if monsters.size() == before and phase in ["turn", "battle_roll"]:
+			break
+
+
+## После каждого действия (смерть, штраф и т.п. идут мимо продолжения стека).
+func _check_bonuses() -> void:
+	super._check_bonuses()
+	_refill_calm28()
+	_auto_death28()
+
+
+## 09.11 (владелец): обязательный выбор с единственным вариантом делается сам, без всплывающего списка.
+func _advance_card_automation() -> void:
+	super._advance_card_automation()
+	if phase != "effect" or not _card_automation_active():
+		return
+	var step := _card_step()
+	if step.is_empty() or not step.has("targets") or not bool(step.get("required", false)):
+		return
+	var choices := _card_choices()
+	if choices.size() == 1 and str(choices[0].arg.get("op", "")) != "skip_choice":
+		_note("Единственный вариант выбран сам: " + str(choices[0].label))
+		_choose_card_effect(0)

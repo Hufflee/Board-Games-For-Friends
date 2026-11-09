@@ -221,6 +221,18 @@ func _cancel_attack25() -> bool:
 		_resolving_base = mini(_resolving_base, stack.size())
 		_end_battle()
 		resolving["_resume"] = "turn"
+		# 09.11: приостановленные эффекты боя (способность монстра ждёт броска) продолжат обычный ход,
+		# а не «бросок атаки» без боя — иначе партия вставала (Повелитель ямы 836).
+		for paused: Dictionary in paused_effects:
+			if str(paused.get("resume", "")) == "battle_roll":
+				paused["resume"] = "turn"
+			if (paused.get("effect", {}) as Dictionary).get("_resume", "") == "battle_roll":
+				paused.effect["_resume"] = "turn"
+		for entry: Dictionary in stack:
+			if str(entry.kind) == "resume_effect":
+				var previous: Dictionary = entry.get("previous", {})
+				if str(previous.get("resume", "")) == "battle_roll":
+					previous["resume"] = "turn"
 	return found
 
 func _bone_soul25(source: Dictionary, owner: int) -> void:

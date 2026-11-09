@@ -4,6 +4,8 @@ extends "res://games/four_souls/logic/fs_state.gd"
 ## Отдельно не используется: состояние и вызовы общие через self.
 
 ## Обязательные триггеры идут в общий стек и разрешаются после окна ответов.
+var _ankh_turn28: Dictionary = {}  # 09.11: ход, в котором анх уже бросали за смерть игрока
+
 func _emit_passives(event: String, data: Dictionary = {}) -> void:
 	if _setting_up:
 		return
@@ -339,8 +341,10 @@ func _resolve_top() -> void:
 					stack.append(effect)
 					_begin_resolving({"kind": "item", "card": 210, "owner": dying, "source": entry, "conditional": true, "automation_context": "would_die"})
 					return
-		if _card_automation_enabled() and hp[dying] <= 0 and not bool(effect.get("ankh_checked", false)) and _item_count(dying, 687) > 0:
+		# 09.11: анх бросается один раз за смерть — повторная запись смерти (страховка зависания) его не бросает.
+		if _card_automation_enabled() and hp[dying] <= 0 and not bool(effect.get("ankh_checked", false)) and _item_count(dying, 687) > 0 and int(_ankh_turn28.get(dying, -1)) != turn_serial:
 			effect["ankh_checked"] = true
+			_ankh_turn28[dying] = turn_serial
 			stack.append(effect)
 			_begin_resolving({"kind": "item", "card": 687, "owner": dying, "conditional": true, "automation_context": "would_die"})
 			return
@@ -611,6 +615,13 @@ func _cancel_unresolved() -> void:
 				discarded[id] = true
 		elif pending.get("kind", "") == "event" and not bool(pending.get("attached", false)):
 			discards.monster.append(int(pending.card))
+		elif pending.get("kind", "") == "monster_death":
+			# 09.11: отменённая смерть монстра — он остаётся в слоте (вылечится в конце хода), а не теряется.
+			var ref: Dictionary = pending.get("monster_ref20", {})
+			for monster: Dictionary in monsters:
+				if is_same(monster, ref) or (ref.is_empty() and int(monster.id) == int(pending.card)):
+					monster["death_pending"] = false
+					monster["hp"] = maxi(1, int(monster.get("hp", 0)))
 	# Прерванная награда всё равно снимает умершего монстра (в сброс или уже в души).
 	var rewarded := {}
 	for pending: Dictionary in pending_effects:

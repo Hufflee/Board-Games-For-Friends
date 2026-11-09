@@ -584,13 +584,13 @@ func _hands(view: Dictionary) -> void:
 		_card(public_row, int(player.char), Vector2(64, 86), func(): _card_dialog(int(player.char), "Закрыть просмотр", "", null, false), "c:%d" % int(view.current))
 		for item: Dictionary in player.items:
 			_card(public_row,int(item.id),Vector2(64,86),func(): _card_dialog(int(item.id),"Закрыть просмотр","",null,false),"i:%d:%d" % [int(view.current), int(item.id)])
-		var backs: Array = []
-		for i in int(player.hand_count):
-			if player.has("hand"):
-				backs.append({"key": "open:%d" % i, "id": int(player.hand[i]), "face_up": true})
-			else:
-				backs.append({"key":"back:%d"%i,"id":-1,"face_up":false,"back_drawer":FSData.draw_loot_back})
-		_fan(public_row,backs,"opponent",false)
+		# 09.11 (владелец): рубашки чужой руки не рисуем — только число карт под предметами.
+		if player.has("hand"):
+			var open_cards: Array = []
+			for i in int(player.hand_count):
+				open_cards.append({"key": "open:%d" % i, "id": int(player.hand[i]), "face_up": true})
+			_fan(public_row, open_cards, "opponent", false)
+		_note(opponent, "Карт добычи: %d" % int(player.hand_count), FSStyle.BODY)
 	if view.seat < 0: return
 	var own := FSStyle.vbox(2); own.size_flags_horizontal=Control.SIZE_EXPAND_FILL; own.size_flags_stretch_ratio=1.35; row.add_child(own)
 	# 06.11: персонаж, вечные карты, брелки и предметы — отдельно от руки лута, чтобы было видно, что они в игре.
@@ -1160,6 +1160,7 @@ func _card_dialog(id: int,caption: String,kind: String,arg,enabled: bool) -> VBo
 	return col
 func _inventory(seat: int) -> void:
 	var col := _dialog(); _note(col,str(_v.players[seat].name),FSStyle.H1)
+	_note(col, "Карт добычи в руке: %d · монеты: %d · души: %d" % [int(_v.players[seat].get("hand_count", 0)), int(_v.players[seat].coins), int(_v.players[seat].souls)], FSStyle.BODY)  # 09.11
 	var row := FSStyle.hbox(8); col.add_child(row)
 	_card(row,int(_v.players[seat].char),Vector2(120,165),func(): _show_preview(int(_v.players[seat].char)),"c:%d" % seat)
 	var scroll := ScrollContainer.new(); scroll.custom_minimum_size = Vector2(500,220); scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED; row.add_child(scroll)

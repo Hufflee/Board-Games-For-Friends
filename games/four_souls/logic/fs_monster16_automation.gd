@@ -112,6 +112,8 @@ func _apply_card_step(step: Dictionary) -> void:
 			attack_left += 1
 			attacked = false
 			_forced_regular16 += 1
+			# 09.11 (владелец): «должен атаковать» — ход не закончить, пока атака не объявлена (Зависть 404, Портал 432…).
+			_mandatory_attacks25 += 1
 		"spider_split_prepare16":
 			resolving["split_left16"] = int(source.get("counters", 0))
 			if int(resolving.split_left16) > 0:

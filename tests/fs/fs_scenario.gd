@@ -244,6 +244,10 @@ func choose(seat: int, op: String, fields: Dictionary = {}) -> bool:
 			matches = matches and arg.get(key) == fields[key]
 		if matches:
 			return ok(seat, "card_choice", {"index": index, "revision": g.revision}, "выбор " + op)
+	# 09.11: единственный обязательный вариант игра выбирает сама — тест принимает уже сделанный выбор.
+	for line in g.log.slice(-6):
+		if str(line).begins_with("Единственный вариант выбран сам"):
+			return t.check(true, "вариант " + op + " выбран автоматически")
 	return t.check(false, "Нет допустимого варианта " + op + " " + str(fields))
 
 ## Изолированный стенд операции, а не притворное исполнение произвольной способности Бомбы.

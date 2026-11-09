@@ -136,8 +136,11 @@ func _card_choices() -> Array:
 	if op == "read_peek":
 		out.append({"label": "Продолжить", "arg": {"op": "close_peek"}})
 	if op == "order_peek":
+		# 09.11 (владелец): понятно, куда ляжет карта — первая выбранная будет самой верхней.
+		var place: int = (peek.get("order", []) as Array).size() + 1
 		for id in peek.get("cards", []):
-			out.append({"label": "Следующая сверху: " + FSData.title(int(id)), "arg": {"op": "order_card", "card": int(id)}})
+			var where := "1-я сверху (возьмут первой)" if place == 1 else "%d-я сверху" % place
+			out.append({"label": "%s: %s" % [where, FSData.title(int(id))], "arg": {"op": "order_card", "card": int(id)}})
 	return out
 
 func _choose_card_effect(index: int) -> bool:

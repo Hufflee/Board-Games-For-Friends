@@ -89,6 +89,9 @@ static func play(config: Dictionary, rng: RandomNumberGenerator, max_steps: int)
 			continue
 		log.append([int(choice.seat), str(choice.kind), choice.get("arg"), faces.duplicate()])
 		var found := FSInvariants.check(g, false)
+		# 09.11: в спокойной фазе хода все слоты монстров заняты (проверка только для живых партий фаззера).
+		if g.phase == "turn" and g.stack.is_empty() and g.resolving.is_empty() and g.battle < 0 and g.monsters.size() < int(g.monster_slots) and (not g.decks.monster.is_empty() or not g.discards.monster.is_empty()):
+			found.append("Пустой слот монстров в фазе хода: %d из %d" % [g.monsters.size(), int(g.monster_slots)])
 		if not found.is_empty():
 			problem = "%s (после %s места %d)" % [found[0], str(choice.kind), int(choice.seat)]
 			break
