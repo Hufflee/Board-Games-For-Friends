@@ -20,6 +20,45 @@ static func legal(g: FSRules, seat: int) -> Array:
 			out.append(candidate)
 	return out
 
+
+## Подсказка для стола: среди доступных действий остались только бросок и конец хода.
+static func roll_without_other_actions(g: FSRules, seat: int) -> bool:
+	if seat < 0 or g.phase not in ["battle_roll", "effect", "priority"]:
+		return false
+	if g.phase == "battle_roll" and seat != g._battle_roller15():
+		return false
+	if g.phase == "effect" and seat != int(g.resolving.get("reroll_request", {}).get("owner", g.resolving.get("owner", -1))):
+		return false
+	if g.phase == "priority" and not g.stack.any(func(entry: Dictionary): return entry.kind == "effect_roll" and int(entry.owner) == seat):
+		if g.strict_responses28 or seat != g.current:
+			return false
+	var actions := candidates(g, seat)
+	if not actions.any(func(candidate: Dictionary): return candidate.kind in ["roll", "effect_roll"]):
+		return false
+	for candidate: Dictionary in actions:
+		if candidate.kind in ["roll", "effect_roll", "end"]:
+			continue
+		var trial := g.clone()
+		trial.roll_source = Callable()
+		if trial.action(seat, str(candidate.kind), candidate.get("arg")):
+			return false
+	return true
+
+## Считаем только действия, способные добавить ответ в стек.
+static func can_respond(g: FSRules) -> bool:
+	const RESPONSE_ACTIONS := ["loot", "loot_top20", "character", "activate", "room_activate20",
+		"room_activate24", "mushroom_counter20", "remove_spider15"]
+	for seat in g.players.size():
+		for candidate: Dictionary in candidates(g, seat):
+			if candidate.kind not in RESPONSE_ACTIONS:
+				continue
+			var trial := g.clone()
+			trial.roll_source = Callable()
+			if trial.action(seat, candidate.kind, candidate.get("arg")):
+				return true
+	return false
+
+
 ## Есть ли у кого-нибудь хоть одно законное действие (партия не зависла).
 static func anyone_can_act(g: FSRules) -> bool:
 	if g.phase == "game_over":
@@ -61,6 +100,10 @@ static func candidates(g: FSRules, seat: int) -> Array:
 		if bool(room_action.attack):
 			out.append(_a("room_attack24", {"index": int(room_action.index)}))
 	match g.phase:
+		"starting_character":
+			if seat == g.actor():
+				for offer: Dictionary in g._character_offers[seat]:
+					out.append(_a("choose_character", {"card": int(offer.card)}))
 		"starting_item":
 			if not g._starting_choices.is_empty():
 				for id in g._starting_choices[0].cards:

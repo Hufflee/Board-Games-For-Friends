@@ -32,18 +32,18 @@ func _card_choices() -> Array:
 			out.append(_choice26("Взять и сбросить добычу", "gimpy26", "loot"))
 			out.append(_choice26("Получить +2 атаки до конца хода", "gimpy26", "attack"))
 		"pink_eggs26", "blood_targets26":
-			for seat in players.size():
+			for seat in active_seats():
 				if not dead[seat]:
 					_add_combat_choice26(out, step, "player", seat, name_of(seat))
 			for slot in monsters.size():
 				if not monsters[slot].has("virtual_zone15") and int(monsters[slot].hp) > 0:
 					_add_combat_choice26(out, step, "monster", slot, FSData.title(int(monsters[slot].id)))
 		"nonactive26":
-			for seat in players.size():
+			for seat in active_seats():
 				if seat != current and not dead[seat] and int(hp[seat]) > 0:
 					out.append({"label": name_of(seat), "arg": {"op": "sibling26", "target": seat}})
 		"ready_chars26":
-			for seat in players.size():
+			for seat in active_seats():
 				if not character_ready[seat]:
 					out.append({"label": name_of(seat), "arg": {"op": "ready_character", "target": seat}})
 		"ibs_modes26":

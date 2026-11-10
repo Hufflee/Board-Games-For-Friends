@@ -72,7 +72,7 @@ func _card_choices() -> Array:
 					out.append({"label": "Бросок %s · %d" % [name_of(int(stack[index].owner)), int(stack[index].value)], "arg": {"op": "classic_pick28", "roll_index": index}})
 		"classic_judges28":
 			var roller: int = int(resolving.get("classic_roller28", owner))
-			for seat in players.size():
+			for seat in active_seats():
 				if seat != roller:
 					out.append({"label": name_of(seat) + " выбирает результат", "arg": {"op": "classic_judge28", "target": seat}})
 		"classic_faces28":
@@ -92,7 +92,7 @@ func _card_choices() -> Array:
 				if discards.has(deck) and not discards[deck].is_empty():
 					out.append({"label": "%s → на верх колоды: %s" % [FSData.title(int(discards[deck].back())), DECK_NAMES28[deck]], "arg": {"op": "curse_return28", "deck": deck, "card": int(discards[deck].back())}})
 		"spindown_items28":
-			for seat in players.size():
+			for seat in active_seats():
 				for index in items[seat].size():
 					if not bool(items[seat][index].eternal):
 						out.append({"label": "%s · %s" % [name_of(seat), FSData.title(int(items[seat][index].id))], "arg": {"op": "spindown28", "seat28": seat, "item": index, "card": int(items[seat][index].id)}})
@@ -105,7 +105,7 @@ func _card_choices() -> Array:
 				if _loss_eligible28(soul_cards[owner][index]):
 					out.append({"label": "Уничтожить душу: " + FSData.title(int(soul_cards[owner][index].id)), "arg": {"op": "loss_soul28", "item": index}})
 		"curse_pass28":
-			for seat in players.size():
+			for seat in active_seats():
 				if seat != owner:
 					out.append({"label": "Отдать проклятие: " + name_of(seat), "arg": {"op": "curse_pass28", "target": seat}})
 		"deeper_cards28":
@@ -181,7 +181,7 @@ func _apply_card_step(step: Dictionary) -> void:
 			_resolving_base = mini(_resolving_base, stack.size())
 			if canceled.kind == "loot" and not bool(canceled.get("loot_copy14", false)):
 				discards.loot.append(int(canceled.card))
-			_note("Дубинка отменила: " + FSData.title(int(canceled.card)))
+			_note("Дубинка отменила: " + FSData.title(int(canceled.card)), int(canceled.card))
 			var source: Dictionary = resolving.get("source", {})
 			if _source_item_in_play(source):
 				source["club_off28"] = true
@@ -208,12 +208,12 @@ func _apply_card_step(step: Dictionary) -> void:
 			if decks.has(deck) and not decks[deck].is_empty():
 				var id: int = int(decks[deck].pop_back())
 				discards[deck].append(id)
-				_note("Проклятие: верхняя карта колоды в сброс — " + FSData.title(id))
+				_note("Проклятие: верхняя карта колоды в сброс — " + FSData.title(id), id)
 		"curse_return28":
 			var deck: String = str(step.deck)
 			if discards.has(deck) and not discards[deck].is_empty() and int(discards[deck].back()) == int(step.card):
 				decks[deck].append(int(discards[deck].pop_back()))
-				_note("Проклятие: %s возвращена на верх колоды" % FSData.title(int(step.card)))
+				_note("Проклятие: %s возвращена на верх колоды" % FSData.title(int(step.card)), int(step.card))
 		"spindown28":
 			var seat: int = int(step.seat28)
 			var index: int = int(step.item)
@@ -242,7 +242,7 @@ func _apply_card_step(step: Dictionary) -> void:
 			if target >= 0 and target < players.size() and not bool(resolving.get("attached", false)):
 				curses[target].append(int(resolving.card))
 				resolving["attached"] = true
-				_note("%s получает проклятие: %s" % [name_of(target), FSData.title(int(resolving.card))])
+				_note("%s получает проклятие: %s" % [name_of(target), FSData.title(int(resolving.card))], int(resolving.card))
 				_refresh_passive_stats()
 		"curse_pass28":
 			if curses[owner].has(744):
@@ -257,7 +257,7 @@ func _apply_card_step(step: Dictionary) -> void:
 			if discards.monster.has(id):
 				discards.monster.erase(id)
 				decks.monster.append(id)
-				_note("На верх колоды монстров: " + FSData.title(id))
+				_note("На верх колоды монстров: " + FSData.title(id), id)
 				_insert_card_steps([{"op": "deeper28", "targets": "deeper_cards28", "optional": true}])
 		_:
 			if str(step.op) == "take_shop":
@@ -282,7 +282,7 @@ func _loss_eligible28(entry: Dictionary) -> bool:
 func _destroy_soul28(seat: int, index: int) -> void:
 	var lost: Dictionary = soul_cards[seat].pop_at(index)
 	souls[seat] = maxi(0, int(souls[seat]) - int(lost.get("value", 1)))
-	var pile: String = {"monster": "monster", "loot": "loot", "treasure": "treasure", "room": "room"}.get(str(FSData.card(int(lost.id)).get("kind", "")), "")
+	var pile: String = {"monster": "monster", "event": "monster", "loot": "loot", "treasure": "treasure", "room": "room"}.get(str(FSData.card(int(lost.id)).get("kind", "")), "")
 	if not pile.is_empty():
 		discards[pile].append(int(lost.id))
 
@@ -456,10 +456,15 @@ func _auto_death28() -> void:
 	if not _card_automation_enabled() or phase != "death" or _death_queue.is_empty():
 		return
 	var seat: int = int(_death_queue[0])
-	if not hands[seat].is_empty() or items[seat].any(func(entry): return not bool(entry.eternal)):
+	var destroyable := []
+	for index in items[seat].size():
+		if not bool(items[seat][index].eternal):
+			destroyable.append(index)
+	var options := 1 if strict_responses28 else 0
+	if hands[seat].size() > options or destroyable.size() > options:
 		return
-	_note("Штраф за смерть без выбора: %s теряет только 1¢" % name_of(seat))
-	action(seat, "death", {"loot": -1, "item": -1})
+	_note("Штраф за смерть без выбора: " + name_of(seat))
+	action(seat, "death", {"loot": -1 if hands[seat].is_empty() else int(hands[seat][0]), "item": -1 if destroyable.is_empty() else int(destroyable[0])})
 
 
 var refill_calm28 := true  # отладка: выключить страховку дозаполнения

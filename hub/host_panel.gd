@@ -268,6 +268,12 @@ func _player_rows(p: Dictionary, info: Dictionary) -> Array:
 		rows.append(cards)
 	if rows.is_empty() and not bool(p.remote):
 		rows.append(_label("Для этой игры правок игрока нет.", 13, MUTED))
+	if bool(p.get("remove_character", false)):
+		var remove := _button("Кикнуть с персонажем", false)
+		remove.tooltip_text = "Удерживайте, чтобы убрать персонажа из партии и сбросить его карты"
+		remove.add_theme_color_override("font_color", Color("ff8a8a"))
+		LeaveGuard.hold(remove, func(): Net.host_tools.remove_four_souls_player(seat), "Убрать персонажа?")
+		rows.append(remove)
 	if bool(p.remote):
 		if bool(info.spectate):
 			var spec := _button("Сделать зрителем", true)

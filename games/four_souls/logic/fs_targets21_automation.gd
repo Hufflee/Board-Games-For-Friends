@@ -68,7 +68,7 @@ func _apply_card_step(step: Dictionary) -> void:
 	var parent: Dictionary = pending.parent21
 	parent.automation_step = parent.automation_steps.size()
 	_resolving_base = mini(_resolving_base, stack.size())
-	_note("Отменено: " + FSData.title(int(pending.card)))
+	_note("Отменено: " + FSData.title(int(pending.card)), int(pending.card))
 	if int(resolving.card) == 470:
 		_damage_player(int(pending.owner), 2, {"attacker": int(resolving.owner)})
 

@@ -15,7 +15,10 @@ func _advance_start() -> void:
 		_begin_turn()
 func _begin_turn() -> void:
 	# Пропущенный ход не даёт добор/перезарядку и не запускает его начало/конец.
-	while int(skipped_turns[current]) > 0:
+	while is_out(current) or int(skipped_turns[current]) > 0:
+		if is_out(current):
+			_advance_turn_order()
+			continue
 		skipped_turns[current] = int(skipped_turns[current]) - 1
 		_note("%s пропускает ход" % name_of(current))
 		_advance_turn_order()
@@ -182,7 +185,7 @@ func _end_turn() -> void:
 		if _source_item_in_play(temporary.source):
 			temporary.source.eternal = bool(temporary.eternal)
 	_temporary_eternal.clear()
-	for seat in players.size():
+	for seat in active_seats():
 		hp[seat] = max_hp[seat]
 		dead[seat] = false
 		for item: Dictionary in items[seat]:
@@ -251,7 +254,7 @@ func _check_bonuses() -> void:
 	for id in bonuses:
 		if claimed.has(id): continue
 		var key: String = FSData.card(int(id)).key
-		for seat in players.size():
+		for seat in active_seats():
 			if _room_has20(779) or curses[seat].has(744):
 				continue
 			var guppy := 0
@@ -260,7 +263,7 @@ func _check_bonuses() -> void:
 			if key == "soulofgreed" and coins[seat] >= 25 or key == "soulofgluttony" and hands[seat].size() >= 10 or key == "soulofguppy" and guppy >= 2:
 				claimed.append(id)
 				_gain_soul_card(seat, {"id": int(id), "value": 1})
-				_note(name_of(seat) + " получает " + FSData.title(int(id)))
+				_note(name_of(seat) + " получает " + FSData.title(int(id)), int(id))
 				break
 	_refresh_passive_stats()
 func _check_win() -> void:
@@ -273,6 +276,8 @@ func _check_win() -> void:
 			_cleanup_reward_cards()
 			winner = seat; phase = "game_over"; _note("Четыре души! Победитель: " + name_of(seat)); return
 func actor() -> int:
+	if phase == "starting_character":
+		return _chosen_characters.size()
 	if phase == "battle_roll":
 		return _battle_roller15()
 	if phase == "forced_discard":

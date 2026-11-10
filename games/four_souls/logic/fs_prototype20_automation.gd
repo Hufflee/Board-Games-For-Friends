@@ -20,7 +20,7 @@ func _card_choices() -> Array:
 			if int(text.begin) == 2:
 				out.append({"label": str(PROTOTYPE_COLUMNS20[1][int(text.effect)]) + "; " + str(PROTOTYPE_COLUMNS20[2][int(text.tail)]), "arg": {"op": "prototype_run20", "index": index}})
 	if category == "prototype_receivers20" and not bool(resolving.source.get("eternal", false)):
-		for seat in players.size():
+		for seat in active_seats():
 			if seat != int(resolving.owner):
 				out.append({"label": name_of(seat), "arg": {"op": "prototype_give20", "target": seat}})
 	var chooser := _card_choice_owner() if _card_automation_active() else current

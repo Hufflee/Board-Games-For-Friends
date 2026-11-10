@@ -17,6 +17,8 @@ var _preview: Control
 var _zones: Dictionary = {}
 var _cards: Dictionary = {}
 var _die_key := ""
+var _roll_die: TossDie
+var _roll_revision := -1
 var _rebuild_queued := false
 var _pages: Dictionary = {}
 var _debug: RefCounted
@@ -80,6 +82,7 @@ func _state(view: Dictionary) -> void:
 		incoming.erase(key)
 	var same_contents := previous == incoming
 	if _seat != int(view.get("seat", -1)) or _view.get("game_id") != view.get("game_id"):
+		_drop_roll_die()
 		_shown = _author_test() or not bool(view.get("hotseat", false))
 		if _view.get("game_id") != view.get("game_id"):
 			_pages.clear()
@@ -177,6 +180,7 @@ func _debug_restart(same_seed: bool) -> void:
 		Net.cg_view_seat = 0
 		_shown = true
 		_die_key = ""
+		_drop_roll_die()
 		_sound_id = -1
 		Net.set_paused(false)
 		Net._push_state()
@@ -196,7 +200,10 @@ func _at(control: Control, rect: Rect2) -> void:
 	_field.add_child(control)
 
 func _rebuild() -> void:
-	Style.clear(_field)
+	for child in _field.get_children():
+		if child != _roll_die:
+			_field.remove_child(child)
+			child.queue_free()
 	_zones.clear()
 	_cards.clear()
 	_preview = null
@@ -715,6 +722,7 @@ func _dice() -> void:
 			if item.get("kind") == "dice_tray" and _item_visible(item):
 				tray = _rect(item, tray)
 				has_tray = true
+	_sync_roll_die(rolling, tray, has_tray)
 	if _view.get("cg_layout", {}).get("custom", false) and not has_tray and not rolling:
 		return
 	var key := str([_view.get("game_id"), _view.get("dice", {}), rolling])
@@ -735,29 +743,84 @@ func _dice() -> void:
 		var look := _dice_look(str(_view.get("dice_sets", {}).get(seat, "")))
 		for index in values.size():
 			var face: Variant = values[index]
+			if index == 0 and int(seat) == _seat and is_instance_valid(_roll_die):
+				x += 72
+				continue
 			var die := TossDie.new()
 			_style_die(die, look, int(seat))
 			var compact: bool = values.size() > 3
 			die.scale = Vector2.ONE * (0.5 if compact else 1.0)
 			die.home = origin + Vector2(24 + (index % 6) * 40, 56 + (index / 6) * 32) if compact else Vector2(x + 32, origin.y + 80)
 			die.area = tray
+			die._die.value = int(face)
 			_field.add_child(die)
 			if animate:
 				die.throw(Vector2(320, -160), int(face))
 			else:
 				die.position = die.home - Vector2(32, 32)
-				die._die.value = int(face)
 			x += 72
 	if rolling:
-		var die := TossDie.new()
-		_style_die(die, _dice_look(""), _seat)
-		die.home = tray.get_center() if has_tray else Vector2(_field.size.x * 0.5, 320)
-		die.area = tray
-		die.draggable = true
-		die.thrown.connect(func(_velocity: Vector2): _send({"kind": "answer"}))
-		_field.add_child(die)
-		die.wait_for_roll()
-		_at(Style.label("Потяните и бросьте кубик"), Rect2(536, 392, 300, 32))
+		_at(Style.label(TossDie.roll_hint()), Rect2(536, 392, 300, 32))
+
+
+func _sync_roll_die(rolling: bool, tray: Rect2, has_tray: bool) -> void:
+	if is_instance_valid(_roll_die) and _roll_die.awaits_result() and _roll_revision >= 0 and int(_view.revision) > _roll_revision:
+		var values: Variant = _view.get("dice", {}).get(str(_seat), [])
+		if values is Array and not values.is_empty():
+			_roll_die.set_result(int(values[0]))
+			_roll_revision = -1
+	if Prefs.dice_style != "reel":
+		_drop_roll_die()
+		if rolling:
+			var classic := _make_roll_die(tray, has_tray)
+			classic.thrown.connect(func(_velocity: Vector2): _send({"kind": "answer"}))
+		return
+	if not rolling and (not is_instance_valid(_roll_die) or not _roll_die.is_busy()):
+		if is_instance_valid(_roll_die):
+			_roll_die.set_reel_prompt(false)
+			_roll_die.draggable = false
+		return
+	if not is_instance_valid(_roll_die):
+		_roll_die = _make_roll_die(tray, has_tray)
+		_roll_die.thrown.connect(_throw_pending_reel)
+		_roll_die.finished.connect(_render_pending.call_deferred)
+		_roll_die.stalled.connect(func(): _roll_revision = -1)
+		_roll_die._reel.returned_home.connect(_retire_roll_die)
+	_roll_die.set_reel_prompt(rolling and not Net.paused)
+	_roll_die.draggable = rolling and not Net.paused and not _roll_die.is_busy()
+	if _roll_die.draggable and _roll_die.state == "idle":
+		_roll_die.wait_for_roll()
+
+
+func _make_roll_die(tray: Rect2, has_tray: bool) -> TossDie:
+	var die := TossDie.new()
+	_style_die(die, _dice_look(""), _seat)
+	die.home = tray.get_center() if has_tray else Vector2(_field.size.x * 0.5, 320)
+	die.area = tray
+	die.draggable = true
+	_field.add_child(die)
+	die.wait_for_roll()
+	return die
+
+
+func _throw_pending_reel(_velocity: Vector2) -> void:
+	_roll_revision = int(_view.revision)
+	_send({"kind": "answer"})
+
+
+func _retire_roll_die() -> void:
+	if not is_instance_valid(_roll_die) or _roll_die.is_busy() or _view.get("pending", {}).get("kind") == "roll":
+		return
+	_drop_roll_die()
+	_render_pending.call_deferred()
+
+
+func _drop_roll_die() -> void:
+	if is_instance_valid(_roll_die):
+		_roll_die.hide()
+		_roll_die.queue_free()
+	_roll_die = null
+	_roll_revision = -1
 
 ## Вид набора кубиков по id; пустой id — первый набор игры (блоки без выбора набора).
 func _dice_look(set_id: String) -> Dictionary:

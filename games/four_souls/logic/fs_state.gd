@@ -176,6 +176,18 @@ var _equality_running := false
 var _plan_c_owner := -1
 var _character_attack_bonuses: Array = []
 var _starting_choices: Array = []
+var choose_character_at_start := false
+var _character_offers: Array = []
+var _chosen_characters: Array = []
+var _withdrawn: Dictionary = {}
+
+
+func is_out(seat: int) -> bool:
+	return _withdrawn.has(seat)
+
+
+func active_seats() -> Array:
+	return range(players.size()).filter(func(seat): return not is_out(seat))
 ## Результаты бросков текущего хода по порядку (Фруктовый пирог).
 var _turn_faces: Array = []
 ## Убийства монстров текущим игроком за ход (Клещ: первое убийство).
@@ -390,7 +402,7 @@ func new_game(members: Array, expanded: bool = false, seed_value: int = 0) -> vo
 	dlc = expanded
 	_rng.seed = seed_value if seed_value != 0 else Time.get_ticks_usec()
 	decks = {}; discards = {}; hands = []; items = []; chars = []; hp = []; max_hp = []; attack = []; coins = []; souls = []; soul_cards = []; curses = []; character_ready = []; dead = []
-	monsters = []; shop = []; stack = []; log = []; claimed = []; resolving = {}; paused_effects = []; _death_queue = []
+	monsters = []; shop = []; stack = []; log = []; log_cards = []; action_history = []; _action_sequence = 0; _history_scope = 0; claimed = []; resolving = {}; paused_effects = []; _death_queue = []
 	phase = "turn"; _after_stack = "turn"; _death_resume = "turn"; peek = {}; current = 0; priority = 0; passes = 0; round_no = 1; winner = -1; revision = 0; room = -1; battle = -1; roll_no = 0; last_roll = 0
 	next_action = {}
 	_resolving_base = 0
@@ -493,6 +505,9 @@ func new_game(members: Array, expanded: bool = false, seed_value: int = 0) -> vo
 	_room_bonuses.clear()
 	_character_attack_bonuses.clear()
 	_starting_choices.clear()
+	_character_offers.clear()
+	_chosen_characters.clear()
+	_withdrawn.clear()
 	bonus_progress = {"deaths": 0, "treasures": 0, "monsters": 0}
 	for kind in ["loot", "treasure", "monster", "room"]:
 		decks[kind] = FSData.pool(kind, dlc)
@@ -516,26 +531,43 @@ func new_game(members: Array, expanded: bool = false, seed_value: int = 0) -> vo
 		_turn_monster_attack.append(0)
 		skipped_turns.append(0)
 		var chosen: Dictionary = characters.pop_back()
-		chars.append(int(chosen.card))
-		var health := PassiveRules.character_health(int(chosen.card))
-		max_hp.append(health); hp.append(health); attack.append(1); coins.append(3); souls.append(0); character_ready.append(true); dead.append(false); hands.append([]); items.append([]); soul_cards.append([]); curses.append([])
-		var eternal: int = int(chosen.item)
-		if eternal < 0 and chosen.key == "eden":
-			var options: Array = []
-			for i in 3:
-				var option := _draw("treasure")
-				if option >= 0:
-					options.append(option)
-			if not options.is_empty():
-				_starting_choices.append({"owner": seat, "cards": options})
-		if eternal >= 0:
-			# Вторая сторона ещё создаётся: общий пересчёт выполняется после раздачи всем.
-			var starter := FSData.item_entry(eternal, true)
-			starter["starter21"] = true
-			items[seat].append(starter)
-		_draw_loot(seat, 5 if int(chosen.card) == 908 else 3, "setup")
-		if chosen.key == "cain":
-			current = seat
+		chars.append(-1)
+		max_hp.append(2); hp.append(2); attack.append(1); coins.append(3); souls.append(0); character_ready.append(true); dead.append(false); hands.append([]); items.append([]); soul_cards.append([]); curses.append([])
+		if choose_character_at_start:
+			_character_offers.append([chosen, characters.pop_back()])
+		else:
+			_deal_character(seat, chosen)
+	if not _character_offers.is_empty():
+		phase = "starting_character"
+		return
+	_finish_setup()
+
+
+func _deal_character(seat: int, chosen: Dictionary) -> void:
+	chars[seat] = int(chosen.card)
+	var health := PassiveRules.character_health(int(chosen.card))
+	max_hp[seat] = health
+	hp[seat] = health
+	var eternal: int = int(chosen.item)
+	if eternal < 0 and chosen.key == "eden":
+		var options: Array = []
+		for i in 3:
+			var option := _draw("treasure")
+			if option >= 0:
+				options.append(option)
+		if not options.is_empty():
+			_starting_choices.append({"owner": seat, "cards": options})
+	if eternal >= 0:
+		# Вторая сторона ещё создаётся: общий пересчёт выполняется после раздачи всем.
+		var starter := FSData.item_entry(eternal, true)
+		starter["starter21"] = true
+		items[seat].append(starter)
+	_draw_loot(seat, 5 if int(chosen.card) == 908 else 3, "setup")
+	if chosen.key == "cain":
+		current = seat
+
+
+func _finish_setup() -> void:
 	for i in 2:
 		shop.append(_draw_shop_slot24())
 		_fill_monster(true)
@@ -549,28 +581,42 @@ func _shuffle(array: Array) -> void:
 	for i in range(array.size() - 1, 0, -1):
 		var j := _rng.randi_range(0, i)
 		var value = array[i]; array[i] = array[j]; array[j] = value
+func _sync_discards28() -> void:
+	pass
+
+
 func _draw(kind: String) -> int:
 	if decks[kind].is_empty() and not discards[kind].is_empty():
+		_sync_discards28()
 		# 06.11 (владелец): сброс замешивается под низ колоды — ещё не виденные карты выходят раньше.
 		var back: Array = discards[kind].duplicate(); discards[kind] = []; _shuffle(back)
+		_sync_discards28()
 		back.append_array(decks[kind])
 		decks[kind] = back
 		_note("Сброс замешан в колоду: " + {"loot": "добыча", "treasure": "сокровища", "monster": "монстры", "room": "комнаты"}.get(kind, kind))
 	return int(decks[kind].pop_back()) if not decks[kind].is_empty() else -1
 func _draw_loot(seat: int, count: int, reason: String = "effect") -> void:
+	if is_out(seat):
+		return
 	if reason == "effect" and count > 0:
 		count += _has_item(seat, "luckytoe")
 	count *= int(pow(2, int(_double_draw13.get(seat, 0))))
 	var compost: bool = count > 0 and _compost_draws13 > 0
 	if compost: _compost_draws13 -= 1
+	var drawn := 0
 	for i in count:
 		var id: int = int(discards.loot.pop_back()) if compost and not discards.loot.is_empty() else (-1 if compost else _draw("loot"))
 		if id < 0:
 			break
 		hands[seat].append(id)
+		drawn += 1
 		if not _setting_up:
 			_emit_passives("loot_draw", {"seat": seat, "card": id, "reason": reason})
+	if drawn > 0:
+		_action_result({"kind": "draw", "seat": seat, "amount": drawn}, seat)
 func _gain_coins(seat: int, amount: int, poker_done: bool = false, equality_done: bool = false) -> void:
+	if is_out(seat):
+		return
 	if amount > 0 and _room_has20(807) and not _equality_running and not equality_done and _card_automation_enabled():
 		_equality_running = true
 		for offset in players.size():
@@ -596,15 +642,64 @@ func _gain_coins(seat: int, amount: int, poker_done: bool = false, equality_done
 		var count := mini(amount,bank)
 		coins[seat] += count; bank -= count
 		if count > 0:
+			_action_result({"kind": "coins", "seat": seat, "amount": count}, seat)
 			_emit_passives("coins", {"seat": seat, "amount": count})
 	else:
 		if _item_count(seat, 523) > 0:
 			return
 		var count := mini(-amount,int(coins[seat]))
 		coins[seat] -= count; bank += count
-func _note(text: String) -> void:
+		if count > 0:
+			_action_result({"kind": "coins", "seat": seat, "amount": -count}, seat)
+var log_cards: Array = []
+var action_history: Array = []
+var _action_sequence := 0
+var _history_scope := 0
+
+
+## Лента содержит только открытые сведения: добор записывается числом, без ID карт руки.
+func _action_record(kind: String, seat: int, card: int = -1, result: Dictionary = {}) -> int:
+	_action_sequence += 1
+	var author := _action_person(seat)
+	var entry := {"seq": _action_sequence, "kind": kind, "card": card, "author": author, "results": []}
+	action_history.append(entry)
+	if not result.is_empty():
+		_action_result(result, seat, _action_sequence)
+	if action_history.size() > 24:
+		action_history.pop_front()
+	return _action_sequence
+
+
+func _action_person(seat: int) -> Dictionary:
+	if seat < 0 or seat >= players.size():
+		return {}
+	return {"name": name_of(seat), "char": int(chars[seat])}
+
+
+func _action_result(result: Dictionary, fallback_seat: int, sequence: int = 0) -> void:
+	if _setting_up:
+		return
+	if sequence == 0:
+		sequence = _history_scope if _history_scope != 0 else int(resolving.get("history_seq", 0))
+	var record := result.duplicate()
+	var target := int(record.get("seat", -1))
+	if target >= 0:
+		record["target"] = _action_person(target)
+	for index in range(action_history.size() - 1, -1, -1):
+		var entry: Dictionary = action_history[index]
+		if int(entry.seq) == sequence:
+			entry.results.append(record)
+			return
+		if int(entry.seq) < sequence:
+			break
+	_action_record(str(record.kind), fallback_seat, -1, record)
+
+func _note(text: String, card: int = -1) -> void:
 	log.append(text)
-	if log.size() > 150: log.pop_front()
+	log_cards.append(card)
+	if log.size() > 150:
+		log.pop_front()
+		log_cards.pop_front()
 ## Лента наглядных событий для стола (06.11): срабатывания пассивов и изменения бросков.
 ## Только показ: правила её не читают. Клиент показывает записи с номером больше последнего виденного.
 ## Карты, убранные из колод этой партии (Net задаёт FSData.PARTIAL_OFF28; тесты и фаззер — пусто).
@@ -668,13 +763,14 @@ func _absorb_next_hit(zone: String, target: int, amount: int) -> int:
 
 ## Получение контроля над физической картой души, включая перенос от другого игрока.
 func _gain_soul_card(seat: int, card: Dictionary, gained: bool = true) -> void:
-	if gained and (_room_has20(779) or curses[seat].has(744)):
+	if is_out(seat) or gained and (_room_has20(779) or curses[seat].has(744)):
 		var pile: String = {"monster": "monster", "event": "monster", "loot": "loot", "treasure": "treasure", "room": "room"}.get(str(FSData.card(int(card.id)).get("kind", "")), "")
 		if not pile.is_empty() and not discards[pile].has(int(card.id)): discards[pile].append(int(card.id))
 		_note("Получение души запрещено: " + name_of(seat))
 		return
 	souls[seat] = int(souls[seat]) + int(card.value)
 	soul_cards[seat].append(card)
+	_action_result({"kind": "soul", "seat": seat, "card": int(card.id), "amount": int(card.value)}, seat)
 	# Одна физическая карта может стоить несколько душ: триггеры учитывают всю ценность.
 	for unit in maxi(0, int(card.value)):
 		_emit_passives("soul_control", {"seat": seat, "card": int(card.id), "value": 1, "soul_value": int(card.value)})
@@ -698,12 +794,16 @@ func _remove_item(seat: int, index: int, leaving: bool = false) -> Dictionary:
 	_refresh_passive_stats()
 	return entry
 func _gain_item(seat: int, id: int, eternal: bool = false) -> void:
+	if is_out(seat):
+		_discard_item(id)
+		return
 	var old_health: int = int(max_hp[seat])
 	var entry := FSData.item_entry(id, eternal or bool(_eternal_shop15.get(id, false)))
 	_eternal_shop15.erase(id)
 	if id == 58:
 		entry.counters = hands[seat].size()
 	items[seat].append(entry)
+	_action_result({"kind": "gain_item", "seat": seat, "card": id}, seat)
 	if not _setting_up and FSData.card(id).kind == "treasure":
 		bonus_progress.treasures = int(bonus_progress.treasures) + 1
 	_refresh_passive_stats()
@@ -777,7 +877,7 @@ func _place_egg(zone: String, target: int, color: String) -> void:
 	var marks: Dictionary = _eggs_players[target] if zone == "player" else _eggs_monsters[target]
 	marks[color] = int(marks.get(color, 0)) + 1
 	_refresh_passive_stats()
-	_note("Положено яйцо: " + (name_of(target) if zone == "player" else FSData.title(target)))
+	_note("Положено яйцо: " + (name_of(target) if zone == "player" else FSData.title(target)), target)
 
 func _permitted_player_attack_targets() -> Array:
 	var out: Array = []

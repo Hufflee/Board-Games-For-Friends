@@ -879,6 +879,7 @@ func _update_dice() -> void:
 		if mine and not _thrown_mine and d.state == "idle":
 			d.wait_for_roll()
 		d.draggable = mine and not _thrown_mine and d.state == "waiting"
+		d.set_reel_prompt(mine and i < n and not Net.paused, (i - (n - 1) * 0.5) * 1.12)
 	_place_dice()
 
 
@@ -889,7 +890,9 @@ func _on_die_thrown(i: int, vel: Vector2) -> void:
 	for d in _dice3d:
 		d.draggable = false
 	if _dice_count() == 2:
-		(_dice3d[1 - i] as TossDie).throw(vel.rotated(randf_range(-0.35, 0.35)) * randf_range(0.85, 1.1))
+		var companion: TossDie = _dice3d[1 - i]
+		companion.hold_reel_throw()
+		companion.throw(vel.rotated(randf_range(-0.35, 0.35)) * randf_range(0.85, 1.1), 0, true)
 	_send("br_roll")
 
 
@@ -909,7 +912,7 @@ func _show_roll() -> void:
 		var d: TossDie = _dice3d[i]
 		d.visible = true
 		var face := int(roll[i])
-		if d.state == "flying":
+		if _thrown_mine and d.awaits_result():
 			d.set_result(face)  # свой бросок — кубик остановится на выпавшем
 		elif first:
 			continue
@@ -1012,7 +1015,7 @@ func _update_bar() -> void:
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	if _my_roll():
 		var mode := str(_v.get("dice", ""))
-		row.add_child(BRStyle.label("Схвати кубик%s мышью и брось ↑" % ("и" if mode in ["grey", "black"] else ""), BRStyle.BODY, BRStyle.GREEN_DARK, HORIZONTAL_ALIGNMENT_CENTER, "bold"))
+		row.add_child(BRStyle.label(TossDie.roll_hint(), BRStyle.BODY, BRStyle.GREEN_DARK, HORIZONTAL_ALIGNMENT_CENTER, "bold"))
 	elif phase == "free" and mine:
 		for i in my_shop.size():
 			var c: Dictionary = BRData.SHOP[int(my_shop[i])]

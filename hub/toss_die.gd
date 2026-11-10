@@ -18,22 +18,29 @@ const SIDE := 64.0
 const FRICTION := 2.2
 const BOUNCE := 0.55
 const MAX_SPEED := 2600.0
+const Reel := preload("res://hub/dice_reel.gd")
 
 var home := Vector2.ZERO  # центр места кубика
 var area := Rect2(0, 0, 1280, 720)  # где летает (поле)
 var draggable := false:
 	set(v):
 		draggable = v
-		mouse_default_cursor_shape = Control.CURSOR_DRAG if v else Control.CURSOR_ARROW
+		_sync_cursor()
 var state := "idle"  # idle, waiting, dragging, flying, settled, returning
 
 var _die: PerudoDie
+var use_player_style := true
+var _reel: Reel
+var _reel_required := false
+var _reel_offset := 0.0
 var max_face := 6:
 	set(v):
 		max_face = 8 if v == 8 else 6
 		if is_instance_valid(_die):
 			_die.sides = max_face
 			_die.value = clampi(_die.value, 1, max_face)
+		if _reel != null and state != "flying":
+			_reel.sides = max_face
 var _vel := Vector2.ZERO
 var _spin := 0.0
 var _result := 0
@@ -57,6 +64,71 @@ func _init() -> void:
 	_die.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_die)
 	modulate.a = 0.45
+
+
+func _ready() -> void:
+	Prefs.changed.connect(_sync_style)
+	_sync_style()
+
+
+func _sync_style() -> void:
+	if is_busy():
+		return
+	if use_player_style and Prefs.dice_style == "reel" and _reel == null:
+		_reel = Reel.new()
+		_reel.sides = max_face
+		_reel.pulled.connect(_pull_reel)
+		add_child(_reel)
+		set_reel_prompt(_reel_required, _reel_offset)
+	elif Prefs.dice_style != "reel" and _reel != null:
+		_reel.queue_free()
+		_reel.hide()
+		_reel = null
+	_die.visible = _reel == null
+	mouse_filter = Control.MOUSE_FILTER_STOP if _reel == null else Control.MOUSE_FILTER_IGNORE
+	if _reel != null:
+		_reel.show_face(_die.value)
+	_sync_cursor()
+
+
+func _sync_cursor() -> void:
+	if _reel != null:
+		_reel.active = draggable and state == "waiting"
+		_reel.queue_redraw()
+		mouse_default_cursor_shape = Control.CURSOR_ARROW
+	else:
+		mouse_default_cursor_shape = Control.CURSOR_DRAG if draggable else Control.CURSOR_ARROW
+
+
+func awaits_result() -> bool:
+	return state == "flying" and _result == 0
+
+
+func set_reel_prompt(required: bool, offset: float = 0.0) -> void:
+	_reel_required = required
+	_reel_offset = offset
+	if _reel != null:
+		_reel.required = required
+		_reel.prompt_offset = offset
+
+
+func hold_reel_throw() -> void:
+	if _reel != null:
+		_reel.hold_local_throw()
+
+
+func _pull_reel() -> void:
+	if not draggable or state != "waiting":
+		return
+	hold_reel_throw()
+	var velocity := (area.get_center() - home).normalized() * 900.0
+	throw(velocity, 0, true)
+	draggable = false
+	thrown.emit(velocity)
+
+
+static func roll_hint() -> String:
+	return "Нажмите на рычаг кубомёта" if Prefs.dice_style == "reel" else "Потяните кубик и отпустите"
 
 
 func center() -> Vector2:
@@ -89,12 +161,15 @@ func wait_for_roll() -> void:
 	_result = 0
 	rotation = 0.0
 	_set_center(home)
+	_sync_style()
+	if _reel != null:
+		_reel.release_local_throw()
 	_anim = create_tween()
 	_anim.tween_property(self, "modulate:a", 1.0, 0.2)
 
 
 ## Бросок без мыши (чужой ход, бот): result — что выпадет (0 — придёт позже через set_result).
-func throw(vel: Vector2, result: int = 0) -> void:
+func throw(vel: Vector2, result: int = 0, local_reel: bool = false) -> void:
 	_stop_anim()
 	visible = true
 	modulate.a = 1.0 if draggable or state == "waiting" else 0.8
@@ -107,11 +182,20 @@ func throw(vel: Vector2, result: int = 0) -> void:
 	_rest = 0.0
 	_wait = 0.0
 	state = "flying"
+	if _reel != null:
+		if not local_reel:
+			_reel.release_local_throw()
+		rotation = 0.0
+		_reel.sides = max_face
+		_reel.spin()
+		_sync_cursor()
 	Sfx.play("die_throw", -4, 0.08, 0.05)
 
 
 func set_result(f: int) -> void:
 	_result = clampi(f, 1, max_face)
+	if _reel != null:
+		_reel.sides = max_face
 
 
 func _gui_input(e: InputEvent) -> void:
@@ -164,6 +248,13 @@ func _input(e: InputEvent) -> void:
 func _process(delta: float) -> void:
 	if state != "flying":
 		return
+	if _reel != null:
+		if _reel.advance(delta, _result):
+			_settle()
+		elif _result <= 0 and _reel.timed_out():
+			_reel.show_face(_die.value)
+			_give_up()
+		return
 	var c := center() + _vel * delta
 	var r := area.grow(-SIDE * 0.5)
 	if c.x < r.position.x or c.x > r.end.x:
@@ -207,6 +298,11 @@ func _settle() -> void:
 	_result = 0  # показан; следующий бросок ждёт свой результат
 	var t := create_tween()
 	_anim = t
+	if _reel != null:
+		Sfx.play("die_hit", -14)
+		t.tween_interval(0.9)
+		t.tween_callback(_back_home)
+		return
 	t.tween_property(self, "rotation", round(rotation / (PI / 2.0)) * (PI / 2.0), 0.15)
 	t.tween_property(self, "scale", Vector2(1.15, 1.15), 0.1)
 	t.tween_property(self, "scale", Vector2.ONE, 0.12)
@@ -221,6 +317,10 @@ func _settle() -> void:
 func _back_home() -> void:
 	state = "idle"
 	_anim = null
+	if _reel != null:
+		_reel.release_local_throw()
+		modulate.a = 1.0 if _reel_required else 0.45
+	_sync_style()
 	finished.emit()
 
 

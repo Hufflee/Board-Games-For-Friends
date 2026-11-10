@@ -26,10 +26,41 @@ var _laid_out := false
 func _ready() -> void:
 	custom_minimum_size = Vector2(100, card_size.y * (0.6 if edge_peek else 1.0) + 18)
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
+	sync_cards(entries, order)
+	resized.connect(_layout)
+
+
+## Обновляет состав, сохраняя узлы оставшихся карт и их перетаскивание.
+func sync_cards(next: Array, preferred_order: Array) -> void:
+	var keys: Array = next.map(func(entry): return str(entry.key))
+	var new_cards := []
+	for key in _cards.keys():
+		if key not in keys:
+			var card: K12TableCard = _cards[key]
+			if _hover == key:
+				_hover = ""
+				_preview_token += 1
+				preview_closed.emit()
+			if card.dragging:
+				drag_ended.emit()
+			remove_child(card)
+			card.queue_free()
+			_cards.erase(key)
+	entries = next
+	order = preferred_order.filter(func(key): return key in keys)
 	for entry: Dictionary in entries:
 		var key: String = str(entry.key)
 		if not order.has(key):
 			order.append(key)
+		if _cards.has(key):
+			var existing: K12TableCard = _cards[key]
+			existing.set_meta("hand_entry", entry)
+			existing.face_up = bool(entry.get("face_up", true))
+			var face := existing._face as TextureRect
+			face.texture = entry.get("texture")
+			if entry.get("material") != null:
+				face.material = entry.material
+			continue
 		var image := TextureRect.new()
 		image.texture = entry.get("texture")
 		image.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
@@ -41,32 +72,32 @@ func _ready() -> void:
 			material_value.shader = preload("res://hub/card_corners.gdshader")
 		image.material = material_value
 		var card := K12TableCard.new(key, bool(entry.get("face_up", true)), image, card_size)
+		card.set_meta("hand_entry", entry)
 		card.draggable = movable
 		card.back_drawer = entry.get("back_drawer", Callable())
 		_cards[key] = card
 		add_child(card)
+		new_cards.append(card)
 		if card.back_drawer.is_valid():
 			card._back.material = material_value
 		card.clicked.connect(
 			func(_card):
 				drag_ended.emit()
-				if bool(entry.get("face_up", true)):
-					chosen.emit(entry)
+				if _card.face_up:
+					chosen.emit(_card.get_meta("hand_entry"))
 		)
-		card.hovered.connect(func(c, on): _on_hover(c, on, entry))
+		card.hovered.connect(func(c, on): _on_hover(c, on, c.get_meta("hand_entry")))
 		card.drag_started.connect(
 			func(_card):
 				_preview_token += 1
 				preview_closed.emit()
-				drag_began.emit(entry)
+				drag_began.emit(_card.get_meta("hand_entry"))
 		)
 		card.dropped.connect(_dropped)
-	order = order.filter(func(key): return _cards.has(key))
-	resized.connect(_layout)
-	_layout.call_deferred()
+	_layout.call_deferred(new_cards)
 
 
-func _layout() -> void:
+func _layout(new_cards: Array = []) -> void:
 	if not is_inside_tree():
 		return
 	if size.x <= 1.0:
@@ -88,7 +119,7 @@ func _layout() -> void:
 		if highlighted:
 			center.y -= 24 * card_size.y / 140.0
 		card.z_index = 50 if highlighted else i
-		if first:
+		if first or card in new_cards:
 			card.place(center, off * 0.012, 1.0)
 		else:
 			card.move_to(center, 0.0 if highlighted else off * 0.012, 1.08 if highlighted else 1.0, 0.12)

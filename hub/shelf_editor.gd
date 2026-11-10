@@ -3,6 +3,8 @@ extends Control
 var room: Node
 var _values: Dictionary = {}
 var _message: Label
+var _zoom: HSlider
+var _zoom_label: Label
 
 
 func _ready() -> void:
@@ -40,6 +42,23 @@ func _ready() -> void:
 		row.add_child(spin)
 		_values[str(spec[0])] = spin
 		spin.value_changed.connect(func(_value): _change())
+	var zoom_row := HubStyle.hbox(8)
+	col.add_child(zoom_row)
+	zoom_row.add_child(HubStyle.label("Камера", 14))
+	_zoom = HSlider.new()
+	_zoom.min_value = Prefs.SHELF_ZOOM_MIN
+	_zoom.max_value = Prefs.SHELF_ZOOM_MAX
+	_zoom.step = 0.05
+	_zoom.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_zoom.tooltip_text = "Приближение комнаты. Можно также прокрутить колесо над комнатой."
+	zoom_row.add_child(_zoom)
+	_zoom_label = HubStyle.label("", 14)
+	_zoom_label.custom_minimum_size.x = 44
+	zoom_row.add_child(_zoom_label)
+	_zoom.value_changed.connect(func(value: float):
+		room.set_shelf_camera_zoom(value)
+		sync_zoom())
+	sync_zoom()
 	var help := (
 		HubStyle
 		. label(
@@ -60,6 +79,11 @@ func _ready() -> void:
 	cancel.pressed.connect(func(): room.finish_shelf_editor(false))
 	col.add_child(cancel)
 	sync()
+
+
+func sync_zoom() -> void:
+	_zoom.set_value_no_signal(Prefs.shelf_camera_zoom)
+	_zoom_label.text = "%d%%" % roundi(Prefs.shelf_camera_zoom * 100)
 
 
 func sync(message: String = "") -> void:

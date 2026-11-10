@@ -39,7 +39,7 @@ func _apply_card_step(step: Dictionary) -> void:
 				source.at = FSData.stat(id, "at", 1) + int(source.get("temporary_at", 0))
 				if _untargetable(id):
 					_end_battle()
-			_note("Карта Монстра открывает и копирует: " + FSData.title(id))
+			_note("Карта Монстра открывает и копирует: " + FSData.title(id), id)
 		_:
 			super._apply_card_step(step)
 

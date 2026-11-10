@@ -95,6 +95,8 @@ static func resolve(game: String, view: Dictionary) -> Dictionary:
 	if winners.has(result.leader):
 		result.leader = -1
 	for seat: int in players.size():
+		if game == "four_souls" and bool(players[seat].get("withdrawn", false)):
+			continue
 		if seat == result.leader and not winners.has(seat):
 			continue
 		if winners.has(seat):

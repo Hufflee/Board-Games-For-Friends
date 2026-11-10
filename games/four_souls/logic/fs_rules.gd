@@ -11,6 +11,10 @@ const RESPONSE_WINDOW := 5.0  # тихое окно ответов (никто �
 const OFF_TURN_WINDOW := 10.0  # больше не ограничивает (06.11); оставлено для старых тестов/совместимости
 const OFF_TURN_KINDS := ["character", "mushroom_counter20", "loot_top20", "remove_spider15", "loot", "activate"]  # «разыграть свою карту» вне своего хода
 var turn_elapsed := 0.0  # секунд с начала текущего хода (считает хост в tick)
+var turn_time := 0.0
+var _idle_time := 0.0
+var _response_check_revision := -1
+var _can_respond := true
 var _quiet := 0.0
 var _quiet_revision := -1
 var _turn_seen := -1  # номер хода, к которому относится turn_elapsed
@@ -18,24 +22,58 @@ var _turn_seen := -1  # номер хода, к которому относит�
 var played: Array = []
 ## 06.11: лента настоящего сброса для стопки «СБРОС» — карты в порядке попадания во все сбросы.
 var discard_feed28: Array = []
-var _discard_sizes28: Dictionary = {}
+var _discard_previous: Dictionary = {}
 const PLAYED_KEEP := 40
 
 
 func new_game(members: Array, expanded: bool = false, seed_value: int = 0) -> void:
+	_idle_time = 0.0
+	_response_check_revision = -1
 	played = []
 	discard_feed28 = []
-	_discard_sizes28 = {}
+	_discard_previous = {}
 	super(members, expanded, seed_value)
 
 
 ## Каждый розыгрыш проходит через стек: запоминаем его до ответов (даже если его потом отменят).
 func _push(effect: Dictionary, resume: String) -> void:
 	_remember_play(effect)
+	_record_action_on_stack(effect)
 	var kind28 := str(effect.get("kind", ""))
+	if kind28 == "event":
+		_fx28({"kind": "reveal_event", "card": int(effect.card)})
 	if effect.has("card") and (kind28 == "passive" or (kind28 == "item" and bool(effect.get("conditional", false)))):
 		_fx28({"kind": "trigger", "seat": int(effect.get("owner", -1)), "card": int(effect.card)})
 	super(effect, resume)
+
+
+func _record_action_on_stack(effect: Dictionary) -> void:
+	if _setting_up or effect.has("history_seq"):
+		return
+	var kind := str(effect.get("kind", ""))
+	var owner := int(effect.get("owner", -1))
+	var card := int(effect.get("card", -1))
+	var result := {}
+	match kind:
+		"attack":
+			var slot := int(effect.get("slot", -1))
+			result = {"kind": "aim", "card": int(monsters[slot].id)} if slot >= 0 and slot < monsters.size() else {"kind": "blind_monster"}
+		"player_attack":
+			result = {"kind": "aim", "seat": int(effect.get("target", -1))}
+		"purchase":
+			# Карта верха колоды остаётся закрытой до завершения покупки.
+			var slot := int(effect.get("slot", -1))
+			if slot >= 0 and slot < shop.size():
+				card = int(shop[slot])
+			result = {"kind": "price", "amount": int(effect.get("cost", 10))}
+		"roll", "effect_roll":
+			result = {"kind": "die", "amount": int(effect.get("value", 0))}
+			card = -1
+		"loot", "item", "character_loot", "event", "death":
+			pass
+		_:
+			return
+	effect["history_seq"] = _action_record(kind, owner, card, result)
 
 
 ## Карты руки, которые можно разыграть прямо сейчас и для которых сейчас есть повод (цель на стеке, бой).
@@ -76,12 +114,18 @@ func _loot_moment28(seat: int) -> Array:
 func _sync_discards28() -> void:
 	for pile in discards:
 		var cards: Array = discards[pile]
-		var before: int = int(_discard_sizes28.get(pile, 0))
-		if cards.size() > before:
-			for index in range(before, cards.size()):
-				var n: int = 1 if discard_feed28.is_empty() else int(discard_feed28.back().n) + 1
-				discard_feed28.append({"n": n, "card": int(cards[index]), "pile": str(pile), "round": round_no})
-		_discard_sizes28[pile] = cards.size()
+		var before: Dictionary = _discard_previous.get(pile, {})
+		var present := {}
+		for id: int in cards:
+			if before.has(id):
+				present[id] = before[id]
+				continue
+			var n: int = 1 if discard_feed28.is_empty() else int(discard_feed28.back().n) + 1
+			var record := {"n": n, "card": id, "pile": str(pile), "round": round_no}
+			present[id] = record
+			discard_feed28.append(record)
+			_note("Сброс: " + FSData.title(id), id)
+		_discard_previous[pile] = present
 	if discard_feed28.size() > PLAYED_KEEP:
 		discard_feed28 = discard_feed28.slice(discard_feed28.size() - PLAYED_KEEP)
 
@@ -101,7 +145,18 @@ func tick(delta: float) -> bool:
 	if _turn_seen != turn_serial:
 		_turn_seen = turn_serial
 		turn_elapsed = 0.0
+		_idle_time = 0.0
 	turn_elapsed += delta
+	if strict_responses28 and _auto_only_choice():
+		return true
+	if turn_clock_running():
+		_idle_time += delta
+		if _idle_time >= turn_time:
+			if phase == "battle_roll":
+				_end_battle()
+				phase = "turn"
+			_note("Время хода истекло")
+			return action(current, "end")
 	if _death_watchdog():
 		revision += 1
 		return true
@@ -121,9 +176,9 @@ func tick(delta: float) -> bool:
 	if revision != _quiet_revision:
 		_quiet_revision = revision  # кто-то ответил — окно снова открыто полностью
 		_quiet = 0.0
-		return false
-	_quiet += delta
-	if _quiet < _response_window28():
+	else:
+		_quiet += delta
+	if _response_available() and _quiet < _response_window28():
 		return false
 	_quiet = 0.0
 	var before := [phase, stack.size(), resolving.size()]
@@ -143,6 +198,52 @@ func tick(delta: float) -> bool:
 ## применялся. В устойчивой фазе без стека объявляем смерть заново — дальше обычный путь с фазой death.
 ## 09.11 (владелец): на смерть игрока отвечать дольше — 10 с вместо обычных 5.
 const DEATH_WINDOW28 := 10.0
+
+
+func _response_available() -> bool:
+	if not strict_responses28:
+		return true
+	if _response_check_revision != revision:
+		_response_check_revision = revision
+		_can_respond = preload("res://games/four_souls/logic/fs_legal.gd").can_respond(self)
+	return _can_respond
+
+
+func _auto_only_choice() -> bool:
+	if phase == "starting_item" and not _starting_choices.is_empty() and _starting_choices[0].cards.size() == 1:
+		return action(actor(), "choose_starting_item", {"card": int(_starting_choices[0].cards[0])})
+	if phase == "forced_discard" and hands[actor()].size() == 1:
+		return action(actor(), "forced_discard", {"item": 0})
+	if phase != "effect":
+		return false
+	var owner := int(resolving.get("owner", -1))
+	var soul_targets: Array = resolving.get("reward_soul_targets", [])
+	if soul_targets.size() == 1:
+		return action(owner, "reward_soul_target", {"target": int(soul_targets[0])})
+	if bool(resolving.get("reward_damage", false)):
+		var targets := _reward_damage_targets()
+		if targets.size() == 1:
+			return action(owner, "reward_damage", targets[0])
+	return false
+
+
+func turn_clock_running() -> bool:
+	return turn_time > 0.0 and phase in ["turn", "battle_roll"] and not _ending_turn and _can_end_turn()
+
+
+func turn_time_left() -> float:
+	return maxf(0.0, turn_time - _idle_time) if _turn_seen == turn_serial else turn_time
+
+
+func set_turn_clock(seconds: float) -> void:
+	turn_time = seconds
+	_idle_time = 0.0
+
+
+func _can_end_turn() -> bool:
+	return not _must_buy24() and _forced_deck_remaining() == 0 and _required_player_remaining() == 0 and not _must_attack() and not _encounter_must_attack()
+
+
 func _response_window28() -> float:
 	return DEATH_WINDOW28 if not stack.is_empty() and str(stack.back().get("kind", "")) == "death" else RESPONSE_WINDOW
 
@@ -186,8 +287,80 @@ func _turn_time() -> float:
 	return turn_elapsed if _turn_seen == turn_serial else 0.0
 
 
+func can_remove_player(seat: int) -> bool:
+	return seat >= 0 and seat < players.size() and not is_out(seat) and phase == "turn" and battle < 0 and battle_player < 0 and stack.is_empty() and resolving.is_empty() and paused_effects.is_empty()
+
+
+## Место остаётся зарезервированным в массивах, чтобы номера владельцев карт и сетевых мест не изменились.
+func remove_player(seat: int) -> bool:
+	if not can_remove_player(seat):
+		return false
+	_withdrawn[seat] = true
+	chars[seat] = -1
+	hp[seat] = 0
+	dead[seat] = true
+	character_ready[seat] = false
+	bank += int(coins[seat])
+	coins[seat] = 0
+	discards.loot.append_array(hands[seat])
+	hands[seat].clear()
+	for index in range(items[seat].size() - 1, -1, -1):
+		var card := _remove_item(seat, index, true)
+		if FSData.card(int(card.id)).get("kind", "") != "eternal":
+			_discard_item(int(card.id))
+	discards.monster.append_array(curses[seat])
+	curses[seat].clear()
+	while not soul_cards[seat].is_empty():
+		_destroy_soul28(seat, soul_cards[seat].size() - 1)
+	extra_turns = extra_turns.filter(func(owner): return int(owner) != seat)
+	_note(name_of(seat) + " покидает партию вместе с персонажем")
+	var remaining := active_seats()
+	if remaining.size() == 1:
+		winner = int(remaining[0])
+		phase = "game_over"
+	elif current == seat:
+		_end_turn()
+	_refresh_passive_stats()
+	_sync_discards28()
+	revision += 1
+	return true
+
+
 func action(seat: int, kind: String, arg = null) -> bool:
+	if is_out(seat):
+		return false
+	if phase == "starting_character":
+		return _choose_character(seat, int(arg.get("card", -1))) if kind == "choose_character" and arg is Dictionary else false
+	if not _apply_action(seat, kind, arg):
+		return false
+	_idle_time = 0.0
+	_sync_discards28()
+	return true
+
+
+func _choose_character(seat: int, id: int) -> bool:
+	if seat != actor() or seat >= _character_offers.size():
+		return false
+	for offer: Dictionary in _character_offers[seat]:
+		if int(offer.card) != id:
+			continue
+		_chosen_characters.append(offer)
+		if _chosen_characters.size() == players.size():
+			for index in _chosen_characters.size():
+				_deal_character(index, _chosen_characters[index])
+			_character_offers.clear()
+			_chosen_characters.clear()
+			_finish_setup()
+		revision += 1
+		return true
+	return false
+
+
+func _apply_action(seat: int, kind: String, arg) -> bool:
 	if seat < 0 or seat >= players.size() or phase == "game_over": return false
+	# Повторный жест не закрывает окно ожидающего броска по эффекту.
+	if strict_responses28 and phase == "priority" and kind in ["roll", "effect_roll"]:
+		return false
 	if kind in OFF_TURN_KINDS and not off_turn_open(seat, kind) and not _forced_activation20:
 		return false
 	if kind in OFF_TURN_KINDS and _jail_owner >= 0 and seat != _jail_owner:
@@ -310,7 +483,7 @@ func action(seat: int, kind: String, arg = null) -> bool:
 				return false
 			discards.loot.append(hands[seat].pop_at(index))
 			discard_choice.remaining = int(discard_choice.remaining) - 1
-			_note(name_of(seat) + " сбрасывает карту лута: " + FSData.title(int(discard_choice.card)))
+			_note(name_of(seat) + " сбрасывает добычу")
 			if int(discard_choice.remaining) <= 0 or hands[seat].is_empty():
 				discard_choice = {}
 				_continue_stack()
@@ -410,7 +583,7 @@ func action(seat: int, kind: String, arg = null) -> bool:
 					if guppy < 2: return false
 				claimed.append(id)
 				_gain_soul_card(recipient, {"id": int(id), "value": 1})
-				_note(name_of(recipient) + " получает " + FSData.title(id))
+				_note(name_of(recipient) + " получает " + FSData.title(id), id)
 				ok = true
 		"peek_take":
 			if _card_automation_active() and not _host_manual:
@@ -887,15 +1060,17 @@ func action(seat: int, kind: String, arg = null) -> bool:
 			var id: int = int(a.get("card",-1))
 			if phase == "discard" and seat == current and hands[seat].has(id):
 				hands[seat].erase(id); discards.loot.append(id); ok = true
+				_action_record("discard", seat, id)
 				if hands[seat].size() <= _discard_limit: _end_turn()
 		"end":
-			if phase == "turn" and seat == current and not _must_buy24() and _forced_deck_remaining() == 0 and _required_player_remaining() == 0 and not _must_attack() and not _encounter_must_attack():
+			if phase == "turn" and seat == current and _can_end_turn():
 				_end_turn()
 				ok = true
 		"trade":
 			var target: int = int(a.get("target",-1)); var amount: int = int(a.get("amount",0))
-			if phase in ["turn","priority"] and target >= 0 and target < players.size() and target != seat and amount > 0 and amount <= coins[seat]:
+			if phase in ["turn","priority"] and target >= 0 and target < players.size() and target != seat and not is_out(target) and amount > 0 and amount <= coins[seat]:
 				_transfer_coins(seat, target, amount); _note("%s → %s: %d¢" % [name_of(seat),name_of(target),amount]); ok = true
+				_action_record("trade", seat, -1, {"kind": "coins", "seat": target, "amount": amount})
 		"room":
 			if phase == "turn" and seat == current and dlc and (a.has("index") or _room_can_discard()):
 				if a.has("index"):
@@ -910,7 +1085,8 @@ func action(seat: int, kind: String, arg = null) -> bool:
 						_refill_shop24()
 					if room == 810:
 						_reset_room_goals()
-					_note("Новая комната: " + FSData.title(room))
+					_note("Новая комната: " + FSData.title(room), room)
+					_action_record("room", seat, room)
 					ok = true
 	if ok:
 		_refresh_passive_stats()
@@ -982,10 +1158,15 @@ func _curse_of_loss(seat: int) -> void:
 	var pile: String = {"monster": "monster", "loot": "loot", "treasure": "treasure"}.get(str(FSData.card(int(lost.id)).get("kind", "")), "")
 	if not pile.is_empty():
 		discards[pile].append(int(lost.id))
-	_note("Проклятие потери: %s теряет душу %s" % [name_of(seat), FSData.title(int(lost.id))])
+	_note("Проклятие потери: %s теряет душу %s" % [name_of(seat), FSData.title(int(lost.id))], int(lost.id))
 
 func get_view(seat: int, _show_all: bool = false) -> Dictionary:
 	_sync_discards28()
+	var live_discards: Array = []
+	for pile: Dictionary in _discard_previous.values():
+		live_discards.append_array(pile.values())
+	live_discards.sort_custom(func(left, right): return int(left.n) < int(right.n))
+	live_discards = live_discards.slice(maxi(0, live_discards.size() - PLAYED_KEEP))
 	var card_choices: Array = []
 	var card_choice_previews: Array = []
 	if phase == "effect" and seat == _card_choice_owner():
@@ -995,7 +1176,7 @@ func get_view(seat: int, _show_all: bool = false) -> Dictionary:
 	var public := []
 	var off_turn_left := -1.0  # без ограничения по времени хода (06.11)
 	for i in players.size():
-		public.append({"name":players[i].name,"char":chars[i],"items":items[i].duplicate(true),"hp":hp[i],"max_hp":max_hp[i],"attack":attack[i],"coins":coins[i],"souls":souls[i],"hand_count":hands[i].size(),"souls_cards":soul_cards[i].duplicate(true),"curses":curses[i].duplicate(),"ready":character_ready[i],"dead":dead[i], "respawn_egg17":_eggs_respawn17.has(i)})
+		public.append({"name":players[i].name,"steam_id":int(players[i].get("steam_id", 0)),"withdrawn":is_out(i),"bot":bool(players[i].get("bot", false)),"char":chars[i],"items":items[i].duplicate(true),"hp":hp[i],"max_hp":max_hp[i],"attack":attack[i],"coins":coins[i],"souls":souls[i],"hand_count":hands[i].size(),"souls_cards":soul_cards[i].duplicate(true),"curses":curses[i].duplicate(),"ready":character_ready[i],"dead":dead[i], "respawn_egg17":_eggs_respawn17.has(i)})
 		if bool(_enigma_back26.get(i, false)):
 			public[i]["enigma_back26"] = true
 		public.back()["eggs"] = _egg_count("player", i)
@@ -1029,4 +1210,4 @@ func get_view(seat: int, _show_all: bool = false) -> Dictionary:
 		entry["untargetable"] = _untargetable(int(entry.id))
 		entry.dc = _monster_evasion(entry)
 		entry.at = _monster_attack(entry)
-	return {"native_room_actions24": _native_room_actions24(seat), "tap_price24": _tap_price24(), "extra_rooms20": _extra_rooms20.duplicate(true), "loot_top20": int(decks.loot.back()) if not decks.loot.is_empty() and _top_loot20.values().has(turn_serial) else -1, "can_top_loot20": int(_top_loot20.get(seat, -1)) == turn_serial, "die_sides20": 8 if _d8_next20.has(actor()) else 6, "last_die_sides20": _last_die_sides20, "last_raw_die20": _last_raw_die20, "battle_roller15": _battle_roller15(), "shadow_item15": items[seat].find(_shadow_penalty15[seat].item) if _shadow_penalty15.has(seat) and not _shadow_penalty15[seat].item.is_empty() else -1, "spider_tokens15": int(_spider_tokens15.get(seat, 0)), "familiar_targets15": _familiar_targets15(), "player_attack_defense16": _player_defenses17(), "blind_only17": attack_left > 0 and attack_left <= _optional_blind17, "forced_monster_slots": _forced_slots14(), "unlimited_loot":bool(_unlimited_loot13.get(seat,false)),"card_choice_previews":card_choice_previews,"card_choices":card_choices,"card_automated":_card_automation_active(),"card_roll_wait":str(_card_step().get("op", "")) == "auto_roll" and not resolving.has("automation_roll"),"players":public,"seat":seat,"discard_choice":discard_choice.duplicate(true),"battle_player":battle_player,"required_player_attacks":_required_player_remaining(),"player_attack_targets":_permitted_player_attack_targets(),"forced_deck_attacks":_forced_deck_remaining(),"spawn_slots":_peep_spawn_slots(),"effect_pending":_pending_manual_passives(),"starting_pending":phase=="priority" and _after_stack=="starting_continue","starting_options":_starting_choices[0].cards.duplicate() if phase=="starting_item" and not _starting_choices.is_empty() and seat==actor() else [],"phase":phase,"current":current,"actor":actor(),"round_no":round_no,"dlc":dlc,"hand":hands[seat].duplicate() if seat >= 0 and seat < players.size() else [],"monsters":visible_monsters,"shop":shop.duplicate(),"shop_price":_purchase_cost(seat if seat >= 0 else current,0),"discard_treasure":int(discards.treasure.back()) if seat >= 0 and _item_count(seat,473)>0 and not discards.treasure.is_empty() else -1,"room":room,"bonuses":bonuses.duplicate(),"bonus_targets":bonus_targets,"bonus_progress":bonus_progress.duplicate(),"claimed":claimed.duplicate(),"stack":visible_stack,"resolving":public_effect,"battle":battle,"roll_no":roll_no,"last_roll":last_roll,"log":log.duplicate(),"winner":winner,"free_loot":free_loot,"bonus_loot_plays":int(_bonus_loot_plays[seat]) if seat >= 0 else 0,"gold_deck_attacks":_gold_deck_attacks,"bought":bought,"attacked":attacked,"counts":counts,"bank":bank,"reward_boost":reward_boost,"revision":revision,"peek":peek.duplicate(true) if int(peek.get("owner",-2)) == seat or bool(peek.get("public", false)) else {},"death_actor":int(_death_queue[0]) if not _death_queue.is_empty() else -1,"discard_limit":_discard_limit,"off_turn_left":off_turn_left,"response_window":_response_window28(),"played":played.duplicate(true),"fx28":fx28.duplicate(true),"loot_moment28":_loot_moment28(seat),"strict_responses28":strict_responses28,"blind_price28":_purchase_cost(seat if seat >= 0 else current, -1),"response_left28":(_response_window28() - _quiet) if phase == "priority" and not stack.is_empty() else -1.0,"discard_feed28":discard_feed28.duplicate(true)}
+	return {"roll_without_other_actions": preload("res://games/four_souls/logic/fs_legal.gd").roll_without_other_actions(self, seat), "native_room_actions24": _native_room_actions24(seat), "tap_price24": _tap_price24(), "extra_rooms20": _extra_rooms20.duplicate(true), "loot_top20": int(decks.loot.back()) if not decks.loot.is_empty() and _top_loot20.values().has(turn_serial) else -1, "can_top_loot20": int(_top_loot20.get(seat, -1)) == turn_serial, "die_sides20": 8 if _d8_next20.has(actor()) else 6, "last_die_sides20": _last_die_sides20, "last_raw_die20": _last_raw_die20, "battle_roller15": _battle_roller15(), "shadow_item15": items[seat].find(_shadow_penalty15[seat].item) if _shadow_penalty15.has(seat) and not _shadow_penalty15[seat].item.is_empty() else -1, "spider_tokens15": int(_spider_tokens15.get(seat, 0)), "familiar_targets15": _familiar_targets15(), "player_attack_defense16": _player_defenses17(), "blind_only17": attack_left > 0 and attack_left <= _optional_blind17, "forced_monster_slots": _forced_slots14(), "unlimited_loot":bool(_unlimited_loot13.get(seat,false)),"card_choice_previews":card_choice_previews,"card_choices":card_choices,"card_automated":_card_automation_active(),"card_roll_wait":str(_card_step().get("op", "")) == "auto_roll" and not resolving.has("automation_roll"),"players":public,"seat":seat,"discard_choice":discard_choice.duplicate(true),"battle_player":battle_player,"required_player_attacks":_required_player_remaining(),"player_attack_targets":_permitted_player_attack_targets(),"forced_deck_attacks":_forced_deck_remaining(),"spawn_slots":_peep_spawn_slots(),"effect_pending":_pending_manual_passives(),"starting_pending":phase=="priority" and _after_stack=="starting_continue","character_offers":_character_offers[seat].duplicate(true) if phase == "starting_character" and seat == actor() else [],"starting_options":_starting_choices[0].cards.duplicate() if phase=="starting_item" and not _starting_choices.is_empty() and seat==actor() else [],"phase":phase,"current":current,"actor":actor(),"round_no":round_no,"dlc":dlc,"hand":hands[seat].duplicate() if seat >= 0 and seat < players.size() else [],"monsters":visible_monsters,"shop":shop.duplicate(),"shop_counters":_shop_counters20.duplicate(),"shop_price":_purchase_cost(seat if seat >= 0 else current,0),"discard_treasure":int(discards.treasure.back()) if seat >= 0 and _item_count(seat,473)>0 and not discards.treasure.is_empty() else -1,"room":room,"bonuses":bonuses.duplicate(),"bonus_targets":bonus_targets,"bonus_progress":bonus_progress.duplicate(),"claimed":claimed.duplicate(),"stack":visible_stack,"resolving":public_effect,"battle":battle,"roll_no":roll_no,"last_roll":last_roll,"log":log.duplicate(),"log_cards":log_cards.duplicate(),"action_history":action_history.duplicate(true),"winner":winner,"free_loot":free_loot,"bonus_loot_plays":int(_bonus_loot_plays[seat]) if seat >= 0 else 0,"gold_deck_attacks":_gold_deck_attacks,"bought":bought,"attacked":attacked,"counts":counts,"bank":bank,"reward_boost":reward_boost,"revision":revision,"peek":peek.duplicate(true) if int(peek.get("owner",-2)) == seat or bool(peek.get("public", false)) else {},"death_actor":int(_death_queue[0]) if not _death_queue.is_empty() else -1,"discard_limit":_discard_limit,"off_turn_left":off_turn_left,"response_window":_response_window28(),"played":played.duplicate(true),"fx28":fx28.duplicate(true),"loot_moment28":_loot_moment28(seat),"strict_responses28":strict_responses28,"blind_price28":_purchase_cost(seat if seat >= 0 else current, -1),"response_left28":(_response_window28() - _quiet) if phase == "priority" and not stack.is_empty() and _after_stack != "starting_continue" and _response_available() else -1.0,"discard_feed28":discard_feed28.duplicate(true),"live_discards":live_discards.duplicate(true)}

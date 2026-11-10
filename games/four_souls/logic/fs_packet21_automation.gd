@@ -8,7 +8,7 @@ func _card_choices() -> Array:
 	match category:
 		"shield_monsters21", "shield_targets21":
 			if category == "shield_targets21":
-				for seat in players.size():
+				for seat in active_seats():
 					if not dead[seat]:
 						out.append({"label": name_of(seat), "arg": {"op": str(step.op), "zone": "player", "target": seat}})
 			for slot in monsters.size():
@@ -18,7 +18,7 @@ func _card_choices() -> Array:
 			for amount in range(1, int(resolving.source.counters) + 1):
 				out.append({"label": "Сбросить %d жетонов → %s" % [amount, "1 урона монстру" if amount >= 4 else "1 добыча"], "arg": {"op": "bag_spend21", "amount": amount}})
 		"battery_items21":
-			for seat in players.size():
+			for seat in active_seats():
 				for index in items[seat].size():
 					var source: Dictionary = items[seat][index]
 					if bool(source.tapped) and int(source.id) != 44 and not is_same(source, resolving.source):
@@ -43,7 +43,7 @@ func _card_choices() -> Array:
 			out.append({"label": "Взять добычу и отдать карту", "arg": {"op": "offer_loot_accept21"}})
 		"counter_items21":
 			out.append({"label": "Получить 1¢", "arg": {"op": "coins", "target": owner, "amount": 1}})
-			for seat in players.size():
+			for seat in active_seats():
 				for index in items[seat].size():
 					var source: Dictionary = items[seat][index]
 					if not bool(source.eternal):

@@ -3,7 +3,7 @@ extends "res://games/four_souls/logic/fs_wildcard20_automation.gd"
 func _card_choices() -> Array:
 	var out := super._card_choices()
 	if str(_card_step().get("targets", "")) == "room_items20":
-		for owner in players.size():
+		for owner in active_seats():
 			for index in items[owner].size():
 				var source: Dictionary = items[owner][index]
 				if not bool(source.eternal) and not _protected20(owner, int(resolving.owner)):
@@ -32,7 +32,7 @@ func _apply_card_step(step: Dictionary) -> void:
 		_refresh_passive_stats()
 		for owner in players.size():
 			hp[owner] = mini(int(max_hp[owner]), int(saved_hp[owner]))
-		_note("Новая комната: " + FSData.title(int(source.id)))
+		_note("Новая комната: " + FSData.title(int(source.id)), int(source.id))
 	elif str(step.op) == "destroy_self" and bool(source.get("room_item20", false)):
 		if not _destroy_room20(source, int(resolving.owner)):
 			resolving.automation_step = resolving.automation_steps.size()

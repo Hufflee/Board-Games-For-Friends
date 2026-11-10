@@ -331,7 +331,7 @@ func _refresh_controls() -> void:
 	var acting := _can_act()
 	match str(view.phase):
 		"roll":
-			message = "Потяните кубик и отпустите"
+			message = TossDie.roll_hint()
 			if acting and view.built[int(view.current)].has("station"):
 				for n in [1, 2]:
 					var button := Style.button("%d кубик%s" % [n, "" if n == 1 else "а"], 14)
@@ -445,9 +445,14 @@ func _refresh_choice() -> void:
 func _sync_dice() -> void:
 	var waiting: bool = view.phase in ["roll", "trawler"]
 	var n: int = 2 if view.phase == "trawler" else dice_count
+	var mandatory: bool = _can_act() and (view.phase == "trawler" or (
+		view.phase == "roll" and not view.built[int(view.current)].has("station")
+	))
 	var serial := int(view.throw_serial)
 	for i in dice_nodes.size():
 		var die: TossDie = dice_nodes[i]
+		var next_companion := i == 1 and (dice_nodes[0] as TossDie).is_busy() and not die.is_busy()
+		die.set_reel_prompt(mandatory and i < n and not next_companion, (i - (n - 1) * 0.5) * 1.12)
 		die.visible = ((i < n if waiting else i < view.dice.size()) or die.is_busy()) and view.phase != "game_over"
 		var pending := waiting and i == 0 and local_throw_serial == serial + 1 and die.state == "flying"
 		die.draggable = waiting and i == 0 and _can_act() and not pending
@@ -469,7 +474,7 @@ func _sync_dice() -> void:
 				# Жест уже запустил кубик из точки отпускания. От хоста нужна только грань.
 				die.set_result(int(view.dice[i]))
 			else:
-				die.throw(velocity.rotated(0.4 * i), int(view.dice[i]))
+				die.throw(velocity.rotated(0.4 * i), int(view.dice[i]), local)
 
 func _dice_finished() -> void:
 	if not view.is_empty():
@@ -478,10 +483,15 @@ func _dice_finished() -> void:
 ## Хост не прислал грань (бросок отклонён/потерян) — снова разрешаем бросить.
 func _dice_stalled() -> void:
 	local_throw_serial = -1
+	var companion: TossDie = dice_nodes[1]
+	if companion._reel != null and not companion.is_busy():
+		companion._reel.release_local_throw()
 
 func _thrown(velocity: Vector2) -> void:
 	local_throw_serial = int(view.throw_serial) + 1
 	local_throw_velocity = velocity
+	if dice_count == 2 or view.phase == "trawler":
+		(dice_nodes[1] as TossDie).hold_reel_throw()
 	_send("roll", {"count": dice_count})
 
 func _hover(card: Control, on: bool) -> void:

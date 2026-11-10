@@ -902,6 +902,7 @@ func _components(tools: VBoxContainer, center: VBoxContainer, properties: VBoxCo
 		center.add_child(Style.label("В игре нажмите «Бросить», потяните кубик и отпустите. Результат выбирает хост."))
 		_dice_look(properties, center, entry, path)
 		var die := TossDie.new()
+		die.use_player_style = false
 		var reader = load("res://games/custom/ui/cg_assets.gd").new()
 		reader.configure_document(document.data)
 		Style.style_die(die._die, entry, reader, Net.color_of(0))

@@ -8,7 +8,7 @@ func _card_choices() -> Array:
 		return out
 	match str(step.get("targets", "")):
 		"gift_players":
-			for seat in players.size():
+			for seat in active_seats():
 				if seat not in resolving.get("gift_players", []):
 					out.append({"label": "Добавить: " + name_of(seat), "arg": {"op": "gift_player", "target": seat}})
 		"gift_cards":
@@ -23,7 +23,7 @@ func _card_choices() -> Array:
 				if int(shop[index]) >= 0:
 					out.append({"label": FSData.title(int(shop[index])), "arg": {"op": "discard_shop", "item": index}})
 		"tapped_items":
-			for seat in players.size():
+			for seat in active_seats():
 				for index in items[seat].size():
 					if bool(items[seat][index].tapped):
 						out.append({"label": name_of(seat) + " · " + FSData.title(int(items[seat][index].id)), "arg": {"op": "gish_lock", "target": seat, "item": index}})

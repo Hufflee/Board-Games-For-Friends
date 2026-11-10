@@ -83,7 +83,7 @@ func run(t: Check) -> void:
 					else: t.equal(s.g.hp[0], 0, "Три неблагоприятных исхода довели до смерти")
 				551:
 					if face in [3, 4]: t.equal(s.g._monster_evasion(s.g.monsters[1]), 2, "551уменьшаетзащиту атакуемого монстра")
-					if face >= 5: t.equal(s.g._monster_attack(s.g.monsters[1]), 3, "551прибавляет2атаки атакуемому монстру")
+					if face >= 5: t.equal(s.g._monster_evasion(s.g.monsters[1]), 5, "551 прибавляет 2 защиты атакуемому монстру")
 					if face >= 3: t.equal(s.g._monster_attack(s.g.monsters[0]), 1, "Неатакуемый сейчас монстр не получает чужой бонус")
 				580:
 					t.equal(s.zone_of(91 if face <= 2 or face >= 5 else 40), "discard:treasure", "580уничтожил правильный старый предмет")

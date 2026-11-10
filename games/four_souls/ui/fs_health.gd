@@ -14,8 +14,9 @@ func _init(hp: int = 0, max_hp: int = 0) -> void:
 
 
 func _draw() -> void:
-	var slots := mini(maximum, 10)
-	var step := minf(16.0, maxf(10.0, (size.x - 40.0) / maxf(1.0, slots)))
+	var slots := mini(mini(maximum, 10), maxi(1, int((size.x - 36.0) / 13.0)))
+	var filled := ceili(float(current * slots) / maxi(1, maximum))
+	var step := minf(16.0, (size.x - 36.0) / maxf(1.0, slots))
 	for i in slots:
 		var points := PackedVector2Array(
 			[
@@ -31,7 +32,7 @@ func _draw() -> void:
 		)
 		for k in points.size():
 			points[k] += Vector2(i * step, 1)
-		var color := Color("d75e58") if i < current else Color(FSStyle.ink(), 0.15)
+		var color := Color("d75e58") if i < filled else Color(FSStyle.ink(), 0.15)
 		draw_colored_polygon(points, color)
 		draw_polyline(points + PackedVector2Array([points[0]]), Color(FSStyle.ink(), 0.45), 1, true)
 	var label := "%d/%d" % [current, maximum]

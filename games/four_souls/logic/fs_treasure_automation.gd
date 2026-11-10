@@ -6,7 +6,7 @@ func _card_choices() -> Array:
 	if str(_card_step().get("targets", "")) == "brimstone_targets":
 		for slot in monsters.size():
 			out.append({"label": FSData.title(int(monsters[slot].id)), "arg": {"op": "monster_damage", "item": slot, "amount": 1}})
-		for seat in players.size():
+		for seat in active_seats():
 			if seat != int(resolving.owner):
 				out.append({"label": name_of(seat), "arg": {"op": "damage", "target": seat, "amount": 1}})
 	return out

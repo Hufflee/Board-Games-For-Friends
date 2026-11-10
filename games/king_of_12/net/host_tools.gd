@@ -208,12 +208,15 @@ func info() -> Dictionary:
 	var players: Array = []
 	var gp: Array = net._gp() if g != null else []
 	for seat: int in gp.size():
+		if net.fours != null and net.fours.is_out(seat):
+			continue
 		var peer: int = net.seat_peers[seat] if seat < net.seat_peers.size() else 0
 		players.append({
 			"seat": seat,
 			"name": str(gp[seat].get("name", "Игрок %d" % (seat + 1))),
 			"peer": peer,
 			"remote": peer > 1,
+			"remove_character": net.fours != null and peer != 1 and net.fours.can_remove_player(seat),
 			"bot": bool(gp[seat].get("bot", false)),
 			"stats": g.call("host_stats", seat) if g != null and g.has_method("host_stats") else [],
 			"cards": g != null and g.has_method("host_give_card"),
@@ -223,11 +226,11 @@ func info() -> Dictionary:
 	if net.cg != null: limit = int(net.cg.state.turn_seconds)
 	if net.khr != null: limit = int(net.khr.timer)
 	return {
-		"timer_supported": net.get("bc") == null and net.get("mk") == null and net.mind == null and net.fours == null and net.stillion == null and net.rsb == null,
+		"timer_supported": net.get("bc") == null and net.get("mk") == null and net.mind == null and net.stillion == null and net.rsb == null,
 		"undo": can_undo(),
 		"redo": can_redo(),
 		"timer_on": limit > 0,
-		"timer": limit if limit > 0 else int(net.settings.get("host_last_turn_time", 60)),
+		"timer": limit if limit > 0 else (20 if net.fours != null else int(net.settings.get("host_last_turn_time", 60))),
 		"theme": g != null and g.has_method("host_new_theme"),
 		"game_stats": g.call("host_game_stats") if g != null and g.has_method("host_game_stats") else [],
 		"players": players,
@@ -242,7 +245,9 @@ func set_timer(on: bool, seconds: int) -> void:
 	net.settings["host_last_turn_time"] = seconds
 	net.settings[_timer_key()] = seconds if on else 0
 	var g: Object = net._game_obj()
-	if g != null and "turn_time" in g:
+	if net.fours != null:
+		net.fours.set_turn_clock(float(seconds) if on else 0.0)
+	elif g != null and "turn_time" in g:
 		g.set("turn_time", float(seconds) if on else 0.0)  # покер считает время хода сам
 		if "time_left" in g:
 			g.set("time_left", float(seconds) if on else 0.0)
@@ -260,6 +265,7 @@ func set_timer(on: bool, seconds: int) -> void:
 
 ## Things in Rings хранит время хода отдельно (tr_timer), остальные — общий turn_time.
 func _timer_key() -> String:
+	if net.fours != null: return "fs_timer"
 	if net.tir != null: return "tr_timer"
 	if net.phantom != null: return "pi_time"
 	if net.wslam != null: return "ws_time"
@@ -391,6 +397,19 @@ func take_card(seat: int) -> bool:
 	net._system_chat("Хост забрал карту: %s." % _name(seat))
 	net._push_state()
 	return true
+
+
+func remove_four_souls_player(seat: int) -> void:
+	if not net.is_host() or net.fours == null or seat < 0 or seat >= net.seat_peers.size() or net.seat_peers[seat] == 1:
+		return
+	if not net.fours.remove_player(seat):
+		return
+	var peer: int = net.seat_peers[seat]
+	net.seat_peers[seat] = 0
+	net.disconnected.erase(seat)
+	if peer > 1:
+		net.kick_peer(peer)
+	net._push_state()
 
 
 func kick(seat: int) -> void:

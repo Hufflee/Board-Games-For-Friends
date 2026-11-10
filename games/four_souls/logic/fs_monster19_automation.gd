@@ -8,14 +8,23 @@ func _card_choices() -> Array:
 	var owner: int = int(resolving.owner)
 	match str(step.get("targets", "")):
 		"other_hands19":
-			for seat in players.size():
+			for seat in active_seats():
 				if seat != owner and not hands[seat].is_empty():
 					out.append({"label": name_of(seat), "arg": {"op": "random_loot19", "target": seat}})
 		"bloat_slots19":
-			for slot in mini(maxi(monster_slots, monsters.size()), monsters.size() + 1):
-				if slot != battle and (slot >= monsters.size() or int(monsters[slot].id) not in [272, 279, 299, 312, 913, 914]):
-					out.append({"label": "Слот монстров %d" % (slot + 1), "arg": {"op": "bloat_place19", "item": slot}})
+			for slot: int in _bloat_slots19():
+				out.append({"label": "Слот монстров %d" % (slot + 1), "arg": {"op": "bloat_place19", "item": slot}})
 	return out
+
+func _bloat_slots19() -> Array:
+	var slots := []
+	for slot in mini(maxi(monster_slots, monsters.size()), monsters.size() + 1):
+		if slot == battle:
+			continue
+		if slot >= monsters.size() or (int(monsters[slot].hp) > 0 and int(monsters[slot].id) not in [272, 279, 299, 312, 913, 914] and not _untargetable(int(monsters[slot].id))):
+			slots.append(slot)
+	return slots
+
 
 func _apply_card_step(step: Dictionary) -> void:
 	var owner: int = int(resolving.owner)
@@ -43,7 +52,7 @@ func _apply_card_step(step: Dictionary) -> void:
 				if FSData.card(id).get("key", "") == "bloat":
 					found = id
 					break
-			if found >= 0:
+			if found >= 0 and not _bloat_slots19().is_empty():
 				resolving["bloat_id19"] = found
 				_insert_card_steps([{"op": "bloat_place19", "targets": "bloat_slots19"}])
 			else:

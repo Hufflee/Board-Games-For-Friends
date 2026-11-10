@@ -14,7 +14,7 @@ func _card_choices() -> Array:
 				if int(shop[index]) >= 0:
 					out.append({"label": FSData.title(int(shop[index])), "arg": {"op": "berkano_take", "item": index}})
 		"all_destroyable":
-			for seat in players.size():
+			for seat in active_seats():
 				for index in items[seat].size():
 					if not bool(items[seat][index].eternal):
 						out.append({"label": name_of(seat) + " · " + FSData.title(int(items[seat][index].id)), "arg": {"op": op, "target": seat, "item": index, "shop": false}})
@@ -51,11 +51,11 @@ func _card_choices() -> Array:
 				out.append({"label": "Уничтожить проклятие", "arg": {"op": "dagaz_curse"}})
 			out.append({"label": "Предотвратить следующий 1 урон игроку", "arg": {"op": "dagaz_shield"}})
 		"all_curses":
-			for seat in players.size():
+			for seat in active_seats():
 				for id in curses[seat]:
 					out.append({"label": name_of(seat) + " · " + FSData.title(int(id)), "arg": {"op": "destroy_curse", "target": seat, "card": int(id)}})
 		"curse_recipients":
-			for seat in players.size():
+			for seat in active_seats():
 				if seat != int(resolving.curse_from):
 					out.append({"label": name_of(seat), "arg": {"op": "transfer_curse", "target": seat}})
 	if str(step.get("targets", "")) == "own_destroy" and op == "reroll_item":
@@ -176,7 +176,7 @@ func _rune_result_steps(id: int, face: int) -> Array:
 		521:
 			return [CardAutomation.op("temporary_attack")] if face <= 2 else [CardAutomation.op("self_health")] if face <= 4 else [CardAutomation.op("damage")]
 		551:
-			return [{"op": "recharge_all", "target": int(resolving.owner)}] if face <= 2 else [CardAutomation.op("self_monster_dc", -1)] if face <= 4 else [CardAutomation.op("self_monster_attack", 2)]
+			return [{"op": "recharge_all", "target": int(resolving.owner)}] if face <= 2 else [CardAutomation.op("self_monster_dc", -1)] if face <= 4 else [CardAutomation.op("self_monster_dc", 2)]
 		579:
 			return [{"op": "cancel_selected", "targets": "cancel_loot"}] if face <= 2 else [CardAutomation.op("discard_other_hands")] if face <= 4 else []
 		580:

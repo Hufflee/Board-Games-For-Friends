@@ -16,13 +16,13 @@ func _card_choices() -> Array:
 				if not is_same(monsters[slot], resolving.source) and not monsters[slot].has("virtual_zone15"):
 					out.append({"label": FSData.title(int(monsters[slot].id)), "arg": {"op": str(step.op), "item": slot}})
 		"living_players16", "kill_three16":
-			for seat in players.size():
+			for seat in active_seats():
 				if not dead[seat] and int(hp[seat]) > 0 and (category != "kill_three16" or seat != current):
 					out.append({"label": name_of(seat), "arg": {"op": str(step.op), "target": seat}})
 			if category == "kill_three16":
 				out.append({"label": "Закончить выбор", "arg": {"op": "stop_kills16"}})
 		"split_damage16":
-			for seat in players.size():
+			for seat in active_seats():
 				if not dead[seat] and int(hp[seat]) > 0:
 					out.append({"label": name_of(seat), "arg": {"op": "split_damage16", "target": seat, "zone": "player"}})
 			for slot in monsters.size():
@@ -437,6 +437,7 @@ func _intercept_effect_damage16(a: Dictionary) -> bool:
 		if slot >= 0 and slot < monsters.size():
 			var pending := {"kind": "damage16", "owner": _damage_owner18(), "zone": "monster", "card": int(monsters[slot].id), "damage": int(a.get("amount", 1)), "arg": a}
 			if _intercept_damage16(pending):
+				pending.arg["history_seq"] = int(resolving.get("history_seq", 0))
 				return true
 	return false
 

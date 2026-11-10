@@ -9,7 +9,7 @@ func _card_choices() -> Array:
 				out.append({"label": "Под %d верхних карт" % depth, "arg": {"op": "guardian_place24", "amount": depth}})
 		"vote_cast24", "vote_guess24":
 			var secret: bool = int(resolving.card) == 748
-			for seat in players.size():
+			for seat in active_seats():
 				if (secret and seat != current) or (not secret and seat != _card_choice_owner()):
 					out.append({"label": name_of(seat), "arg": {"op": category, "target": seat}})
 		"vote_tie24":
@@ -18,7 +18,7 @@ func _card_choices() -> Array:
 		"vote_soul24":
 			var owner := _card_choice_owner()
 			if not _room_has20(779) and not curses[owner].has(744):
-				for seat in players.size():
+				for seat in active_seats():
 					if seat == owner or _protected20(seat, owner):
 						continue
 					for index in soul_cards[seat].size():

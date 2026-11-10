@@ -20,7 +20,7 @@ func _card_choices() -> Array:
 					_append_numbers22(out, pending, id, "", -1, "монеты", amount)
 				elif CardAutomation.handles(pending):
 					_plan_numbers22(out, pending, id, "", _automation_plan22(pending))
-		for seat in players.size():
+		for seat in active_seats():
 			if _protected20(seat, owner):
 				continue
 			for source: Dictionary in items[seat]:

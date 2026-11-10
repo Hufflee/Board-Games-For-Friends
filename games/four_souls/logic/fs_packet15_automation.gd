@@ -10,7 +10,7 @@ func _card_choices() -> Array:
 	var category: String = str(step.get("targets", ""))
 	match category:
 		"leaders15":
-			for seat in players.size():
+			for seat in active_seats():
 				if int(souls[seat]) == int(souls.max()):
 					out.append({"label": name_of(seat), "arg": {"op": "winner15", "target": seat}})
 		"faces15", "unique_faces15", "neighbor_faces15":
@@ -19,7 +19,7 @@ func _card_choices() -> Array:
 					continue
 				out.append({"label": str(face), "arg": {"op": str(step.op), "face": face}})
 		"penalty_items15", "eternal_items15", "other_player_items15":
-			for seat in players.size():
+			for seat in active_seats():
 				if category == "penalty_items15" and seat != int(resolving.automation_data.seat):
 					continue
 				if category == "other_player_items15" and seat == owner:
@@ -34,7 +34,7 @@ func _card_choices() -> Array:
 					if int(shop[index]) >= 0:
 						out.append({"label": "Магазин · " + FSData.title(int(shop[index])), "arg": {"op": "eternal_shop15", "item": index}})
 		"kill_targets15":
-			for seat in players.size():
+			for seat in active_seats():
 				if int(resolving.card) != 257 and not dead[seat] and int(hp[seat]) > 0:
 					out.append({"label": name_of(seat), "arg": {"op": "kill15", "target": seat, "zone": "player"}})
 			for slot in monsters.size():
@@ -287,7 +287,7 @@ func _apply_card_step(step: Dictionary) -> void:
 			for id in others:
 				decks.monster.push_front(id)
 			if found >= 0:
-				_note("Проклятие открыто: " + FSData.title(found))
+				_note("Проклятие открыто: " + FSData.title(found), found)
 				curses[current].append(found)
 		"item_health15":
 			var item: Dictionary = items[int(step.target)][int(step.item)]

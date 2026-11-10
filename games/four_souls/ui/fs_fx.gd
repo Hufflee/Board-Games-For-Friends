@@ -192,7 +192,7 @@ class Marker extends Control:
 
 ## Разыгранная карта: крупно в центре экрана, затем летит и ложится на стопку сброса.
 ## from_rect пустой — карта появляется в центре; to_rect пустой — гаснет на месте (активация предмета).
-static func fly_card(layer: Control, texture: Texture2D, from_rect: Rect2, to_rect: Rect2, hold: float = 1.4) -> void:  # 07.11: вдвое дольше в центре
+static func fly_card(layer: Control, texture: Texture2D, from_rect: Rect2, to_rect: Rect2, hold: float = 1.4, caption: String = "") -> void:  # 07.11: вдвое дольше в центре
 	if not is_instance_valid(layer) or texture == null:
 		return
 	var image := TextureRect.new()
@@ -207,6 +207,15 @@ static func fly_card(layer: Control, texture: Texture2D, from_rect: Rect2, to_re
 	var origin := layer.get_global_rect().position
 	var big := Vector2(220, 300)
 	var center := Rect2(layer.size * 0.5 - big * 0.5, big)
+	if not caption.is_empty():
+		var label := FSStyle.label(caption, FSStyle.BODY, true)
+		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		label.add_theme_stylebox_override("normal", FSStyle.box(FSStyle.COAL))
+		image.add_child(label)
+		label.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+		label.offset_top = -32
+		label.offset_bottom = -4
 	var tween := image.create_tween()
 	if from_rect.size == Vector2.ZERO:
 		image.position = center.position + big * 0.1

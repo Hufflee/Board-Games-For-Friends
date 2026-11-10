@@ -19,7 +19,7 @@ func _card_choices() -> Array:
 			if not hands[owner].is_empty():
 				out.append({"label": "Сбросить добычу и взять 1 добычу", "arg": {"op": "blue_modes25", "mode": "cycle"}})
 		"blue_others25":
-			for seat in players.size():
+			for seat in active_seats():
 				if seat != owner and int(coins[seat]) > 0 and not _protected20(seat, owner):
 					out.append({"label": name_of(seat), "arg": {"op": "blue_steal25", "target": seat}})
 		"incubus_modes25":

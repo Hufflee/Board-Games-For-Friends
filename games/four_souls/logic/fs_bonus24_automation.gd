@@ -25,7 +25,7 @@ func _card_choices() -> Array:
 	var id: int = int(resolving.card)
 	var values: Array = souls if id == 694 else items.map(func(inventory): return inventory.size())
 	var least: int = int(values.min())
-	for seat in players.size():
+	for seat in active_seats():
 		if int(values[seat]) == least:
 			out.append({"label": name_of(seat), "arg": {"op": "bonus_seat24", "target": seat}})
 	return out
@@ -39,7 +39,7 @@ func _apply_card_step(step: Dictionary) -> void:
 	if id in bonuses and id not in claimed and not _room_has20(779) and not curses[target].has(744):
 		claimed.append(id)
 		_gain_soul_card(target, {"id": id, "value": 1})
-		_note(name_of(target) + " получает " + FSData.title(id))
+		_note(name_of(target) + " получает " + FSData.title(id), id)
 
 func _treasure12_passives(event: String, data: Dictionary) -> void:
 	super._treasure12_passives(event, data)

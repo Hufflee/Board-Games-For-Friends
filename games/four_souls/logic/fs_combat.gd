@@ -56,6 +56,9 @@ func _finish_player_damage(seat: int, amount: int, context: Dictionary) -> void:
 	damage_shields[seat] -= blocked
 	var before_hit: int = int(hp[seat])
 	hp[seat] = maxi(0, int(hp[seat]) - (maxi(0, amount) - blocked))
+	if int(hp[seat]) != before_hit:
+		_action_result({"kind": "damage", "seat": seat, "amount": before_hit - int(hp[seat])},
+			int(context.get("attacker", current)), int(context.get("history_seq", 0)))
 	if before_hit > 0 and int(hp[seat]) <= 0:
 		# FAQ: предотвращённая смерть возвращает здоровье, какое было до смертельного урона.
 		_pre_lethal_hp[seat] = before_hit
@@ -146,6 +149,8 @@ func _apply_combat(effect: Dictionary) -> void:
 		var before_hp: int = monster.hp
 		monster.hp = int(monster.hp) - int(effect.damage)
 		if int(effect.damage) > 0:
+			_action_record("damage", int(effect.owner), -1,
+				{"kind": "damage", "card": int(monster.id), "amount": int(effect.damage)})
 			if monster.has("virtual_zone15"):
 				_emit_passives("object_damage20", {"seat": int(effect.owner), "card": int(monster.id), "amount": int(effect.damage), "zone": str(monster.virtual_zone15), "combat": true, "value": value})
 			else:
@@ -320,7 +325,7 @@ func _finish_monster_reward(effect: Dictionary) -> void:
 			break
 	if slot < 0:
 		# Повторный cleanup не должен заново класть уже снятую карту в сброс/колоду.
-		_note("Награда: карта уже снята со стола — " + FSData.title(int(effect.card)))
+		_note("Награда: карта уже снята со стола — " + FSData.title(int(effect.card)), int(effect.card))
 		return
 	if not bool(effect.get("kept_as_soul", false)) and not bool(effect.get("kept_as_item", false)):
 		if bool(dying.get("ambush_return20", false)):
@@ -373,7 +378,7 @@ func _start_attack(effect: Dictionary) -> void:
 			var over: int = clampi(int(effect.get("over",0)),0,monsters.size()-1)
 			var covered := _cover_monster20(monsters[over])
 			if not covered.is_empty():
-				fresh["under"] = covered.duplicate(true)
+				fresh["under"] = covered
 			monsters[over] = fresh
 			slot = over
 	if slot < 0 or slot >= monsters.size(): _continue_stack(); return
@@ -399,12 +404,15 @@ func _complete_purchase(effect: Dictionary) -> void:
 				_shop_buys_turn += 1
 			coins[seat] -= price
 			bank += price
+			var outer_history := _history_scope
+			_history_scope = int(effect.get("history_seq", 0))
 			_gain_item(seat, id)
+			_history_scope = outer_history
 			if slot >= 0: shop[slot] = _draw_shop_slot24()
 			if _item_count(seat, 76) > 0:
 				_queue_passive(seat, 76, {}, [PassiveRules.operation("coins", _item_count(seat, 76))])
 			_emit_passives("purchase", {"seat": seat, "slot": slot, "cost": price})
-			_note(name_of(seat) + " покупает " + FSData.title(id))
+			_note(name_of(seat) + " покупает " + FSData.title(id), id)
 	_continue_stack()
 func _fill_monster(initial: bool = false, slot: int = -1) -> void:
 	var skipped := []

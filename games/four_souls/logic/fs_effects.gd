@@ -69,6 +69,7 @@ func _effect(a: Dictionary) -> bool:
 			if chosen.eternal and not sack_ability:
 				return false
 			items[target].append(_remove_item(owner, index))
+			_action_result({"kind": "gain_item", "seat": target, "card": int(chosen.id)}, owner)
 		"peek_hand", "peek_hands":
 			var revealed := []
 			for seat in players.size():
@@ -77,10 +78,16 @@ func _effect(a: Dictionary) -> bool:
 			peek = {"owner": int(resolving.owner), "hands": revealed}
 		"prevent_damage":
 			damage_shields[target] += maxi(0, amount)
+			if amount > 0:
+				_action_result({"kind": "shield", "seat": target, "amount": amount}, int(resolving.owner))
 		"coins": _gain_coins(target,amount)
 		"loot": _draw_loot(target,clampi(amount,0,20))
 		"damage": _damage_player(target, amount, {"attacker": int(resolving.owner)} if not _card_automation_enabled() else {"monster": int(resolving.card)} if _damage_owner18() < 0 else {"attacker": _damage_owner18()})
-		"heal": hp[target] = mini(int(max_hp[target]),int(hp[target])+maxi(0,amount))
+		"heal":
+			var before := int(hp[target])
+			hp[target] = mini(int(max_hp[target]), before + maxi(0, amount))
+			if int(hp[target]) > before:
+				_action_result({"kind": "heal", "seat": target, "amount": int(hp[target]) - before}, int(resolving.owner))
 		"souls":
 			# Душа — всегда карта: +души только забирают карту награды, −души — «Уничтожить карту души».
 			if amount < 0:
@@ -108,7 +115,7 @@ func _effect(a: Dictionary) -> bool:
 			var pile: String = {"monster": "monster", "loot": "loot", "treasure": "treasure"}.get(str(FSData.card(id).get("kind", "")), "")
 			if not pile.is_empty():
 				discards[pile].append(id)
-			_note("Уничтожена душа: %s · %s" % [name_of(target), FSData.title(id)])
+			_note("Уничтожена душа: %s · %s" % [name_of(target), FSData.title(id)], id)
 		"steal_soul":
 			var i: int = int(a.get("item",-1))
 			if i < 0 or i >= soul_cards[target].size() or target == int(resolving.owner): return false
@@ -271,7 +278,7 @@ func _effect(a: Dictionary) -> bool:
 			var id: int = shop[i]
 			shop[i] = _draw_shop_slot24()
 			_gain_item(target, id)
-			_note("%s забирает из магазина без покупки: %s" % [name_of(target), FSData.title(id)])
+			_note("%s забирает из магазина без покупки: %s" % [name_of(target), FSData.title(id)], id)
 		"discard_monster":
 			var i: int = int(a.get("item", -1))
 			if i < 0 or i >= monsters.size() or i == battle:
@@ -309,6 +316,8 @@ func _effect(a: Dictionary) -> bool:
 			monsters[i].hp = int(monsters[i].hp) - damage
 			monsters[i]["slayer"] = int(resolving.owner)
 			if damage > 0:
+				_action_result({"kind": "damage", "card": int(monsters[i].id), "amount": damage},
+					int(resolving.owner), int(a.get("history_seq", 0)))
 				_emit_passives("monster_damage", {"seat": _damage_owner18(), "card": int(monsters[i].id), "amount": damage, "physical_id20": int(monsters[i].get("physical_id20", monsters[i].id))})
 		_:
 			return false

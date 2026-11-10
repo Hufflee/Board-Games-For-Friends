@@ -13,7 +13,7 @@ func _card_choices() -> Array:
 		out = out.filter(func(choice): return str(choice.arg.op) == "skip_choice")
 		if category == "roller_items14" and not resolving.has("swap_item14"):
 			return out
-		for seat in players.size():
+		for seat in active_seats():
 			if category == "swap_own14" and seat != owner:
 				continue
 			if category == "roller_items14" and seat != int(data.get("seat", -1)):

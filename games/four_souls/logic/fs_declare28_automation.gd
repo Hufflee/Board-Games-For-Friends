@@ -66,7 +66,7 @@ func _begin_declare28(effect: Dictionary) -> void:
 	declare["loot_copy14"] = true  # объявление — не физический розыгрыш: карта в сброс не уходит
 	declare["automation_steps"] = [first.duplicate(true)]
 	declare["automation_step"] = 0
-	_note("%s объявляет цель: %s" % [name_of(int(effect.owner)), FSData.title(int(effect.card))])
+	_note("%s объявляет цель: %s" % [name_of(int(effect.owner)), FSData.title(int(effect.card))], int(effect.card))
 	_begin_resolving(declare)
 	_advance_card_automation()
 
@@ -135,7 +135,7 @@ func _apply_card_step(step: Dictionary) -> void:
 			elif is_same(resolving.get("declare_for28", {}), parent):
 				parent["canceled28"] = true
 			_resolving_base = mini(_resolving_base, stack.size())
-			_note("Отменено целиком: " + FSData.title(int(parent.card)))
+			_note("Отменено целиком: " + FSData.title(int(parent.card)), int(parent.card))
 			if int(resolving.card) == 470:
 				_damage_player(int(pending.owner), 2, {"attacker": int(resolving.owner)})
 			return

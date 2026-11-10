@@ -221,6 +221,15 @@ func _ready() -> void:
 	shift_hint.custom_minimum_size.x = 400
 	shift_hint.modulate.a = 0.75
 	gameplay.add_child(shift_hint)
+	var dice_row := K12UI.hbox(8)
+	dice_row.add_child(_label("Бросок кубика", K12UI.BODY))
+	var dice_style := OptionButton.new()
+	dice_style.add_item("Обычный кубик")
+	dice_style.add_item("Кубомёт")
+	dice_style.select(1 if Prefs.dice_style == "reel" else 0)
+	dice_style.item_selected.connect(func(index: int): Prefs.set_value("dice_style", "reel" if index == 1 else "classic"))
+	dice_row.add_child(dice_style)
+	gameplay.add_child(dice_row)
 	# качество графики (главное меню и 3D-кубики)
 	var gq := K12UI.hbox(8)
 	gq.add_child(_label("Качество графики:", K12UI.BODY))

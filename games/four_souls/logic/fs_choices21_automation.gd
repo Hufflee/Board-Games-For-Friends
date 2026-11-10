@@ -23,7 +23,7 @@ func _card_choices() -> Array:
 				if slot != battle and not source.has("virtual_zone15") and not bool(source.get("ambush_event20", false)):
 					out.append({"label": FSData.title(int(source.id)), "arg": {"op": "hold_monster21", "item": slot}})
 		"typed_counters21":
-			for seat in players.size():
+			for seat in active_seats():
 				for index in items[seat].size():
 					_append_counter_choices21(out, items[seat][index], "item", index, seat)
 			for slot in shop.size():

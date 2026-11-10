@@ -219,6 +219,7 @@ func _build_seats() -> void:
 			die.scale = Vector2.ONE * 0.8
 		var seat := s
 		die.thrown.connect(func(vel): _on_my_throw(seat, vel))
+		die.settled.connect(_update_dice)
 		_dice.append(die)
 		_seen_throw.append(0)
 		var plate := K12Plate.new(false)
@@ -261,7 +262,7 @@ func _update_dice() -> void:
 		var face: int = int(_v["faces"][s])
 		if th.has("id") and int(th["id"]) != _seen_throw[s]:
 			_seen_throw[s] = int(th["id"])
-			if die.state in ["dragging", "flying", "settling"]:
+			if die.receives_result():
 				die.set_result(face)
 			else:
 				var vel := Vector2(float(th.get("vx", 0.0)), float(th.get("vy", 0.0)))
@@ -275,6 +276,7 @@ func _update_dice() -> void:
 			die.show_face(face)
 		var my_roll: bool = (phase == "roll" and not rolled) or (phase == "oracle" and _v["pending"].get("seat", -1) == s)
 		die.draggable = my_roll and s == _me and die.state == "waiting"
+		die.set_reel_prompt(my_roll and s == _me and not Net.paused)
 		die.crossed = show_trick and trick["dice_cancelled"][s]
 		var chains: Array = trick.get("chains", [])
 		var chain: String = chains[s] if show_trick and s < chains.size() else ""
@@ -853,7 +855,7 @@ func _update_center() -> void:
 	match phase:
 		"roll":
 			if not _v["rolled"][_me]:
-				text = "Бросьте кубик: зажмите его левой кнопкой мыши, потяните и отпустите"
+				text = TossDie.roll_hint()
 			else:
 				text = "Ждём бросков: " + _names(func(s): return not _v["rolled"][s])
 		"select":
@@ -865,7 +867,7 @@ func _update_center() -> void:
 			text = "Чародей: выберите грань" if pend["seat"] == _me else "%s выбирает грань (Чародей)…" % _v["players"][pend["seat"]]["name"]
 		"oracle":
 			if pend["seat"] == _me:
-				text = "Оракул: перебросьте свой кубик — зажмите его мышью, потяните и отпустите"
+				text = "Оракул · %s" % TossDie.roll_hint()
 			else:
 				text = "%s перебрасывает кубик (Оракул)…" % _v["players"][pend["seat"]]["name"]
 		"pick_under":
@@ -1238,7 +1240,7 @@ func _show_history() -> void:
 # --- Обучение: подсказки ------------------------------------------------------------
 
 const HINTS := {
-	"roll": "Это ваш кубик. Зажмите его левой кнопкой мыши, потяните и отпустите — так вы бросите кубик. Выпавшее число — ваша сила в этом раунде: кубик не перебрасывается до конца раунда.",
+	"roll": "Выпавшее число — ваша сила в этом раунде. Кубик остаётся на этой грани до конца раунда.",
 	"select": "Выберите карту: перетащите её из руки на стол (или дважды кликните). Соперники видят только рубашку. Наведите мышь на карту, чтобы прочитать её эффект. Карты в руке можно переставлять.",
 	"trick_result": "Итог розыгрыша. Одинаковые карты отменились, остальные сработали. Победил кубик с наибольшим значением — 2 победных очка (ПО), второе место — 1 ПО. Равные значения отменяют друг друга. Нажмите «Далее».",
 	"sorcerer": "Сработал Чародей: его владелец поворачивает кубик на соседнюю грань.",
@@ -1261,7 +1263,10 @@ func _tutorial_hints() -> void:
 	var col := K12UI.vbox(8)
 	_hint_panel.add_child(col)
 	col.add_child(K12UI.label("Подсказка", K12UI.BODY, Color("5fb4ef")))
-	var l := K12UI.label(HINTS[phase], K12UI.CAP)
+	var hint: String = HINTS[phase]
+	if phase == "roll":
+		hint = TossDie.roll_hint() + ". " + hint
+	var l := K12UI.label(hint, K12UI.CAP)
 	l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	l.custom_minimum_size = Vector2(360, 0)
 	col.add_child(l)

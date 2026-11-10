@@ -10,10 +10,10 @@ func _card_choices() -> Array:
 	var chooser := _card_choice_owner()
 	match str(step.get("targets", "")):
 		"gift_players13":
-			for seat in players.size():
+			for seat in active_seats():
 				out.append({"label":name_of(seat), "arg":{"op":"admiration_target", "target":seat}})
 		"passive_items13", "vote_items13", "steal_players13", "cost_destroy13", "chosen_destroy13":
-			for seat in players.size():
+			for seat in active_seats():
 				if str(step.targets) == "steal_players13" and seat == owner:
 					continue
 				if str(step.targets) == "cost_destroy13" and seat != owner:
@@ -36,14 +36,14 @@ func _card_choices() -> Array:
 				out.append({"label":"Убить игрока или монстра" if mode == "kill" else "Уничтожить предмет или душу", "arg":{"op":"chaos_mode13", "mode":mode}})
 		"chaos_targets13":
 			if str(resolving.chaos_mode13) == "kill":
-				for seat in players.size():
+				for seat in active_seats():
 					if not dead[seat]:
 						out.append({"label":name_of(seat), "arg":{"op":"chaos_kill13", "target":seat}})
 				for slot in monsters.size():
 					if int(monsters[slot].hp)>0:
 						out.append({"label":FSData.title(int(monsters[slot].id)), "arg":{"op":"chaos_monster13", "item":slot}})
 			else:
-				for seat in players.size():
+				for seat in active_seats():
 					for index in items[seat].size():
 						if not bool(items[seat][index].eternal):
 							out.append({"label":FSData.title(int(items[seat][index].id)), "arg":{"op":"destroy", "target":seat, "item":index}})
@@ -62,10 +62,10 @@ func _card_choices() -> Array:
 				if FSData.card(int(id)).get("kind", "") == "monster":
 					out.append({"label":FSData.title(int(id)), "arg":{"op":"monster_top13", "card":int(id)}})
 		"shield_players13":
-			for seat in players.size():
+			for seat in active_seats():
 				out.append({"label":name_of(seat), "arg":{"op":"next_hit_shield", "zone":"player", "target":seat, "amount":2}})
 		"damage_caps13":
-			for seat in players.size():
+			for seat in active_seats():
 				out.append({"label":name_of(seat), "arg":{"op":"damage_cap13", "zone":"player", "target":seat}})
 			for monster: Dictionary in monsters:
 				out.append({"label":FSData.title(int(monster.id)), "arg":{"op":"damage_cap13", "zone":"monster", "target":int(monster.id)}})

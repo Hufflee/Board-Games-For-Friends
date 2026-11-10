@@ -10,7 +10,7 @@ func _card_choices() -> Array:
 		"accept17":
 			out.append({"label": "Применить", "arg": {"op": str(step.op), "target": int(resolving.owner), "amount": int(step.get("amount", 1))}})
 		"living_others17":
-			for seat in players.size():
+			for seat in active_seats():
 				if seat != current and not dead[seat] and int(hp[seat]) > 0:
 					out.append({"label": name_of(seat), "arg": {"op": str(step.op), "target": seat}})
 		"double_faces17":

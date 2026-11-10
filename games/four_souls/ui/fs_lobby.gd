@@ -35,6 +35,18 @@ func _rebuild() -> void:
 	var expanded := bool(data.settings.get("fs_dlc",false))
 	var toggle := CheckBox.new(); toggle.text = "DLC · расширенный набор и комнаты"; toggle.button_pressed = expanded; toggle.disabled = not Net.is_host()
 	toggle.toggled.connect(func(value): Net.set_setting("fs_dlc",value)); _body.add_child(toggle)
+	var timer := CheckBox.new()
+	timer.text = "Таймер хода · 20 секунд без действий"
+	timer.button_pressed = int(data.settings.get("fs_timer", 0)) > 0
+	timer.disabled = not Net.is_host()
+	timer.toggled.connect(func(value: bool): Net.set_setting("fs_timer", 20 if value else 0))
+	_body.add_child(timer)
+	var character_choice := CheckBox.new()
+	character_choice.text = "Выбор персонажа из двух"
+	character_choice.button_pressed = bool(data.settings.get("fs_character_choice", false))
+	character_choice.disabled = not Net.is_host()
+	character_choice.toggled.connect(func(value: bool): Net.set_setting("fs_character_choice", value))
+	_body.add_child(character_choice)
 	var text := FSStyle.label("Базовый набор повторяет состав третьего мода. DLC добавляет расширенные карты из второго. Все карты на русском.",FSStyle.CAP)
 	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; _body.add_child(text)
 	var info := FSStyle.label("Стол как в Tabletop Simulator: колоды, ресурсы и бой ведёт игра, сложные эффекты карт выполняют игроки через панель эффекта. Ботов нет.",FSStyle.CAP)

@@ -5,7 +5,7 @@ func _card_choices() -> Array:
 	var step := _card_step()
 	if str(step.get("targets", "")) == "forced_items20":
 		var owner: int = int(resolving.owner)
-		for seat in players.size():
+		for seat in active_seats():
 			if seat == owner:
 				continue
 			for index in items[seat].size():
@@ -33,7 +33,7 @@ func _card_choices() -> Array:
 				if allowed:
 					out.append({"label": "Сыграть: " + FSData.title(int(id)), "arg": {"op": "booster_play20", "card": int(id)}})
 	if str(step.get("targets", "")) == "karma_second20":
-		for seat in players.size():
+		for seat in active_seats():
 			if seat != int(resolving.karma_first20):
 				out.append({"label": name_of(seat), "arg": {"op": "karma_second20", "target": seat}})
 	if str(step.get("targets", "")) == "karma_shop20":
@@ -58,7 +58,7 @@ func _card_choices() -> Array:
 	if str(step.get("targets", "")) == "stairway_accept20" and not decks.treasure.is_empty():
 		out.append({"label": "Посмотреть 7 верхних сокровищ", "arg": {"op": "peek_deck", "deck": "treasure", "amount": 7}})
 	if str(step.get("targets", "")) == "mushrooms20":
-		for owner in players.size():
+		for owner in active_seats():
 			for index in items[owner].size():
 				if int(items[owner][index].id) == 5:
 					out.append({"label": name_of(owner) + " · Волшебный гриб · %d жетонов" % int(items[owner][index].counters), "arg": {"op": "mushroom_counter20", "target": owner, "item": index, "card": 5, "shop": false}})
@@ -217,7 +217,7 @@ func _apply_card_step(step: Dictionary) -> void:
 				_bottom_peek20()
 			_gain_item(owner, id)
 		"delirium_copy20":
-			_note("Мелкий Делирий открывает: " + FSData.title(int(step.card)))
+			_note("Мелкий Делирий открывает: " + FSData.title(int(step.card)), int(step.card))
 			_copy_item14(int(step.card), false)
 			_bottom_peek20()
 		"pyro_search20":

@@ -7,7 +7,7 @@ func _card_choices() -> Array:
 		return out
 	match str(step.get("targets", "")):
 		"soul_owners18":
-			for seat in players.size():
+			for seat in active_seats():
 				if soul_cards[seat].any(func(card): return FSData.card(int(card.id)).get("kind", "") != "character"):
 					out.append({"label": name_of(seat), "arg": {"op": "soul_giver18", "target": seat}})
 		"owned_souls18":

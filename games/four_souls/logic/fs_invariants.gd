@@ -4,7 +4,7 @@ extends RefCounted
 ## Запуск — из tests/fs/run.gd (FSScenario вызывает автоматически).
 
 const PHASES := ["turn", "priority", "effect", "death", "battle_roll", "discard", "discard_target",
-	"forced_discard", "starting_item", "game_over"]
+	"forced_discard", "starting_character", "starting_item", "game_over"]
 ## Колоды, карты которых физически перемещаются между зонами.
 const PHYSICAL_KINDS := ["loot", "treasure", "monster", "event", "room"]
 

@@ -25,7 +25,7 @@ func _card_choices() -> Array:
 				if not bool(items[owner][index].eternal):
 					out.append({"label": "Уничтожить: " + FSData.title(int(items[owner][index].id)), "arg": {"op": "destroy", "target": owner, "item": index}})
 		"other_living":
-			for seat in players.size():
+			for seat in active_seats():
 				if seat != owner and not dead[seat] and hp[seat] > 0:
 					out.append({"label": name_of(seat), "arg": {"op": str(step.op), "target": seat}})
 		"boss_rush_slots":
@@ -46,7 +46,7 @@ func _card_choices() -> Array:
 				if str(step.targets) == "betray_items" and bool(entries[index].eternal): continue
 				out.append({"label": FSData.title(int(entries[index].id)), "arg": {"op": "steal" if str(step.targets) == "betray_items" else "steal_soul", "target": target, "item": index}})
 		"barrel_entities":
-			for seat in players.size():
+			for seat in active_seats():
 				out.append({"label": name_of(seat), "arg": {"op": "barrel_target", "zone": "player", "target": seat}})
 			for slot in monsters.size():
 				out.append({"label": FSData.title(int(monsters[slot].id)), "arg": {"op": "barrel_target", "zone": "monster", "target": int(monsters[slot].id)}})
@@ -188,7 +188,7 @@ func _place_encounter_monster(id: int, slot: int) -> void:
 		_eggs_monsters.erase(int(monsters[slot].id))
 		var covered := _cover_monster20(monsters[slot])
 		if not covered.is_empty():
-			fresh["under"] = covered.duplicate(true)
+			fresh["under"] = covered
 		monsters[slot] = fresh
 	else: monsters.append(fresh)
 

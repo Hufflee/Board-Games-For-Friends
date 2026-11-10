@@ -29,6 +29,7 @@ const BOARD := 0.03
 const ROWS := 4
 const PER_CELL := 4  # коробок в ячейке — впритык к задней стенке; ширина шкафа считается по самой широкой ячейке
 const SHELF_SCALE := 0.95  # шкаф вместе с коробками крупнее (масштаб от пола у стены)
+const CAMERA_FOV := 52.0
 const BOXED_ROWS := 3  # ячеек с коробками (в последней — ещё «Перудо»), ниже — «Coming soon»
 ## Какие коробки на какой полке (сверху вниз, слева направо).
 const SHELF_LAYOUT := [
@@ -141,7 +142,7 @@ func _ready() -> void:
 	_init_custom_shelf()
 	_lights()
 	camera = Camera3D.new()
-	camera.fov = 52.0
+	camera.fov = _shelf_camera_fov()
 	camera.position = Vector3(SHELF_X - 0.1, 0.9, 0.12)
 	add_child(camera)
 	camera.look_at(Vector3(SHELF_X, 0.84, BACK + 0.2))
@@ -1437,7 +1438,7 @@ func _frame_shelf() -> void:
 	var aspect: float = (
 		get_viewport().get_visible_rect().size.x / maxf(1, get_viewport().get_visible_rect().size.y)
 	)
-	var tangent: float = tan(deg_to_rad(camera.fov) * 0.5)
+	var tangent: float = tan(deg_to_rad(CAMERA_FOV) * 0.5)
 	var distance: float = maxf(
 		1.7,
 		maxf(
@@ -1462,6 +1463,18 @@ func _frame_shelf() -> void:
 	camera.global_position = aim + Vector3(shift, 0.03, distance)
 	camera.look_at(aim + Vector3(shift, 0, 0))
 	_cam_home = camera.transform
+
+
+## Масштаб меняет угол обзора, сохраняя точку съёмки и перспективу комнаты.
+func _shelf_camera_fov() -> float:
+	var zoom := 1.0 if remote_view else Prefs.shelf_camera_zoom
+	return rad_to_deg(2.0 * atan(tan(deg_to_rad(CAMERA_FOV) * 0.5) / zoom))
+
+
+func set_shelf_camera_zoom(value: float) -> void:
+	if not _editor_on or remote_view:
+		return
+	Prefs.shelf_camera_zoom = clampf(value, Prefs.SHELF_ZOOM_MIN, Prefs.SHELF_ZOOM_MAX)
 
 
 func _make_shelf_ui() -> void:
@@ -1516,6 +1529,7 @@ func finish_shelf_editor(save: bool) -> void:
 	elif _save_shelf() != OK:
 		_editor_ui.call("sync", "Не удалось сохранить шкаф. Попробуйте ещё раз.")
 		return
+	Prefs.save()
 	_editor_on = false
 	panels.input_locked = false
 	_edge_overlay.visible = false
@@ -2191,6 +2205,14 @@ func _pointer_clear() -> bool:
 	return control == null or control.mouse_filter == Control.MOUSE_FILTER_IGNORE
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _editor_on and _pointer_clear() and _edge_drag.is_empty() and _drag_box == null and not _editor_box_press \
+			and poster_dragging == null and not board_dragging and event is InputEventMouseButton and event.pressed:
+		if event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
+			var step := 0.05 if event.button_index == MOUSE_BUTTON_WHEEL_UP else -0.05
+			set_shelf_camera_zoom(snappedf(Prefs.shelf_camera_zoom + step, 0.05))
+			_editor_ui.call("sync_zoom")
+			get_viewport().set_input_as_handled()
+			return
 	# Плакат переносят — ведём по стене до отпускания.
 	if poster_dragging != null:
 		if event is InputEventMouseMotion:
@@ -2936,6 +2958,7 @@ func _process(delta: float) -> void:
 		target.basis.x.normalized(), -m.y * 0.02
 	)
 	camera.transform = camera.transform.interpolate_with(target, minf(1.0, delta * 3.0))
+	camera.fov = lerpf(camera.fov, _shelf_camera_fov(), 1.0 - exp(-delta * 13.0))
 	# лавовая лампа
 	for i in _lava.size():
 		var b: MeshInstance3D = _lava[i]

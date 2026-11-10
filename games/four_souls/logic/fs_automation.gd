@@ -79,14 +79,14 @@ func _card_choices() -> Array:
 	match str(step.get("targets", "")):
 		"damage_targets":
 			var targets: Array = []
-			for seat in players.size():
+			for seat in active_seats():
 				targets.append({"zone": "player", "target": seat})
 			for slot in monsters.size():
 				targets.append({"zone": "monster", "target": slot})
 			for target: Dictionary in targets:
 				out.append({"label": name_of(int(target.target)) if target.zone == "player" else FSData.title(int(monsters[int(target.target)].id)), "arg": {"op": "damage" if target.zone == "player" else "monster_damage", "target": int(target.target) if target.zone == "player" else owner, "item": int(target.target), "amount": amount}})
 		"other_players":
-			for seat in players.size():
+			for seat in active_seats():
 				if seat != owner:
 					out.append({"label": name_of(seat), "arg": {"op": op, "target": seat}})
 		"cancelable_cards":
@@ -100,16 +100,16 @@ func _card_choices() -> Array:
 					out.append({"label": {"loot": "Добыча", "treasure": "Сокровища", "monster": "Монстры", "room": "Комнаты"}[deck], "arg": {"op": "peek_deck", "deck": deck, "amount": int(step.get("amount", 1))}})
 		"players", "richest":
 			var richest: int = int(coins.max())
-			for seat in players.size():
+			for seat in active_seats():
 				if str(step.targets) != "richest" or int(coins[seat]) == richest:
 					out.append({"label": name_of(seat), "arg": {"op": op, "target": seat, "amount": amount}})
 		"items":
-			for seat in players.size():
+			for seat in active_seats():
 				for i in items[seat].size():
 					if int(items[seat][i].id) != 44 or int(resolving.card) == 44:
 						out.append({"label": name_of(seat) + " · " + FSData.title(int(items[seat][i].id)), "arg": {"op": op, "target": seat, "item": i}})
 		"other_souls":
-			for seat in players.size():
+			for seat in active_seats():
 				if seat == owner:
 					continue
 				for i in soul_cards[seat].size():
@@ -123,7 +123,7 @@ func _card_choices() -> Array:
 				for change in ([-1, 1] if str(step.targets) == "roll_modifiers" else [0]):
 					out.append({"label": "%s · %d%s" % [name_of(int(stack[i].owner)), int(stack[i].value), " · %+d" % change if change != 0 else ""], "arg": {"op": op, "roll_index": i, "amount": change}})
 		"combatants":
-			for seat in players.size():
+			for seat in active_seats():
 				out.append({"label": name_of(seat), "arg": {"op": op, "target": seat, "amount": amount}})
 			for slot in monsters.size():
 				if int(monsters[slot].hp) > 0:
@@ -270,7 +270,7 @@ func _apply_card_step(step: Dictionary) -> void:
 			_automation_internal = true
 			_effect(step)
 			_automation_internal = false
-	_note("Автоматический эффект: " + FSData.title(int(resolving.get("card", -1))) + " · " + op)
+	_note("Автоматический эффект: " + FSData.title(int(resolving.get("card", -1))) + " · " + op, int(resolving.get("card", -1)))
 
 func _event_card_steps(id: int, value: int) -> Array:
 	match id:

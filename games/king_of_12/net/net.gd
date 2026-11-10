@@ -68,7 +68,7 @@ var lobby_id := 0
 var members := {}  # peer_id -> {name}
 var join_order: Array[int] = []
 var bots := 0
-var settings := {"bc_edition": "tb", "bc_storyteller": 0, "mk_plus": false, "mk_sharp": false, "mk_limited": false, "cg_example": "card_race", "pk_mode": "classic", "pk_target": 0, "pk_open": false, "kh_rounds": 6, "kh_timer": 90, "tr_rings": ["Attribute", "Word", "Context"], "tr_knower": 0, "tr_coop": false, "tr_mode": "classic", "tr_timer": 0, "tr_want": [], "deck_mode": "first", "manual": [], "promo": "", "tournament": true, "reveal_speed": "normal", "perudo_dice": 5, "perudo_maputo": true, "wl_mode": "teams", "wl_local_teams": [], "dw_rooms": "3-7", "dw_monster": "random", "dw_hard": false, "dw_curses": true, "dw_time": 60, "hc_laps": 0, "hc_free": false, "hc_mode": "classic", "rsb_speed": "normal", "ws_mode": "teams", "ws_catalog": "basic", "ws_cards": "standard", "ws_names": true, "ws_time": 60, "turn_time": 60, "tt_expert": false, "pi_roles": [], "fs_dlc": false, "st_bots": false, "st_lives": 3, "st_meter": 20, "st_casual": false, "shuffle_seats": false}
+var settings := {"bc_edition": "tb", "bc_storyteller": 0, "mk_plus": false, "mk_sharp": false, "mk_limited": false, "cg_example": "card_race", "pk_mode": "classic", "pk_target": 0, "pk_open": false, "kh_rounds": 6, "kh_timer": 90, "tr_rings": ["Attribute", "Word", "Context"], "tr_knower": 0, "tr_coop": false, "tr_mode": "classic", "tr_timer": 0, "tr_want": [], "deck_mode": "first", "manual": [], "promo": "", "tournament": true, "reveal_speed": "normal", "perudo_dice": 5, "perudo_maputo": true, "wl_mode": "teams", "wl_local_teams": [], "dw_rooms": "3-7", "dw_monster": "random", "dw_hard": false, "dw_curses": true, "dw_time": 60, "hc_laps": 0, "hc_free": false, "hc_mode": "classic", "rsb_speed": "normal", "ws_mode": "teams", "ws_catalog": "basic", "ws_cards": "standard", "ws_names": true, "ws_time": 60, "turn_time": 60, "tt_expert": false, "pi_roles": [], "fs_dlc": false, "fs_timer": 0, "fs_character_choice": false, "st_bots": false, "st_lives": 3, "st_meter": 20, "st_casual": false, "shuffle_seats": false}
 var disconnected := {}  # место -> имя вылетевшего игрока (может вернуться)
 var chat_log: Array = []
 var last_join := {}  # куда подключались в последний раз — для «Вернуться в партию»
@@ -1381,6 +1381,8 @@ func start_game() -> String:
 		fours = load("res://games/four_souls/logic/fs_rules.gd").new()
 		fours.excluded_cards28 = load("res://games/four_souls/logic/fs_data.gd").PARTIAL_OFF28.duplicate()  # Four Souls 06.11: partial-карты не в колодах
 		fours.strict_responses28 = true  # Four Souls 06.11: в чужой ход — только в ответ (5 с тишины стека)
+		fours.set_turn_clock(float(settings.get("fs_timer", 0)))
+		fours.choose_character_at_start = bool(settings.get("fs_character_choice", false))
 		fours.new_game(players, bool(settings.get("fs_dlc", false)))
 		auto_advance_time = 0.0
 	elif party_game == "phantom_ink":
@@ -2068,6 +2070,10 @@ func _seat_view(s: int, names: Array, left: float, show_all: bool) -> Dictionary
 	if phantom != null and tl != INF:
 		v["turn_left"] = phantom.time_left
 		v["clock"] = true
+	if fours != null:
+		v["turn_total"] = int(fours.turn_time)
+		v["turn_left"] = fours.turn_time_left()
+		v["clock"] = fours.turn_clock_running()
 	if pkr != null:  # покер считает время хода сам — часы в верхней полосе берут его
 		v["turn_total"] = int(pkr.turn_time)
 		v["turn_left"] = maxf(0.0, pkr.time_left)  # дробное: часы и полоска не уходят на долю секунды
@@ -3761,7 +3767,7 @@ func pi_switch_seat(seat: int) -> void:
 
 ## Смена личного экрана Four Souls только за одним компьютером.
 func fs_switch_seat(seat: int) -> void:
-	if mode != "offline" or fours == null or seat < 0 or seat >= fours.players.size():
+	if mode != "offline" or fours == null or seat < 0 or seat >= fours.players.size() or fours.is_out(seat):
 		return
 	fs_view_seat = seat
 	_push_state()

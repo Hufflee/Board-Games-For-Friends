@@ -20,7 +20,7 @@ func _card_choices() -> Array:
 					for face in range(1, 7):
 						out.append({"label": "%s · результат %d" % [name_of(int(stack[index].owner)), face], "arg": {"op": "set_selected_roll", "index": index, "face": face}})
 		"living_players":
-			for seat in players.size():
+			for seat in active_seats():
 				if not dead[seat] and int(hp[seat]) > 0:
 					out.append({"label": name_of(seat), "arg": {"op": step.op, "target": seat}})
 		"peek_cards":
@@ -39,7 +39,7 @@ func _card_choices() -> Array:
 				if not bool(items[owner][index].eternal):
 					out.append({"label": "Уничтожить: " + FSData.title(int(items[owner][index].id)), "arg": {"op": "destroy" if step.op == "destroy" else "devil_destroy", "item": index}})
 		"steal_or_shop":
-			for seat in players.size():
+			for seat in active_seats():
 				if seat == owner:
 					continue
 				for index in items[seat].size():

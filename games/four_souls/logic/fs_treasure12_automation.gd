@@ -19,7 +19,7 @@ func _card_choices() -> Array:
 				out.append({"label": "Оплатить: " + FSData.title(int(hands[owner][index])), "arg": {"op": "cost_loot12", "item": index, "card": int(hands[owner][index])}})
 		"wiz_targets":
 			var data: Dictionary = resolving.automation_data
-			for seat in players.size():
+			for seat in active_seats():
 				if str(data.get("damaged_zone", "")) != "player" or seat != int(data.get("damaged", -1)):
 					out.append({"label": name_of(seat), "arg": {"op": "damage", "target": seat}})
 			for slot in monsters.size():
@@ -75,7 +75,7 @@ func _card_choices() -> Array:
 			for id in peek.get("cards", []):
 				out.append({"label": "Следующая снизу: " + FSData.title(int(id)), "arg": {"op": "candle_bottom", "card": int(id)}})
 		"donation_items12", "other_items12":
-			for seat in players.size():
+			for seat in active_seats():
 				if str(step.targets) == "donation_items12" and seat != owner:
 					continue
 				for index in items[seat].size():

@@ -27,7 +27,7 @@ func _emit_passives(event: String, data: Dictionary = {}) -> void:
 				for target in players.size():
 					if target != int(delayed.target) and target != int(delayed.owner):
 						_queue_passive(target, int(delayed.card), {}, [{"op": "damage", "amount": 2}])
-	for seat in players.size():
+	for seat in active_seats():
 		for item: Dictionary in _ability_items20(seat).duplicate():
 			if _card_automation_enabled() and TrinketCards.event(int(item.id), seat, current, event, data):
 				_queue_passive(seat, int(item.id), item, [{"op": "trinket_automation", "amount": 1, "context": event, "data": data.duplicate(true)}])
@@ -179,7 +179,7 @@ func _resolve_passive(effect: Dictionary) -> void:
 				if _source_item_in_play(effect.source):
 					effect.source.tapped = false
 	_refresh_passive_stats()
-	_note("Пассив: %s · %s" % [name_of(seat), FSData.title(int(effect.card))])
+	_note("Пассив: %s · %s" % [name_of(seat), FSData.title(int(effect.card))], int(effect.card))
 	_continue_stack()
 func _push(effect: Dictionary, resume: String) -> void:
 	if phase != "priority": _after_stack = resume
@@ -550,7 +550,10 @@ func _resolve_top() -> void:
 			_gain_coins(int(effect.owner), 1)
 		_continue_stack()
 	elif effect.kind == "loot" and _coin_loot_value22(effect) > 0:
+		var outer_history := _history_scope
+		_history_scope = int(effect.get("history_seq", 0))
 		_gain_coins(int(effect.owner), _coin_loot_value22(effect))
+		_history_scope = outer_history
 		if not bool(effect.get("loot_copy14", false)):
 			discards.loot.append(int(effect.card))
 		_continue_stack()
@@ -567,6 +570,9 @@ func _resolve_top() -> void:
 ## Ручной эффект начинает разрешаться. Если в этот момент уже идёт другой (ответ на ручной
 ## эффект), внешний ждёт под маркером resume_effect и вернётся, когда вложенный завершится.
 func _begin_resolving(effect: Dictionary) -> void:
+	if not _setting_up and not effect.has("history_seq") and str(effect.get("kind", "")) in ["item", "reward", "event"]:
+		var label := "reward" if effect.kind == "reward" else "trigger"
+		effect["history_seq"] = _action_record(label, int(effect.owner), int(effect.get("card", -1)))
 	if not resolving.is_empty():
 		stack.append({"kind": "resume_effect", "owner": int(resolving.owner), "nested": true,
 			"previous": {"effect": resolving, "resume": _after_stack, "peek": peek, "base": _resolving_base}})
@@ -628,15 +634,13 @@ func _cancel_unresolved() -> void:
 		if pending.get("kind", "") != "reward" or rewarded.has(int(pending.card)):
 			continue
 		rewarded[int(pending.card)] = true
-		var slot: int = int(pending.get("slot", -1))
-		if slot >= 0 and slot < monsters.size() and int(monsters[slot].id) == int(pending.card):
-			_finish_monster_reward(pending)
-			_refill_pending = true
+		_finish_monster_reward(pending)
+		_refill_pending = true
 	stack.clear()
 	paused_effects.clear()
 	next_action = {}
 	peek = {}
-	battle = -1
+	_end_battle()
 ## При немедленной победе ручные реакции больше не ждём, но полученная карта уже должна покинуть ряд.
 func _cleanup_reward_cards() -> void:
 	var pending: Array = stack.duplicate()

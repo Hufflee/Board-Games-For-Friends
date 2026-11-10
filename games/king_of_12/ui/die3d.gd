@@ -11,6 +11,7 @@ signal settled
 
 const SIZE := 104.0
 const MAX_SPEED := 2600.0
+const Reel := preload("res://hub/dice_reel.gd")
 
 var home := Vector2.ZERO  # центр «своего» места на столе (в координатах родителя)
 var felt_center := Vector2(640, 300)
@@ -18,7 +19,7 @@ var felt_radii := Vector2(520, 190)
 var draggable := false:
 	set(v):
 		draggable = v
-		mouse_default_cursor_shape = Control.CURSOR_DRAG if v else Control.CURSOR_ARROW
+		_sync_cursor()
 		_overlay.queue_redraw()
 var crossed := false:
 	set(v):
@@ -50,6 +51,10 @@ var _grab := Vector2.ZERO
 var _samples: Array = []
 var _overlay: Control
 var _value_label: Label
+var _reel: Reel
+var _reel_required := false
+var _viewport: SubViewport
+var _texture: TextureRect
 
 const STEP := 1.0 / 120.0  # шаг физики полёта (одинаковый для просчёта и показа)
 var _fs := {}  # состояние полёта: pos, vel, w, q (без поправки), t
@@ -77,6 +82,7 @@ func _init(side_count: int = 12) -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 
 	var vp := SubViewport.new()
+	_viewport = vp
 	vp.transparent_bg = true
 	vp.own_world_3d = true
 	vp.msaa_3d = Viewport.MSAA_4X
@@ -84,6 +90,7 @@ func _init(side_count: int = 12) -> void:
 	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	add_child(vp)
 	var tex := TextureRect.new()
+	_texture = tex
 	tex.texture = vp.get_texture()
 	tex.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	tex.stretch_mode = TextureRect.STRETCH_SCALE
@@ -145,6 +152,45 @@ func _init(side_count: int = 12) -> void:
 	_value_label.visible = false
 	_value_label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_value_label)
+
+
+func _ready() -> void:
+	Prefs.changed.connect(_sync_style)
+	_sync_style()
+
+
+func _sync_style() -> void:
+	if is_busy():
+		return
+	if Prefs.dice_style == "reel" and _reel == null:
+		_reel = Reel.new()
+		_reel.base_scale = 1.25
+		_reel.sides = sides
+		_reel.required = _reel_required
+		_reel.pulled.connect(_pull_reel)
+		add_child(_reel)
+		move_child(_reel, _overlay.get_index())
+		_reel.show_face(face)
+	elif Prefs.dice_style != "reel" and _reel != null:
+		_reel.hide()
+		_reel.queue_free()
+		_reel = null
+		if face > 0:
+			_q = _orient(face)
+			_apply()
+	_texture.visible = _reel == null
+	mouse_filter = Control.MOUSE_FILTER_STOP if _reel == null else Control.MOUSE_FILTER_IGNORE
+	_viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS if _reel == null else SubViewport.UPDATE_DISABLED
+	_sync_cursor()
+
+
+func _sync_cursor() -> void:
+	if _reel != null:
+		_reel.active = draggable and state == "waiting"
+		_reel.queue_redraw()
+		mouse_default_cursor_shape = Control.CURSOR_ARROW
+	else:
+		mouse_default_cursor_shape = Control.CURSOR_DRAG if draggable else Control.CURSOR_ARROW
 
 
 static func _build_die(body: Node3D) -> void:
@@ -289,11 +335,22 @@ func wait_for_roll() -> void:
 	_target = 0
 	_set_center(home)
 	_w = Vector3(0.4, 1.0, 0.2).normalized() * 1.2
+	_sync_style()
+	if _reel != null:
+		_reel.show_face(0)
+		_reel.release_local_throw()
 
 
 ## Показать грань (сразу или плавным поворотом).
 func show_face(f: int, animate: bool = true) -> void:
 	if f < 1 or f > sides:
+		return
+	if _reel != null:
+		if not is_busy():
+			face = f
+			state = "idle"
+			_reel.show_face(f)
+			_sync_cursor()
 		return
 	if state in ["dragging", "flying", "settling", "returning"]:
 		if state == "dragging" or (state == "flying" and _target == 0):
@@ -317,11 +374,19 @@ func show_face(f: int, animate: bool = true) -> void:
 
 
 ## Бросок с текущего места со скоростью vel (px/с). Грань станет известна через set_result().
-func throw(vel: Vector2, result: int = 0) -> void:
+func throw(vel: Vector2, result: int = 0, local_reel: bool = false) -> void:
 	_vel = vel.limit_length(MAX_SPEED)
 	Sfx.play("die_throw", lerpf(-10.0, 0.0, clampf(_vel.length() / 2000.0, 0.0, 1.0)), 0.08, 0.05)
 	_t = 0.0
 	state = "flying"
+	if _reel != null:
+		if not local_reel:
+			_reel.release_local_throw()
+		_target = result
+		_set_center(home)
+		_reel.spin()
+		_sync_cursor()
+		return
 	var w_extra := Vector3(randf_range(-1, 1), randf_range(-1, 1), randf_range(-3, 3))
 	_w = _rolling_w(_vel) + w_extra
 	_fs = {"pos": center(), "vel": _vel, "w": _w, "q": _q, "t": 0.0}
@@ -338,7 +403,7 @@ func throw(vel: Vector2, result: int = 0) -> void:
 ## Результат броска пришёл: просчитываем остаток полёта и вычисляем поправку вращения.
 func set_result(f: int) -> void:
 	_target = f
-	if state != "flying" or _fs.is_empty():
+	if _reel != null or state != "flying" or _fs.is_empty():
 		return
 	# начинаем с того, что видно сейчас (если поправка уже была — она сохраняется)
 	_fs["q"] = _display_q()
@@ -357,6 +422,28 @@ func set_result(f: int) -> void:
 
 func is_busy() -> bool:
 	return state in ["dragging", "flying", "settling", "returning"]
+
+
+func receives_result() -> bool:
+	if _reel != null:
+		return state == "flying" and _target == 0
+	return state in ["dragging", "flying", "settling"]
+
+
+func set_reel_prompt(required: bool) -> void:
+	_reel_required = required
+	if _reel != null:
+		_reel.required = required
+
+
+func _pull_reel() -> void:
+	if not draggable or state != "waiting":
+		return
+	_reel.hold_local_throw()
+	var velocity := (felt_center - home).normalized() * 900.0
+	draggable = false
+	throw(velocity, 0, true)
+	thrown.emit(velocity)
 
 
 # --- Управление мышью ----------------------------------------------------------
@@ -406,6 +493,9 @@ func _release_velocity() -> Vector2:
 # --- Анимация ------------------------------------------------------------------
 
 func _process(delta: float) -> void:
+	if _reel != null:
+		_process_reel(delta)
+		return
 	match state:
 		"waiting":
 			_spin(delta)
@@ -460,6 +550,7 @@ func _process(delta: float) -> void:
 			if _t >= 0.6 + 0.35:
 				_set_center(home)
 				state = "idle"
+				_sync_style()
 				settled.emit()
 		"turning":
 			_t += delta
@@ -467,6 +558,30 @@ func _process(delta: float) -> void:
 			_apply()
 			if _t >= 0.5:
 				state = "idle"
+				_sync_style()
+
+
+func _process_reel(delta: float) -> void:
+	match state:
+		"flying":
+			if _reel.advance(delta, _target):
+				face = _target
+				state = "returning"
+				_t = 0.0
+				Sfx.play("die_hit", -14)
+			elif _target <= 0 and _reel.timed_out():
+				state = "idle"
+				_reel.show_face(face)
+				_reel.release_local_throw()
+				_sync_style()
+				settled.emit()
+		"returning":
+			_t += delta
+			if _t >= 0.9:
+				state = "idle"
+				_reel.release_local_throw()
+				_sync_style()
+				settled.emit()
 
 
 func _spin(delta: float) -> void:
@@ -551,7 +666,7 @@ func _draw_overlay() -> void:
 	var c := size / 2.0
 	if highlight.a > 0.0:
 		_overlay.draw_arc(c, SIZE * 0.47, 0, TAU, 48, highlight, 4.0, true)
-	if draggable:
+	if draggable and _reel == null:
 		var a := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 220.0)
 		_overlay.draw_arc(c, SIZE * 0.49, 0, TAU, 48, Color(1.0, 0.85, 0.4, 0.45 + 0.5 * a), 3.0, true)
 	if crossed:

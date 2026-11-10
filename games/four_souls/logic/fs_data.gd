@@ -30,10 +30,11 @@ static func title(id: int) -> String:
 	return parts[0] if parts.size() > 1 else str(c.name)
 static func texture(id: int) -> Texture2D:
 	if not _textures.has(id):
-		if id in [913, 914]:
-			_textures[id] = ImageTexture.create_from_image(Image.load_from_file("res://games/four_souls/art/cards/%d.webp" % id))
-			return _textures[id]
-		_textures[id] = load("res://games/four_souls/art/cards/%d.webp" % id)
+		var path := "res://games/four_souls/art/cards/%d.webp" % id
+		if id in [913, 914] and not ResourceLoader.exists(path):
+			_textures[id] = ImageTexture.create_from_image(Image.load_from_file(path))
+		else:
+			_textures[id] = load(path)
 	return _textures[id]
 static func pool(kind: String, dlc: bool) -> Array:
 	var out := []

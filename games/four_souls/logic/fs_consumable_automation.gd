@@ -18,7 +18,7 @@ func _card_choices() -> Array:
 					if slot != battle:
 						out.append({"label": "Открыть монстра поверх: " + FSData.title(int(monsters[slot].id)), "arg": {"op": "key_cover", "item": slot}})
 		"most_souls":
-			for seat in players.size():
+			for seat in active_seats():
 				if int(souls[seat]) == int(souls.max()):
 					out.append({"label": name_of(seat), "arg": {"op": "judgement_player", "target": seat}})
 		"chosen_souls":
