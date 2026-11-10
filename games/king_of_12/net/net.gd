@@ -39,8 +39,10 @@ var _leaving := false
 const APP_ID := 480
 const PORT := 24565
 const MAX_PLAYERS := 8
-const NETWORK_CAPACITY := 16  # Clocktower: 15 игроков и отдельный рассказчик.
-const PARTY_CAPACITY := 10  # The Gang расширяет пати; пределы остальных игр сохраняются.
+const NETWORK_CAPACITY := 20  # Пати до 20 человек (сеть и лобби Steam).
+const PARTY_CAPACITY := 20  # Предел пати; пределы самих игр — ниже.
+const CLOCKTOWER_MAX := 16  # Clocktower: 15 игроков и отдельный рассказчик.
+const GANG_MAX := 10  # The Gang.
 const LOBBY_TAG := "bgff_party"
 const STEAM_LOBBY_FRIENDS_ONLY := 1
 const STEAM_LOBBY_PUBLIC := 2
@@ -1056,7 +1058,7 @@ func _rpc_kicked(reason: String) -> void:
 func set_bots(n: int) -> void:
 	if not is_host() or in_game:
 		return
-	var maximum: int = NETWORK_CAPACITY if party_game == "blood_on_the_clocktower" else (PARTY_CAPACITY if party_game == "the_gang" else MAX_PLAYERS)
+	var maximum: int = CLOCKTOWER_MAX if party_game == "blood_on_the_clocktower" else (GANG_MAX if party_game == "the_gang" else MAX_PLAYERS)
 	bots = clampi(n, 0, maxi(0, maximum - members.size()))
 	_broadcast_lobby()
 
@@ -1226,10 +1228,10 @@ func start_game() -> String:
 	# Старое/неверное отрицательное значение добавочных мест не скрывает реальных участников.
 	var added_players: int = maxi(0, bots)
 	var total: int = members.size() + added_players
-	var maximum := PARTY_CAPACITY if party_game == "the_gang" else (5 if party_game == "machi_koro" else (6 if party_game == "things_in_rings" else MAX_PLAYERS))
+	var maximum := GANG_MAX if party_game == "the_gang" else (5 if party_game == "machi_koro" else (6 if party_game == "things_in_rings" else MAX_PLAYERS))
 	var minimum := 3 if party_game in ["the_gang", "khorom"] else 2
 	if party_game == "blood_on_the_clocktower":
-		maximum = NETWORK_CAPACITY
+		maximum = CLOCKTOWER_MAX
 		minimum = int(bc_bridge.Data.EDITIONS.get(str(settings.get("bc_edition", "tb")), {"minimum": 5}).minimum) + 1
 	if total < minimum or total > maximum:
 		return "Нужно от %d до %d игроков." % [minimum, maximum]
@@ -3916,7 +3918,7 @@ func _rpc_public_room(peer: int, snapshot: Dictionary) -> void:
 
 ## Предел существующей пати не меняется у остальных игр.
 func party_capacity() -> int:
-	return NETWORK_CAPACITY if party_game == "blood_on_the_clocktower" else PARTY_CAPACITY
+	return PARTY_CAPACITY
 
 func bc_configure(options: Dictionary) -> void:
 	var revision := int(bc_bridge.setup_view.get("revision", -1))
