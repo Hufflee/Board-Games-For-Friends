@@ -30,7 +30,6 @@ var _left: VBoxContainer
 
 var _make_button: Callable
 var _chat_btn: Button
-var _games_btn: Button
 var _pause_btn: Button
 var _pause_icon: PlayPauseIcon
 var _spec_btn: Button
@@ -135,12 +134,9 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 	t._drawer.add_theme_constant_override("separation", 6)
 	overlay.add_child(t._drawer)
 	var right := t._drawer
-	t._chat_btn = t._btn("Чат", "Enter")
-	t._chat_btn.pressed.connect(func(): t.chat.expanded = not t.chat.expanded)
+	t._chat_btn = t._btn("Общение", "Чат и мини-игры: Z — чат, X — мини-игры, Enter — писать")
+	t._chat_btn.pressed.connect(func(): t.chat.toggle())
 	right.add_child(t._chat_btn)
-	t._games_btn = t._btn("Мини-игры", "Шахматы, шашки и го один на один с участником пати")
-	t._games_btn.pressed.connect(func(): Net.minigames.toggle_panel())
-	right.add_child(t._games_btn)
 	t._invite_btn = t._btn("Пригласить", "")
 	t._invite_btn.pressed.connect(t._invite)
 	right.add_child(t._invite_btn)
@@ -334,13 +330,10 @@ func _process(_d: float) -> void:
 	_invite_btn.visible = Net.is_party()
 	_spec_btn.visible = playing and not spectator and Net.can_spectate()
 	var unread := chat.unread() if chat else 0
-	var t := "Чат" + (" (%d)" % unread if unread > 0 else "")
+	unread += int(Net.minigames.dots())  # непрочитанное в чате + ходы соперников и приглашения
+	var t := "Общение" + (" (%d)" % unread if unread > 0 else "")
 	if _chat_btn.text != t:
 		_chat_btn.text = t
-	var waiting := int(Net.minigames.dots())
-	var games_text := "Мини-игры" + (" (%d)" % waiting if waiting > 0 else "")
-	if _games_btn.text != games_text:
-		_games_btn.text = games_text
 	_place_actions()
 
 

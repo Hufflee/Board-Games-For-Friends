@@ -54,6 +54,7 @@ func act(g: Rules, seat: int, kind: String, args: Dictionary = {}) -> bool:
 
 func _run() -> void:
 	_roles()
+	_audit_11()
 	_poison_and_death()
 	_minions()
 	_information()
@@ -61,6 +62,41 @@ func _run() -> void:
 	_night()
 	print("Clocktower SV: %d проверок, %d ошибок." % [checks, failures])
 	quit(1 if failures > 0 else 0)
+
+## Аудит ролей 11.11: Мудрец узнаёт один раз (пары — со слотами), Парикмахер не меняет другого демона,
+## факты Учёного разложены на «игрок + роль».
+func _audit_11() -> void:
+	var g := fixture(["clockmaker", "dreamer", "sage", "mathematician", "seamstress", "barber", "witch", "fang_gu"])
+	g.abilities.night_no = 2
+	g.alive[3] = false
+	g.status[3]["sage_killer"] = 8
+	g.abilities._wake(3, "sage")
+	check(g.requests.has(0) and g.requests[0].options[0].has("left") and g.requests[0].options[0].has("right"), "Мудрец: варианты с полями пары")
+	respond(g, 0)
+	g.abilities._wake(3, "sage")
+	check(not g.requests.has(0), "Мудрец получает сведения только один раз")
+	g = fixture(["clockmaker", "dreamer", "sage", "mathematician", "seamstress", "barber", "vortox", "fang_gu"])
+	g.abilities.night_no = 2
+	g.alive[6] = false
+	g.status[6]["barber_dead"] = true
+	g.abilities._wake(6, "barber")
+	var demon := int(g.abilities.pending.get("recipient", -1))
+	check(demon >= 0 and g.requests.has(demon), "Парикмахер: демон выбирает обмен")
+	if g.requests.has(demon):
+		var other := 7 if demon == 8 else 8
+		var seats: Array = g.requests[demon].options.map(func(o: Dictionary): return int(o.target))
+		check(not seats.has(other) and seats.has(demon), "Парикмахер: другого демона выбрать нельзя, себя — можно")
+	# Математик: рассказчик выбирает число сам, подсчёт системы — первым вариантом.
+	g = fixture()
+	g.abilities.abnormal = {2: true}
+	g.abilities._wake(4, "mathematician")
+	check(g.requests.has(0) and g.requests[0].options.size() > 1, "Математик: у рассказчика выбор числа")
+	if g.requests.has(0):
+		check(str(g.requests[0].options[0].label).contains("по подсчёту системы") and str(g.requests[0].options[0].text).ends_with(": 1."), "Математик: подсчёт системы первым")
+		check(str(g.requests[0].get("hint", "")).contains("насчитала 1"), "Математик: подсказка с подсчётом")
+	g = fixture()
+	var facts: Array = g.abilities._facts()
+	check(not facts.is_empty() and facts[0].has("target") and facts[0].has("role"), "Учёный: факты «игрок + роль» для слотов")
 
 func _roles() -> void:
 	var g := fixture()
@@ -193,7 +229,8 @@ func _information() -> void:
 	check(g.private_log[1].back().contains("1"), "Оракул считает мёртвых злых")
 	g.abilities.abnormal = {2: true, 3: true, 4: true}
 	g.abilities._wake(4, "mathematician")
-	check(g.private_log[4].back().contains("2"), "Математик считает персонажей, исключая себя")
+	respond(g, 0)
+	check(str(g.private_log[4].back()).contains("2"), "Математик считает персонажей, исключая себя (подсчёт системы — первый вариант)")
 	g.abilities.on_vote(8)
 	g.abilities._boolean_information(1, [not g.abilities.demon_votes.is_empty()], "Демон голосовал: %s.")
 	check(g.private_log[1].back().ends_with("да."), "Голос демона записан для Цветочницы")

@@ -70,7 +70,7 @@ var lobby_id := 0
 var members := {}  # peer_id -> {name}
 var join_order: Array[int] = []
 var bots := 0
-var settings := {"bc_edition": "tb", "bc_storyteller": 0, "mk_plus": false, "mk_sharp": false, "mk_limited": false, "cg_example": "card_race", "pk_mode": "classic", "pk_target": 0, "pk_open": false, "kh_rounds": 6, "kh_timer": 90, "tr_rings": ["Attribute", "Word", "Context"], "tr_knower": 0, "tr_coop": false, "tr_mode": "classic", "tr_timer": 0, "tr_want": [], "deck_mode": "first", "manual": [], "promo": "", "tournament": true, "reveal_speed": "normal", "perudo_dice": 5, "perudo_maputo": true, "wl_mode": "teams", "wl_local_teams": [], "dw_rooms": "3-7", "dw_monster": "random", "dw_hard": false, "dw_curses": true, "dw_time": 60, "hc_laps": 0, "hc_free": false, "hc_mode": "classic", "rsb_speed": "normal", "ws_mode": "teams", "ws_catalog": "basic", "ws_cards": "standard", "ws_names": true, "ws_time": 60, "turn_time": 60, "tt_expert": false, "pi_roles": [], "fs_dlc": false, "fs_timer": 0, "fs_character_choice": false, "st_bots": false, "st_lives": 3, "st_meter": 20, "st_casual": false, "shuffle_seats": false}
+var settings := {"bc_edition": "tb", "bc_storyteller": 0, "mk_plus": false, "mk_sharp": false, "mk_limited": false, "cg_example": "card_race", "pk_mode": "classic", "pk_target": 0, "pk_open": false, "kh_rounds": 6, "kh_timer": 90, "tr_rings": ["Attribute", "Word", "Context"], "tr_knower": 0, "tr_coop": false, "tr_mode": "classic", "tr_timer": 0, "tr_want": [], "deck_mode": "first", "manual": [], "promo": "", "tournament": true, "reveal_speed": "normal", "perudo_dice": 5, "perudo_maputo": true, "wl_mode": "teams", "wl_local_teams": [], "dw_rooms": "3-7", "dw_monster": "random", "dw_hard": false, "dw_curses": true, "dw_time": 60, "hc_laps": 0, "hc_free": false, "hc_mode": "classic", "rsb_speed": "normal", "ws_mode": "teams", "ws_catalog": "basic", "ws_cards": "standard", "ws_names": true, "ws_time": 120, "turn_time": 60, "tt_expert": false, "pi_roles": [], "fs_dlc": false, "fs_timer": 0, "fs_character_choice": false, "st_bots": false, "st_lives": 2, "st_time": 10, "st_oral": false, "shuffle_seats": false}
 var disconnected := {}  # место -> имя вылетевшего игрока (может вернуться)
 var chat_log: Array = []
 var last_join := {}  # куда подключались в последний раз — для «Вернуться в партию»
@@ -112,10 +112,6 @@ var pkr = null  # «Покер» (PKRules): холдем с ботами, отк
 var kh_view_seat := 0
 var fs_view_seat := 0
 var stillion: STRules = null  # «Стиллион»
-var _st_jev: STJev  # проверка незнакомых ответов нейросетью (только у хоста), своя на каждую партию
-var _st_jev_for: STRules  # партия, к которой привязан _st_jev: вердикты старой партии не трогают новую
-var _st_checking := -1  # номер ответа, отправленного в jev
-var _st_verdict: Array = []  # вердикт, пришедший на паузе: [партия, no, ok, rarity] — применим после паузы
 var _st_deck: Array = []  # колода вопросов на всю сессию лобби: не повторяются, пока хост не выйдет к выбору игры
 var player_stats := PlayerStatsStore.new()
 var _match_metrics := MatchMetrics.new()
@@ -1470,12 +1466,11 @@ func start_game() -> String:
 		tiptop = null
 		stillion = STRules.new()
 		stillion.max_lives = clampi(int(settings.get("st_lives", STRules.MAX_LIVES)), 1, 9)
-		stillion.meter_max = clampi(int(settings.get("st_meter", STRules.METER_MAX)), 4, 60)
-		stillion.casual = bool(settings.get("st_casual", false))
-		stillion.deck = _st_deck  # та же колода (по ссылке) — вопросы прошлых партий не повторяются
+		stillion.answer_time = float(clampi(int(settings.get("st_time", STRules.ANSWER_TIME)), 3, 60))
+		stillion.oral = bool(settings.get("st_oral", false))
+		stillion.hotseat = mode == "offline"
+		stillion.deck = _st_deck  # та же колода (по ссылке) — темы прошлых партий не повторяются
 		stillion.new_game(players, bool(settings.get("st_bots", false)))
-		stillion.external_check = STJev.available()
-		_st_checking = -1
 		auto_advance_time = 0.0
 	elif party_game == "four_souls":
 		rules = null
@@ -2530,7 +2525,7 @@ func turn_limit() -> float:
 	if phantom != null:
 		return phantom.turn_time if phantom.turn_time > 0 and phantom.phase not in ["object", "writing", "game_over"] else INF
 	if wslam != null:
-		var ws_limit := int(settings.get("ws_time", 60))
+		var ws_limit := int(settings.get("ws_time", 120))
 		return float(ws_limit) if ws_limit > 0 else INF
 	var t := int(settings.get("turn_time", 60))
 	if t <= 0 or rsb != null:  # Ready Set Bet: ходов нет — всё идёт вместе с гонкой, своего таймера не нужно
@@ -3131,7 +3126,7 @@ func _start_ws(players: Array) -> String:
 
 ## 0 — «Бесконечность»: ход Word Slam не истекает сам.
 func _ws_time_total() -> float:
-	return float(settings.get("ws_time", 60))
+	return float(settings.get("ws_time", 120))
 
 
 func _ws_time_left() -> float:
@@ -3899,40 +3894,11 @@ func fs_switch_seat(seat: int) -> void:
 # «Стиллион» на хосте
 # =============================================================================
 
-## Тик правил; ответ не из списка вопроса — на проверку jev (пока проверяется, фитиль стоит).
+## Тик правил «Стиллиона»: фитиль, боты, пауза между темами.
 func _st_process(delta: float) -> void:
 	if paused:
 		return
-	if not _st_verdict.is_empty():
-		var held: Array = _st_verdict
-		_st_verdict = []
-		if held[0] == stillion and stillion.resolve_external(int(held[1]), bool(held[2]), str(held[3])):
-			_push_state()
 	if stillion.tick(delta):
-		_push_state()
-	if stillion.phase == "check" and int(stillion.pending.get("no", -1)) != _st_checking:
-		_st_checking = int(stillion.pending.no)
-		if _st_jev == null or _st_jev_for != stillion:
-			# новая партия — новый проверяющий; старый вместе с незавершёнными запросами удаляется
-			if _st_jev != null:
-				_st_jev.queue_free()
-			_st_jev = STJev.new()
-			_st_jev_for = stillion
-			_st_verdict = []
-			add_child(_st_jev)
-			var game := stillion
-			_st_jev.judged.connect(func(no: int, ok: bool, rarity: String): _st_judged(game, no, ok, rarity))
-		_st_jev.check(_st_checking, stillion.question, str(stillion.pending.text), bool(stillion.pending.get("appeal", false)))
-
-
-## Вердикт jev: только для своей партии; на паузе — откладываем до продолжения.
-func _st_judged(game: STRules, no: int, ok: bool, rarity: String) -> void:
-	if game != stillion or stillion == null:
-		return
-	if paused:
-		_st_verdict = [game, no, ok, rarity]
-		return
-	if stillion.resolve_external(no, ok, rarity):
 		_push_state()
 
 

@@ -306,6 +306,55 @@ func _advance_auto_reward() -> void:
 	resolving["reward_ready"] = true
 	action(int(resolving.owner), "effect_done")
 
+## 11.11: активный игрок погиб, пока разрешалась смерть убитого им монстра (Гнев бьёт всех при смерти).
+## Ход на этом заканчивается и неразрешённое отменяется, но награда за уже убитого монстра не сгорает:
+## простые напечатанные награды (монеты, добыча, сокровища, душа) выдаются сразу.
+func _settle_pending_rewards() -> void:
+	var pending: Array = []
+	if resolving.get("kind", "") == "reward":
+		pending.append(resolving)
+	for paused: Dictionary in paused_effects:
+		if (paused.get("effect", {}) as Dictionary).get("kind", "") == "reward":
+			pending.append(paused.effect)
+	for entry: Dictionary in stack:
+		if entry.get("kind", "") == "resume_effect" and entry.has("previous") and (entry.previous.get("effect", {}) as Dictionary).get("kind", "") == "reward":
+			pending.append(entry.previous.effect)
+	for effect: Dictionary in pending:
+		if not effect.has("auto_reward") or bool(effect.get("reward_ready", false)) or bool(effect.get("settled_on_death", false)):
+			continue
+		var printed: Dictionary = effect.auto_reward
+		var complex := false
+		for field: String in ["roll", "return_roll", "soul_other", "damage_choice", "victory_most_souls", "self_item", "manual_post", "manual_death"]:
+			complex = complex or printed.has(field) and (not (printed[field] is bool) or bool(printed[field])) and (not (printed[field] is int) or int(printed[field]) != 0)
+		var slain := false
+		for monster: Dictionary in monsters:
+			if effect.has("monster_ref20") and is_same(monster, effect.monster_ref20) and int(monster.get("hp", 1)) <= 0:
+				slain = true
+		if complex or not slain:
+			continue
+		effect["settled_on_death"] = true
+		var owner: int = int(effect.owner)
+		var recipient: int = int(effect.get("resource_recipient", owner))
+		var step: int = int(effect.get("reward_step", 0))
+		var times: int = int(effect.get("reward_multiplier", 1)) * reward_boost
+		_note("%s погибает, но награду за монстра получает: %s" % [name_of(owner), FSData.title(int(effect.card))], int(effect.card))
+		if step <= 0 and int(printed.get("coins", 0)) > 0:
+			_gain_coins(recipient, int(printed.coins) * times)
+		if step <= 1 and int(printed.get("loot", 0)) > 0:
+			_draw_loot(recipient, int(printed.loot) * times)
+		if step <= 2:
+			for unit in int(effect.get("treasure_remaining", int(printed.get("treasure", 0)) * times)):
+				var id := _draw("treasure")
+				if id >= 0:
+					_gain_item(recipient, id)
+		if step <= 4 and int(printed.get("souls", 0)) > 0 and not bool(effect.get("kept_as_soul", false)) \
+				and not _room_has20(779) and not curses[owner].has(744) and not bool(effect.get("return_to_deck", false)):
+			effect["kept_as_soul"] = true
+			_gain_soul_card(owner, {"id": int(effect.card), "value": int(printed.souls)})
+		effect["reward_step"] = 5
+		effect["reward_ready"] = true
+
+
 func _finish_monster_reward(effect: Dictionary) -> void:
 	var slot := -1
 	var parent: Dictionary = {}

@@ -298,39 +298,18 @@ func _confetti() -> void:
 	var old := get_node_or_null("Confetti")
 	if old:
 		old.free()
-	var conf := CPUParticles2D.new()
-	conf.name = "Confetti"
+	var conf := preload("res://hub/confetti.gd").make(accent)
 	conf.position = Vector2(size.x * 0.5, -TopBar.HEIGHT - 16)
 	conf.amount = 180
 	conf.lifetime = 4.5
-	conf.one_shot = true
 	conf.explosiveness = 0.55
 	conf.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
 	conf.emission_rect_extents = Vector2(size.x * 0.5, 8)
 	conf.direction = Vector2(0, 1)
 	conf.spread = 25.0
-	conf.gravity = Vector2(0, 240)
-	conf.initial_velocity_min = 60.0
-	conf.initial_velocity_max = 200.0
-	conf.angular_velocity_min = -360.0
-	conf.angular_velocity_max = 360.0
-	conf.scale_amount_min = 4.0
-	conf.scale_amount_max = 8.0
-	var hues := Gradient.new()
-	hues.set_color(0, accent.lightened(0.3))
-	hues.set_color(1, Color("5fb4ef"))
-	hues.add_point(0.33, Color("e2645c"))
-	hues.add_point(0.66, Color("6fcf6f"))
-	conf.color_initial_ramp = hues
 	add_child(conf)
 	move_child(conf, _backdrop.get_index() + 1)
-	conf.emitting = true
-	get_tree().create_timer(6.0).timeout.connect(_free_confetti.bind(weakref(conf)))
-
-static func _free_confetti(reference: WeakRef) -> void:
-	var conf: Node = reference.get_ref()
-	if is_instance_valid(conf):
-		conf.queue_free()
+	preload("res://hub/confetti.gd").start(conf)
 
 ## Ведущий без собственного условия победы: отдельно, справа ниже звезды, с лайками игроков.
 func _add_leader(seat: int) -> void:

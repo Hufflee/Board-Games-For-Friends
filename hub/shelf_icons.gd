@@ -8,7 +8,13 @@ static func icon(mode: int = -1) -> Texture2D:
 	if _cache.has(mode):
 		return _cache[mode]
 	var shape: String
-	if mode < 0:
+	if mode == -4:
+		shape = '<path d="M25 12A10 10 0 1 0 25 21M25 5v7h-7"/>'
+	elif mode == -3:
+		shape = '<rect x="5" y="3" width="22" height="25" rx="1"/><path d="M5 12h22M5 20h22M8 28v2m16-2v2"/>'
+	elif mode == -2:
+		shape = '<path d="m4 10 12-6 12 6v14l-12 5-12-5zM4 10l12 6 12-6m-12 6v13M10 7l12 6"/>'
+	elif mode < 0:
 		shape = '<path d="M5 22l2-7L20 2l6 6-13 13-8 1zM17 5l6 6M7 15l6 6"/>'
 	elif mode == 0:
 		shape = '<rect x="5" y="5" width="22" height="22" rx="2"/>'

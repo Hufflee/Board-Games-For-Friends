@@ -218,6 +218,15 @@ func _finish_monster_reward(effect: Dictionary) -> void:
 	pass
 func _advance_auto_reward() -> void:
 	pass
+func _settle_pending_rewards() -> void:
+	pass
+## Предмет переходит к другому игроку, не покидая игру: его бонусы атаки и здоровья снимаются у прежнего
+## владельца (новому их начислит _refresh_passive_stats).
+func _strip_item_bonus(seat: int, entry: Dictionary) -> void:
+	attack[seat] = maxi(0, int(attack[seat]) - int(entry.get("_attack_bonus", 0)))
+	max_hp[seat] = maxi(1, int(max_hp[seat]) - int(entry.get("_health_bonus", 0)))
+	entry.erase("_attack_bonus")
+	entry.erase("_health_bonus")
 func _advance_card_automation() -> void:
 	pass
 func _card_automation_active() -> bool:

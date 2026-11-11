@@ -480,6 +480,38 @@ static func cover_texture(id: String, part: String) -> Texture2D:
 	return null
 
 
+var _wall_shelf_finish := false
+
+
+## Матовая обложка и слабое рассеянное заполнение при свете настенной полки.
+func set_wall_shelf_finish(on: bool) -> void:
+	if _wall_shelf_finish == on:
+		return
+	_wall_shelf_finish = on
+	for mat: StandardMaterial3D in _face_mats:
+		if on:
+			mat.set_meta("shelf_finish", [mat.roughness, mat.metallic_specular, mat.emission_enabled,
+				mat.emission, mat.emission_texture, mat.emission_operator, mat.emission_energy_multiplier])
+			mat.roughness = 0.9
+			mat.metallic_specular = 0.04
+			if not mat.emission_enabled and mat.albedo_texture != null:
+				mat.emission_enabled = true
+				mat.emission = Color.WHITE
+				mat.emission_texture = mat.albedo_texture
+				mat.emission_operator = BaseMaterial3D.EMISSION_OP_MULTIPLY
+				mat.emission_energy_multiplier = 0.20
+		elif mat.has_meta("shelf_finish"):
+			var saved: Array = mat.get_meta("shelf_finish")
+			mat.roughness = saved[0]
+			mat.metallic_specular = saved[1]
+			mat.emission_enabled = saved[2]
+			mat.emission = saved[3]
+			mat.emission_texture = saved[4]
+			mat.emission_operator = saved[5]
+			mat.emission_energy_multiplier = saved[6]
+			mat.remove_meta("shelf_finish")
+
+
 func _face(part: String, pos: Vector3, rot: Vector3, quad: Vector2, big_title: bool) -> void:
 	var tex := cover_texture(str(game.get("id", "")), part)
 	if tex != null:

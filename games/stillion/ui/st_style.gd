@@ -184,15 +184,6 @@ static func clear(node: Node) -> void:
 		c.queue_free()
 
 
-## Плашка редкости ответа.
-static func rarity_chip(rarity: String, text: String = "") -> PanelContainer:
-	var p := PanelContainer.new()
-	p.add_theme_stylebox_override("panel", box(RARITY_COLORS.get(rarity, PAPER), 8, 2, 2, 6))
-	var l := label(text if text != "" else STQuestions.RARITY_NAMES.get(rarity, ""), CAP, INK if rarity == "c" else PAPER, HORIZONTAL_ALIGNMENT_CENTER, "bold")
-	p.add_child(l)
-	return p
-
-
 ## Чат из общего кода — в цвета бумаги.
 static func restyle_chat(chat: Control) -> void:
 	var apply := func():

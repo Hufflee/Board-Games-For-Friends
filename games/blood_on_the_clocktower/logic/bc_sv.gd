@@ -131,6 +131,7 @@ func _wake(actor: int, id: String) -> void:
 	if id == "sage":
 		var killer := int(g.status[actor].get("sage_killer", -1))
 		if killer >= 0:
+			g.status[actor].erase("sage_killer")
 			_sage_information(actor, killer)
 		return
 	if id == "barber":
@@ -138,7 +139,7 @@ func _wake(actor: int, id: String) -> void:
 			g.status[actor].erase("barber_dead")
 			for s: int in g.seats_in_circle():
 				if g.alive[s] and g.catalog[g.roles[s]].type == "demon":
-					_ask_targets(s, "Парикмахер: выберите первую роль для обмена", "barber_first", false, true)
+					_ask_targets(s, "Парикмахер: выберите первую роль для обмена", "barber_first", false, true, _other_demons(s))
 					break
 		return
 	if not g.alive[actor] and not active(actor, id):
@@ -166,7 +167,7 @@ func _wake(actor: int, id: String) -> void:
 			_numeric(actor, _clock_distances(), g.seats_in_circle().size() - 1, "Расстояние от демона до ближайшего приспешника: %d.")
 		"mathematician":
 			var total := abnormal.size() - (1 if abnormal.has(actor) else 0)
-			_numeric(actor, [total], g.seats_in_circle().size() - 1, "Способностей с нарушенным действием: %d.")
+			_mathematician(actor, total)
 		"flowergirl":
 			_boolean_information(actor, [not demon_votes.is_empty()], "Демон голосовал сегодня: %s.")
 		"town_crier":
@@ -217,7 +218,7 @@ func _resolve_targets(actor: int, id: String, targets: Array) -> void:
 			_boolean_information(actor, [g.sides[first] == g.sides[target]], "Выбранные игроки одной стороны: %s.")
 		"barber_first":
 			g.status[actor]["barber_first"] = target
-			_ask_targets(actor, "Парикмахер: вторая роль", "barber_second", false, false, [target])
+			_ask_targets(actor, "Парикмахер: вторая роль", "barber_second", false, false, [target] + _other_demons(actor))
 		"barber_second":
 			var first := int(g.status[actor].barber_first)
 			var old_role := str(g.roles[first])
@@ -352,6 +353,34 @@ func _change_role(target: int, id: String, side: String = "") -> void:
 		else:
 			g.status[target]["start_pending"] = true
 
+## Парикмахер: «2 players (not another Demon)» — другие демоны недоступны, себя демон выбрать может.
+func _other_demons(demon: int) -> Array:
+	var result: Array = []
+	for s: int in g.seats_in_circle():
+		if s != demon and g.catalog[g.roles[s]].type == "demon":
+			result.append(s)
+	return result
+
+## Математик: система считает нарушенные способности приблизительно (видит не все случаи),
+## поэтому рассказчик всегда выбирает число сам; подсчёт системы — первым и в подсказке.
+func _mathematician(actor: int, counted: int) -> void:
+	var options: Array = []
+	var template := "Способностей с нарушенным действием: %d."
+	var maximum: int = g.seats_in_circle().size() - 1
+	var order: Array = [counted]
+	for value in range(maximum + 1):
+		if value != counted: order.append(value)
+	for value: int in order:
+		var correct := value == counted
+		if _vortox(actor) and correct:
+			continue
+		var text := template % value
+		options.append({"label": text + (" — по подсчёту системы" if correct else ""), "text": text, "abnormal": not correct})
+	var reason := super._information_hint(actor) if not healthy(actor) else ("В игре Вортокс: число должно быть ложным." if _vortox(actor) else "")
+	var hint := "Система насчитала %d (сегодня: яд, опьянение, Вортокс и т. п.). Если знаете больше — выберите своё число." % counted
+	_choice(g.storyteller, "Информация для %s · Математик" % g.players[actor].name, options, {"op": "sv_information", "actor": actor},
+		hint + ("\n" + reason if not reason.is_empty() else ""))
+
 func _clock_distances() -> Array:
 	var circle: Array = g.seats_in_circle()
 	var values: Array = []
@@ -390,7 +419,7 @@ func _sage_information(actor: int, killer: int) -> void:
 			var correct: bool = killer in [left, right]
 			if _allowed_information(actor, correct):
 				var text := "%s или %s — убивший вас демон." % [g.players[left].name, g.players[right].name]
-				options.append({"label": text, "text": text, "abnormal": not correct})
+				options.append({"label": text, "text": text, "abnormal": not correct, "left": left, "right": right})
 	_information(actor, options)
 
 func _insert_arbitrary() -> void:
@@ -559,7 +588,7 @@ func _facts() -> Array:
 		for id: String in g.catalog:
 			if g.catalog[id].edition == "sv":
 				var text := "%s — %s." % [g.players[s].name, g.catalog[id].name]
-				result.append({"label": text, "text": text, "truth": g.roles[s] == id})
+				result.append({"label": text, "text": text, "truth": g.roles[s] == id, "target": s, "role": id})
 	return result
 
 func _savant_second(actor: int, first: Dictionary) -> void:

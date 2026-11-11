@@ -9,6 +9,7 @@ const SIDE := 0.38 * 0.27  # м: сторона стикера размера 1
 const FRAME := 0.028
 const MARKER_FONT := preload("res://hub/art/fonts/Neucha-Regular.ttf")
 
+var board_id := 0  # 0 — основная доска, дальше — добавленные в редакторе шкафа (hub/stickers.gd: board_ids)
 var _stickers: Node3D
 var _shown: Array = []
 var _shown_once := false
@@ -85,6 +86,7 @@ func _ready() -> void:
 	prop.collision_layer = 8
 	prop.collision_mask = 0
 	prop.set_meta("room_prop", "board")
+	prop.set_meta("board_id", board_id)
 	var collider := CollisionShape3D.new()
 	var box := BoxShape3D.new()
 	box.size = Vector3(SIZE.x + FRAME * 2.0, SIZE.y + FRAME * 2.0, 0.04)

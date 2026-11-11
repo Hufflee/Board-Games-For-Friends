@@ -17,6 +17,7 @@ var size_scale := 1.0  # 1 — обычный плакат, до 2 — вдво�
 var _quad: MeshInstance3D
 var _frame: MeshInstance3D
 var _shape: BoxShape3D
+var _body: StaticBody3D
 var _material: StandardMaterial3D
 var _animation: SpriteFrames
 var _frame_index := 0
@@ -49,7 +50,8 @@ func _ready() -> void:
 	_frame.position.z = -0.004
 	add_child(_frame)
 	var body := StaticBody3D.new()
-	body.collision_layer = 8
+	_body = body
+	body.collision_layer = 8 if visible else 0
 	body.collision_mask = 0
 	body.set_meta("room_prop", "poster")
 	body.set_meta("poster_slot", slot)
@@ -128,3 +130,10 @@ func wall_size() -> Vector2:
 func wall_rect() -> Rect2:
 	var extent := wall_size()
 	return Rect2(Vector2(position.x, position.y) - extent / 2.0, extent)
+
+
+## Плакат висит / снят (снятый не виден и не ловит клики). Номера с 3 и дальше — добавленные игроком.
+func set_shown(on: bool) -> void:
+	visible = on
+	if is_instance_valid(_body):
+		_body.collision_layer = 8 if on else 0

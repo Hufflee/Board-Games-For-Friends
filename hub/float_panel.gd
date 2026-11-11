@@ -16,17 +16,40 @@ signal rescaled
 const SAVE_PATH := "user://float_panels.cfg"
 const K_MIN := 0.7
 const K_MAX := 1.8
-const BG := Color(0.086, 0.098, 0.125, 0.96)
-const BG_HEAD := Color(0.13, 0.145, 0.18)
-const BG_SOFT := Color(0.17, 0.19, 0.235)
-const LINE := Color(0.27, 0.3, 0.37)
-const INK := Color(0.9, 0.91, 0.94)
-const MUTED := Color(0.62, 0.65, 0.72)
-const ACCENT := Color(0.38, 0.72, 0.95)
 const BLINK := 0.45
 
 static var _layouts := {}
 static var _loaded := false
+
+## Палитра окна: тёмная основа, подкрашенная под акцент текущей игры (set_palette).
+var c_bg := Color(0.086, 0.098, 0.125, 0.96)
+var c_head := Color(0.13, 0.145, 0.18)
+var c_soft := Color(0.17, 0.19, 0.235)
+var c_line := Color(0.27, 0.3, 0.37)
+var c_ink := Color(0.95, 0.94, 0.98)
+var c_muted := Color(0.62, 0.65, 0.72)
+var c_accent := Color(0.38, 0.72, 0.95)
+var c_head_ink := Color(0.95, 0.94, 0.98)  # надписи на полосе вкладок
+var c_head_muted := Color(0.62, 0.65, 0.72)
+## Обводка окна и простой свёрнутой плашки — как у кнопки, с которой взят цвет (ширина 0 — тонкая линия c_line).
+var outline_color := Color(0, 0, 0, 0)
+var outline_width := 0
+var outline_radius := -1  # −1 — обычное скругление окна
+
+
+func _edge() -> int:
+	return outline_width if outline_width > 0 else 1
+
+
+func _edge_color() -> Color:
+	return outline_color if outline_width > 0 else c_line
+
+
+func _corner() -> int:
+	return outline_radius if outline_radius >= 0 else px(10)
+## Своя свёрнутая кнопка: () -> Button (например, кнопка верхней полосы текущей игры). Пусто — простая плашка.
+var mini_factory := Callable()
+var _mini_button: Button
 
 var key := "panel"
 var mode_key := ""  # под каким ключом помнить «открыта / свёрнута / закрыта» (пусто — как key)
@@ -55,7 +78,10 @@ var _mini_label: Label
 var _grip: Control
 var _tabs: Array = []
 var _dots: Array[Label] = []
-var _pos := Vector2.ZERO
+var _pos := Vector2.ZERO  # место свёрнутой кнопки: окно раскрывается от неё и в неё же сворачивается
+var _mini_size := Vector2(96, 32)
+var _open_right := false  # окно раскрыто влево от кнопки (справа — край экрана)
+var _open_bottom := false  # окно раскрыто вверх от кнопки (снизу — край экрана)
 var _placed := false
 var _press := false
 var _press_tab := ""
@@ -95,15 +121,15 @@ func _ready() -> void:
 	_mini = PanelContainer.new()
 	_mini.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	_mini.gui_input.connect(_drag_input.bind("__mini"))
-	_mini_label = Label.new()
-	_mini.add_child(_mini_label)
 	add_child(_mini)
 	_built = true
 	_build_body()
 	_restyle()
+	rebuild_mini()
 	var parent := get_parent() as Control
 	if parent != null:
 		parent.resized.connect(_apply)
+	_pick_side.call_deferred()
 	_apply.call_deferred()
 
 
@@ -122,6 +148,105 @@ func _rescale_body() -> void:
 	pass
 
 
+## Перекрасить окно под акцент: оттенок акцента уходит в фон, полосу и рамки.
+func set_palette(accent: Color) -> void:
+	var hue := accent.h
+	var vivid := Color.from_hsv(hue, clampf(accent.s, 0.45, 0.8), maxf(accent.v, 0.9))
+	c_accent = vivid
+	c_bg = Color.from_hsv(hue, 0.5, 0.2, 0.97)
+	c_head = Color.from_hsv(hue, 0.55, 0.32)
+	c_soft = Color.from_hsv(hue, 0.4, 0.38)
+	c_line = Color.from_hsv(hue, 0.4, 0.46)
+	c_muted = Color.from_hsv(hue, 0.16, 0.78)
+	c_head_ink = c_ink
+	c_head_muted = c_muted
+	if _built:
+		_restyle()
+		_rescale_body()
+		_apply()
+
+
+## Цвета окна от готовой кнопки (кнопка «Общение» верхней полосы игры): её заливка — цвет полосы вкладок,
+## тот же цвет, затемнённый и слегка прозрачный, — фон сообщений и игр. Так окно сочетается с экраном.
+func set_palette_from_button(fill: Color, text: Color) -> void:
+	var head := Color(fill.r, fill.g, fill.b, 1.0)
+	var light := head.get_luminance()
+	c_head = head
+	c_bg = Color(head.darkened(0.58), 0.88)
+	c_soft = Color(head.darkened(0.42), 1.0)
+	c_line = head.darkened(0.25) if light > 0.45 else head.lightened(0.22)
+	c_muted = Color.from_hsv(head.h, minf(head.s, 0.2), 0.8)
+	c_accent = Color.from_hsv(head.h, clampf(head.s, 0.35, 0.8), maxf(head.v, 0.88)) if head.s > 0.12 else Color(0.85, 0.87, 0.92)
+	# надписи на полосе: цвет текста самой кнопки, если он читается на её заливке
+	if absf(text.get_luminance() - light) > 0.3:
+		c_head_ink = Color(text.r, text.g, text.b, 1.0)
+	else:
+		c_head_ink = Color(0.08, 0.07, 0.1) if light > 0.55 else Color(0.97, 0.96, 0.99)
+	c_head_muted = c_head_ink.lerp(head, 0.32)
+	if _built:
+		_restyle()
+		_rescale_body()
+		_apply()
+
+
+## Кнопка на полосе вкладок: надписи в цвет полосы, а не тёмного фона.
+func _on_head(b: Button) -> Button:
+	b.add_theme_color_override("font_color", c_head_muted)
+	b.add_theme_color_override("font_hover_color", c_head_ink)
+	b.add_theme_color_override("font_pressed_color", c_head_ink)
+	var veil := Color(c_head_ink, 0.16)
+	b.add_theme_stylebox_override("hover", flat(veil, 5, 4))
+	b.add_theme_stylebox_override("pressed", flat(Color(c_head_ink, 0.24), 5, 4))
+	return b
+
+
+## Пересобрать свёрнутую кнопку (сменился экран — у новой игры другая кнопка полосы).
+func rebuild_mini() -> void:
+	if not _built:
+		return
+	for child: Node in _mini.get_children():
+		_mini.remove_child(child)
+		child.queue_free()
+	_mini_button = null
+	_mini_label = null
+	var made: Variant = mini_factory.call() if mini_factory.is_valid() else null
+	if made is Button:
+		_mini_button = made
+		_mini_button.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_mini_button.focus_mode = Control.FOCUS_NONE
+		_mini.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+		_mini.add_child(_mini_button)
+	else:
+		var plate := flat(c_head, mini(_corner(), 14), 8, _edge_color())
+		plate.set_border_width_all(_edge())
+		plate.shadow_color = Color(0, 0, 0, 0.3)
+		plate.shadow_size = 5
+		plate.shadow_offset = Vector2(0, 2)
+		_mini.add_theme_stylebox_override("panel", plate)
+		_mini_label = Label.new()
+		_mini_label.add_theme_font_size_override("font_size", 14)
+		_mini_label.add_theme_color_override("font_color", c_head_ink)
+		_mini.add_child(_mini_label)
+	_mini_text()
+	var measured := _mini.get_combined_minimum_size()
+	if measured.x > 8.0 and measured.y > 8.0:
+		_mini_size = measured
+	_apply()
+
+
+func _mini_text() -> void:
+	var text := title + (" ●" if mini_dot and _blink_on else ("   " if mini_dot else ""))
+	if _mini_button != null and is_instance_valid(_mini_button):
+		_mini_button.text = text
+	elif _mini_label != null and is_instance_valid(_mini_label):
+		_mini_label.text = text
+
+
+## Куда на самом деле ведёт «закрыть» (наследник может свернуть вместо закрытия).
+func _closing_mode() -> int:
+	return Mode.MINI if close_minimizes else Mode.CLOSED
+
+
 func px(n: float) -> int:
 	return roundi(n * (k if scale_content else 1.0))
 
@@ -135,11 +260,13 @@ func is_open() -> bool:
 
 
 func set_mode(next: int) -> void:
-	if next == Mode.CLOSED and close_minimizes:
-		next = Mode.MINI
+	if next == Mode.CLOSED:
+		next = _closing_mode()
 	if mode == next:
 		return
 	mode = next
+	if next == Mode.OPEN:
+		_pick_side()
 	_zoom = 0.0
 	_store()
 	_apply()
@@ -161,12 +288,12 @@ func small_button(text: String, tip: String) -> Button:
 	b.focus_mode = Control.FOCUS_NONE
 	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	b.add_theme_font_size_override("font_size", px(13))
-	b.add_theme_color_override("font_color", MUTED)
-	b.add_theme_color_override("font_hover_color", INK)
-	b.add_theme_color_override("font_pressed_color", ACCENT)
+	b.add_theme_color_override("font_color", c_muted)
+	b.add_theme_color_override("font_hover_color", c_ink)
+	b.add_theme_color_override("font_pressed_color", c_accent)
 	b.add_theme_stylebox_override("normal", flat(Color(0, 0, 0, 0), 5, 4))
-	b.add_theme_stylebox_override("hover", flat(BG_SOFT, 5, 4))
-	b.add_theme_stylebox_override("pressed", flat(BG_SOFT.darkened(0.2), 5, 4))
+	b.add_theme_stylebox_override("hover", flat(c_soft, 5, 4))
+	b.add_theme_stylebox_override("pressed", flat(c_soft.darkened(0.2), 5, 4))
 	b.add_theme_stylebox_override("disabled", flat(Color(0, 0, 0, 0), 5, 4))
 	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
 	b.custom_minimum_size = Vector2(px(22), px(22))
@@ -187,30 +314,28 @@ static func flat(color: Color, radius: int = 6, margin: int = 6, border: Color =
 # --- Оформление и раскладка ------------------------------------------------------------
 
 func _restyle() -> void:
-	var frame := flat(BG, px(10), 0, LINE)
+	var frame := flat(c_bg, _corner(), 0, _edge_color())
+	frame.set_border_width_all(_edge())
 	frame.shadow_color = Color(0, 0, 0, 0.35)
 	frame.shadow_size = 8
 	frame.shadow_offset = Vector2(0, 3)
 	_frame.add_theme_stylebox_override("panel", frame)
-	var head := flat(BG_HEAD, px(10), 0)
+	var head := flat(c_head, _corner(), 0)
 	head.corner_radius_bottom_left = 0
 	head.corner_radius_bottom_right = 0
-	head.border_color = LINE
+	head.border_color = _edge_color()
+	head.border_width_left = _edge()
+	head.border_width_top = _edge()
+	head.border_width_right = _edge()
 	head.border_width_bottom = 1
 	_head.add_theme_stylebox_override("panel", head)
-	var mini := flat(BG_HEAD, 9, 8, LINE)
-	mini.shadow_color = Color(0, 0, 0, 0.3)
-	mini.shadow_size = 5
-	mini.shadow_offset = Vector2(0, 2)
-	_mini.add_theme_stylebox_override("panel", mini)
-	_mini_label.add_theme_font_size_override("font_size", 14)
-	_mini_label.add_theme_color_override("font_color", INK)
 	for child: Node in _head.get_children():
 		child.queue_free()
 	var row := HBoxContainer.new()
 	row.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	row.offset_left = px(6)
-	row.offset_right = -px(4)
+	row.offset_left = px(6) + _edge()
+	row.offset_right = -px(4) - _edge()
+	row.offset_top = _edge() - 1
 	row.add_theme_constant_override("separation", px(2))
 	row.mouse_filter = Control.MOUSE_FILTER_PASS
 	_head.add_child(row)
@@ -230,11 +355,14 @@ func _restyle() -> void:
 	header_extra.alignment = BoxContainer.ALIGNMENT_CENTER
 	row.add_child(header_extra)
 	_fill_header()
-	var fold := small_button("—", "Свернуть в кнопку «%s»" % title)
+	for extra: Node in header_extra.get_children():
+		if extra is Button:
+			_on_head(extra as Button)
+	var fold := _on_head(small_button("—", "Свернуть в кнопку «%s»" % title))
 	fold.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	fold.pressed.connect(set_mode.bind(Mode.MINI))
 	row.add_child(fold)
-	var close := small_button("✕", "Свернуть" if close_minimizes else "Закрыть")
+	var close := _on_head(small_button("✕", "Свернуть" if close_minimizes else "Закрыть"))
 	close.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	close.pressed.connect(set_mode.bind(Mode.CLOSED))
 	row.add_child(close)
@@ -252,11 +380,11 @@ func _rebuild_tabs() -> void:
 		var id := str(tab.get("id", ""))
 		var on := id == current_tab
 		var item := PanelContainer.new()
-		var sb := flat(BG if on else Color(0, 0, 0, 0), px(6), px(5))
+		var sb := flat(c_bg if on else Color(0, 0, 0, 0), px(6), px(5))
 		sb.corner_radius_bottom_left = 0
 		sb.corner_radius_bottom_right = 0
 		if on:
-			sb.border_color = ACCENT
+			sb.border_color = c_accent
 			sb.border_width_top = 2
 		item.add_theme_stylebox_override("panel", sb)
 		item.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -271,14 +399,14 @@ func _rebuild_tabs() -> void:
 			var dot := Label.new()
 			dot.text = "●"
 			dot.add_theme_font_size_override("font_size", px(10))
-			dot.add_theme_color_override("font_color", ACCENT)
+			dot.add_theme_color_override("font_color", c_accent if on else c_head_ink)
 			dot.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			line.add_child(dot)
 			_dots.append(dot)
 		var label := Label.new()
 		label.text = str(tab.get("text", ""))
 		label.add_theme_font_size_override("font_size", px(13))
-		label.add_theme_color_override("font_color", INK if on else MUTED)
+		label.add_theme_color_override("font_color", c_ink if on else c_head_muted)
 		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		line.add_child(label)
 		if bool(tab.get("closable", false)):
@@ -286,8 +414,12 @@ func _rebuild_tabs() -> void:
 			var x := small_button("×", "Закрыть вкладку")
 			x.custom_minimum_size = Vector2(px(16), px(16))
 			x.add_theme_stylebox_override("normal", flat(Color(0, 0, 0, 0), 4, 1))
-			x.add_theme_stylebox_override("hover", flat(BG_SOFT, 4, 1))
-			x.add_theme_stylebox_override("pressed", flat(BG_SOFT, 4, 1))
+			x.add_theme_stylebox_override("hover", flat(c_soft, 4, 1))
+			x.add_theme_stylebox_override("pressed", flat(c_soft, 4, 1))
+			if not on:
+				_on_head(x)
+				x.add_theme_stylebox_override("hover", flat(Color(c_head_ink, 0.16), 4, 1))
+				x.add_theme_stylebox_override("pressed", flat(Color(c_head_ink, 0.24), 4, 1))
 			x.pressed.connect(func(): tab_closed.emit(id))
 			line.add_child(x)
 		_tab_row.add_child(item)
@@ -297,7 +429,7 @@ func _draw_grip() -> void:
 	var s := _grip.size
 	for i in 3:
 		var d := 4.0 + i * 4.0
-		_grip.draw_line(Vector2(s.x - 2, s.y - d), Vector2(s.x - d, s.y - 2), Color(MUTED, 0.7), 1.5, true)
+		_grip.draw_line(Vector2(s.x - 2, s.y - d), Vector2(s.x - d, s.y - 2), Color(c_muted, 0.7), 1.5, true)
 
 
 func _parent_size() -> Vector2:
@@ -314,6 +446,30 @@ func _clamped(pos: Vector2, rect_size: Vector2) -> Vector2:
 	return Vector2(clampf(pos.x, 0.0, maxf(0.0, limit.x)), clampf(pos.y, minf(top_limit, maxf(0.0, limit.y)), maxf(0.0, limit.y)))
 
 
+## В какую сторону раскрыться от свёрнутой кнопки: туда, где есть место. Если справа или снизу край
+## экрана — окно растёт влево или вверх, а кнопка остаётся в своём углу и после сворачивания.
+func _pick_side() -> void:
+	var normal := _normal_size()
+	var room := _parent_size()
+	_open_right = _pos.x + normal.x > room.x and _pos.x + _mini_size.x - normal.x >= 0.0
+	_open_bottom = _pos.y + normal.y > room.y and _pos.y + _mini_size.y - normal.y >= top_limit
+
+
+func _open_pos(normal: Vector2) -> Vector2:
+	return Vector2(
+		_pos.x + _mini_size.x - normal.x if _open_right else _pos.x,
+		_pos.y + _mini_size.y - normal.y if _open_bottom else _pos.y
+	)
+
+
+## Раскрытое окно передвинули — кнопка едет вместе с тем углом, от которого оно раскрыто.
+func _anchor_from(rect_pos: Vector2, normal: Vector2) -> void:
+	_pos = Vector2(
+		rect_pos.x + normal.x - _mini_size.x if _open_right else rect_pos.x,
+		rect_pos.y + normal.y - _mini_size.y if _open_bottom else rect_pos.y
+	)
+
+
 ## Поставить панель по текущему состоянию: место, размер, свёрнутость.
 func _apply() -> void:
 	if not _built or not is_inside_tree():
@@ -328,9 +484,10 @@ func _apply() -> void:
 	if mode == Mode.CLOSED:
 		return
 	if mode == Mode.MINI:
-		_mini_label.text = title + (" ●" if mini_dot and _blink_on else ("  " if mini_dot else ""))
+		_mini_text()
 		_mini.reset_size()
 		var mini_size := _mini.get_combined_minimum_size()
+		_mini_size = mini_size
 		if not _placed and default_place.is_valid():
 			_pos = default_place.call(mini_size, _parent_size())
 		size = mini_size
@@ -339,11 +496,12 @@ func _apply() -> void:
 		return
 	var normal := _normal_size()
 	if not _placed and default_place.is_valid():
-		_pos = default_place.call(normal, _parent_size())
+		_pos = default_place.call(_mini_size, _parent_size())
+		_pick_side()
 	var rect_size := normal
 	if _zoom > 0.0:
 		rect_size = normal.lerp(normal.max(hover_zoom).min(_parent_size()), ease(_zoom, -1.8)).round()
-	var pos := _clamped(_pos, normal)
+	var pos := _clamped(_open_pos(normal), normal)
 	if _zoom > 0.0:
 		pos = _clamped(pos, rect_size)
 	position = pos
@@ -353,8 +511,8 @@ func _apply() -> void:
 	_frame.size = rect_size
 	_head.position = Vector2.ZERO
 	_head.size = Vector2(rect_size.x, hh)
-	body.position = Vector2(1, hh)
-	body.size = Vector2(rect_size.x - 2, rect_size.y - hh - 1)
+	body.position = Vector2(_edge(), hh)
+	body.size = Vector2(rect_size.x - _edge() * 2, rect_size.y - hh - _edge())
 	_grip.size = Vector2(16, 16)
 	_grip.position = rect_size - _grip.size
 	_grip.queue_redraw()
@@ -371,7 +529,7 @@ func _process(delta: float) -> void:
 			if is_instance_valid(dot):
 				dot.modulate.a = 1.0 if _blink_on else 0.15
 		if mode == Mode.MINI and mini_dot:
-			_mini_label.text = title + (" ●" if _blink_on else "  ")
+			_mini_text()
 	if mode != Mode.OPEN or hover_zoom == Vector2.ZERO:
 		return
 	var want := false
@@ -431,7 +589,11 @@ func _drag_input(event: InputEvent, tab: String) -> void:
 			_dragging = true
 			_zoom = 0.0
 		if _dragging:
-			_pos = _clamped(_press_pos + shift, size)
+			var moved := _clamped(_press_pos + shift, size)
+			if mode == Mode.OPEN:
+				_anchor_from(moved, _normal_size())
+			else:
+				_pos = moved
 			_placed = true
 			_apply()
 
@@ -450,7 +612,7 @@ func _grip_input(event: InputEvent) -> void:
 			if not is_equal_approx(_live_k, k):
 				k = _live_k
 				_placed = true
-				_pos = position
+				_anchor_from(position, _normal_size())
 				_store()
 				_restyle()
 				_rescale_body()

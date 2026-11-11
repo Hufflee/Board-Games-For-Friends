@@ -12,6 +12,7 @@ signal box_panel_toggled(open: bool)  # хаб прячет карточку и�
 
 const Stickers := preload("res://hub/stickers.gd")
 const Board := preload("res://hub/sticker_board.gd")
+const RoomIcons := preload("res://hub/room_icons.gd")
 const TILE := 56  # кнопка стикера в панели
 const COLS := 6  # стикеров в ряду панели
 const HANDLE_R := 7.0  # точка поворота у рамки выделения
@@ -25,6 +26,7 @@ var _watch_peer: Callable
 var _watch_name: Callable
 var _smiley: Button
 var _board_smiley: Button  # смайлик над своей доской после удержания
+var _board_cross: Button  # крестик рядом со смайликом: удержать — снять доску вместе со стикерами
 var _board_smiley_left := 0.0
 var _panel: PanelContainer  # панель стикеров коробки или доски
 var _panel_kind := ""  # "box" | "board"
@@ -108,17 +110,26 @@ func _ready() -> void:
 	_board_smiley.tooltip_text = "Разобрать свою доску: приблизить и снять ненужные стикеры"
 	_board_smiley.draw.connect(func(): _draw_face(_board_smiley, HubStyle.CYAN))
 	_board_smiley.pressed.connect(func():
-		_board_smiley.visible = false
-		open_board(_room.camera.unproject_position(_room.sticker_board.global_position)))
+		_hide_board_icons()
+		if is_instance_valid(_room.sticker_board):
+			open_board(_room.camera.unproject_position(_room.sticker_board.global_position)))
 	_board_smiley.visible = false
 	add_child(_board_smiley)
+	_board_cross = HubStyle.button("", 14)
+	_board_cross.name = "BoardRemove"
+	_board_cross.custom_minimum_size = Vector2(44, 44)
+	_board_cross.draw.connect(func(): RoomIcons.cross(_board_cross, HubStyle.PINK))
+	LeaveGuard.hold(_board_cross, _remove_board, "Снять доску друзей вместе со всеми стикерами на ней")
+	_board_cross.visible = false
+	add_child(_board_cross)
 	_room.board_held.connect(func():
 		if _own_room():
 			_board_smiley_left = 6.0
-			_board_smiley.visible = true)
-	_room.board_moved.connect(func(center: Vector2):
+			_board_smiley.visible = true
+			_board_cross.visible = true)
+	_room.board_moved.connect(func(center: Vector2, bid: int):
 		if _own_room():
-			Net.stickers.set_board_pos(center))
+			Net.stickers.set_board_pos(center, bid))
 	_room.box_released.connect(func():
 		if _panel_kind == "box":
 			_close_panel())
@@ -134,6 +145,29 @@ func _peer() -> int:
 
 func _own_room() -> bool:
 	return _peer() == 0 and not _room.remote_view
+
+
+## Доска, с которой сейчас работают (последняя нажатая).
+func _bid() -> int:
+	return maxi(0, _room.active_board_id())
+
+
+func _hide_board_icons() -> void:
+	_board_smiley.visible = false
+	_board_cross.visible = false
+
+
+## Крестик над своей доской удержан: доска снимается совсем, стикеры на ней не сохраняются.
+func _remove_board() -> void:
+	var bid := _room.active_board_id()
+	_hide_board_icons()
+	if bid < 0 or not _own_room():
+		return
+	if _panel_kind == "board":
+		_close_panel()
+	Net.stickers.remove_board(bid)
+	Sfx.play("card_shove", -6, 0.08)
+	toast("Доска друзей снята · новую можно повесить в редакторе шкафа")
 
 
 # --- Показ стикеров на коробках и доске ----------------------------------------------------
@@ -169,10 +203,12 @@ func _apply(_force: bool) -> void:
 		var box := item as GameBox
 		if box != null and not box.is_figurine():
 			box.set_stickers(data.boxes.get(_room._shelf_id(box), []))
-	if is_instance_valid(_room.sticker_board):
-		_room.set_board_position(Net.stickers.board_pos(peer))
-		var board: Array = data.board
-		if _sel_kind == "board" and peer == _sel_owner:
+	var ids: Array = Stickers.board_ids(data)
+	_room.sync_boards(ids)
+	for bid: int in ids:
+		_room.set_board_position(Stickers.board_pos(data, bid), bid)
+		var board: Array = Stickers.board_list(data, bid)
+		if _sel_kind == "board" and peer == _sel_owner and bid == _bid():
 			# Свой стикер на доске друга двигается сразу, не дожидаясь ответа хозяина доски.
 			board = board.duplicate(true)
 			var found := false
@@ -188,7 +224,7 @@ func _apply(_force: bool) -> void:
 					found = true
 			if not found and not _board_dirty:
 				_deselect()
-		_room.sticker_board.show_stickers(board)
+		_room.boards[bid].show_stickers(board)
 
 
 func _place_smiley() -> void:
@@ -213,12 +249,14 @@ func _place_board_smiley(delta: float) -> void:
 	if not _board_smiley.visible:
 		return
 	_board_smiley_left -= delta
-	if (_board_smiley_left <= 0.0 and not _room.board_dragging) or not _own_room() or _panel_kind != "":
-		_board_smiley.visible = false
-		return
 	var board: Node3D = _room.sticker_board
+	if (_board_smiley_left <= 0.0 and not _room.board_dragging) or not _own_room() or _panel_kind != "" or not is_instance_valid(board):
+		_hide_board_icons()
+		return
 	var top := board.global_position + Vector3(0, 0.26, 0.03)
-	_board_smiley.position = _room.camera.unproject_position(top) - Vector2(22, 48)
+	var at := _room.camera.unproject_position(top)
+	_board_smiley.position = at - Vector2(48, 48)
+	_board_cross.position = at - Vector2(-4, 48)
 
 
 func _draw_face(button: Button, color: Color) -> void:
@@ -404,7 +442,7 @@ func _selection_controls(parent: Control, on_remove: Callable) -> void:
 		var list: Array = Net.stickers.box_stickers(_sel_key)
 		title_id = str(list[_sel_index][0]) if _sel_index < list.size() else ""
 	else:
-		for entry: Array in Net.stickers.room_of(_sel_owner).board:
+		for entry: Array in Net.stickers.board_of(_sel_owner, _bid()):
 			if str(entry[0]) == _sel_key:
 				title_id = str(entry[1])
 	col.add_child(HubStyle.label("Выделен: «%s»" % Stickers.title(title_id), 15, HubStyle.YELLOW, HORIZONTAL_ALIGNMENT_LEFT, "medium"))
@@ -537,13 +575,16 @@ func _start_placing(id: String) -> void:
 ## Клик по доске друга со стикером «в руке»: наклеить в это место.
 func _place_on_board(point: Vector2) -> void:
 	var peer := _placing_board
+	if not is_instance_valid(_room.sticker_board):
+		_stop_placing()
+		return
 	var uv: Vector2 = _room.sticker_board.uv_at(_room.camera, point)
 	if uv.x < 0.0:
 		toast("Мимо доски — нажмите на саму доску")
 		return
 	var sticker := _placing
 	_stop_placing()
-	if Net.stickers.request_board_add(peer, sticker, uv.x, uv.y, randf_range(-0.45, 0.45)):
+	if Net.stickers.request_board_add(peer, _bid(), sticker, uv.x, uv.y, randf_range(-0.45, 0.45)):
 		Sfx.play("card_place", -6, 0.08)
 		toast("Стикер «%s» на доске · его можно сразу тащить мышью" % Stickers.title(sticker))
 
@@ -633,7 +674,7 @@ func _open_board_panel() -> void:
 	var col := _new_panel("board", HubStyle.CYAN)
 	col.add_child(HubStyle.neon_label("ДОСКА ДРУЗЕЙ", 18, HubStyle.CYAN))
 	if peer == 0:
-		var count: int = Net.stickers.local.board.size()
+		var count: int = Net.stickers.board_of(0, _bid()).size()
 		var text := "Это ваша доска: сюда друзья клеят вам стикеры (сейчас — %d). Себе клеить нельзя." % count
 		text += "\nЧтобы наклеить стикер другу, откройте его комнату — значок глаза рядом с ником в пати."
 		var note := HubStyle.label(text, 14, HubStyle.TEXT)
@@ -646,7 +687,7 @@ func _open_board_panel() -> void:
 		col.add_child(help)
 		if _sel_kind == "own_board":
 			var picked: Array = []
-			for entry: Array in Net.stickers.local.board:
+			for entry: Array in Net.stickers.board_of(0, _bid()):
 				if str(entry[0]) == _sel_key:
 					picked = entry
 			if not picked.is_empty():
@@ -660,7 +701,7 @@ func _open_board_panel() -> void:
 				remove.name = "OwnBoardRemove"
 				var uid := _sel_key
 				remove.pressed.connect(func():
-					Net.stickers.remove_own_board_sticker(uid)
+					Net.stickers.remove_own_board_sticker(uid, _bid())
 					_sel_kind = ""
 					_sel_key = ""
 					_sel = []
@@ -676,7 +717,7 @@ func _open_board_panel() -> void:
 				row.add_child(keep)
 				inner.add_child(row)
 		var authors := {}
-		for entry: Array in Net.stickers.local.board:
+		for entry: Array in Net.stickers.board_of(0, _bid()):
 			authors[str(entry[6])] = int(authors.get(str(entry[6]), 0)) + 1
 		if not authors.is_empty():
 			var names := PackedStringArray()
@@ -696,14 +737,14 @@ func _open_board_panel() -> void:
 			_start_placing(id)
 			_placing_board = peer
 			toast("Нажмите на доску друга, чтобы приклеить · правая кнопка — отмена"))
-		var mine: Array = Net.stickers.my_board_stickers(peer)
+		var mine: Array = Net.stickers.my_board_stickers(peer, _bid())
 		if not mine.is_empty():
 			var ids: Array = mine.map(func(entry): return str(entry[1]))
 			var uids: Array = mine.map(func(entry): return str(entry[0]))
 			_applied_row(col, "Ваши стикеры на этой доске: %d из %d" % [mine.size(), Stickers.BOARD_PER_AUTHOR], ids, uids, func(uid: String): _select_board(peer, uid))
 		if _sel_kind == "board" and _sel_owner == peer:
 			_selection_controls(col, func():
-				Net.stickers.request_board_remove(peer, _sel_key)
+				Net.stickers.request_board_remove(peer, _bid(), _sel_key)
 				_deselect(false)
 				toast("Стикер снят")
 				_open_board_panel())
@@ -732,7 +773,7 @@ func _select_box(game: String, index: int) -> void:
 
 
 func _select_board(owner: int, uid: String) -> void:
-	for entry: Array in Net.stickers.my_board_stickers(owner):
+	for entry: Array in Net.stickers.my_board_stickers(owner, _bid()):
 		if str(entry[0]) == uid:
 			_flush()
 			_sel_kind = "board"
@@ -795,7 +836,7 @@ func _send_board_update() -> void:
 	_board_dirty = false
 	_board_clock = 0.0
 	if _sel_kind == "board" and not _sel.is_empty():
-		Net.stickers.request_board_update(_sel_owner, _sel_key, _sel[0], _sel[1], _sel[2], _sel[3])
+		Net.stickers.request_board_update(_sel_owner, _bid(), _sel_key, _sel[0], _sel[1], _sel[2], _sel[3])
 
 
 func _turn(delta: float) -> void:
@@ -842,7 +883,7 @@ func _pick_at(uv: Vector2) -> String:
 				return str(i)
 		return ""
 	# На своей доске можно выделить любой стикер (чтобы снять), на чужой — только свои.
-	var mine: Array = Net.stickers.local.board if _peer() == 0 else Net.stickers.my_board_stickers(_peer())
+	var mine: Array = Net.stickers.board_of(0, _bid()) if _peer() == 0 else Net.stickers.my_board_stickers(_peer(), _bid())
 	for i in range(mine.size() - 1, -1, -1):
 		var entry: Array = mine[i]
 		var k := float(entry[7]) if entry.size() > 7 else 1.0
@@ -942,7 +983,7 @@ func _input(event: InputEvent) -> void:
 		_sel_kind = "own_board"
 		_sel_key = picked
 		_sel = []
-		for entry: Array in Net.stickers.local.board:
+		for entry: Array in Net.stickers.board_of(0, _bid()):
 			if str(entry[0]) == picked:
 				_sel = [float(entry[2]), float(entry[3]), float(entry[4]), float(entry[7]) if entry.size() > 7 else 1.0]
 		_open_board_panel()

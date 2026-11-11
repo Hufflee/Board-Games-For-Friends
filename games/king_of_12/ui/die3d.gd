@@ -376,7 +376,8 @@ func show_face(f: int, animate: bool = true) -> void:
 ## Бросок с текущего места со скоростью vel (px/с). Грань станет известна через set_result().
 func throw(vel: Vector2, result: int = 0, local_reel: bool = false) -> void:
 	_vel = vel.limit_length(MAX_SPEED)
-	Sfx.play("die_throw", lerpf(-10.0, 0.0, clampf(_vel.length() / 2000.0, 0.0, 1.0)), 0.08, 0.05)
+	if _reel == null:  # у кубомёта свой звук — трещотка по рёбрам (hub/dice_reel.gd)
+		Sfx.play("die_throw", lerpf(-10.0, 0.0, clampf(_vel.length() / 2000.0, 0.0, 1.0)), 0.08, 0.05)
 	_t = 0.0
 	state = "flying"
 	if _reel != null:

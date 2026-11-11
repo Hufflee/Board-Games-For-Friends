@@ -76,7 +76,7 @@ func _host() -> void:
 			client = int(peer)
 	marker("joined")
 	check(st.add_box_sticker("machi_koro", "fire", 0.3, 0.4, 0.1), "свой стикер на коробку")
-	check(not st.request_board_add(1, "gg", 0.5, 0.5, 0.0), "на свою доску клеить нельзя (хост)")
+	check(not st.request_board_add(1, 0, "gg", 0.5, 0.5, 0.0), "на свою доску клеить нельзя (хост)")
 	await until(func(): return seen("client_box_seen"), "клиент увидел стикер коробки хоста")
 	await until(func(): return seen("client_added"), "клиент наклеил стикер на доску хоста")
 	await until(func(): return st.local.board.size() == 1, "на доске хоста один стикер друга")
@@ -86,13 +86,13 @@ func _host() -> void:
 		check(is_equal_approx(float(st.local.board[0][2]), 0.1) and is_equal_approx(float(st.local.board[0][4]), 1.0), "место и поворот от автора применены у хозяина")
 	# Хозяин не может «перехватить» чужой стикер: правка с его ключом отклоняется.
 	if not st.local.board.is_empty():
-		st._owner_update(st.my_author_key(), str(st.local.board[0][0]), 0.5, 0.5, 0.0, 1.0)
+		st._owner_update(st.my_author_key(), 0, str(st.local.board[0][0]), 0.5, 0.5, 0.0, 1.0)
 		check(is_equal_approx(float(st.local.board[0][2]), 0.1), "чужой ключ автора не двигает стикер")
 	check(st.add_box_sticker("machi_koro", "gg", 0.5, 0.5, 0.0), "второй стикер на коробку")
 	st.update_box_sticker("machi_koro", 1, 0.99, 0.1, 3.5, 9.0)
 	var big: Array = st.box_stickers("machi_koro")[1]
 	check(is_equal_approx(float(big[4]), 2.0) and absf(float(big[3])) <= PI, "размер и поворот на коробке ограничены")
-	check(st.request_board_add(client, "pixel_heart", 0.2, 0.3, 0.0), "хост клеит стикер на доску клиента")
+	check(st.request_board_add(client, 0, "pixel_heart", 0.2, 0.3, 0.0), "хост клеит стикер на доску клиента")
 	await until(func(): return seen("client_removed"), "клиент снял свой стикер")
 	await until(func(): return st.local.board.is_empty(), "стикер клиента снят с доски хоста")
 	if not st.local.board.is_empty():
@@ -102,8 +102,8 @@ func _host() -> void:
 	check(st.local.board.is_empty(), "поддельный «хозяйский» RPC клиента не наклеил стикер")
 	# Не больше 6 стикеров одного автора на доске; у другого автора свой лимит.
 	for i in 8:
-		st._owner_add("steam:77", "Друг", "gg", 0.1 * i, 0.5, 0.0)
-	st._owner_add("steam:78", "Соня", "fire", 0.5, 0.5, 0.0)
+		st._owner_add("steam:77", "Друг", 0, "gg", 0.1 * i, 0.5, 0.0)
+	st._owner_add("steam:78", "Соня", 0, "fire", 0.5, 0.5, 0.0)
 	check(st.local.board.filter(func(e): return str(e[5]) == "steam:77").size() == 6, "от одного друга не больше 6 стикеров")
 	check(st.local.board.size() == 7, "лимит считается отдельно для каждого автора")
 	st.local.board.clear()
@@ -151,11 +151,11 @@ func _client() -> void:
 	var me: int = net.multiplayer.get_unique_id()
 	await until(func(): return not st.room_of(1).boxes.get("machi_koro", []).is_empty(), "видна коробка хоста со стикером")
 	marker("client_box_seen")
-	check(not st.request_board_add(me, "gg", 0.5, 0.5, 0.0), "на свою доску клеить нельзя (клиент)")
-	check(st.request_board_add(1, "crown", 0.6, 0.4, 0.2), "запрос стикера на доску хоста")
+	check(not st.request_board_add(me, 0, "gg", 0.5, 0.5, 0.0), "на свою доску клеить нельзя (клиент)")
+	check(st.request_board_add(1, 0, "crown", 0.6, 0.4, 0.2), "запрос стикера на доску хоста")
 	await until(func(): return st.my_board_stickers(1).size() == 1, "свой стикер виден на доске хоста")
 	if st.my_board_stickers(1).size() == 1:
-		st.request_board_update(1, str(st.my_board_stickers(1)[0][0]), 0.1, 0.9, 1.0, 1.7)
+		st.request_board_update(1, 0, str(st.my_board_stickers(1)[0][0]), 0.1, 0.9, 1.0, 1.7)
 	await until(func(): return st.my_board_stickers(1).size() == 1 and is_equal_approx(float(st.my_board_stickers(1)[0][7]), 1.7), "свой стикер на доске друга сдвинут, повёрнут, увеличен")
 	if st.my_board_stickers(1).size() != 1 or not is_equal_approx(float(st.my_board_stickers(1)[0][7]), 1.7):
 		print("ОТЛАДКА доска хоста у клиента: ", st.room_of(1).get("board"), " мой ключ: ", st.my_author_key())
@@ -165,11 +165,11 @@ func _client() -> void:
 		check(st.my_board_stickers(me).is_empty(), "чужой стикер на моей доске — не «мой»")
 	var mine: Array = st.my_board_stickers(1)
 	if not mine.is_empty():
-		st.request_board_remove(1, str(mine[0][0]))
+		st.request_board_remove(1, 0, str(mine[0][0]))
 	await until(func(): return st.my_board_stickers(1).is_empty(), "свой стикер снят с доски хоста")
 	marker("client_removed")
 	# Подделка: клиент сам вызывает RPC, который хост шлёт хозяину доски.
-	st._rpc_owner_add.rpc_id(1, "steam:999", "Хакер", "skull", 0.5, 0.5, 0.0)
+	st._rpc_owner_add.rpc_id(1, "steam:999", "Хакер", 0, "skull", 0.5, 0.5, 0.0)
 	marker("forged")
 	await until(func(): return seen("board_moved") and st.board_pos(1).is_equal_approx(Vector2(-1.5, 1.8)), "доска хоста перевешена и у клиента")
 	check(st.board_pos(me) == load("res://hub/stickers.gd").BOARD_DEFAULT, "своя доска клиента — на месте по умолчанию")

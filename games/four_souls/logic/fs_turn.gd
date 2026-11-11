@@ -229,6 +229,7 @@ func _resume_after_deaths() -> void:
 		_push({"kind": "death", "owner": int(_death_queue[0])}, _death_resume)
 	elif _end_after_deaths:
 		_end_after_deaths = false
+		_settle_pending_rewards()
 		_cancel_unresolved()
 		resolving = {}
 		_after_stack = "turn"

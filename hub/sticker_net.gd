@@ -131,11 +131,40 @@ func update_box_sticker(game: String, index: int, u: float, v: float, r: float, 
 
 # --- Плакаты комнаты -------------------------------------------------------------------
 
-func _poster_list() -> Array:
+func _poster_list(slot: int = 0) -> Array:
 	var list: Array = (local.get("posters", []) as Array).duplicate(true)
-	while list.size() < Stickers.POSTERS:
+	while list.size() < maxi(Stickers.POSTERS, slot + 1):
 		list.append([])
 	return list
+
+
+## Свободный номер для нового плаката: снятый стандартный или пустой добавленный; -1 — плакатов уже максимум.
+func free_poster_slot() -> int:
+	var shown := Stickers.poster_slots(local)
+	for slot in Stickers.POSTERS_MAX:
+		if not shown.has(slot):
+			return slot
+	return -1
+
+
+## Снять свой плакат совсем (повесить снова — кнопкой плаката в редакторе шкафа).
+func remove_poster(slot: int) -> void:
+	if slot < 0 or slot >= Stickers.POSTERS_MAX:
+		return
+	var list := _poster_list(slot)
+	list[slot] = []
+	while list.size() > Stickers.POSTERS and (list.back() as Array).is_empty():
+		list.pop_back()
+	local["posters"] = list
+	if slot < Stickers.POSTERS:
+		var gone: Array = (local.get("poster_gone", []) as Array).duplicate()
+		if not gone.has(slot):
+			gone.append(slot)
+		local["poster_gone"] = gone
+	var order: Array = (local.get("poster_order", []) as Array).duplicate()
+	order.erase(slot)
+	local["poster_order"] = order
+	_local_changed()
 
 
 ## Плакат, который трогали последним, — в верхнем слое (плакаты могут наслаиваться друг на друга).
@@ -154,9 +183,22 @@ func poster_layer(peer: int, slot: int) -> int:
 
 
 ## Перевесили свой плакат (центр на задней стене, м).
+func set_default_poster(slot: int, center: Vector2) -> void:
+	if slot < 0 or slot >= Stickers.POSTERS_MAX:
+		return
+	_poster_to_top(slot)
+	var list := _poster_list(slot)
+	list[slot] = [center.x, center.y, "", 1.0]
+	local.posters = list
+	var removed: Array = local.get("poster_gone", [])
+	removed.erase(slot)
+	local.poster_gone = removed
+	_local_changed()
+
+
 func set_poster_pos(slot: int, center: Vector2) -> void:
 	_poster_to_top(slot)
-	var list := _poster_list()
+	var list := _poster_list(slot)
 	var entry: Array = list[slot]
 	list[slot] = [center.x, center.y, str(entry[2]) if entry.size() >= 3 else "", float(entry[3]) if entry.size() >= 4 else 1.0]
 	local["posters"] = list
@@ -166,7 +208,7 @@ func set_poster_pos(slot: int, center: Vector2) -> void:
 ## Размер своего плаката: 1 — обычный, до POSTER_SCALE_MAX (вдвое больше).
 func set_poster_scale(slot: int, center: Vector2, scale: float) -> void:
 	_poster_to_top(slot)
-	var list := _poster_list()
+	var list := _poster_list(slot)
 	var entry: Array = list[slot]
 	list[slot] = [center.x, center.y, str(entry[2]) if entry.size() >= 3 else "", clampf(scale, 1.0, Stickers.POSTER_SCALE_MAX)]
 	local["posters"] = list
@@ -207,7 +249,7 @@ func set_poster_gif(slot: int, bytes: PackedByteArray, center: Vector2) -> Strin
 
 
 func _set_poster_bytes(slot: int, bytes: PackedByteArray, center: Vector2, texture: Resource = null) -> String:
-	if slot < 0 or slot >= 3 or bytes.is_empty() or bytes.size() > Stickers.POSTER_MAX_BYTES:
+	if slot < 0 or slot >= Stickers.POSTERS_MAX or bytes.is_empty() or bytes.size() > Stickers.POSTER_MAX_BYTES:
 		return ""
 	var hash := _sha(bytes)
 	if not _write_poster(hash, bytes):
@@ -216,10 +258,14 @@ func _set_poster_bytes(slot: int, bytes: PackedByteArray, center: Vector2, textu
 	if texture != null:
 		_remember_poster(hash, texture)
 	_poster_to_top(slot)
-	var list := _poster_list()
+	var list := _poster_list(slot)
 	var old: Array = list[slot]
 	list[slot] = [center.x, center.y, hash, float(old[3]) if old.size() >= 4 else 1.0]
 	local["posters"] = list
+	var gone: Array = (local.get("poster_gone", []) as Array).duplicate()
+	if gone.has(slot):  # снятый стандартный плакат повесили заново — уже со своей картинкой
+		gone.erase(slot)
+		local["poster_gone"] = gone
 	_local_changed()
 	_upload(hash)
 	return hash
@@ -418,15 +464,67 @@ func _rpc_poster_deliver(hash: String, index: int, count: int, chunk: PackedByte
 
 
 ## Хозяин перевесил свою доску (центр на задней стене, м). Видят и друзья в режиме наблюдения.
-func set_board_pos(pos: Vector2) -> void:
+func set_board_pos(pos: Vector2, bid: int = 0) -> void:
 	var clamped := Stickers.clamp_board_pos(pos)
-	local["pos"] = [clamped.x, clamped.y]
+	if bid == 0:
+		local["pos"] = [clamped.x, clamped.y]
+	for entry: Dictionary in local.get("boards", []):
+		if int(entry.id) == bid:
+			entry.pos = [clamped.x, clamped.y]
 	_local_changed()
 
 
-func board_pos(peer: int) -> Vector2:
-	var pos: Array = room_of(peer).get("pos", [])
-	return Vector2(float(pos[0]), float(pos[1])) if pos.size() == 2 else Stickers.BOARD_DEFAULT
+func board_pos(peer: int, bid: int = 0) -> Vector2:
+	return Stickers.board_pos(room_of(peer), bid)
+
+
+## Доски друзей в комнате участника (номера).
+func board_ids(peer: int) -> Array:
+	return Stickers.board_ids(room_of(peer))
+
+
+## Стикеры доски bid в комнате участника.
+func board_of(peer: int, bid: int) -> Array:
+	return Stickers.board_list(room_of(peer), bid)
+
+
+## Повесить ещё одну пустую доску друзей (центр pos). Вернёт её номер или -1, если досок уже максимум.
+func add_board(pos: Vector2) -> int:
+	var clamped := Stickers.clamp_board_pos(pos)
+	if local.get("board_gone", false):
+		local.erase("board_gone")
+		local.board = []
+		local["pos"] = [clamped.x, clamped.y]
+		_local_changed()
+		return 0
+	var more: Array = local.get("boards", [])
+	if more.size() >= Stickers.BOARDS_MAX - 1:
+		notice.emit("Досок друзей уже %d — больше не поместится" % Stickers.BOARDS_MAX)
+		return -1
+	var id := 1
+	for entry: Dictionary in more:
+		id = maxi(id, int(entry.id) + 1)
+	more.append({"id": id, "pos": [clamped.x, clamped.y], "board": []})
+	local["boards"] = more
+	_local_changed()
+	return id
+
+
+## Снять доску друзей совсем — вместе со всеми стикерами на ней.
+func remove_board(bid: int) -> void:
+	if bid == 0:
+		local["board_gone"] = true
+		local.board = []
+		local.erase("pos")
+	else:
+		var more: Array = local.get("boards", [])
+		for i in more.size():
+			if int(more[i].id) == bid:
+				more.remove_at(i)
+				break
+		if more.is_empty():
+			local.erase("boards")
+	_local_changed()
 
 
 func remove_box_sticker(game: String, index: int) -> void:
@@ -442,72 +540,73 @@ func remove_box_sticker(game: String, index: int) -> void:
 # --- Доска друга ----------------------------------------------------------------------
 
 ## Наклеить стикер на доску участника owner (своя доска — нельзя).
-func request_board_add(owner: int, sticker: String, u: float, v: float, r: float) -> bool:
+func request_board_add(owner: int, bid: int, sticker: String, u: float, v: float, r: float) -> bool:
 	if not _party() or owner == my_peer() or owner <= 0:
 		notice.emit("На свою доску клеить нельзя — её украшают друзья")
 		return false
 	if Stickers.clean_box_sticker([sticker, u, v, r]).is_empty():
 		return false
-	if my_board_stickers(owner).size() >= Stickers.BOARD_PER_AUTHOR:
+	if my_board_stickers(owner, bid).size() >= Stickers.BOARD_PER_AUTHOR:
 		notice.emit("На одной доске — не больше %d ваших стикеров. Снимите или поправьте свои." % Stickers.BOARD_PER_AUTHOR)
 		return false
 	if _net().is_host():
-		_host_add(1, owner, sticker, u, v, r)
+		_host_add(1, owner, bid, sticker, u, v, r)
 	else:
-		_rpc_add.rpc_id(1, owner, sticker, u, v, r)
+		_rpc_add.rpc_id(1, owner, bid, sticker, u, v, r)
 	return true
 
 
-func request_board_remove(owner: int, uid: String) -> void:
+func request_board_remove(owner: int, bid: int, uid: String) -> void:
 	if not _party() or owner == my_peer():
 		return
 	if _net().is_host():
-		_host_remove(1, owner, uid)
+		_host_remove(1, owner, bid, uid)
 	else:
-		_rpc_remove.rpc_id(1, owner, uid)
+		_rpc_remove.rpc_id(1, owner, bid, uid)
 
 
 ## Хозяин доски снимает стикер со своей доски (выборочно, любого друга).
-func remove_own_board_sticker(uid: String) -> void:
-	for i in local.board.size():
-		if str(local.board[i][0]) == uid:
-			local.board.remove_at(i)
+func remove_own_board_sticker(uid: String, bid: int = 0) -> void:
+	var board := Stickers.board_list(local, bid)
+	for i in board.size():
+		if str(board[i][0]) == uid:
+			board.remove_at(i)
 			_local_changed()
 			return
 
 
 ## Изменить свой стикер на доске участника owner (место, поворот, размер).
-func request_board_update(owner: int, uid: String, u: float, v: float, r: float, k: float) -> void:
+func request_board_update(owner: int, bid: int, uid: String, u: float, v: float, r: float, k: float) -> void:
 	if not _party() or owner == my_peer() or Stickers.clean_box_sticker(["fire", u, v, r, k]).is_empty():
 		return
 	if _net().is_host():
-		_host_update(1, owner, uid, u, v, r, k)
+		_host_update(1, owner, bid, uid, u, v, r, k)
 	else:
-		_rpc_update.rpc_id(1, owner, uid, u, v, r, k)
+		_rpc_update.rpc_id(1, owner, bid, uid, u, v, r, k)
 
 
 ## Мои стикеры на доске участника owner: [[uid, id стикера, u, v, r], ...].
-func my_board_stickers(owner: int) -> Array:
+func my_board_stickers(owner: int, bid: int = 0) -> Array:
 	var key := my_author_key()
-	return room_of(owner).board.filter(func(entry): return str(entry[5]) == key)
+	return board_of(owner, bid).filter(func(entry): return str(entry[5]) == key)
 
 
 @rpc("any_peer", "reliable")
-func _rpc_add(owner: int, sticker: String, u: float, v: float, r: float) -> void:
+func _rpc_add(owner: int, bid: int, sticker: String, u: float, v: float, r: float) -> void:
 	if _net().is_host():
-		_host_add(multiplayer.get_remote_sender_id(), owner, sticker, u, v, r)
+		_host_add(multiplayer.get_remote_sender_id(), owner, bid, sticker, u, v, r)
 
 
 @rpc("any_peer", "reliable")
-func _rpc_update(owner: int, uid: String, u: float, v: float, r: float, k: float) -> void:
+func _rpc_update(owner: int, bid: int, uid: String, u: float, v: float, r: float, k: float) -> void:
 	if _net().is_host():
-		_host_update(multiplayer.get_remote_sender_id(), owner, uid, u, v, r, k)
+		_host_update(multiplayer.get_remote_sender_id(), owner, bid, uid, u, v, r, k)
 
 
 @rpc("any_peer", "reliable")
-func _rpc_remove(owner: int, uid: String) -> void:
+func _rpc_remove(owner: int, bid: int, uid: String) -> void:
 	if _net().is_host():
-		_host_remove(multiplayer.get_remote_sender_id(), owner, uid)
+		_host_remove(multiplayer.get_remote_sender_id(), owner, bid, uid)
 
 
 func _member(peer: int) -> Dictionary:
@@ -516,90 +615,93 @@ func _member(peer: int) -> Dictionary:
 
 
 ## Хост: отправитель — настоящий peer RPC, ключ автора берём из участников пати, не из запроса.
-func _host_add(sender: int, owner: int, sticker: String, u: float, v: float, r: float) -> void:
+func _host_add(sender: int, owner: int, bid: int, sticker: String, u: float, v: float, r: float) -> void:
 	if sender == owner or _member(sender).is_empty() or _member(owner).is_empty():
 		return
 	var author: Dictionary = _member(sender)
 	var key := Stickers.author_key(int(author.get("steam_id", 0)), str(author.get("name", "")))
 	var nick := str(author.get("name", "Друг"))
 	if owner == 1:
-		_owner_add(key, nick, sticker, u, v, r)
+		_owner_add(key, nick, bid, sticker, u, v, r)
 	else:
-		_rpc_owner_add.rpc_id(owner, key, nick, sticker, u, v, r)
+		_rpc_owner_add.rpc_id(owner, key, nick, bid, sticker, u, v, r)
 
 
-func _host_remove(sender: int, owner: int, uid: String) -> void:
+func _host_remove(sender: int, owner: int, bid: int, uid: String) -> void:
 	if sender == owner or _member(sender).is_empty() or _member(owner).is_empty():
 		return
 	var author: Dictionary = _member(sender)
 	var key := Stickers.author_key(int(author.get("steam_id", 0)), str(author.get("name", "")))
 	if owner == 1:
-		_owner_remove(key, uid)
+		_owner_remove(key, bid, uid)
 	else:
-		_rpc_owner_remove.rpc_id(owner, key, uid)
+		_rpc_owner_remove.rpc_id(owner, key, bid, uid)
 
 
-func _host_update(sender: int, owner: int, uid: String, u: float, v: float, r: float, k: float) -> void:
+func _host_update(sender: int, owner: int, bid: int, uid: String, u: float, v: float, r: float, k: float) -> void:
 	if sender == owner or _member(sender).is_empty() or _member(owner).is_empty():
 		return
 	var author: Dictionary = _member(sender)
 	var key := Stickers.author_key(int(author.get("steam_id", 0)), str(author.get("name", "")))
 	if owner == 1:
-		_owner_update(key, uid, u, v, r, k)
+		_owner_update(key, bid, uid, u, v, r, k)
 	else:
-		_rpc_owner_update.rpc_id(owner, key, uid, u, v, r, k)
+		_rpc_owner_update.rpc_id(owner, key, bid, uid, u, v, r, k)
 
 
 @rpc("authority", "reliable")
-func _rpc_owner_update(key: String, uid: String, u: float, v: float, r: float, k: float) -> void:
-	_owner_update(key, uid, u, v, r, k)
+func _rpc_owner_update(key: String, bid: int, uid: String, u: float, v: float, r: float, k: float) -> void:
+	_owner_update(key, bid, uid, u, v, r, k)
 
 
 ## Хозяин доски меняет стикер только по запросу его автора (ключ подставил хост).
-func _owner_update(key: String, uid: String, u: float, v: float, r: float, k: float) -> void:
-	for i in local.board.size():
-		var entry: Array = local.board[i]
+func _owner_update(key: String, bid: int, uid: String, u: float, v: float, r: float, k: float) -> void:
+	var board := Stickers.board_list(local, bid)
+	for i in board.size():
+		var entry: Array = board[i]
 		if str(entry[0]) == uid and str(entry[5]) == key:
 			var updated := Stickers.clean_board_sticker([entry[0], entry[1], u, v, r, entry[5], entry[6], k])
 			if not updated.is_empty() and updated != entry:
-				local.board[i] = updated
+				board[i] = updated
 				_local_changed()
 			return
 
 
 @rpc("authority", "reliable")
-func _rpc_owner_add(key: String, nick: String, sticker: String, u: float, v: float, r: float) -> void:
-	_owner_add(key, nick, sticker, u, v, r)
+func _rpc_owner_add(key: String, nick: String, bid: int, sticker: String, u: float, v: float, r: float) -> void:
+	_owner_add(key, nick, bid, sticker, u, v, r)
 
 
 @rpc("authority", "reliable")
-func _rpc_owner_remove(key: String, uid: String) -> void:
-	_owner_remove(key, uid)
+func _rpc_owner_remove(key: String, bid: int, uid: String) -> void:
+	_owner_remove(key, bid, uid)
 
 
 ## Хозяин доски: сам себе не клеит (ключ автора совпал со своим — отказ).
-func _owner_add(key: String, nick: String, sticker: String, u: float, v: float, r: float) -> void:
-	if key == my_author_key():
+func _owner_add(key: String, nick: String, bid: int, sticker: String, u: float, v: float, r: float) -> void:
+	if key == my_author_key() or not Stickers.board_ids(local).has(bid):
 		return
+	var board := Stickers.board_list(local, bid)
 	var uid := "%x%04x" % [int(Time.get_unix_time_from_system()), randi() % 0x10000]
 	var entry := Stickers.clean_board_sticker([uid, sticker, u, v, r, key, nick, 1.0])
 	if entry.is_empty():
 		return
 	# Не больше BOARD_PER_AUTHOR стикеров одного автора на этой доске (проверка у хозяина — она главная).
-	if local.board.filter(func(item): return str(item[5]) == key).size() >= Stickers.BOARD_PER_AUTHOR:
+	if board.filter(func(item): return str(item[5]) == key).size() >= Stickers.BOARD_PER_AUTHOR:
 		return
-	local.board.append(entry)
-	while local.board.size() > Stickers.BOARD_MAX:
-		local.board.pop_front()
+	board.append(entry)
+	while board.size() > Stickers.BOARD_MAX:
+		board.pop_front()
 	notice.emit("%s наклеил(а) вам стикер «%s» на доску" % [nick, Stickers.title(sticker)])
 	_local_changed()
 
 
-func _owner_remove(key: String, uid: String) -> void:
-	for i in local.board.size():
-		var entry: Array = local.board[i]
+func _owner_remove(key: String, bid: int, uid: String) -> void:
+	var board := Stickers.board_list(local, bid)
+	for i in board.size():
+		var entry: Array = board[i]
 		if str(entry[0]) == uid and str(entry[5]) == key:
-			local.board.remove_at(i)
+			board.remove_at(i)
 			_local_changed()
 			return
 

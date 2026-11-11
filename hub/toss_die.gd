@@ -189,7 +189,8 @@ func throw(vel: Vector2, result: int = 0, local_reel: bool = false) -> void:
 		_reel.sides = max_face
 		_reel.spin()
 		_sync_cursor()
-	Sfx.play("die_throw", -4, 0.08, 0.05)
+	else:
+		Sfx.play("die_throw", -4, 0.08, 0.05)  # у кубомёта свой звук — трещотка по рёбрам (dice_reel.gd)
 
 
 func set_result(f: int) -> void:

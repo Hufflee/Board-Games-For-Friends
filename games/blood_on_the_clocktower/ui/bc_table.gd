@@ -489,8 +489,8 @@ func update_view(next: Dictionary) -> void:
 	actions.start_vote.visible = is_story and phase == "defense"
 	actions.count_vote.visible = is_story and phase == "voting"
 	actions.close_day.visible = is_story and phase == "nominations"
-	actions.tinker.visible = is_story and view.edition == "bmr"
-	actions.madness_execution.visible = is_story and view.edition == "sv"
+	actions.tinker.visible = is_story and view.edition == "bmr" and not _story_candidates("tinker").is_empty()
+	actions.madness_execution.visible = is_story and view.edition == "sv" and not _story_candidates("madness_execution").is_empty()
 	actions.nominate.visible = not is_story and alive and phase == "nominations" and not view.get("nominators", []).has(me)
 	actions.slay.visible = not is_story and alive and day and view.edition == "tb" and not bool(people[me].get("slayer_shot", false))
 	actions.evil_vote.visible = bool(view.get("evil_vote_open", false))
@@ -667,10 +667,23 @@ func _sync_targets(people: Array, me: int, storyteller: int) -> void:
 			if not nominated.has(i) and (living or view.edition == "bmr"): ids.append(i)
 		elif actions.slay.visible or actions.evil_vote.visible:
 			if living and i != me: ids.append(i)
-		elif actions.tinker.visible or actions.madness_execution.visible:
-			ids.append(i)
+		elif actions.tinker.visible:
+			if _story_candidates("tinker").has(i): ids.append(i)
+		elif actions.madness_execution.visible:
+			if _story_candidates("madness_execution").has(i): ids.append(i)
 	target.visible = not ids.is_empty()
 	_sync_people(target, people, ids)
+
+## Рассказчику — только подходящие игроки: живой Лудильщик; живой Мутант или сведённый с ума Цереновусом.
+func _story_candidates(kind: String) -> Array[int]:
+	var result: Array[int] = []
+	for item: Dictionary in view.get("grimoire", []):
+		if not bool(item.get("alive", false)): continue
+		var role := str(item.get("role", ""))
+		var status: Dictionary = item.get("status", {})
+		if kind == "tinker" and role == "tinker": result.append(int(item.seat))
+		elif kind == "madness_execution" and (role == "mutant" or status.has("mad_source")): result.append(int(item.seat))
+	return result
 
 func _sync_people(menu: OptionButton, people: Array, ids: Array[int]) -> void:
 	var expected: Array[String] = []
@@ -747,7 +760,8 @@ func _option_for(seats: Array[int], role: String = "") -> int:
 	for i in request_data.size():
 		var option: Variant = request_data[i]
 		if not option is Dictionary: continue
-		if seats.size() == 1 and int(option.get("target", -2)) == seats[0] and _pair_of(option).is_empty(): return i
+		if seats.size() == 1 and int(option.get("target", -2)) == seats[0] and _pair_of(option).is_empty():
+			if role.is_empty() or str(option.get("role", "")) == role: return i
 		var pair := _pair_of(option)
 		if seats.size() == 2 and not pair.is_empty() and _same_pair(pair, seats):
 			if role.is_empty() or str(option.get("role", "")) == role: return i
@@ -755,13 +769,22 @@ func _option_for(seats: Array[int], role: String = "") -> int:
 
 ## Выпадающие списки пары: левый — все игроки из вариантов, правый — допустимые с левым, роль — для пары.
 func _sync_slots() -> void:
-	slot_row.visible = pick_mode == "pair" and not request_token.is_empty()
+	var one_roles := pick_mode == "one" and _one_has_roles()
+	slot_row.visible = (pick_mode == "pair" or one_roles) and not request_token.is_empty()
 	if not slot_row.visible: return
 	_slot_sync = true
 	var everyone: Array[int] = []
 	var partners: Array[int] = []
 	var roles: Array[String] = []
 	for option: Variant in request_data:
+		if one_roles:
+			if not option is Dictionary or int(option.get("target", -1)) < 0: continue
+			var seat := int(option.target)
+			if not everyone.has(seat): everyone.append(seat)
+			if not picked.is_empty() and seat == picked[0]:
+				var role_id := str(option.get("role", ""))
+				if not role_id.is_empty() and not roles.has(role_id): roles.append(role_id)
+			continue
 		var pair := _pair_of(option)
 		if pair.is_empty(): continue
 		for seat: int in pair:
@@ -774,7 +797,8 @@ func _sync_slots() -> void:
 			if not role.is_empty() and not roles.has(role): roles.append(role)
 	everyone.sort()
 	partners.sort()
-	_fill_slot(slot_left, "Первый игрок", everyone, picked[0] if not picked.is_empty() else -1)
+	_fill_slot(slot_left, "Игрок" if one_roles else "Первый игрок", everyone, picked[0] if not picked.is_empty() else -1)
+	slot_right.visible = not one_roles
 	_fill_slot(slot_right, "Второй игрок", partners if not picked.is_empty() else everyone, picked[1] if picked.size() == 2 else -1)
 	slot_right.disabled = picked.is_empty()
 	var chosen_role := str(slot_role.get_item_metadata(slot_role.selected)) if slot_role.selected > 0 else ""
@@ -784,13 +808,20 @@ func _sync_slots() -> void:
 	for role: String in roles:
 		slot_role.add_item(str(Data.catalog().get(role, {}).get("name", role)))
 		slot_role.set_item_metadata(slot_role.item_count - 1, role)
-	slot_role.visible = _pairs_have_roles()
+	slot_role.visible = one_roles or _pairs_have_roles()
 	slot_role.disabled = roles.is_empty()
 	if not roles.has(chosen_role): chosen_role = roles[0] if roles.size() == 1 else ""
 	slot_role.select(maxi(0, roles.find(chosen_role) + 1) if not chosen_role.is_empty() else 0)
 	_slot_sync = false
-	var ready := picked.size() == 2 and (not slot_role.visible or not chosen_role.is_empty())
+	var need := 1 if one_roles else 2
+	var ready := picked.size() == need and (not slot_role.visible or not chosen_role.is_empty())
 	selected_option = _option_for(picked, chosen_role) if ready else -1
+
+## «Игрок — роль» (Учёный): у вариантов с игроком есть и роль — нужен второй список.
+func _one_has_roles() -> bool:
+	for option: Variant in request_data:
+		if option is Dictionary and int(option.get("target", -1)) >= 0 and not str(option.get("role", "")).is_empty(): return true
+	return false
 
 func _pairs_have_roles() -> bool:
 	for option: Variant in request_data:
@@ -830,7 +861,7 @@ func _pair_exists(a: int, b: int) -> bool:
 
 ## Общий хвост выбора: варианты списка сняты, кнопка и подпись обновлены.
 func _after_pick() -> void:
-	if pick_mode == "pair":
+	if pick_mode == "pair" or (pick_mode == "one" and _one_has_roles()):
 		_sync_slots()
 	request_options.deselect_all()
 	request_confirm.disabled = selected_option < 0 or _choice_sent
@@ -847,7 +878,9 @@ func _seat_clicked(seat: int) -> void:
 			picked.append(seat)
 		else:
 			picked.append(seat)
-		if pick_mode == "one":
+		if pick_mode == "one" and _one_has_roles():
+			if _option_for(picked) < 0: picked.clear()
+		elif pick_mode == "one":
 			selected_option = _option_for(picked)
 			# Недопустимую цель (не из вариантов запроса) не выделяем.
 			if selected_option < 0: picked.clear()
@@ -889,6 +922,9 @@ func _paint_picks() -> void:
 			request_summary.text = "Выберите роль в третьем списке." if slot_role.visible else "Такую пару выбрать нельзя — выберите других игроков."
 		else:
 			request_summary.text = "Выберите двух игроков в списках или щёлкните по их плашкам на площади." if picked.is_empty() else "Выбран %s — выберите второго игрока." % names[0]
+	elif pick_mode == "one" and _one_has_roles():
+		request_summary.text = ("Будет показано: %s" % str(request_data[selected_option].get("label", ""))) if selected_option >= 0 else (
+			"Выберите игрока и роль в списках или щёлкните по плашке." if picked.is_empty() else "Выберите роль для %s." % names[0])
 	elif pick_mode == "one":
 		request_summary.text = ("Вы выбрали: %s." % names[0]) if not picked.is_empty() else (
 			"Щёлкните по плашке игрока на площади." if request_options.item_count == 0 else "Щёлкните по плашке игрока на площади или выберите вариант в списке.")

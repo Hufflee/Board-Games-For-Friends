@@ -19,6 +19,9 @@ const BRASS := Color("bd9057")
 const LIGHT := Color("f4d69a")
 const INK := Color("22292a")
 const MINT := Color("91f1cf")
+## Щелчок трещотки на каждом ребре барабана (tools/sfx_reel_tick.py): к концу вращения ход медленнее — щелчки реже.
+const TICK := preload("res://hub/audio/reel_tick.wav")
+const TICK_VOICES := 4
 
 signal pulled
 signal returned_home
@@ -46,6 +49,9 @@ var _anchor := 1
 var _face := 1
 var _spinning := false
 var _lamp := 0.0
+var _rib := 0  # последнее пройденное ребро (для щелчка)
+var _ticks: Array[AudioStreamPlayer] = []
+var _tick_voice := 0
 
 
 func _init() -> void:
@@ -62,6 +68,12 @@ func _init() -> void:
 	_window.size = WINDOW.size
 	_window.draw.connect(_draw_window)
 	add_child(_window)
+	for i in TICK_VOICES:
+		var p := AudioStreamPlayer.new()
+		p.stream = TICK
+		p.bus = "SFX"
+		add_child(p)
+		_ticks.append(p)
 
 
 func hit(point: Vector2) -> bool:
@@ -159,6 +171,7 @@ func spin() -> void:
 	_elapsed = 0.0
 	_brake_at = -1.0
 	_travel = 0.0
+	_rib = 0
 
 
 ## Сначала равномерный ход вниз, затем замедление до соседней подходящей метки и отскок.
@@ -185,9 +198,27 @@ func advance(delta: float, result: int) -> bool:
 				show_face(result)
 				return true
 			_travel = _end + sin(rock * TAU) * (1.0 - rock) * 0.17
+	_click_ribs(delta)
 	_window.queue_redraw()
 	queue_redraw()
 	return false
+
+
+## Барабан прошёл ребро (середину между цифрами) — щелчок; чем медленнее ход, тем тише и ниже.
+func _click_ribs(delta: float) -> void:
+	var rib := floori(_travel + 0.5)
+	if rib == _rib:
+		return
+	var passed := absi(rib - _rib)
+	_rib = rib
+	if not is_visible_in_tree() or _ticks.is_empty():
+		return
+	var speed := clampf(float(passed) / maxf(delta, 0.001) / SPEED, 0.0, 1.0)
+	var p := _ticks[_tick_voice]
+	_tick_voice = (_tick_voice + 1) % _ticks.size()
+	p.volume_db = lerpf(-15.0, -9.0, speed)
+	p.pitch_scale = lerpf(0.88, 1.04, speed) * randf_range(0.97, 1.03)
+	p.play()
 
 
 func _process(delta: float) -> void:

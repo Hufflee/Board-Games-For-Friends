@@ -421,12 +421,10 @@ static func row_layout(
 	var figures: Array = []
 	var outside := {}
 	for id: String in ids:
-		if not is_figure(id):
-			continue
 		if sizes[id] == Vector3.ZERO:
 			outside[id] = Transform3D.IDENTITY
 			continue
-		if capacity <= 0.0:
+		if not is_figure(id) or capacity <= 0.0:
 			continue
 		var ratio: float = float(figure_ratio.get(id, -1.0)) if figure_ratio is Dictionary else float(figure_ratio)
 		if ratio < 0.0:
@@ -521,7 +519,7 @@ static func visible_order(ids: Array, sizes: Dictionary, poses: Dictionary, conf
 	var layout := row_layout(ids, occupied, poses, float(config.height), figure_ratios(config), float(config.width) - GAP)
 	var groups: Array = layout.piles.duplicate(true)
 	for id: String in ids:
-		if is_figure(id) and not groups.any(func(group): return group.ids.has(id)):
+		if (is_figure(id) or occupied[id] == Vector3.ZERO) and not groups.any(func(group): return group.ids.has(id)):
 			var ext: Vector3 = sizes[id]
 			groups.append({"ids": [id], "x": (layout.boxes[id] as Transform3D).origin.x - ext.x * 0.5})
 	groups.sort_custom(func(a, b): return float(a.x) < float(b.x))
@@ -535,7 +533,7 @@ static func visible_order(ids: Array, sizes: Dictionary, poses: Dictionary, conf
 static func sizes_on_shelf(config: Dictionary, sizes: Dictionary, entering: String = "") -> Dictionary:
 	var occupied := sizes.duplicate()
 	for id: String in config.get("figure_surfaces", {}):
-		if id != entering and is_figure(id) and occupied.has(id):
+		if id != entering and occupied.has(id):
 			occupied[id] = Vector3.ZERO
 	return occupied
 

@@ -38,6 +38,7 @@ const MAIN := [
 
 const EXTRA := [
 	["expand_monsters", "Расширить ячейки монстров", {"amount": true}],
+	["add_soul", "Добавить игроку душу", {"target": true}],
 	["destroy_soul", "Уничтожить карту души по индексу", {"target": true, "item": "души"}],
 	["pay_coins", "Заплатить монеты за способность (с учётом скидки)", {"amount": true}],
 	["deactivate", "Деактивировать предмет", {"target": true, "item": "предмета"}],

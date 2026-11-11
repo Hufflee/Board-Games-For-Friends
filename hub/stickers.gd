@@ -15,7 +15,9 @@ const DIR := "res://hub/art/stickers/"
 const BOX_MAX := 200  # стикеров на одной коробке: не ограничение игрока, только защита сетевого снимка
 const BOXES_MAX := 64
 const BOARD_MAX := 40  # на доске; лишние — самые старые — отклеиваются
-const POSTERS := 3  # плакатов в комнате
+const POSTERS := 3  # стандартных плакатов в комнате (свои картинки — Ready Set Bet, монеты, Стиллион)
+const POSTERS_MAX := 12  # всего плакатов: игрок добавляет новые в редакторе шкафа (11.11)
+const BOARDS_MAX := 6  # досок друзей: основная (номер 0) + добавленные в редакторе шкафа
 const POSTER_SCALE_MAX := 2.0  # плакат можно сделать вдвое больше обычного
 const POSTER_MAX_SIDE := 1280  # своя картинка плаката ужимается до этого размера (качество, но не вес)
 const POSTER_MAX_BYTES := 900000
@@ -170,11 +172,12 @@ static func clean_public(value: Variant) -> Dictionary:
 		var y := _number(pos[1], WALL_Y.x, WALL_Y.y)
 		if not is_nan(x) and not is_nan(y):
 			out["pos"] = [x, y]
-	# Плакаты комнаты: [[x, y, хэш своей картинки ("" — стандартная), размер 1..2] или [] — на стандартном месте], до POSTERS.
+	# Плакаты комнаты: [[x, y, хэш своей картинки ("" — стандартная), размер 1..2] или [] — на стандартном месте], до POSTERS_MAX.
+	# Номера с POSTERS и дальше — добавленные игроком: пустая запись там значит «плаката нет».
 	var posters: Variant = value.get("posters", [])
 	if posters is Array and not posters.is_empty():
 		var list: Array = []
-		for i in mini(posters.size(), POSTERS):
+		for i in mini(posters.size(), POSTERS_MAX):
 			var entry: Variant = posters[i]
 			var clean: Array = []
 			if entry is Array and entry.size() in [3, 4]:
@@ -188,19 +191,102 @@ static func clean_public(value: Variant) -> Dictionary:
 		out["posters"] = list
 	# Порядок слоёв плакатов: номера снизу вверх (последний перевешенный — сверху).
 	var order: Variant = value.get("poster_order", [])
-	if order is Array and not order.is_empty() and order.size() <= POSTERS:
+	if order is Array and not order.is_empty() and order.size() <= POSTERS_MAX:
 		var layers: Array = []
 		for slot: Variant in order:
-			if (slot is int or slot is float) and int(slot) >= 0 and int(slot) < POSTERS and not layers.has(int(slot)):
+			if (slot is int or slot is float) and int(slot) >= 0 and int(slot) < POSTERS_MAX and not layers.has(int(slot)):
 				layers.append(int(slot))
 		out["poster_order"] = layers
-	var board: Variant = value.get("board", [])
+	# Снятые стандартные плакаты (номера 0..POSTERS-1).
+	var gone: Variant = value.get("poster_gone", [])
+	if gone is Array and not gone.is_empty():
+		var removed: Array = []
+		for slot: Variant in gone:
+			if (slot is int or slot is float) and int(slot) >= 0 and int(slot) < POSTERS and not removed.has(int(slot)):
+				removed.append(int(slot))
+		if not removed.is_empty():
+			out["poster_gone"] = removed
+	out.board = _clean_board_list(value.get("board", []))
+	if value.get("board_gone", false) == true:
+		out["board_gone"] = true
+	# Добавленные доски: [{"id": 1.., "pos": [x, y], "board": [стикеры]}].
+	var more: Variant = value.get("boards", [])
+	if more is Array and not more.is_empty():
+		var list: Array = []
+		var ids: Array = []
+		for entry: Variant in more:
+			if list.size() >= BOARDS_MAX - 1 or not entry is Dictionary:
+				continue
+			var id: Variant = entry.get("id", 0)
+			var at: Variant = entry.get("pos", [])
+			if not (id is int or id is float) or int(id) < 1 or int(id) > 999 or ids.has(int(id)) or not (at is Array and at.size() == 2):
+				continue
+			var x := _number(at[0], -WALL_X, WALL_X)
+			var y := _number(at[1], WALL_Y.x, WALL_Y.y)
+			if is_nan(x) or is_nan(y):
+				continue
+			ids.append(int(id))
+			list.append({"id": int(id), "pos": [x, y], "board": _clean_board_list(entry.get("board", []))})
+		if not list.is_empty():
+			out["boards"] = list
+	return out
+
+
+static func _clean_board_list(board: Variant) -> Array:
+	var out: Array = []
 	if board is Array:
 		for entry: Variant in board.slice(maxi(0, board.size() - BOARD_MAX)):
 			var sticker := clean_board_sticker(entry)
 			if not sticker.is_empty():
-				out.board.append(sticker)
+				out.append(sticker)
 	return out
+
+
+# --- Доски и плакаты комнаты -----------------------------------------------------------------
+
+## Номера досок друзей в комнате: 0 — основная (если её не сняли), дальше — добавленные.
+static func board_ids(data: Dictionary) -> Array:
+	var ids: Array = []
+	if not data.get("board_gone", false):
+		ids.append(0)
+	for entry: Dictionary in data.get("boards", []):
+		ids.append(int(entry.id))
+	return ids
+
+
+## Стикеры доски bid (тот же массив, что в data, — для своих правок). Нет доски — пустой массив.
+static func board_list(data: Dictionary, bid: int) -> Array:
+	if bid == 0:
+		if not data.has("board"):
+			data["board"] = []
+		return data.board
+	for entry: Dictionary in data.get("boards", []):
+		if int(entry.id) == bid:
+			return entry.board
+	return []
+
+
+## Где висит доска bid (центр на задней стене, м).
+static func board_pos(data: Dictionary, bid: int) -> Vector2:
+	var pos: Array = data.get("pos", []) if bid == 0 else []
+	for entry: Dictionary in data.get("boards", []):
+		if int(entry.id) == bid:
+			pos = entry.pos
+	return Vector2(float(pos[0]), float(pos[1])) if pos.size() == 2 else BOARD_DEFAULT
+
+
+## Номера плакатов, которые висят в комнате: стандартные (если не сняты) и добавленные.
+static func poster_slots(data: Dictionary) -> Array:
+	var list: Array = data.get("posters", [])
+	var gone: Array = data.get("poster_gone", [])
+	var slots: Array = []
+	for slot in POSTERS_MAX:
+		if slot < POSTERS:
+			if not gone.has(slot):
+				slots.append(slot)
+		elif slot < list.size() and list[slot] is Array and (list[slot] as Array).size() >= 3:
+			slots.append(slot)
+	return slots
 
 
 static func clean_box_sticker(entry: Variant) -> Array:

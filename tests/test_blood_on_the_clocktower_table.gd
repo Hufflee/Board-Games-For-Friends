@@ -116,6 +116,22 @@ func _seat_picks(table: Control) -> void:
 	check(not chosen.is_empty() and [int(chosen.left), int(chosen.right)].has(a) and [int(chosen.left), int(chosen.right)].has(b) and chosen.role == "empath", "Левый, правый и роль дают нужный вариант: %s" % [chosen])
 	check(not table.request_confirm.disabled and table.request_summary.text.begins_with("Будет показано"), "Можно подтверждать, видно, что получит игрок")
 	await shot("info_slots_1280x720")
+	# Учёный: «игрок — роль» — список игроков и роль для него, без сотен строк.
+	var facts: Array = []
+	for seat: int in [a, b]:
+		for role: String in ["clockmaker", "dreamer", "witch"]:
+			facts.append({"label": "%d — %s" % [seat, role], "text": "т", "truth": false, "target": seat, "role": role})
+	v.request = {"token": "test_savant", "title": "Учёный: второе утверждение", "options": facts}
+	table.update_view(v)
+	await frames()
+	check(table.pick_mode == "one" and table.slot_row.visible and table.slot_role.visible and not table.slot_right.visible, "Учёный: игрок и роль двумя списками")
+	check(not table.request_options.visible, "Учёный: длинного списка нет")
+	await click_seat(table, b)
+	check(table.selected_option < 0 and table.request_summary.text.contains("роль"), "После выбора игрока просит роль")
+	table.slot_role.select(2)
+	table.slot_role.item_selected.emit(2)
+	var fact: Dictionary = facts[table.selected_option] if table.selected_option >= 0 else {}
+	check(not fact.is_empty() and int(fact.target) == b and fact.role == "dreamer", "Игрок + роль дают нужное утверждение: %s" % [fact])
 	# Сворачивание карточки роли.
 	table.role_toggle.pressed.emit()
 	check(not table.personal.visible and table.role_toggle.text.begins_with("▸"), "Карточка роли сворачивается")

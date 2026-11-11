@@ -21,9 +21,12 @@ const CHUNK := 48000
 const KEEP := 120  # сообщений в одном разговоре
 const BLOBS := 24  # картинок в памяти
 const TEXTURES := 10
-const ASK_EVERY := 4000
+const ASK_EVERY := 2500
 
-const PosterGif := preload("res://hub/poster_gif.gd")
+const ChatGif := preload("res://hub/chat_gif.gd")
+const WINDOW := 3  # кусков картинки в полёте
+const STALL := 6000  # мс без новых кусков — загрузку начинаем заново
+const PANEL_LAYER := 45
 
 var convs: Dictionary = {}  # ключ → {key, peer, name, entries, unread, stamp, open, stale}
 var current := "all"
@@ -37,12 +40,15 @@ var _next_id := 1  # хост
 var _audience: Dictionary = {}  # хост: id → кому видно сообщение ([] — всем)
 var _blobs: Dictionary = {}  # хэш → байты картинки
 var _blob_order: Array[String] = []
-var _textures: Dictionary = {}  # хэш → Texture2D или SpriteFrames
+var _textures: Dictionary = {}  # хэш → {frames, delays}
 var _texture_order: Array[String] = []
 var _failed: Dictionary = {}  # хэш → true: картинку не удалось показать
 var _decoding: Dictionary = {}
 var _wanted: Dictionary = {}
-var _incoming: Dictionary = {}
+var _offers: Dictionary = {}  # хост: хэш → приём картинки от автора
+var _downloads: Dictionary = {}  # клиент: хэш → загрузка картинки с хоста
+var _waiters: Dictionary = {}  # хост: хэш → кто ждёт картинку, которую автор ещё отдаёт
+var _panel: Control
 
 
 func _ready() -> void:
@@ -276,7 +282,9 @@ func _reset_all() -> void:
 	_texture_order.clear()
 	_failed.clear()
 	_wanted.clear()
-	_incoming.clear()
+	_offers.clear()
+	_downloads.clear()
+	_waiters.clear()
 	_next_id = 1
 	_order = 0
 	current = "all"
@@ -296,7 +304,9 @@ func reset_party() -> void:
 			top = maxi(top, int(entry.get("id", 0)))
 	_next_id = top + 1
 	_wanted.clear()
-	_incoming.clear()
+	_offers.clear()
+	_downloads.clear()
+	_waiters.clear()
 	changed.emit()
 
 
@@ -408,7 +418,7 @@ func clean_extra(extra: Dictionary) -> Dictionary:
 			"text": str((reply as Dictionary).get("text", "")).left(90),
 		}
 	var image := str(extra.get("image", ""))
-	if image.length() == 64 and image.is_valid_hex_number(false) and _blobs.has(image):
+	if image.length() == 64 and image.is_valid_hex_number(false) and (_blobs.has(image) or _offers.has(image)):
 		out["image"] = image
 	return out
 
@@ -470,9 +480,12 @@ func _apply_react(id: int, map: Dictionary) -> void:
 
 
 # --- Картинки ------------------------------------------------------------------------------
+# Картинка едет кусками «по запросу»: получатель сам просит следующий кусок, когда пришёл предыдущий
+# (в полёте не больше WINDOW кусков). Раньше все куски уходили разом и не помещались в очередь
+# отправки Steam — крупные GIF у игроков так и не появлялись.
 
 static func is_gif(bytes: PackedByteArray) -> bool:
-	return PosterGif.matches(bytes)
+	return ChatGif.matches(bytes)
 
 
 static func _sha(bytes: PackedByteArray) -> String:
@@ -508,10 +521,8 @@ func prepare_file(path: String) -> PackedByteArray:
 		if bytes.size() > MAX_IMAGE_BYTES:
 			notice.emit("GIF больше 2 МБ — такой не отправить")
 			return PackedByteArray()
-		var width := bytes.decode_u16(6)
-		var height := bytes.decode_u16(8)
-		if width > PosterGif.MAX_SIDE or height > PosterGif.MAX_SIDE:
-			notice.emit("GIF слишком большой по размеру: сторона до %d px" % PosterGif.MAX_SIDE)
+		if bytes.decode_u16(6) > ChatGif.CANVAS_SIDE or bytes.decode_u16(8) > ChatGif.CANVAS_SIDE:
+			notice.emit("GIF слишком большой по размеру: сторона до %d px" % ChatGif.CANVAS_SIDE)
 			return PackedByteArray()
 		return bytes
 	var image := _load_image(bytes)
@@ -540,16 +551,22 @@ func prepare_image(image: Image) -> PackedByteArray:
 	return bytes
 
 
-## Запомнить картинку и отдать её хосту. Возвращает хэш для сообщения.
+static func _chunks(size: int) -> int:
+	return ceili(float(size) / CHUNK)
+
+
+static func _slice(bytes: PackedByteArray, index: int) -> PackedByteArray:
+	return bytes.slice(index * CHUNK, mini(bytes.size(), (index + 1) * CHUNK))
+
+
+## Запомнить картинку и предложить её хосту (он сам заберёт её по кускам). Возвращает хэш для сообщения.
 func attach(bytes: PackedByteArray) -> String:
 	if bytes.is_empty() or bytes.size() > MAX_IMAGE_BYTES:
 		return ""
 	var hash := _sha(bytes)
 	_keep_blob(hash, bytes)
 	if not _net().is_host():
-		var count := ceili(float(bytes.size()) / CHUNK)
-		for i in count:
-			_rpc_blob_up.rpc_id(1, hash, i, count, bytes.slice(i * CHUNK, mini(bytes.size(), (i + 1) * CHUNK)))
+		_rpc_blob_offer.rpc_id(1, hash, bytes.size())
 	return hash
 
 
@@ -561,70 +578,146 @@ func _keep_blob(hash: String, bytes: PackedByteArray) -> void:
 		_blobs.erase(_blob_order.pop_front())
 
 
-func _collect(key: String, index: int, count: int, chunk: PackedByteArray) -> PackedByteArray:
-	if count < 1 or count > ceili(float(MAX_IMAGE_BYTES) / CHUNK) + 1 or index < 0 or index >= count or chunk.size() > CHUNK:
+## Сборка по кускам: transfer = {size, count, parts, next, stamp}. Возвращает готовые байты или пусто.
+func _take_part(transfer: Dictionary, index: int, chunk: PackedByteArray) -> PackedByteArray:
+	var count := int(transfer.count)
+	if index < 0 or index >= count or chunk.size() > CHUNK or chunk.is_empty():
 		return PackedByteArray()
-	var entry: Dictionary = _incoming.get(key, {"count": count, "parts": {}})
-	if int(entry.count) != count:
-		entry = {"count": count, "parts": {}}
-	entry.parts[index] = chunk
-	_incoming[key] = entry
-	if entry.parts.size() < count:
+	transfer.parts[index] = chunk
+	transfer.stamp = Time.get_ticks_msec()
+	if (transfer.parts as Dictionary).size() < count:
 		return PackedByteArray()
-	_incoming.erase(key)
 	var bytes := PackedByteArray()
 	for i in count:
-		bytes.append_array(entry.parts[i])
+		bytes.append_array(transfer.parts[i])
 	return bytes
 
 
+static func _new_transfer(size: int) -> Dictionary:
+	return {"size": size, "count": _chunks(size), "parts": {}, "next": 0, "stamp": Time.get_ticks_msec()}
+
+
 @rpc("any_peer", "reliable")
-func _rpc_blob_up(hash: String, index: int, count: int, chunk: PackedByteArray) -> void:
+func _rpc_blob_offer(hash: String, size: int) -> void:
 	var sender := multiplayer.get_remote_sender_id()
-	if not _net().is_host() or _member(sender).is_empty() or hash.length() != 64:
+	if not _net().is_host() or _member(sender).is_empty() or hash.length() != 64 or size <= 0 or size > MAX_IMAGE_BYTES:
 		return
-	var bytes := _collect("up:%d:%s" % [sender, hash], index, count, chunk)
-	if bytes.is_empty() or bytes.size() > MAX_IMAGE_BYTES or _sha(bytes) != hash:
+	if _blobs.has(hash) or _offers.has(hash):
+		return
+	var transfer := _new_transfer(size)
+	transfer["peer"] = sender
+	_offers[hash] = transfer
+	for i in mini(WINDOW, int(transfer.count)):
+		transfer.next = i + 1
+		_rpc_blob_pull.rpc_id(sender, hash, i)
+
+
+## Хост просит у автора кусок его картинки.
+@rpc("authority", "reliable")
+func _rpc_blob_pull(hash: String, index: int) -> void:
+	if _blobs.has(hash) and index >= 0 and index < _chunks((_blobs[hash] as PackedByteArray).size()):
+		_rpc_blob_part.rpc_id(1, hash, index, _slice(_blobs[hash], index))
+
+
+@rpc("any_peer", "reliable")
+func _rpc_blob_part(hash: String, index: int, chunk: PackedByteArray) -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if not _net().is_host() or not _offers.has(hash):
+		return
+	var transfer: Dictionary = _offers[hash]
+	if int(transfer.peer) != sender:
+		return
+	var bytes := _take_part(transfer, index, chunk)
+	if bytes.is_empty():
+		if int(transfer.next) < int(transfer.count):
+			transfer.next = int(transfer.next) + 1
+			_rpc_blob_pull.rpc_id(sender, hash, int(transfer.next) - 1)
+		return
+	_offers.erase(hash)
+	if bytes.size() != int(transfer.size) or _sha(bytes) != hash:
 		return
 	_keep_blob(hash, bytes)
+	for waiter: Variant in _waiters.get(hash, []):
+		if not _member(int(waiter)).is_empty():
+			_rpc_blob_ready.rpc_id(int(waiter), hash, bytes.size())
+	_waiters.erase(hash)
+	image_ready.emit(hash)
 
 
 @rpc("any_peer", "reliable")
 func _rpc_blob_want(hash: String) -> void:
 	var sender := multiplayer.get_remote_sender_id()
+	if not _net().is_host() or _member(sender).is_empty():
+		return
+	if _blobs.has(hash):
+		_rpc_blob_ready.rpc_id(sender, hash, (_blobs[hash] as PackedByteArray).size())
+	elif _offers.has(hash):
+		var list: Array = _waiters.get(hash, [])
+		if not list.has(sender):
+			list.append(sender)
+		_waiters[hash] = list
+
+
+## Хост: картинка есть, можно забирать.
+@rpc("authority", "reliable")
+func _rpc_blob_ready(hash: String, size: int) -> void:
+	if _blobs.has(hash) or size <= 0 or size > MAX_IMAGE_BYTES:
+		return
+	var transfer := _new_transfer(size)
+	_downloads[hash] = transfer
+	for i in mini(WINDOW, int(transfer.count)):
+		transfer.next = i + 1
+		_rpc_blob_get.rpc_id(1, hash, i)
+
+
+@rpc("any_peer", "reliable")
+func _rpc_blob_get(hash: String, index: int) -> void:
+	var sender := multiplayer.get_remote_sender_id()
 	if not _net().is_host() or _member(sender).is_empty() or not _blobs.has(hash):
 		return
-	var bytes: PackedByteArray = _blobs[hash]
-	var count := ceili(float(bytes.size()) / CHUNK)
-	for i in count:
-		_rpc_blob_down.rpc_id(sender, hash, i, count, bytes.slice(i * CHUNK, mini(bytes.size(), (i + 1) * CHUNK)))
+	if index >= 0 and index < _chunks((_blobs[hash] as PackedByteArray).size()):
+		_rpc_blob_chunk.rpc_id(sender, hash, index, _slice(_blobs[hash], index))
 
 
 @rpc("authority", "reliable")
-func _rpc_blob_down(hash: String, index: int, count: int, chunk: PackedByteArray) -> void:
-	var bytes := _collect("down:" + hash, index, count, chunk)
-	if bytes.is_empty() or bytes.size() > MAX_IMAGE_BYTES or _sha(bytes) != hash:
+func _rpc_blob_chunk(hash: String, index: int, chunk: PackedByteArray) -> void:
+	if not _downloads.has(hash):
+		return
+	var transfer: Dictionary = _downloads[hash]
+	var bytes := _take_part(transfer, index, chunk)
+	if bytes.is_empty():
+		if int(transfer.next) < int(transfer.count):
+			transfer.next = int(transfer.next) + 1
+			_rpc_blob_get.rpc_id(1, hash, int(transfer.next) - 1)
+		return
+	_downloads.erase(hash)
+	if bytes.size() != int(transfer.size) or _sha(bytes) != hash:
 		return
 	_keep_blob(hash, bytes)
 	_wanted.erase(hash)
 	_decode(hash)
 
 
-## Картинка сообщения: Texture2D, SpriteFrames (гифка) или null — ещё едет (придёт image_ready).
-func image_texture(hash: String) -> Resource:
+## Кадры картинки сообщения: {"frames": [Texture2D, ...], "delays": [...]}; пусто — ещё едет или
+## разбирается (придёт image_ready). Пока картинки нет, окно чата зовёт это раз в пару секунд.
+func image_frames(hash: String) -> Dictionary:
 	if _textures.has(hash):
 		return _textures[hash]
 	if _failed.has(hash) or _decoding.has(hash):
-		return null
+		return {}
 	if _blobs.has(hash):
 		_decode(hash)
-		return _textures.get(hash)
+		return _textures.get(hash, {})
 	if not _net().is_host() and _net().in_session():
 		var now := Time.get_ticks_msec()
+		if _downloads.has(hash):
+			if now - int(_downloads[hash].stamp) < STALL:
+				return {}
+			_downloads.erase(hash)  # загрузка встала — начинаем заново
 		if now - int(_wanted.get(hash, -ASK_EVERY)) >= ASK_EVERY:
 			_wanted[hash] = now
 			_rpc_blob_want.rpc_id(1, hash)
-	return null
+	return {}
 
 
 func image_failed(hash: String) -> bool:
@@ -642,25 +735,49 @@ func _decode(hash: String) -> void:
 		return
 	var image := _load_image(bytes)
 	if image == null:
-		_decoded(hash, null)
+		_decoded(hash, {})
 		return
-	image.generate_mipmaps()
-	_decoded(hash, ImageTexture.create_from_image(image))
+	var images: Array[Image] = [image]
+	_decoded(hash, {"images": images, "delays": PackedFloat32Array([1.0])})
 
 
 func _decode_gif(hash: String, bytes: PackedByteArray) -> void:
-	var texture: Resource = PosterGif.texture(bytes)
-	_decoded.call_deferred(hash, texture)
+	_decoded.call_deferred(hash, ChatGif.frames(bytes))
 
 
-func _decoded(hash: String, texture: Resource) -> void:
+## Главный поток: из картинок — текстуры.
+func _decoded(hash: String, data: Dictionary) -> void:
 	_decoding.erase(hash)
-	if texture == null:
+	var images: Array = data.get("images", [])
+	if images.is_empty():
 		_failed[hash] = true
 	else:
+		var frames: Array[Texture2D] = []
+		for image: Image in images:
+			frames.append(ImageTexture.create_from_image(image))
 		_texture_order.erase(hash)
 		_texture_order.append(hash)
-		_textures[hash] = texture
+		_textures[hash] = {"frames": frames, "delays": data.get("delays", PackedFloat32Array())}
 		while _texture_order.size() > TEXTURES:
 			_textures.erase(_texture_order.pop_front())
 	image_ready.emit(hash)
+
+
+# --- Окно «Общение» ------------------------------------------------------------------------
+
+## Одно окно на всю игру (hub/comms_panel.gd): живёт в своём слое поверх любого экрана.
+func panel() -> Control:
+	if is_instance_valid(_panel):
+		return _panel
+	var layer := CanvasLayer.new()
+	layer.layer = PANEL_LAYER
+	layer.name = "CommsLayer"
+	layer.add_to_group("pause_allowed")
+	var root := Control.new()
+	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	layer.add_child(root)
+	_panel = load("res://hub/comms_panel.gd").new()
+	root.add_child(_panel)
+	get_tree().root.add_child.call_deferred(layer)
+	return _panel

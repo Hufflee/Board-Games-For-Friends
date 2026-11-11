@@ -5,6 +5,10 @@ var _values: Dictionary = {}
 var _message: Label
 var _zoom: HSlider
 var _zoom_label: Label
+var _undo: Button
+var _ball: Button  # мяч в комнате: вкл / выкл
+
+const RoomIcons := preload("res://hub/room_icons.gd")
 
 
 func _ready() -> void:
@@ -59,6 +63,30 @@ func _ready() -> void:
 		room.set_shelf_camera_zoom(value)
 		sync_zoom())
 	sync_zoom()
+	# Управление предметами комнаты слева, параметры шкафа справа.
+	var props := HubStyle.vbox(8)
+	props.name = "EditorRoomTools"
+	props.position = Vector2(16, 82)
+	add_child(props)
+	var add_poster := _icon_button("Повесить плакат с картинкой по умолчанию", func(b: Button): RoomIcons.poster(b, HubStyle.TEXT))
+	add_poster.name = "EditorAddPoster"
+	add_poster.pressed.connect(func(): room.emit_signal("poster_add_requested"))
+	props.add_child(add_poster)
+	_ball = _icon_button("", func(b: Button): RoomIcons.ball(b, HubStyle.TEXT if bool(room.get("ball_on")) else HubStyle.MUTED, bool(room.get("ball_on"))))
+	_ball.name = "EditorBall"
+	_ball.pressed.connect(func():
+		room.call("set_ball_enabled", not bool(room.get("ball_on")))
+		_sync_ball())
+	props.add_child(_ball)
+	var add_board := _icon_button("Повесить ещё одну доску друзей", func(b: Button): RoomIcons.board(b, HubStyle.TEXT))
+	add_board.name = "EditorAddBoard"
+	add_board.pressed.connect(func(): room.call("add_friend_board"))
+	props.add_child(add_board)
+	var basket := _icon_button("Повесить мини-корзину для мяча", func(b: Button): RoomIcons.basket(b, HubStyle.TEXT))
+	basket.name = "EditorAddBasket"
+	basket.pressed.connect(func(): room.call("add_room_basket"))
+	props.add_child(basket)
+	_sync_ball()
 	var help := (
 		HubStyle
 		. label(
@@ -72,6 +100,10 @@ func _ready() -> void:
 	_message = HubStyle.label("", 14, HubStyle.YELLOW)
 	_message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	col.add_child(_message)
+	_undo = HubStyle.button("↶ Отменить изменение (Ctrl+Z)", 14)
+	_undo.tooltip_text = "Вернуть шкаф на шаг назад: перестановку, поворот коробки, размер ящиков"
+	_undo.pressed.connect(func(): room.undo_shelf_edit())
+	col.add_child(_undo)
 	var done := HubStyle.button("Готово", 16)
 	done.pressed.connect(func(): room.finish_shelf_editor(true))
 	col.add_child(done)
@@ -79,6 +111,26 @@ func _ready() -> void:
 	cancel.pressed.connect(func(): room.finish_shelf_editor(false))
 	col.add_child(cancel)
 	sync()
+
+
+func _process(_delta: float) -> void:
+	if is_instance_valid(_undo) and is_instance_valid(room):
+		_undo.disabled = not bool(room.call("can_undo_shelf"))
+
+
+func _icon_button(tooltip: String, paint: Callable) -> Button:
+	var button := HubStyle.button("", 14)
+	button.theme = HubStyle.theme()
+	button.custom_minimum_size = Vector2(52, 44)
+	button.tooltip_text = tooltip
+	button.draw.connect(func(): paint.call(button))
+	return button
+
+
+func _sync_ball() -> void:
+	var on := bool(room.get("ball_on"))
+	_ball.tooltip_text = "Мяч-попрыгун в комнате: включён — нажмите, чтобы убрать" if on else "Мяч-попрыгун убран — нажмите, чтобы вернуть"
+	_ball.queue_redraw()
 
 
 func sync_zoom() -> void:

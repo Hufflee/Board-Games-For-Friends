@@ -1,278 +1,223 @@
 extends SceneTree
-## Тесты правил «Стиллиона»: банк вопросов, проверка ответов (опечатки), ход партии, боты, разбор ответа jev.
-## Запуск: godot --headless --path . --script res://tests/test_stillion.gd (код выхода 1 при ошибке)
+## Тесты правил «Стиллиона»: банк тем, буквы, оспаривание (большинство, 1 на 1, повтор — выстрел),
+## конец букв, выстрел и новая тема, устный режим, боты, конец партии.
+## Запуск: godot --headless --audio-driver Dummy --path . --script res://tests/test_stillion.gd (код выхода 1 при ошибке)
 
 var checks := 0
 var failed := 0
 
 
-func check(ok: bool, msg: String) -> void:
+func check(cond: bool, msg: String) -> void:
 	checks += 1
-	if not ok:
+	if not cond:
 		failed += 1
 		push_error("ПРОВАЛ: " + msg)
 
 
-func _initialize() -> void:
-	_questions()
-	_judge()
-	_flow()
+func _init() -> void:
+	_bank()
+	_letters()
+	_challenge_majority()
+	_challenge_duel_and_repeat()
+	_letters_out()
+	_timeout()
+	_oral()
+	_hotseat()
 	_bots()
-	_jev()
-	_settings()
-	_deck_session()
-	_fuse_per_question()
-	_near_same()
-	print("СТИЛЛИОН: %d проверок, ошибок: %d" % [checks, failed])
+	print("STILLION: %d проверок, %d ошибок" % [checks, failed])
 	quit(1 if failed > 0 else 0)
 
 
-func _questions() -> void:
-	var all := STQuestions.all()
-	check(STQuestions.categories().size() == 10, "10 категорий (сейчас %d)" % STQuestions.categories().size())
-	check(all.size() >= 240, "вопросов не меньше 240 (сейчас %d)" % all.size())
-	for q: Dictionary in all:
-		var counts := {"c": 0, "s": 0, "u": 0, "e": 0}
-		var seen := {}
-		for a: Dictionary in q.answers:
-			counts[a.rarity] += 1
-			for alt in a.alts:
-				check(not seen.has(alt) or seen[alt] == a.name, "повтор ответа «%s» в «%s»" % [alt, q.text])
-				seen[alt] = a.name
-		check(counts.c >= 2, "у «%s» мало общеизвестных ответов" % q.text)
-		check(q.answers.size() >= 8, "у «%s» меньше 8 ответов" % q.text)
-
-
-func _judge() -> void:
-	check(STJudge.normalize("  Ёжик-в  тумане! ") == "ежик в тумане", "нормализация")
-	var q := {"cat": "Тест", "text": "?", "answers": []}
-	for item in [["Санкт-Петербург|Питер", "s"], ["Москва", "c"], ["Сыр", "c"]]:
-		var alts: Array = []
-		for alt in str(item[0]).split("|"):
-			alts.append(STJudge.normalize(alt))
-		q.answers.append({"name": str(item[0]).split("|")[0], "alts": alts, "rarity": item[1]})
-	check(STJudge.lookup(q, "москва").found and not STJudge.lookup(q, "москва").typo, "точное совпадение")
-	check(STJudge.lookup(q, "Масква").found and STJudge.lookup(q, "Масква").typo, "одна опечатка прощается")
-	check(STJudge.lookup(q, "санкт петербур").name == "Санкт-Петербург", "опечатка в длинном слове")
-	check(STJudge.lookup(q, "питер").found, "синоним")
-	check(not STJudge.lookup(q, "сор").found, "в коротком слове опечатки не прощаются")
-	check(not STJudge.lookup(q, "лондон").found, "чужой ответ не найден")
-
-
-func _new(n: int, bots: bool = false) -> STRules:
-	var r := STRules.new()
-	var pl := []
+func _names(n: int) -> Array:
+	var out: Array = []
 	for i in n:
-		pl.append({"name": "И%d" % i, "bot": bots})
-	r.new_game(pl, false, 7)
+		out.append({"name": "И%d" % i})
+	return out
+
+
+## Новая партия сразу в фазе ответа у места 0.
+func _game(n: int, seed_value := 5) -> STRules:
+	var r := STRules.new()
+	r.new_game(_names(n), false, seed_value)
+	r.target = 0
+	r.tick(STRules.NEW_Q_TIME + 0.01)
+	r.tick(STRules.AIM_TIME + 0.01)
 	return r
 
 
-func _until(r: STRules, phase: String, limit: float = 30.0) -> void:
-	var t := 0.0
-	while r.phase != phase and t < limit and r.phase != "game_over":
-		r.tick(0.1)
-		t += 0.1
+func _to_fuse(r: STRules) -> void:
+	if r.phase == "aim":
+		r.tick(STRules.AIM_TIME + 0.01)
 
 
-func _flow() -> void:
-	var r := _new(4)
-	check(r.phase == "new_q" and r.get_view(0).question.text == "", "партия начинается с «Новый вопрос!», вопрос пока скрыт")
-	r.tick(STRules.NEW_Q_TIME - 0.1)
-	check(r.phase == "new_q", "пауза перед вопросом держится")
-	r.tick(0.2)
-	check(r.phase == "aim" and r.get_view(0).question.text != "", "после паузы — вопрос и наведение")
-	check(is_equal_approx(r.fuse_len, STRules.FUSE_START), "фитиль вопроса — полный")
-	_until(r, "fuse")
-	check(r.phase == "fuse", "после наведения горит фитиль")
-	var tgt := r.target
-	check(not r.submit((tgt + 1) % 4, "что угодно"), "отвечает только тот, в кого целятся")
-	var a: Dictionary = r.question.answers[0]
-	check(r.submit(tgt, a.name), "ответ принят")
-	check(r.last.kind == "ok" and r.target == (tgt + 1) % 4, "пушка повернулась к следующему по часовой")
-	check(int(r.players[tgt].meter) == int(STRules.POINTS[a.rarity]) % STRules.METER_MAX, "очки шкалы по редкости")
-	_until(r, "fuse")
-	r.submit(r.target, a.name)
-	check(r.last.kind == "used" and r.phase == "fuse", "повтор ответа не засчитан, фитиль горит дальше")
-	r.submit(r.target, "абракадабра-нет-такого")
-	check(r.last.kind == "wrong" and r.phase == "fuse", "неверный ответ без jev — ещё попытка")
-	var victim := r.target
-	_until(r, "boom")
-	check(r.last.kind == "boom" and int(r.players[victim].lives) == STRules.MAX_LIVES - 1, "не успел — минус жизнь")
-	_until(r, "aim")
-	check(r.target == (victim + 1) % 4, "после выстрела — следующий")
-	# шкала: заполнилась — жизнь назад
-	var p: Dictionary = r.players[victim]
-	p.meter = STRules.METER_MAX - 1
-	r.target = victim
-	r.phase = "fuse"
-	var free_answer := ""
-	for x: Dictionary in r.question.answers:
-		if not r._is_used(x.name):
-			free_answer = x.name
-			break
-	r.submit(victim, free_answer)
-	check(int(p.lives) == STRules.MAX_LIVES and int(p.meter) == 0, "полная шкала возвращает жизнь и обнуляется")
-	# смена вопроса после двух потерянных жизней
-	var no := r.q_no
-	r.q_losses = STRules.LOSSES_PER_QUESTION
-	_until(r, "fuse")
+func _bank() -> void:
+	var cats := STRules.categories()
+	check(cats.size() == 90, "90 тем (есть %d)" % cats.size())
+	var names := {}
+	var bad := 0
+	for c: Dictionary in cats:
+		names[c.cat] = true
+		var firsts := {}
+		for a: Dictionary in c.answers:
+			var l := str(a.alts[0]).left(1)
+			if not STRules.LETTERS.has(l) or firsts.has(l):
+				bad += 1
+			firsts[l] = true
+		if (c.answers as Array).size() != 14:
+			bad += 1
+	check(names.size() == 90, "Названия тем не повторяются")
+	var hinted := {}
+	for c: Dictionary in cats:
+		if str(c.hint) != "":
+			hinted[c.cat] = c.hint
+	check(hinted.size() == 3 and hinted.has("Камень") and hinted.has("Продукт питания") and hinted.has("Часть дома"), "Подсказки у трёх тем, название без скобок")
+	check(bad == 0, "У каждой темы 14 ответов на разные разрешённые буквы (ошибок %d)" % bad)
+	check(STRules.LETTERS.size() == 24, "24 буквы")
+	for l in ["й", "ё", "ю", "э", "ц", "щ", "ъ", "ь", "ы"]:
+		check(not STRules.LETTERS.has(l), "Буквы «%s» нет" % l)
+
+
+func _letters() -> void:
+	var r := _game(3)
+	check(r.phase == "fuse" and r.target == 0 and r.category.has("cat"), "Тема открыта, пушка на месте 0")
+	check(not r.submit(1, "Австрия"), "Не тот игрок не отвечает")
+	check(r.submit(0, "Австрия") and r.letter_used("а") and r.target == 1, "Ответ засчитан, «А» погасла, ход дальше")
+	check(r.players[0].last_answer == "Австрия", "Последний ответ над игроком")
+	_to_fuse(r)
+	r.submit(1, "аргентина")
+	check(r.last.kind == "wrong" and r.last.why == "used" and r.target == 1, "Занятая буква не принимается")
+	r.submit(1, "Эстония")
+	check(r.last.kind == "wrong" and r.last.why == "none", "Буквы «Э» нет — не принимается")
+	r.submit(1, "Ёлка")
+	check(r.letter_used("е") and r.target == 2, "«Ё» считается за «Е»")
+	check(r.get_view(2).category == r.category.cat and r.get_view(2).used.size() == 2, "Вид: тема и погасшие буквы")
+
+
+## 4 игрока: голосуют трое (кроме автора), нужно 2.
+func _challenge_majority() -> void:
+	var r := _game(4)
+	r.submit(0, "Бразилия")
+	check(r.votes_needed() == 2, "4 игрока: нужно 2 голоса из 3")
+	check(not r.challenge(0), "Автор не оспаривает свой ответ")
+	check(r.challenge(2) and r.target == 1 and r.letter_used("б"), "Один голос — ответ ещё в силе")
+	check(not r.challenge(2), "Дважды не голосуют")
+	check(r.challenge(3) and not r.letter_used("б") and r.target == 0 and r.phase == "aim", "Большинство — не засчитан, пушка вернулась к автору")
+	check(r.last.kind == "challenged" and r.retry_seat == 0 and r.players[0].last_answer == "", "Событие и метка повтора")
+	_to_fuse(r)
+	check(r.fuse_t == 0.0 and r.fuse_len == r.answer_time, "Время автора сначала")
+	r.submit(0, "Бельгия")
+	_to_fuse(r)
+	r.submit(1, "Венгрия")
+	check(r.retry_seat == -1 and r.prev.seat == 1, "Следующий ответил — повтор забыт, оспорить можно только последний")
+	check(not r.can_challenge(3) or int(r.prev.seat) == 1, "Старый ответ уже не оспорить")
+
+
+## 1 на 1: хватает одного; оспорили дважды подряд — выстрел автору.
+func _challenge_duel_and_repeat() -> void:
+	var r := _game(2)
+	r.submit(0, "Германия")
+	check(r.votes_needed() == 1, "1 на 1: нужен один голос")
+	check(r.challenge(1) and r.target == 0 and not r.letter_used("г"), "Один голос отменяет ответ")
+	_to_fuse(r)
+	r.submit(0, "Гана")
+	check(r.prev.retry, "Повторный ответ помечен")
+	var lives := int(r.players[0].lives)
+	check(r.challenge(1) and r.phase == "boom" and r.target == 0, "Второй раз подряд — выстрел")
+	check(int(r.players[0].lives) == lives - 1 and r.last.kind == "boom" and r.last.challenged, "Минус жизнь, событие с пометкой")
+	var q := r.q_no
+	r.tick(STRules.BOOM_TIME + 0.01)
+	check(r.phase == "new_q" and r.q_no == q + 1 and r.used.is_empty() and r.target == 0, "Новая тема, буквы снова все, начинает подстреленный")
+
+
+func _letters_out() -> void:
+	var r := _game(2)
+	var cat: Dictionary = r.category
+	for l: String in STRules.LETTERS:
+		_to_fuse(r)
+		r.submit(r.target, l + "тест")
+	check(r.phase == "review" and r.letters_left() == 0, "Буквы кончились — окно оспаривания")
+	check(r.can_challenge(1 - int(r.prev.seat)), "Последний ответ ещё можно оспорить")
+	r.tick(STRules.REVIEW_TIME + 0.01)
+	check(r.phase == "new_q" and r.category != cat and r.used.is_empty(), "Потом — новая тема")
+	check(int(r.players[0].lives) == r.max_lives and int(r.players[1].lives) == r.max_lives, "Без потерь жизней")
+	# оспорили последний ответ в окне — буква снова свободна, автор отвечает
+	var r2 := _game(2)
+	for l: String in STRules.LETTERS:
+		_to_fuse(r2)
+		r2.submit(r2.target, l + "тест")
+	var author := int(r2.prev.seat)
+	check(r2.challenge(1 - author) and r2.phase == "aim" and r2.target == author and r2.letters_left() == 1, "Оспорили в окне — буква вернулась")
+
+
+func _timeout() -> void:
+	var r := _game(3)
+	r.max_lives = 1
+	r.players[0].lives = 1
 	r.tick(r.fuse_len + 0.1)
-	_until(r, "aim")
-	check(r.q_no != no, "после двух потерь — новый вопрос")
-	# внешний судья
-	var e := _new(2)
-	e.external_check = true
-	_until(e, "fuse")
-	e.submit(e.target, "совсем незнакомый ответ")
-	check(e.phase == "check", "незнакомый ответ уходит на проверку jev")
-	var fuse_before := e.fuse_t
-	e.tick(1.0)
-	check(e.fuse_t == fuse_before, "пока проверяем — фитиль стоит")
-	check(e.resolve_external(int(e.pending.no), true, "e"), "вердикт принят")
-	check(e.last.kind == "ok" and e.last.rarity == "e", "jev засчитал редкий ответ")
-	var e2 := _new(2)
-	e2.external_check = true
-	_until(e2, "fuse")
-	e2.submit(e2.target, "ещё один")
-	e2.tick(STRules.CHECK_TIMEOUT + 0.5)
-	check(e2.last.kind == "wrong" and e2.phase == "fuse", "jev молчит — не засчитано, игра идёт")
+	check(r.phase == "boom" and not r.players[0].alive, "Не успел — выстрел, без жизней — выбыл")
+	r.tick(STRules.BOOM_TIME + 0.01)
+	check(r.phase == "new_q" and r.target == 1, "Новую тему начинает следующий живой")
+	r.tick(STRules.NEW_Q_TIME + 0.01)
+	r.tick(STRules.AIM_TIME + 0.01)
+	r.players[1].lives = 1
+	r.tick(r.fuse_len + 0.1)
+	r.tick(STRules.BOOM_TIME + 0.01)
+	check(r.phase == "game_over" and r.winner == 2, "Остался один — победа")
+
+
+func _oral() -> void:
+	var r := STRules.new()
+	r.oral = true
+	r.new_game(_names(3), false, 9)
+	r.target = 0
+	r.tick(STRules.NEW_Q_TIME + 0.01)
+	r.tick(STRules.AIM_TIME + 0.01)
+	check(not r.action(0, "st_answer", {"text": "Австрия"}), "Устно: текст не принимается")
+	check(r.action(0, "st_answer", {"letter": "к"}) and r.letter_used("к") and r.target == 1, "Устно: нажатая буква — ответ")
+	check(r.players[0].last_answer == "на «К»", "Над игроком — буква")
+	_to_fuse(r)
+	check(not r.action(1, "st_answer", {"letter": "к"}), "Занятую букву не нажать")
+	check(not r.action(1, "st_answer", {"letter": "щ"}), "Буквы «Щ» нет")
+	check(r.action(2, "st_challenge", {}) and r.action(1, "st_challenge", {}) and r.target == 0, "Устный ответ тоже оспаривается")
+
+
+func _hotseat() -> void:
+	var r := _game(4)
+	r.hotseat = true
+	r.submit(0, "Дания")
+	check(r.votes_needed() == 1 and r.can_challenge(0), "Один компьютер: одно нажатие, жмёт любой")
+	check(r.challenge(0) and r.target == 0 and not r.letter_used("д"), "Оспорено одним нажатием")
 
 
 func _bots() -> void:
-	for seed_value in 20:
-		var r := STRules.new()
-		var pl := []
-		for i in 2 + seed_value % 7:
-			pl.append({"name": "Б%d" % i, "bot": true})
-		r.new_game(pl, false, seed_value + 1)
-		var t := 0.0
-		while r.phase != "game_over" and t < 3000.0:
-			r.tick(0.1)
-			t += 0.1
-		check(r.phase == "game_over" and r.winner >= 0 and r.alive_count() == 1, "боты доигрывают партию (сид %d)" % seed_value)
-		var v := r.get_view(0)
-		check(v.game == "stillion" and v.players.size() == pl.size(), "view")
-
-
-func _jev() -> void:
-	var q: Dictionary = STQuestions.all()[0]
-	var body := STJev.request_body(q, "подъезд")
-	check(body.questions.correct.type == "noul" and body.questions.rarity.type == "choice", "форма запроса jev")
-	check(body.state.player_answer == "подъезд" and body.model == STJev.MODEL, "состояние запроса")
-	var ok := STJev.parse({"answers": {"correct": {"noul": true}, "rarity": {"choice": "smart"}}})
-	check(ok.ok and ok.rarity == "e", "разбор: bool + choice (редкость jev — на ступень выше)")
-	var prob := STJev.parse({"answers": {"correct": {"noul": 0.2}, "rarity": {"choice": {"common": 0.7, "erudite": 0.3}}}})
-	check(not prob.ok and prob.rarity == "s", "разбор: вероятности")
-	check(STJev.parse({"answers": {"correct": {"noul": 0.42}, "rarity": {"choice": "erudite"}}}).ok, "порог «верно» — 0,4")
-	check(not STJev.parse({"answers": {"correct": {"noul": 0.38}, "rarity": {"choice": "school"}}}).ok, "ниже 0,4 — не засчитано")
-	check(STJev.parse("мусор").error, "мусор вместо ответа")
-	# засчитанный jev ответ уходит в файл новых ответов
-	var path := "user://test_stillion_new_answers.jsonl"
-	if FileAccess.file_exists(path):
-		DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
-	var v := STJev.parse({"answers": {"correct": {"noul": 0.9}, "rarity": {"choice": "smart"}}})
-	STJev.log_new_answer(q, " подъём ", v, path)
-	STJev.log_new_answer(q, "съезд", v, path)
-	var lines := FileAccess.get_file_as_string(path).strip_edges().split("\n")
-	var rec = JSON.parse_string(lines[0])
-	check(lines.size() == 2 and rec is Dictionary and rec.answer == "подъём" and rec.question == q.text and is_equal_approx(float(rec.p), 0.9) and rec.jev == "smart",
-		"новый ответ записан в файл (дописывается, с вопросом и уверенностью)")
-	DirAccess.remove_absolute(ProjectSettings.globalize_path(path))
-
-
-## Настройки партии: жизни, размер шкалы, «обычные игроки» (редкость на ступень выше).
-func _settings() -> void:
 	var r := STRules.new()
-	r.max_lives = 5
-	r.meter_max = 10
-	r.new_game([{"name": "А"}, {"name": "Б"}], false, 3)
-	check(int(r.players[0].lives) == 5 and int(r.get_view(0).max_lives) == 5, "жизни из настройки")
-	check(int(r.get_view(0).meter_max) == 10, "размер шкалы из настройки")
-	check(r.perceived("x", "u") == "u", "знатоки: редкость как в списке")
-	r.casual = true
-	check(r.perceived("x", "u") == "e" and r.perceived("x", "s") == "u" and r.perceived("x", "e") == "e", "обычные: умник → эрудит, школьник → умник")
-	for q: Dictionary in STQuestions.all():
-		var commons: Array = []
-		for a: Dictionary in q.answers:
-			if a.rarity == "c":
-				commons.append(a.name)
-		if commons.size() < 2:
-			continue
-		r.question = q
-		check(r.perceived(commons[0], "c") == "c", "самый очевидный ответ остаётся общеизвестным")
-		check(r.perceived(commons[commons.size() - 1], "c") == "s", "менее очевидный общеизвестный → школьник")
-		break
-	# очки шкалы и цветные куски
-	_until(r, "fuse")
-	var tgt := r.target
-	var a: Dictionary = r.question.answers[0]
-	r.submit(tgt, a.name)
-	var got: String = r.used[0].rarity
-	check((r.players[tgt].parts as Array) == [got] and int(r.players[tgt].meter) == int(STRules.POINTS[got]), "ответ лёг на шкалу куском своей редкости")
-
-
-## Колода вопросов на сессию лобби: между партиями вопросы не повторяются, пока не кончатся все.
-func _deck_session() -> void:
-	var total := STQuestions.all().size()
-	var deck: Array = []  # как Net._st_deck
-	var seen := {}
-	var repeats := 0
-	var last := {}
-	for game in 6:
-		var r := STRules.new()
-		r.deck = deck
-		r.new_game([{"name": "А"}, {"name": "Б"}], false, 11 + game)
-		for k in 40:
-			if seen.has(r.question.text):
-				repeats += 1
-			seen[r.question.text] = true
-			last = r.question
-			if k < 39:
-				r._next_question()
-	check(repeats == 0 and seen.size() == total, "%d вопросов за 6 партий без повторов (повторов: %d)" % [total, repeats])
-	check(deck.is_empty(), "колода сессии израсходована")
-	var r2 := STRules.new()
-	r2.deck = deck
-	r2.question = last
-	r2._next_question()
-	check(r2.question.text != last.text and deck.size() == total - 1, "колода перемешана заново, новый круг — не с последнего вопроса")
-
-
-## Фитиль: короче с каждым верным ответом на вопрос, на новом вопросе — снова полный.
-func _fuse_per_question() -> void:
-	var r := _new(3)
-	_until(r, "fuse")
-	var a: Dictionary = r.question.answers[0]
-	r.submit(r.target, a.name)
-	check(is_equal_approx(r.fuse_len, STRules.FUSE_START - STRules.FUSE_STEP), "верный ответ — фитиль короче")
-	_until(r, "fuse")
-	var b: Dictionary = r.question.answers[1]
-	r.submit(r.target, b.name)
-	check(is_equal_approx(r.fuse_len, STRules.FUSE_START - 2 * STRules.FUSE_STEP), "ещё ответ — ещё короче")
-	var no := r.q_no
-	r.q_time = STRules.QUESTION_TIME  # вопрос «выдохся»: при следующей смене цели — новый
-	_until(r, "fuse")
-	r.submit(r.target, r.question.answers[2].name)
-	check(r.phase == "new_q" and r.q_no == no + 1, "смена вопроса — пауза «Новый вопрос!»")
-	check(is_equal_approx(r.fuse_len, STRules.FUSE_START), "новый вопрос — фитиль снова полный")
-
-
-## Почти одинаковые ответы (только номер в конце разный) — один ответ.
-func _near_same() -> void:
-	check(STJudge.base("dust 2") == "dust" and STJudge.base("gta iv") == "gta" and STJudge.base("убить билла 2") == "убить билла", "основа без номера")
-	check(STJudge.base("11 22 63") == "11", "номер-название не съедается целиком")
-	var r := STRules.new()
-	r.new_game([{"name": "А"}, {"name": "Б"}], false, 2)
-	for q: Dictionary in STQuestions.all():
-		if q.text == "Назовите карту Counter-Strike":
-			r.question = q
-	_until(r, "fuse")
-	r.used.clear()
-	r.submit(r.target, "даст 2")
-	check(r.last.kind == "ok", "dust 2 засчитан")
-	_until(r, "fuse")
-	r.submit(r.target, "dust")
-	check(r.last.kind == "used", "dust после dust 2 — уже называли")
-	r.submit(r.target, "mirage")
-	check(r.last.kind == "ok", "другая карта засчитана")
+	var pl := _names(3)
+	for p: Dictionary in pl:
+		p.bot = true
+	r.new_game(pl, false, 21)
+	var answers := 0
+	for i in 8000:
+		var before := r.event_no
+		r.tick(0.05)
+		if r.event_no != before and r.last.kind == "ok":
+			answers += 1
+			check(STJudge.lookup(r.category, str(r.last.name)).get("found", false), "Бот отвечает из списка темы")
+		if r.phase == "game_over":
+			break
+	check(answers > 5, "Боты отвечают (%d)" % answers)
+	check(r.phase == "game_over", "Партия ботов доходит до конца")
+	# боты не оспаривают и не входят в счёт голосов: 2 человека + 2 бота — хватает одного голоса человека
+	var b := STRules.new()
+	var pl2 := _names(4)
+	pl2[2].bot = true
+	pl2[3].bot = true
+	b.new_game(pl2, false, 4)
+	b.target = 0
+	b.tick(STRules.NEW_Q_TIME + 0.01)
+	b.tick(STRules.AIM_TIME + 0.01)
+	b.submit(0, "Абырвалг")
+	check(b.votes_needed() == 1 and not b.can_challenge(2), "Боты не голосуют, нужен один человек")
+	for i in 80:
+		b.tick(0.05)
+	check(b.last.kind != "challenged" and b.letter_used("а"), "Ответ не из списка боты не трогают")
+	check(b.challenge(1) and not b.letter_used("а"), "Человек оспорил — не засчитан")

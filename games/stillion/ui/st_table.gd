@@ -1,9 +1,12 @@
 extends Control
-## Стол «Стиллиона»: игроки по кругу, в центре пушка (STCannon), сверху вопрос, снизу поле ответа,
-## справа — уже названные ответы. Состояние приходит с хоста (Net.state_changed); фитиль между
+## Стол «Стиллиона»: игроки по кругу, в центре пушка (STCannon), сверху тема раунда, справа клавиатура
+## из 24 букв (погасшие — уже названы) и «Оспорить», снизу поле ответа (в устном режиме — только подсказка,
+## отвечают нажатием буквы). Состояние приходит с хоста (Net.state_changed); фитиль между
 ## обновлениями досчитывается локально, чтобы пушка надувалась плавно.
 
 const SND := "res://games/stillion/audio/"
+const SIDE_W := 300.0  # ширина панели букв
+const KEY_SIZE := Vector2(60, 48)
 
 var app: Node
 var _v: Dictionary = {}
@@ -30,19 +33,23 @@ var _cannon: STCannon
 var _seats: Array = []  # Control на каждого игрока
 var _q_cat: Label
 var _q_text: Label
+var _q_hint: Label  # подсказка к теме («самоцвет, минерал или руда»)
 var _q_bar: ProgressBar
 var _answer: LineEdit
-var _appeal: Button
 var _send: Button
 var _who: Label
-var _used_box: VBoxContainer
+var _keys: Dictionary = {}  # буква → Button
+var _keys_left: Label
+var _prev_label: Label
+var _prev_hint: Label
+var _challenge: Button
 var _fx: Control  # всплывающие надписи
 var _fuse_t0 := 0.0
 const FUSE_DB := -16.0  # громкость фитиля, когда пушка надута до предела
 var _since_state := 0.0  # сколько фитиль горел у нас после последнего состояния (на паузе не растёт)
 var _last_no := -1
 var _q_no := -1
-var _q_shown := ""  # текст вопроса на карточке (для анимации появления после «Новый вопрос!»)
+var _q_shown := ""  # тема на карточке (для анимации появления после «Новая тема!»)
 var _prev_phase := ""
 var _snd: Dictionary = {}
 var _fuse_snd: AudioStreamPlayer
@@ -69,7 +76,7 @@ func _ready() -> void:
 	_stage = Control.new()
 	_stage.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_stage.offset_top = TopBar.HEIGHT + 110
-	_stage.offset_right = -250
+	_stage.offset_right = -SIDE_W - 24
 	_stage.offset_bottom = -96
 	_stage.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_stage)
@@ -82,12 +89,12 @@ func _ready() -> void:
 	_cannon_caption.visible = false
 	_stage.add_child(_cannon_caption)
 	_stage.resized.connect(_layout)
-	# вопрос
+	# тема раунда
 	var qwrap := MarginContainer.new()
 	qwrap.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	qwrap.offset_top = TopBar.HEIGHT + 4
 	qwrap.offset_left = 120
-	qwrap.offset_right = -370
+	qwrap.offset_right = -SIDE_W - 120
 	add_child(qwrap)
 	var qcard := STStyle.panel(12)
 	qwrap.add_child(qcard)
@@ -95,13 +102,16 @@ func _ready() -> void:
 	qcard.add_child(qcol)
 	_q_cat = STStyle.label("", STStyle.CAP, STStyle.RED, HORIZONTAL_ALIGNMENT_CENTER, "bold")
 	qcol.add_child(_q_cat)
-	_q_text = STStyle.label("", STStyle.H2, Color(0, 0, 0, 0), HORIZONTAL_ALIGNMENT_CENTER, "bold")
+	_q_text = STStyle.label("", STStyle.H1, Color(0, 0, 0, 0), HORIZONTAL_ALIGNMENT_CENTER, "title")
 	_q_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	qcol.add_child(_q_text)
+	_q_hint = STStyle.label("", STStyle.CAP, STStyle.muted(), HORIZONTAL_ALIGNMENT_CENTER)
+	_q_hint.visible = false
+	qcol.add_child(_q_hint)
 	_q_bar = ProgressBar.new()
 	_q_bar.show_percentage = false
 	_q_bar.custom_minimum_size.y = 8
-	_q_bar.max_value = STRules.FUSE_START
+	_q_bar.max_value = STRules.ANSWER_TIME
 	var fill := StyleBoxFlat.new()
 	fill.bg_color = STStyle.MUSTARD
 	fill.set_corner_radius_all(4)
@@ -112,43 +122,13 @@ func _ready() -> void:
 	_q_bar.add_theme_stylebox_override("background", bgq)
 	_q_bar.tooltip_text = "Сколько времени осталось до выстрела"
 	qcol.add_child(_q_bar)
-	# уже названные
-	var side := STStyle.panel(12)
-	side.set_anchors_and_offsets_preset(Control.PRESET_RIGHT_WIDE)
-	side.offset_left = -240
-	side.offset_right = -16
-	side.offset_top = TopBar.HEIGHT + 4
-	side.offset_bottom = -96
-	add_child(side)
-	var scol := STStyle.vbox(8)
-	side.add_child(scol)
-	scol.add_child(
-		STStyle.label("Уже назвали", STStyle.BODY, Color(0, 0, 0, 0), HORIZONTAL_ALIGNMENT_LEFT, "title")
-	)
-	var scroll := ScrollContainer.new()
-	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-	scol.add_child(scroll)
-	_used_box = STStyle.vbox(6)
-	_used_box.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	scroll.add_child(_used_box)
-	var legend := STStyle.hbox(4)
-	for r in STQuestions.RARITIES:
-		legend.add_child(STStyle.rarity_chip(r, ["1", "2", "3", "4"][STQuestions.RARITIES.find(r)]))
-	var lg := STStyle.label("очки шкалы", STStyle.CAP, STStyle.muted())
-	legend.add_child(lg)
-	scol.add_child(legend)
-	_appeal = STStyle.button("Оспорить ответ", STStyle.CAP)
-	_appeal.tooltip_text = "Повторная подробная проверка Jev: один раз для отклонённого ответа. Фитиль на время проверки остановлен."
-	_appeal.visible = false
-	_appeal.pressed.connect(func(): Net.send_action("st_appeal", {"as": int(_v.target)}))
-	scol.add_child(_appeal)
+	_build_keyboard()
 	# поле ответа
 	var bottom := PanelContainer.new()
 	bottom.add_theme_stylebox_override("panel", STStyle.box(STStyle.paper(), 14, 4, 5, 12))
 	bottom.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	bottom.offset_left = 120
-	bottom.offset_right = -370
+	bottom.offset_right = -SIDE_W - 120
 	bottom.offset_top = -84
 	bottom.offset_bottom = -12
 	add_child(bottom)
@@ -157,13 +137,14 @@ func _ready() -> void:
 	_who = STStyle.label("", STStyle.BODY, Color(0, 0, 0, 0), HORIZONTAL_ALIGNMENT_LEFT, "bold")
 	_who.custom_minimum_size.x = 210
 	_who.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_who.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	brow.add_child(_who)
 	_answer = LineEdit.new()
 	_answer.keep_editing_on_text_submit = true
 	_answer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	_answer.placeholder_text = "Печатайте ответ и жмите Enter"
+	_answer.placeholder_text = "Ваш ответ + Enter"
 	_answer.add_theme_font_size_override("font_size", 22)
-	_answer.max_length = 60
+	_answer.max_length = 40
 	_answer.text_submitted.connect(func(_t): _submit())
 	brow.add_child(_answer)
 	_send = STStyle.primary("Ответить!", STStyle.BODY, 150)
@@ -211,6 +192,59 @@ func _ready() -> void:
 	_on_state(Net.view)
 
 
+## Панель справа: клавиатура букв (4 × 6) и последний ответ с кнопкой «Оспорить».
+func _build_keyboard() -> void:
+	var side := STStyle.panel(16)
+	side.set_anchors_and_offsets_preset(Control.PRESET_RIGHT_WIDE)
+	side.offset_left = -SIDE_W - 16
+	side.offset_right = -16
+	side.offset_top = TopBar.HEIGHT + 4
+	side.offset_bottom = -12
+	add_child(side)
+	var col := STStyle.vbox(12)
+	side.add_child(col)
+	var head := STStyle.hbox(8)
+	var t := STStyle.label("Буквы", STStyle.H2, Color(0, 0, 0, 0), HORIZONTAL_ALIGNMENT_LEFT, "title")
+	t.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	head.add_child(t)
+	_keys_left = STStyle.label("", STStyle.CAP, STStyle.muted(), HORIZONTAL_ALIGNMENT_RIGHT)
+	_keys_left.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	head.add_child(_keys_left)
+	col.add_child(head)
+	var grid := GridContainer.new()
+	grid.columns = 4
+	grid.add_theme_constant_override("h_separation", 8)
+	grid.add_theme_constant_override("v_separation", 8)
+	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	col.add_child(grid)
+	for letter: String in STRules.LETTERS:
+		var b := Button.new()
+		b.text = letter.to_upper()
+		b.custom_minimum_size = KEY_SIZE
+		b.focus_mode = Control.FOCUS_NONE
+		b.add_theme_font_override("font", STStyle.font("title"))
+		b.add_theme_font_size_override("font_size", 28)
+		b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
+		b.pressed.connect(_on_key.bind(letter))
+		grid.add_child(b)
+		_keys[letter] = b
+	var gap := Control.new()
+	gap.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	col.add_child(gap)
+	col.add_child(STStyle.label("ПОСЛЕДНИЙ ОТВЕТ", STStyle.CAP, STStyle.muted(), HORIZONTAL_ALIGNMENT_LEFT, "bold"))
+	_prev_label = STStyle.label("", STStyle.BODY, Color(0, 0, 0, 0), HORIZONTAL_ALIGNMENT_LEFT, "bold")
+	_prev_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(_prev_label)
+	_prev_hint = STStyle.label("", STStyle.CAP, STStyle.muted())
+	_prev_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(_prev_hint)
+	_challenge = STStyle.button("Оспорить", STStyle.BODY)
+	_challenge.focus_mode = Control.FOCUS_NONE
+	_challenge.tooltip_text = "Ответ не подходит к теме? Нажмите. Если оспорит больше половины остальных игроков (1 на 1 — один),\nответ не засчитан: буква снова свободна, отвечающий отвечает заново. Оспорят второй раз подряд — выстрел."
+	_challenge.pressed.connect(func(): Net.send_action("st_challenge", {}))
+	col.add_child(_challenge)
+
+
 func _on_state(v: Dictionary) -> void:
 	if v.is_empty() or v.get("game", "") != "stillion":
 		return
@@ -220,14 +254,18 @@ func _on_state(v: Dictionary) -> void:
 	_since_state = 0.0
 	_build_seats()
 	_update_question()
-	_update_used()
+	_update_keys()
+	_update_challenge()
 	_update_input()
 	var last: Dictionary = v.get("last", {})
 	if not first and int(last.get("no", -1)) != _last_no:
 		_play_event(last)
 	_last_no = int(last.get("no", -1))
-	if v.phase == "new_q" and _prev_phase != "new_q" and not first:
-		_popup(_stage.size * Vector2(0.5, 0.3), "Новый вопрос!", STStyle.MUSTARD, 52)
+	if not first and v.phase != _prev_phase:
+		if v.phase == "new_q":
+			_popup(_stage.size * Vector2(0.5, 0.3), "Новая тема!", STStyle.MUSTARD, 52)
+		elif v.phase == "review":
+			_popup(_stage.size * Vector2(0.5, 0.3), "Буквы кончились!", STStyle.MUSTARD, 44)
 	_prev_phase = str(v.phase)
 	var tgt: int = v.target
 	_top.info.text = "Победа!" if v.phase == "game_over" else "Пушка целится: %s" % str(v.players[tgt].name)
@@ -246,7 +284,7 @@ func _process(delta: float) -> void:
 	var fuse_len := float(_v.fuse_len)
 	_cannon.inflate = (
 		clampf(t / fuse_len, 0.0, 1.0)
-		if phase in ["fuse", "check"]
+		if phase == "fuse"
 		else (0.0 if phase != "boom" else _cannon.inflate)
 	)
 	_cannon.burning = burning
@@ -261,8 +299,8 @@ func _process(delta: float) -> void:
 	_cannon.fuse_duration = fuse_len
 	_update_cannon_caption(t, fuse_len, phase)
 	_q_bar.max_value = fuse_len
-	_q_bar.value = clampf(left, 0.0, fuse_len)
-	_q_bar.modulate.a = 0.0 if phase == "new_q" else 1.0  # фитиль появляется вместе с вопросом
+	_q_bar.value = clampf(left, 0.0, fuse_len) if phase == "fuse" else (fuse_len if phase == "aim" else 0.0)
+	_q_bar.modulate.a = 0.0 if phase == "new_q" else 1.0  # фитиль появляется вместе с темой
 	if _seats.size() > int(_v.target):
 		_cannon.aim = (_seat_center(int(_v.target)) - _cannon.position - _cannon.size * 0.5).angle()
 
@@ -287,7 +325,6 @@ func _build_seats() -> void:
 		var seat: Seat = _seats[i]
 		seat.data = pl[i]
 		seat.max_lives = int(_v.max_lives)
-		seat.meter_max = int(_v.meter_max)
 		seat.targeted = i == int(_v.target) and _v.phase != "game_over"
 		seat.mine = i == int(_v.get("seat", -1)) and Net.mode != "offline"
 		seat.queue_redraw()
@@ -311,14 +348,13 @@ func _layout() -> void:
 		seat.position = _seat_pos(i)
 
 
-## Левый верхний угол места: по эллипсу, но целиком внутри сцены; первый — снизу, дальше по часовой.
 ## Одна реплика на наведение, появляется вместе с началом смены выражений.
 func _update_cannon_caption(elapsed: float, duration: float, phase: String) -> void:
 	var target: int = int(_v.target)
-	var question_no: int = int(_v.question.no)
-	if target != _caption_target or question_no != _caption_q:
+	var round_no: int = int(_v.q_no)
+	if target != _caption_target or round_no != _caption_q:
 		_caption_target = target
-		_caption_q = question_no
+		_caption_q = round_no
 		_caption_index = (_caption_index + randi_range(1, CANNON_CAPTIONS.size() - 1)) % CANNON_CAPTIONS.size()
 		_cannon_caption.text = CANNON_CAPTIONS[_caption_index]
 	if phase == "boom":
@@ -332,16 +368,17 @@ func _update_cannon_caption(elapsed: float, duration: float, phase: String) -> v
 		return
 	_cannon_caption.text = CANNON_CAPTIONS[_caption_index]
 	var start := maxf(0.0, duration - 3.0) * STCannon.TIMING_ADVANCE
-	_cannon_caption.visible = phase in ["fuse", "check"] and elapsed > start
+	_cannon_caption.visible = phase == "fuse" and elapsed > start
 
 
+## Левый верхний угол места: по эллипсу, но целиком внутри сцены; первый — снизу, дальше по часовой.
 func _seat_pos(i: int) -> Vector2:
 	var n := maxi(1, _seats.size())
 	var sz := _stage.size
-	var a := PI * 0.5 + TAU * i / n + (PI / n if n % 2 == 0 and n > 2 else 0.0)  # y вниз: π/2 — низ; при чётном числе — по диагоналям, никто не стоит под вопросом
+	var a := PI * 0.5 + TAU * i / n + (PI / n if n % 2 == 0 and n > 2 else 0.0)  # y вниз: π/2 — низ; при чётном числе — по диагоналям, никто не стоит под темой
 	var half := (sz - Seat.SIZE * _seat_k()) * 0.5
 	var pos := half + Vector2(cos(a) * half.x * 0.96, sin(a) * half.y)
-	# Восемь мест: оставляем воздух между ответом нижнего соседа и шкалой верхнего.
+	# Восемь мест: оставляем воздух между ответом нижнего соседа и сердечками верхнего.
 	if n == 8:
 		if i in [1, 6]:
 			pos.y += 12.0
@@ -360,24 +397,32 @@ func _seat_center(i: int) -> Vector2:
 	return _seat_pos(i) + Seat.SIZE * _seat_k() * Vector2(0.5, 0.42)
 
 
-# --- вопрос, ответы, ввод -------------------------------------------------------------
+# --- тема, буквы, ввод ----------------------------------------------------------------
 
 
 func _game_paused() -> bool:
 	return Net.paused if Net.is_host() else bool(_v.get("game_paused", false))
 
 
-## Карточка вопроса; во время паузы «Новый вопрос!» вопрос скрыт (хост его ещё не присылает).
+func _oral() -> bool:
+	return bool(_v.get("oral", false))
+
+
+## Карточка темы; во время паузы «Новая тема!» тема скрыта (хост её ещё не присылает).
 func _update_question() -> void:
-	var q: Dictionary = _v.question
 	if _v.phase == "new_q":
 		_q_cat.text = ""
-		_q_text.text = "Новый вопрос!"
+		_q_text.text = "Новая тема!"
+		_q_hint.visible = false
 		_q_shown = ""
 		return
-	_q_cat.text = str(q.cat).to_upper()
-	_q_text.text = str(q.text)
-	if str(q.text) != _q_shown:
+	var cat := str(_v.category)
+	_q_cat.text = "ТЕМА · УСТНО" if _oral() else "ТЕМА"
+	_q_text.text = cat
+	var hint := str(_v.get("hint", ""))
+	_q_hint.text = hint
+	_q_hint.visible = hint != ""
+	if cat != _q_shown:
 		if _q_no >= 0:
 			Sfx.play("card_flip", -6)
 		_q_text.pivot_offset = _q_text.size * 0.5
@@ -388,31 +433,67 @@ func _update_question() -> void:
 			. set_trans(Tween.TRANS_BACK)
 			. set_ease(Tween.EASE_OUT)
 		)
-		_q_shown = str(q.text)
-	_q_no = int(q.no)
+		_q_shown = cat
+	_q_no = int(_v.q_no)
 
 
-func _update_used() -> void:
-	STStyle.clear(_used_box)
-	var used: Array = _v.used
-	for k in range(used.size() - 1, -1, -1):
-		var u: Dictionary = used[k]
-		var row := STStyle.hbox(6)
-		var chip := STStyle.rarity_chip(str(u.rarity), "")
-		chip.custom_minimum_size.x = 12
-		(chip.get_child(0) as Label).text = " "
-		chip.tooltip_text = STQuestions.RARITY_NAMES.get(str(u.rarity), "")
-		row.add_child(chip)
-		var l := STStyle.label(str(u.name), STStyle.CAP, Color(0, 0, 0, 0), HORIZONTAL_ALIGNMENT_LEFT, "bold")
-		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		l.tooltip_text = (
-			"%s · %s" % [STQuestions.RARITY_NAMES.get(str(u.rarity), ""), str(_v.players[int(u.seat)].name)]
-		)
-		row.add_child(l)
-		_used_box.add_child(row)
-	if used.is_empty():
-		_used_box.add_child(STStyle.label("Пока никто не ответил", STStyle.CAP, STStyle.muted()))
+## Буквы: свободные — бумага; погасшие — тусклые с подсказкой, кто и что назвал; последняя — красная
+## (её ещё можно оспорить); в устном режиме у отвечающего свободные буквы — горчичные кнопки ответа.
+func _update_keys() -> void:
+	var used := {}
+	for u: Dictionary in _v.get("used", []):
+		used[str(u.letter)] = u
+	var prev: Dictionary = _v.get("prev", {})
+	var press := _oral() and _can_answer()
+	for letter: String in _keys:
+		var b: Button = _keys[letter]
+		var u: Dictionary = used.get(letter, {})
+		if not u.is_empty():
+			var who := str(_v.players[int(u.seat)].name)
+			b.tooltip_text = ("«%s» — %s" % [str(u.name), who]) if str(u.name) != "" else "%s (устно)" % who
+			var last := str(prev.get("letter", "")) == letter
+			_key_style(b, STStyle.RED if last else Color(STStyle.ink(), 0.12), STStyle.PAPER if last else Color(STStyle.ink(), 0.3))
+			b.disabled = true
+		else:
+			b.tooltip_text = "Нажмите — ответ на эту букву (скажите его вслух)" if press else ""
+			_key_style(b, STStyle.MUSTARD if press else STStyle.paper(), STStyle.INK if press else STStyle.ink())
+			b.disabled = _v.phase == "game_over" or not (press or (not _oral() and _answer != null and _answer.editable))
+	var left := STRules.LETTERS.size() - used.size()
+	_keys_left.text = "свободно: %d" % left
+
+
+func _key_style(b: Button, fill: Color, font: Color) -> void:
+	for st in ["normal", "hover", "pressed", "disabled", "focus"]:
+		var f := fill
+		if st == "hover":
+			f = fill.lightened(0.12)
+		elif st == "pressed":
+			f = fill.darkened(0.12)
+		var box := STStyle.box(f, 10, 3 if fill.a > 0.5 else 2, 3 if fill.a > 0.5 else 0, 2)
+		b.add_theme_stylebox_override(st, box)
+	for c in ["font_color", "font_hover_color", "font_pressed_color", "font_disabled_color", "font_focus_color"]:
+		b.add_theme_color_override(c, font)
+
+
+## Последний засчитанный ответ и «Оспорить»: голоса, сколько нужно, предупреждение о повторе.
+func _update_challenge() -> void:
+	var prev: Dictionary = _v.get("prev", {})
+	if prev.is_empty():
+		_prev_label.text = "—"
+		_prev_hint.text = "Сомнительный ответ можно оспорить, пока отвечает следующий."
+		_challenge.visible = false
+		return
+	var who := str(_v.players[int(prev.seat)].name)
+	var name := str(prev.name)
+	_prev_label.text = ("«%s» — %s" % [name, who]) if name != "" else "%s: на «%s» (вслух)" % [who, str(prev.letter).to_upper()]
+	var votes: Array = _v.get("votes", [])
+	var need := int(_v.get("votes_needed", 1))
+	var mine := int(_v.get("seat", -1))
+	_prev_hint.text = "Его уже оспаривали: оспорят ещё раз — выстрел!" if bool(prev.get("retry", false)) else ""
+	_challenge.visible = not bool(_v.get("spectator", false))
+	var voted := votes.has(mine) and not bool(_v.get("hotseat", false))
+	_challenge.text = ("Вы оспорили" if voted else "Оспорить") + ("  %d/%d" % [votes.size(), need] if need > 1 else "")
+	_challenge.disabled = not bool(_v.get("can_challenge", false)) or _game_paused()
 
 
 ## Отвечать может тот, в кого целится пушка (на одном компьютере — любой, за того игрока).
@@ -429,26 +510,46 @@ func _update_input() -> void:
 	var tgt: int = _v.target
 	var name := str(_v.players[tgt].name)
 	var can := _can_answer()
-	_appeal.visible = bool(_v.get("can_appeal", false)) and not bool(_v.get("spectator", false)) and (Net.mode == "offline" or int(_v.get("seat", -1)) == tgt)
+	var oral := _oral()
 	var local_seat := int(_v.get("seat", -1))
 	var may_prepare: bool = not bool(_v.get("spectator", false)) and _v.phase != "game_over" and (Net.mode == "offline" or (local_seat >= 0 and local_seat < _v.players.size() and bool(_v.players[local_seat].get("alive", false))))
-	_answer.editable = may_prepare
-	_answer.placeholder_text = "Печатайте ответ и жмите Enter" if can else "Можно подготовить ответ заранее…"
+	_answer.visible = not oral
+	_send.visible = not oral
+	_who.size_flags_horizontal = Control.SIZE_EXPAND_FILL if oral else Control.SIZE_FILL
+	_answer.editable = may_prepare and not oral
+	_answer.placeholder_text = "Ваш ответ + Enter" if can else "Можно подготовить заранее…"
 	_send.disabled = not can
 	if _v.phase == "new_q":
 		_who.text = "Приготовьтесь!"
-	elif _v.phase == "check":
-		_who.text = "Подробно перепроверяем…" if _v.get("appeal_checking", false) else "Проверяем ответ…"
+	elif _v.phase == "review":
+		_who.text = "Буквы кончились! Последний ответ ещё можно оспорить"
 	elif _v.phase == "game_over":
 		_who.text = "Игра окончена"
 	elif bool(_v.players[tgt].bot):
 		_who.text = "%s думает…" % name
+	elif can and oral:
+		_who.text = ("%s, " % name if Net.mode == "offline" else "") + "нажмите свободную букву и скажите ответ вслух!"
 	elif can:
 		_who.text = ("Отвечает %s!" % name) if Net.mode == "offline" else "Ваш ответ!"
 	else:
 		_who.text = "Отвечает %s" % name
-	if can and not _answer.has_focus() and get_viewport().gui_get_focus_owner() == null and not _top.chat.expanded:
+	if can and not oral and not _answer.has_focus() and get_viewport().gui_get_focus_owner() == null and not _top.chat.expanded:
 		_answer.grab_focus()
+	_update_keys()
+
+
+## Буква на клавиатуре: устно — это и есть ответ; письменно — подставляем её первой в поле.
+func _on_key(letter: String) -> void:
+	if _oral():
+		if _can_answer():
+			Net.send_action("st_answer", {"letter": letter, "as": int(_v.target)})
+		return
+	if not _answer.editable:
+		return
+	var rest := _answer.text.substr(1) if _answer.text != "" else ""
+	_answer.text = letter.to_upper() + rest
+	_answer.grab_focus()
+	_answer.caret_column = _answer.text.length()
 
 
 func _submit() -> void:
@@ -469,32 +570,32 @@ func _play_event(e: Dictionary) -> void:
 			_cannon.deflate()
 			_snd.ding.play()
 			_snd.deflate.play()
-			var r := str(e.get("rarity", "c"))
-			var txt := "%s  +%d" % [STQuestions.RARITY_NAMES.get(r, ""), int(STRules.POINTS.get(r, 1))]
-			if bool(e.get("typo", false)):
-				txt = "«%s»  ·  %s" % [str(e.get("name", "")), txt]
-			_popup(
-				_seat_center(seat) + Vector2(0, -60),
-				txt,
-				STStyle.RARITY_COLORS.get(r, STStyle.PAPER).lightened(0.3 if r == "s" else 0.0)
-			)
-			if bool(e.get("healed", false)):
-				_popup(_seat_center(seat) + Vector2(0, -100), "+1 жизнь!", STStyle.GREEN)
+			var name := str(e.get("name", ""))
+			_popup(_seat_center(seat) + Vector2(0, -60), name if name != "" else "на «%s»" % str(e.get("letter", "")).to_upper(), STStyle.MUSTARD)
 		"boom":
 			_cannon.fire()
 			_snd.boom.play()
 			_bang(_seat_center(seat))
 			_shake()
+			if bool(e.get("challenged", false)):
+				_popup(_seat_center(seat) + Vector2(0, -60), "Оспорили дважды!", STStyle.RED)
 			if bool(e.get("out", false)):
 				_popup(_seat_center(seat) + Vector2(0, 10), "выбывает", STStyle.PAPER)
 		"wrong":
 			_snd.buzz.play()
-			_flash_note("«%s» — не подходит!" % str(e.get("text", "")))
+			var l := str(e.get("letter", "")).to_upper()
+			if str(e.get("why", "")) == "used":
+				_flash_note("Буква «%s» уже занята!" % l)
+			else:
+				_flash_note("На «%s» нельзя — начните со свободной буквы" % l)
 			_shake_input()
-		"used":
+		"vote":
+			Sfx.play("click", -4)
+			_popup(_seat_center(seat) + Vector2(0, -60), "Оспариваю!", STStyle.PAPER, 22)
+		"challenged":
 			_snd.buzz.play()
-			_flash_note("«%s» уже называли!" % str(e.get("name", "")))
-			_shake_input()
+			_snd.deflate.play()
+			_popup(_seat_center(seat) + Vector2(0, -60), "Не засчитано!", STStyle.RED)
 
 
 ## Короткое сообщение красным на месте «Отвечает …» (на 2,5 с).
@@ -545,8 +646,8 @@ func _popup(at: Vector2, text: String, color: Color, font_size: int = 28) -> voi
 	_fx.add_child(l)
 	l.reset_size()
 	var p := _stage.position + at - l.size * 0.5
-	p.y = maxf(p.y, _stage.position.y + 8.0)  # не наезжать на карточку вопроса
-	p.x = clampf(p.x, 8.0, size.x - 260.0 - l.size.x)
+	p.y = maxf(p.y, _stage.position.y + 8.0)  # не наезжать на карточку темы
+	p.x = clampf(p.x, 8.0, size.x - SIDE_W - 24.0 - l.size.x)
 	l.position = p
 	l.pivot_offset = l.size * 0.5
 	l.scale = Vector2(0.4, 0.4)
@@ -567,6 +668,8 @@ func _shake() -> void:
 
 
 func _shake_input() -> void:
+	if not _answer.visible:
+		return
 	var t := create_tween()
 	var x := _answer.position.x
 	for i in 4:
@@ -623,19 +726,18 @@ func _show_over() -> void:
 	col.add_child(row)
 
 
-## Игрок у пушки: собственный рисованный персонаж, имя, жизни-сердечки и шкала ответов.
+## Игрок у пушки: собственный рисованный персонаж, имя, жизни-сердечки и последний ответ над головой.
 class Seat:
 	extends Control
-	const SIZE := Vector2(150, 190)
+	const SIZE := Vector2(150, 180)
 	var index := 0
 	var data: Dictionary = {}
 	var max_lives := 3
-	var meter_max := 6
 	var targeted := false
 	var mine := false
 	var _portrait: TextureRect
 	var _last_answer: Label
-	var compact_answers := false  # больше воздуха между ответом и шкалой верхнего соседа
+	var compact_answers := false  # больше воздуха между ответом и сердечками верхнего соседа
 	var _t := 0.0
 
 	func _ready() -> void:
@@ -662,7 +764,6 @@ class Seat:
 			queue_redraw()
 
 	func _draw() -> void:
-		var ink := STStyle.INK
 		var alive := bool(data.get("alive", true))
 		var cx := SIZE.x * 0.5
 		# прожектор на цели
@@ -695,21 +796,7 @@ class Seat:
 		# сердечки
 		var lives := int(data.get("lives", 0))
 		for k in max_lives:
-			_heart(Vector2(cx + (k - (max_lives - 1) * 0.5) * 24, 168), 9.0, k < lives)
-		# Рисованная шкала: бумажная рамка, тень и шероховатые сегменты цвета редкости.
-		var bar := Rect2(6, 180, SIZE.x - 12, 9)
-		var track := STStyle.box(Color("70604b"), 4, 2, 0, 1)
-		draw_style_box(track, bar.grow(2))
-		var x := bar.position.x
-		for r: String in data.get("parts", []):
-			var w := minf(bar.size.x * float(STRules.POINTS.get(r, 1)) / float(meter_max), bar.end.x - x)
-			if w <= 0.0:
-				break
-			# Общая рамка рисуется один раз: цветные части стыкуются без зазоров.
-			draw_rect(Rect2(x, bar.position.y, w, bar.size.y), STStyle.RARITY_COLORS.get(r, STStyle.PAPER))
-			x += w
-		var edge := STStyle.box(Color.TRANSPARENT, 4, 2, 0, 0)
-		draw_style_box(edge, bar.grow(2))
+			_heart(Vector2(cx + (k - (max_lives - 1) * 0.5) * 24, 170), 9.0, k < lives)
 		if not alive:
 			draw_line(Vector2(cx - 30, 40), Vector2(cx + 30, 110), STStyle.RED, 8.0, true)
 			draw_line(Vector2(cx + 30, 40), Vector2(cx - 30, 110), STStyle.RED, 8.0, true)

@@ -148,14 +148,14 @@ func _rebuild() -> void:
 			var b := HCStyle.button("%d с" % sec if sec > 0 else "∞", HCStyle.CAP)
 			if sec == 0:
 				b.tooltip_text = "Бесконечность: ход не заканчивается сам"
-			UISel.pick(b, int(s.get("ws_time", 60)) == sec)
+			UISel.pick(b, int(s.get("ws_time", 120)) == sec)
 			var ss: int = sec
 			b.pressed.connect(func(): Net.set_setting("ws_time", ss))
 			r2.add_child(b)
 		_body.add_child(r2)
 	else:
 		_body.add_child(HCStyle.label("Слова: " + ("упрощённый · по порядку" if s.get("ws_catalog", "basic") == "simplified" else "базовый · перемешивать после «Слэм»"), HCStyle.CAP, HCStyle.MUTED))
-		var turn := "без ограничения времени" if int(s.get("ws_time", 60)) <= 0 else "на ход %d с" % int(s.get("ws_time", 60))
+		var turn := "без ограничения времени" if int(s.get("ws_time", 120)) <= 0 else "на ход %d с" % int(s.get("ws_time", 120))
 		_body.add_child(HCStyle.label("%s · %d карт · %s" % ["Один рассказчик" if solo else "Две команды", count, turn], HCStyle.BODY))
 
 	var start_row := HCStyle.hbox(12)

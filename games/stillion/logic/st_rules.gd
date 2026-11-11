@@ -1,53 +1,79 @@
 class_name STRules
 extends RefCounted
 ## Правила «Стиллиона» (без UI), выполняются на хосте. Игроки стоят по кругу вокруг пушки.
-## Пушка наводится на игрока (aim), надувается (fuse): успел напечатать подходящий ответ — пушка
-## сдувается и поворачивается к следующему по часовой стрелке; не успел — выстрел (boom), минус жизнь.
-## Ответ сначала ищется в списке вопроса (STJudge); если его там нет — ответ уходит на проверку jev
-## (phase check: фитиль на паузе), результат приходит в resolve_external().
-## Вопрос меняется, когда на нём прошло QUESTION_TIME секунд или двое потеряли жизнь (при смене цели).
+## Раунд — одна тема («Страна», «Мороженое»…) и клавиатура из 24 букв. Пушка наводится на игрока и
+## надувается (fuse): он называет ответ на тему на свободную букву — буква гаснет, пушка поворачивается
+## к следующему по часовой стрелке. Не успел — выстрел (boom), минус жизнь, раунд закончен, новая тема.
+## Буквы кончились — тоже новая тема (последний ответ ещё REVIEW_TIME можно оспорить).
+## «Оспорить»: больше половины остальных живых игроков (1 на 1 — один) — ответ не засчитан, буква снова
+## свободна, пушка возвращается к автору, время сначала. Оспорили второй раз подряд — автор проигрывает (выстрел).
+## Устный режим (oral): игрок только жмёт букву мышью и говорит ответ вслух; проверяют оспариванием.
 ## Проверка: godot --headless --path . --script res://tests/test_stillion.gd
 
-const MAX_LIVES := 3  # жизней по умолчанию (настройка st_lives)
-const METER_MAX := 20  # шкала ответов по умолчанию (настройка st_meter): заполнилась — +1 жизнь и с нуля
-const POINTS := {"c": 1, "s": 2, "u": 3, "e": 4}  # Общеизвестно / Школьник / Умник / Эрудит
-const QUESTION_TIME := 20.0
-const LOSSES_PER_QUESTION := 2
+## Буквы клавиатуры: без й, ё, ю, э, ц, щ, ъ, ь, ы (ё в ответе считается за «е»).
+const LETTERS := ["а", "б", "в", "г", "д", "е", "ж", "з", "и", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф", "х", "ч", "ш", "я"]
+const MAX_LIVES := 2  # жизней по умолчанию (настройка st_lives)
+const ANSWER_TIME := 10.0  # время на ответ по умолчанию (настройка st_time)
 const AIM_TIME := 0.9  # пушка поворачивается к игроку
 const BOOM_TIME := 1.8  # выстрел, дым, потеря жизни
-const FUSE_START := 12.0  # фитиль в начале каждого вопроса
-const FUSE_MIN := 5.0
-const FUSE_STEP := 1.0  # каждый верный ответ на этот вопрос — фитиль короче; новый вопрос — снова FUSE_START
-const NEW_Q_TIME := 2.2  # «Новый вопрос!»: пауза перед показом вопроса и фитиля
-const CHECK_TIMEOUT := 8.0  # jev не ответил — ответ не засчитан
-const APPEAL_TIMEOUT := 22.0
+const NEW_Q_TIME := 2.2  # «Новая тема!»: пауза перед показом темы и фитиля
+const REVIEW_TIME := 4.0  # буквы кончились: столько секунд ещё можно оспорить последний ответ
 
-var players: Array = []  # {name, lives, meter, parts, alive, bot}; parts — редкости ответов на шкале по порядку
+var players: Array = []  # {name, lives, alive, bot, last_answer}
 var max_lives := MAX_LIVES  # задать до new_game()
-var meter_max := METER_MAX
-var casual := false  # «обычные игроки»: редкость ответов на ступень выше (см. perceived())
-var phase := "new_q"  # new_q / aim / fuse / check / boom / game_over
+var answer_time := ANSWER_TIME
+var oral := false  # устный режим: ответ — нажатая буква, сам ответ говорят вслух
+var hotseat := false  # один компьютер: «Оспорить» решает одно нажатие (решили вслух)
+var phase := "new_q"  # new_q / aim / fuse / review / boom / game_over
 var target := 0
-var question: Dictionary = {}  # {cat, text, answers}
-var q_no := 0  # номер вопроса (для анимации смены)
-var q_time := 0.0
-var q_losses := 0
-var used: Array = []  # уже названные на этом вопросе: {name, rarity, seat}
-var fuse_len := FUSE_START
+var category: Dictionary = {}  # {cat, answers: [{name, alts, rarity}]}
+var q_no := 0  # номер темы (для анимации смены)
+var used: Array = []  # погасшие буквы раунда: {letter, name, seat}
+var prev: Dictionary = {}  # последний засчитанный ответ, его можно оспорить: {seat, letter, name, retry}
+var votes: Array = []  # места, нажавшие «Оспорить» по prev
+var retry_seat := -1  # чей ответ только что оспорили: оспорят снова — проигрыш
+var fuse_len := ANSWER_TIME
 var fuse_t := 0.0
 var phase_t := 0.0
-var pending: Dictionary = {}  # ответ на проверке jev: {seat, text, no}
-var rejected: Dictionary = {}  # последнее отклонение Jev; одно оспаривание на ответ
-var last: Dictionary = {}  # последнее событие для стола: {kind, seat, name, rarity, typo, text, no}
+var last: Dictionary = {}  # последнее событие для стола: {kind, seat, name, letter, no, …}
 var event_no := 0
 var winner := -1
 var revision := 0
-var external_check := false  # хост подключил jev: незнакомые ответы проверяются им
 var rng := RandomNumberGenerator.new()
-## Колода вопросов (индексы STQuestions.all()): Net передаёт одну и ту же на всю сессию лобби,
-## чтобы вопросы не повторялись между партиями; кончилась — перемешивается заново.
+## Колода тем (индексы categories()): Net передаёт одну и ту же на всю сессию лобби,
+## чтобы темы не повторялись между партиями; кончилась — перемешивается заново.
 var deck: Array = []
 var _bot_at := -1.0
+
+static var _cats: Array = []
+
+
+## Все темы: [{cat, hint, answers: [{name, alts: [норм. варианты], rarity}]}] из STCategories.TEXT.
+## «Тема [подсказка]: …» — подсказка показывается под названием темы.
+static func categories() -> Array:
+	if not _cats.is_empty():
+		return _cats
+	for line: String in STCategories.TEXT.split("\n", false):
+		var i := line.find(":")
+		if i <= 0:
+			continue
+		var head := line.left(i).strip_edges()
+		var hint := ""
+		var h := head.find("[")
+		if h > 0 and head.ends_with("]"):
+			hint = head.substr(h + 1, head.length() - h - 2).strip_edges()
+			head = head.left(h).strip_edges()
+		var c := {"cat": head, "hint": hint, "answers": []}
+		for raw: String in line.substr(i + 1).split(",", false):
+			var alts: Array = []
+			for v: String in raw.split("|", false):
+				var n := STJudge.normalize(v)
+				if n != "" and not alts.has(n):
+					alts.append(n)
+			if not alts.is_empty():
+				(c.answers as Array).append({"name": raw.split("|")[0].strip_edges(), "alts": alts, "rarity": "c"})
+		_cats.append(c)
+	return _cats
 
 
 func new_game(player_list: Array, use_bots: bool = false, seed_value: int = 0) -> void:
@@ -56,13 +82,11 @@ func new_game(player_list: Array, use_bots: bool = false, seed_value: int = 0) -
 	else:
 		rng.randomize()
 	players.clear()
-	rejected = {}
 	for p: Dictionary in player_list:
-		players.append({"name": str(p.get("name", "Игрок")), "lives": max_lives, "meter": 0, "parts": [], "alive": true,
-			"last_answer": "", "bot": bool(p.get("bot", false)) or (use_bots and bool(p.get("local", false)))})
+		players.append({"name": str(p.get("name", "Игрок")), "lives": max_lives, "alive": true, "last_answer": "",
+			"bot": bool(p.get("bot", false)) or (use_bots and bool(p.get("local", false)))})
 	winner = -1
-	target = rng.randi_range(0, players.size() - 1)
-	_new_question(target)
+	_new_round(rng.randi_range(0, players.size() - 1))
 
 
 func player_count() -> int:
@@ -77,69 +101,89 @@ func alive_count() -> int:
 	return n
 
 
-## Действия игроков (Net): st_answer {text}.
+## Действия игроков (Net): st_answer {text} (устно — {letter}), st_challenge.
 func action(seat: int, kind: String, arg) -> bool:
 	var a: Dictionary = arg if arg is Dictionary else {}
 	match kind:
-		"st_appeal":
-			if not can_appeal(seat):
-				return false
-			rejected["appealed"] = true
-			pending = {"seat": seat, "text": rejected.text, "no": event_no + 1, "appeal": true}
-			phase = "check"
-			phase_t = 0.0
-			_bump()
-			return true
 		"st_answer":
+			if oral:
+				return submit_letter(seat, str(a.get("letter", "")))
 			return submit(seat, str(a.get("text", "")))
+		"st_challenge":
+			return challenge(seat)
 	return false
 
 
-## Игрок под прицелом прислал ответ.
+## Игрок под прицелом напечатал ответ: засчитан, если первая буква есть на клавиатуре и ещё свободна.
 func submit(seat: int, text: String) -> bool:
-	if phase != "fuse" or seat != target or STJudge.normalize(text).is_empty():
+	if oral or phase != "fuse" or seat != target:
 		return false
-	rejected = {}
-	players[seat].last_answer = text.strip_edges().left(60)
-	var found := STJudge.lookup(question, text)
-	if found.found:
-		if _is_used(found.name):
-			_event("used", seat, {"name": found.name, "text": text})
-			return true
-		_accept(seat, found.name, found.rarity, found.typo, text)
-		return true
-	if external_check:
-		phase = "check"
-		phase_t = 0.0
-		pending = {"seat": seat, "text": text, "no": event_no + 1}
-		_bump()
-		return true
-	_event("wrong", seat, {"text": text})
-	return true
-
-
-## Вердикт jev по ответу, которого нет в списке: ok, редкость (c/s/u/e) и как показывать ответ.
-func resolve_external(no: int, ok: bool, rarity: String = "s", name: String = "") -> bool:
-	if phase != "check" or pending.is_empty() or int(pending.no) != no:
+	var n := STJudge.normalize(text)
+	if n.is_empty():
 		return false
-	var seat: int = pending.seat
-	var text: String = pending.text
-	var appealed: bool = bool(pending.get("appeal", false))
-	pending = {}
-	phase = "fuse"
-	var shown := name if name != "" else text.strip_edges()
-	if ok and _is_used(shown):
-		_event("used", seat, {"name": shown, "text": text})
-	elif ok:
-		_accept(seat, shown, rarity if POINTS.has(rarity) else "s", false, text)
+	var shown := text.strip_edges().left(40)
+	var letter := n.left(1)
+	if not LETTERS.has(letter):
+		_event("wrong", seat, {"text": shown, "letter": letter, "why": "none"})
+	elif letter_used(letter):
+		_event("wrong", seat, {"text": shown, "letter": letter, "why": "used"})
 	else:
-		rejected = {"seat": seat, "text": text, "question": q_no, "appealed": appealed}
-		_event("wrong", seat, {"text": text})
+		_accept(seat, letter, shown)
 	return true
 
 
-func can_appeal(seat: int) -> bool:
-	return external_check and phase == "fuse" and seat == target and not rejected.is_empty() and int(rejected.get("seat", -1)) == seat and int(rejected.get("question", -1)) == q_no and not bool(rejected.get("appealed", false))
+## Устный режим: игрок под прицелом нажал свободную букву (ответ сказал вслух).
+func submit_letter(seat: int, letter: String) -> bool:
+	letter = letter.to_lower()
+	if not oral or phase != "fuse" or seat != target or not LETTERS.has(letter) or letter_used(letter):
+		return false
+	_accept(seat, letter, "")
+	return true
+
+
+func letter_used(letter: String) -> bool:
+	for u: Dictionary in used:
+		if u.letter == letter:
+			return true
+	return false
+
+
+func letters_left() -> int:
+	return LETTERS.size() - used.size()
+
+
+## Сколько нажатий «Оспорить» нужно: больше половины живых людей, кроме автора (1 на 1 — одно); на одном компьютере — одно.
+## Боты не оспаривают и в счёт не входят: ответы игроков по списку не проверяются, решают только люди.
+func votes_needed() -> int:
+	if prev.is_empty():
+		return 0
+	if hotseat:
+		return 1
+	var n := 0
+	for s in players.size():
+		if players[s].alive and not players[s].bot and s != int(prev.seat):
+			n += 1
+	return maxi(1, n / 2 + 1)
+
+
+func can_challenge(seat: int) -> bool:
+	if prev.is_empty() or not phase in ["aim", "fuse", "review"] or seat < 0 or seat >= players.size():
+		return false
+	if votes.has(seat) or (not hotseat and (not players[seat].alive or players[seat].bot)):
+		return false
+	return hotseat or seat != int(prev.seat)
+
+
+## Нажали «Оспорить» на последний ответ. Набралось — ответ не засчитан.
+func challenge(seat: int) -> bool:
+	if not can_challenge(seat):
+		return false
+	votes.append(seat)
+	if votes.size() >= votes_needed():
+		_overturn()
+	else:
+		_event("vote", seat, {"of": int(prev.seat)})
+	return true
 
 
 ## Время идёт только на хосте. true — состояние изменилось (разослать).
@@ -162,23 +206,24 @@ func tick(delta: float) -> bool:
 				return true
 		"fuse":
 			fuse_t += delta
-			q_time += delta
 			if _bot_at >= 0.0 and fuse_t >= _bot_at:
 				_bot_at = -1.0
 				_bot_answer()
 				return true
 			if fuse_t >= fuse_len:
-				_boom()
+				_boom(target)
 				return true
-		"check":
-			if not pending.is_empty() and phase_t >= (APPEAL_TIMEOUT if pending.get("appeal", false) else CHECK_TIMEOUT):
-				return resolve_external(int(pending.no), false)
+		"review":
+			if phase_t >= REVIEW_TIME:
+				var from := int(prev.get("seat", target))
+				_new_round(_next_alive(from))
+				return true
 		"boom":
 			if phase_t >= BOOM_TIME:
 				if alive_count() <= 1:
 					_finish()
 				else:
-					_turn_to(_next_alive(target))
+					_new_round(target if players[target].alive else _next_alive(target))
 				return true
 	return false
 
@@ -190,84 +235,85 @@ func get_view(seat: int) -> Dictionary:
 		used_view.append(u.duplicate())
 	return {
 		"game": "stillion", "seat": seat, "players": players.duplicate(true), "phase": phase, "target": target,
-		# пока на экране «Новый вопрос!» — сам вопрос ещё не показываем никому
-		"question": {"cat": "" if phase == "new_q" else question.get("cat", ""), "text": "" if phase == "new_q" else question.get("text", ""), "no": q_no},
-		"q_left": maxf(0.0, QUESTION_TIME - q_time), "used": used_view,
-		"fuse_len": fuse_len, "fuse_t": fuse_t, "checking": phase == "check",
-		"can_appeal": can_appeal(target), "appeal_checking": bool(pending.get("appeal", false)),
-		"last": last.duplicate(), "winner": winner, "revision": revision,
-		"max_lives": max_lives, "meter_max": meter_max,
+		# пока на экране «Новая тема!» — саму тему ещё не показываем никому
+		"category": "" if phase == "new_q" else str(category.get("cat", "")),
+		"hint": "" if phase == "new_q" else str(category.get("hint", "")), "q_no": q_no,
+		"letters": LETTERS.duplicate(), "used": used_view,
+		"prev": prev.duplicate(), "votes": votes.duplicate(), "votes_needed": votes_needed(),
+		"can_challenge": can_challenge(seat), "retry_seat": retry_seat,
+		"fuse_len": fuse_len, "fuse_t": fuse_t, "review_left": maxf(0.0, REVIEW_TIME - phase_t) if phase == "review" else 0.0,
+		"oral": oral, "hotseat": hotseat,
+		"last": last.duplicate(), "winner": winner, "revision": revision, "max_lives": max_lives,
 	}
 
 
 # --- внутреннее -----------------------------------------------------------------------
 
-## Редкость с учётом настройки «обычные игроки»: умник → эрудит, школьник → умник, а вторая половина
-## общеизвестных ответов вопроса (список идёт от самых очевидных) → школьник. Ответы от jev — без списка: c не меняется.
-func perceived(name: String, rarity: String) -> String:
-	if not casual:
-		return rarity
-	match rarity:
-		"u":
-			return "e"
-		"s":
-			return "u"
-		"c":
-			var commons: Array = []
-			for a: Dictionary in question.get("answers", []):
-				if a.rarity == "c":
-					commons.append(a.name)
-			var i := commons.find(name)
-			if i >= 0 and i >= ceili(commons.size() / 2.0):
-				return "s"
-	return rarity
+
+func _accept(seat: int, letter: String, name: String) -> void:
+	_close_prev()
+	used.append({"letter": letter, "name": name, "seat": seat})
+	players[seat].last_answer = name if name != "" else "на «%s»" % letter.to_upper()
+	prev = {"seat": seat, "letter": letter, "name": name, "retry": seat == retry_seat}
+	votes = []
+	_event("ok", seat, {"name": name, "letter": letter})
+	if letters_left() <= 0:
+		phase = "review"
+		phase_t = 0.0
+		_bot_at = -1.0
+		_bump()
+	else:
+		_aim(_next_alive(seat))
 
 
-func _accept(seat: int, name: String, rarity: String, typo: bool, text: String) -> void:
-	players[seat].last_answer = text.strip_edges().left(60)
-	rarity = perceived(name, rarity)
-	used.append({"name": name, "rarity": rarity, "seat": seat})
+## Окно оспаривания прошлого ответа закрылось без оспаривания.
+func _close_prev() -> void:
+	if not prev.is_empty() and bool(prev.retry):
+		retry_seat = -1
+	prev = {}
+	votes = []
+
+
+## Ответ оспорили: буква снова свободна, пушка возвращается к автору; второй раз подряд — выстрел.
+func _overturn() -> void:
+	var p := prev
+	prev = {}
+	votes = []
+	for i in range(used.size() - 1, -1, -1):
+		if used[i].letter == p.letter:
+			used.remove_at(i)
+	var s := int(p.seat)
+	players[s].last_answer = ""
+	if bool(p.retry):
+		retry_seat = -1
+		_boom(s, true)
+		return
+	retry_seat = s
+	_event("challenged", s, {"name": p.name, "letter": p.letter})
+	_aim(s)
+
+
+func _boom(seat: int, challenged := false) -> void:
+	target = seat
 	var p: Dictionary = players[seat]
-	p.meter = int(p.meter) + int(POINTS[rarity])
-	(p.parts as Array).append(rarity)
-	var healed := false
-	if int(p.meter) >= meter_max:
-		p.meter = 0
-		p.parts = []
-		if int(p.lives) < max_lives:
-			p.lives = int(p.lives) + 1
-			healed = true
-	fuse_len = maxf(FUSE_MIN, fuse_len - FUSE_STEP)
-	_event("ok", seat, {"name": name, "rarity": rarity, "typo": typo, "text": text, "healed": healed})
-	_turn_to(_next_alive(seat))
-
-
-func _boom() -> void:
-	var p: Dictionary = players[target]
 	p.lives = int(p.lives) - 1
 	if int(p.lives) <= 0:
 		p.lives = 0
 		p.alive = false
-	q_losses += 1
+	_close_prev()
+	retry_seat = -1
 	_bot_at = -1.0
 	phase = "boom"
 	phase_t = 0.0
-	_event("boom", target, {"out": not p.alive})
+	_event("boom", seat, {"out": not p.alive, "challenged": challenged})
 
 
-## Пушка поворачивается к следующему; на смене цели — новый вопрос, если пора.
-func _turn_to(seat: int) -> void:
-	rejected = {}
-	if q_time >= QUESTION_TIME or q_losses >= LOSSES_PER_QUESTION or _unused_left() == 0:
-		_new_question(seat)
-	else:
-		_aim(seat)
-
-
-## Смена вопроса: пауза «Новый вопрос!» (NEW_Q_TIME), фитиль — снова полный, потом наведение на seat.
-func _new_question(seat: int) -> void:
-	rejected = {}
-	_next_question()
+## Новый раунд: новая тема, все буквы снова свободны; пауза «Новая тема!», потом наведение на seat.
+func _new_round(seat: int) -> void:
+	_close_prev()
+	retry_seat = -1
+	used.clear()
+	_next_category()
 	target = seat
 	phase = "new_q"
 	phase_t = 0.0
@@ -281,12 +327,13 @@ func _aim(seat: int) -> void:
 	phase = "aim"
 	phase_t = 0.0
 	fuse_t = 0.0
+	fuse_len = answer_time
 	_bot_at = -1.0
 	_bump()
 
 
-func _next_question() -> void:
-	var all := STQuestions.all()
+func _next_category() -> void:
+	var all := categories()
 	if deck.is_empty():
 		for i in all.size():
 			deck.append(i)
@@ -295,18 +342,15 @@ func _next_question() -> void:
 			var t: int = deck[i]
 			deck[i] = deck[j]
 			deck[j] = t
-		# новый круг не начинается с только что заданного вопроса
-		var last := all.find(question)
-		if deck.size() > 1 and int(deck.back()) == last:
+		# новый круг не начинается с только что сыгранной темы
+		var was := all.find(category)
+		if deck.size() > 1 and int(deck.back()) == was:
 			var t: int = deck[0]
 			deck[0] = deck[deck.size() - 1]
 			deck[deck.size() - 1] = t
-	question = all[deck.pop_back()]
-	fuse_len = FUSE_START
+	category = all[deck.pop_back()]
+	fuse_len = answer_time
 	q_no += 1
-	q_time = 0.0
-	q_losses = 0
-	used.clear()
 
 
 func _next_alive(from: int) -> int:
@@ -326,63 +370,25 @@ func _finish() -> void:
 	_bump()
 
 
-## Назван ли уже этот ответ — или почти такой же: синонимы одного ответа и ответы, отличающиеся
-## только номером в конце (dust / dust 2, GTA IV / GTA V), считаются одним.
-func _is_used(name: String) -> bool:
-	var mine := _bases(name)
-	for u: Dictionary in used:
-		for b in _bases(str(u.name)):
-			if mine.has(b):
-				return true
-	return false
-
-
-## Основы всех написаний ответа (имя + синонимы из списка вопроса, если он там есть).
-func _bases(name: String) -> Dictionary:
-	var out := {}
-	var k := STJudge.key(name)
-	out[STJudge.base(k)] = true
-	for a: Dictionary in question.get("answers", []):
-		if STJudge.key(a.name) == k or (a.alts as Array).has(k):
-			for alt: String in a.alts:
-				out[STJudge.base(alt)] = true
-	return out
-
-
-func _unused_left() -> int:
-	var n := 0
-	for a: Dictionary in question.get("answers", []):
-		if not _is_used(a.name):
-			n += 1
-	return n
-
-
-## Бот под прицелом: через случайное время называет незанятый ответ (чаще — очевидный) или не успевает.
+## Бот под прицелом: через случайное время называет ответ из списка темы на свободную букву или не успевает.
+## Список нужен только ботам (на одном компьютере с «Добавленные — боты» и вместо отключившихся).
 func _plan_bot() -> void:
 	_bot_at = -1.0
 	if not players[target].bot:
 		return
-	_bot_at = rng.randf_range(1.5, fuse_len * 0.95) if rng.randf() < 0.8 else fuse_len + 1.0
+	_bot_at = rng.randf_range(1.5, maxf(2.0, minf(fuse_len * 0.85, 6.0))) if rng.randf() < 0.85 else fuse_len + 1.0
 
 
 func _bot_answer() -> void:
-	var weights := {"c": 6.0, "s": 3.0, "u": 1.2, "e": 0.4}
 	var pool: Array = []
-	var total := 0.0
-	for a: Dictionary in question.answers:
-		if not _is_used(a.name):
+	for a: Dictionary in category.get("answers", []):
+		var letter := str(a.alts[0]).left(1)
+		if LETTERS.has(letter) and not letter_used(letter):
 			pool.append(a)
-			total += float(weights[a.rarity])
 	if pool.is_empty():
-		return  # ответов не осталось — бот ждёт выстрела
-	var r := rng.randf() * total
-	for a: Dictionary in pool:
-		r -= float(weights[a.rarity])
-		if r <= 0.0:
-			_accept(target, a.name, a.rarity, false, a.name)
-			return
-	var a0: Dictionary = pool.back()
-	_accept(target, a0.name, a0.rarity, false, a0.name)
+		return  # ничего не знает — ждёт выстрела
+	var pick: Dictionary = pool[rng.randi_range(0, pool.size() - 1)]
+	_accept(target, str(pick.alts[0]).left(1), "" if oral else str(pick.name))
 
 
 func _event(kind: String, seat: int, extra: Dictionary) -> void:
@@ -414,9 +420,9 @@ func host_set_stat(seat: int, key: String, value: int) -> bool:
 	return false
 
 
-## Новый вопрос тому же игроку под прицелом (не во время проверки ответа и выстрела).
+## Новая тема тому же игроку под прицелом (не во время выстрела).
 func host_new_theme() -> bool:
-	if not phase in ["new_q", "aim", "fuse"]:
+	if not phase in ["new_q", "aim", "fuse", "review"]:
 		return false
-	_new_question(target)
+	_new_round(target)
 	return true

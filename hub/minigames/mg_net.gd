@@ -3,8 +3,8 @@ extends Node
 ##
 ## Приглашение → согласие → партия. Партии живут на хосте пати: он проверяет ходы правилами
 ## (hub/minigames/logic) и рассылает обоим игрокам снимок. Времени на ход нет. Партий может быть несколько;
-## они не зависят от основной игры и переживают смену экрана. Окно — hub/minigames/mg_panel.gd, оно висит
-## в своём слое поверх любого экрана. Без пати доступна только партия «за обоих» на этом компьютере.
+## они не зависят от основной игры и переживают смену экрана. Окно — общее «Общение» (hub/comms_panel.gd),
+## поле — hub/minigames/mg_board.gd. Без пати доступна только партия «за обоих» на этом компьютере.
 ## После смены хоста игроки сами возвращают свои партии новому хосту (по никам).
 
 signal changed  # партии, приглашения, выбранная вкладка
@@ -18,7 +18,6 @@ const RULES := {
 	"go": preload("res://hub/minigames/logic/mg_go.gd"),
 }
 const MAX_SESSIONS := 8  # партий у одного игрока
-const LAYER := 45
 
 var sessions: Dictionary = {}  # id → {id, game, opts, peers, names, state, seat, dot, gone, local, orphan}
 var order: Array[String] = []  # вкладки слева направо
@@ -33,8 +32,6 @@ var _next := 1
 var _salt := randi() % 100000  # номера партий разных хостов не совпадают (после смены хоста старые ещё живы у игроков)
 var _local_next := 1
 var _clock := 0.0
-var _layer: CanvasLayer
-var _panel: Control
 
 
 func _ready() -> void:
@@ -76,33 +73,20 @@ func targets() -> Array:
 # --- Окно ----------------------------------------------------------------------------------
 
 func _ensure_panel() -> Control:
-	if is_instance_valid(_panel):
-		return _panel
-	_layer = CanvasLayer.new()
-	_layer.layer = LAYER
-	_layer.name = "MiniGamesLayer"
-	_layer.add_to_group("pause_allowed")
-	get_tree().root.add_child(_layer)
-	var root := Control.new()
-	root.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_layer.add_child(root)
-	_panel = load("res://hub/minigames/mg_panel.gd").new()
-	root.add_child(_panel)
-	return _panel
+	return _net().chat.panel()
 
 
-## Открыть окно мини-игр (кнопки «Мини-игры» в верхней полосе, в главном меню и в чате).
+## Открыть окно «Общение» на мини-играх (кнопки «Мини-игры» в верхней полосе и в главном меню, клавиша X).
 func show_panel() -> void:
-	_ensure_panel().call("open")
+	_ensure_panel().call("open_games")
 
 
 func toggle_panel() -> void:
-	_ensure_panel().call("toggle")
+	_ensure_panel().call("toggle_games")
 
 
 func _panel_watching(id: String) -> bool:
-	return is_instance_valid(_panel) and bool(_panel.call("watching", id))
+	return bool(_ensure_panel().call("watching", id))
 
 
 func select(id: String) -> void:

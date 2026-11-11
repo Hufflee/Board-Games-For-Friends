@@ -79,23 +79,34 @@ static func clean(value: Variant) -> Dictionary:
 		if not (number is float or number is int) or not is_finite(float(number)) or float(number) < 0 or float(number) > 1:
 			return {}
 		config.figure_positions[id] = float(number)
+	var box_positions: Variant = source.get("box_positions", {})
+	if not box_positions is Dictionary or box_positions.size() > 128:
+		return {}
+	if not box_positions.is_empty():
+		config.box_positions = {}
+		for id in box_positions:
+			var share: Variant = box_positions[id]
+			if not id is String or id.length() > 80 or not (share is float or share is int) or not is_finite(float(share)) or float(share) < 0.0 or float(share) > 1.0:
+				return {}
+			config.box_positions[id] = float(share)
 	for field in ["figure_yaw", "figure_surfaces"]:
 		var entries: Variant = source.get(field, {})
-		if not entries is Dictionary or entries.size() > 16:
+		if not entries is Dictionary or entries.size() > (128 if field == "figure_surfaces" else 16):
 			return {}
 		if not source.has(field):
 			continue
 		config[field] = {}
 		for id in entries:
-			if not Shelf.is_figure(id):
-				continue
 			var entry: Variant = entries[id]
+			var wall_item: bool = field == "figure_surfaces" and entry is Dictionary and entry.get("surface", "") in ["wall_lower", "wall_upper"]
+			if not Shelf.is_figure(id) and not (wall_item and id is String and id.length() <= 80):
+				continue
 			if field == "figure_yaw":
 				if not (entry is float or entry is int) or not is_finite(float(entry)) or absf(float(entry)) > PI + 0.0001:
 					return {}
 				config[field][id] = float(entry)
 			else:
-				if not entry is Dictionary or entry.size() != 2 or not entry.get("surface", "") in ["tv", "stand_left", "stand_right", "cabinet"]:
+				if not entry is Dictionary or entry.size() != 2 or not entry.get("surface", "") in ["tv", "stand_left", "stand_right", "cabinet", "wall_lower", "wall_upper"]:
 					return {}
 				var fraction: Variant = entry.get("x")
 				if not (fraction is float or fraction is int) or not is_finite(float(fraction)) or float(fraction) < 0 or float(fraction) > 1:

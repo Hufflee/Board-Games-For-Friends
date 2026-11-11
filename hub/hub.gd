@@ -19,6 +19,7 @@ var _leaving := false
 var _selected := {}
 var _watch_peer := 0
 var _watch_follow := true
+var _party_collapsed := false
 var _publish_clock := 0.0
 var _stickers: Control  # hub/sticker_ui.gd — стикеры на коробках и доска друзей
 
@@ -103,6 +104,11 @@ func _rebuild() -> void:
 	var party := _party_panel() if in_party else _party_create_panel()
 	party.position = Vector2(22, 112)
 	_ui.add_child(party)
+	var turn_arrow: Button = load("res://hub/room_turn_arrow.gd").new()
+	turn_arrow.room = _room
+	turn_arrow.party = party
+	turn_arrow.z_index = 3
+	_ui.add_child(turn_arrow)
 	# подсказка снизу по центру
 	var hint := HubStyle.label(NeonRoom.HINT if not in_party or Net.is_host() else "Игру запускает ведущий пати — откройте коробку и предложите ему свою", 14, HubStyle.MUTED, HORIZONTAL_ALIGNMENT_CENTER)
 	_shelf_hint = hint
@@ -123,17 +129,10 @@ func _rebuild() -> void:
 	var news := HubStyle.button("Что нового?", 15)
 	news.pressed.connect(func(): add_child(load("res://hub/whats_new.gd").new()))
 	top.add_child(news)
-	if in_party:
-		var chat_button := HubStyle.button("Чат", 15)
-		chat_button.tooltip_text = "Чат пати (Enter)"
-		chat_button.pressed.connect(func():
-			for panel: Node in _ui.find_children("*", "K12ChatPanel", false, false):
-				(panel as K12ChatPanel).expanded = not (panel as K12ChatPanel).expanded)
-		top.add_child(chat_button)
-	var mini_games := HubStyle.button("Мини-игры", 15)
-	mini_games.tooltip_text = "Шахматы, шашки и го один на один с участником пати"
-	mini_games.pressed.connect(func(): Net.minigames.toggle_panel())
-	top.add_child(mini_games)
+	var comms := HubStyle.button("Общение", 15)
+	comms.tooltip_text = "Чат пати и мини-игры: Z — чат, X — мини-игры, Enter — писать"
+	comms.pressed.connect(func(): Net.chat.panel().call("toggle"))
+	top.add_child(comms)
 	var stats := HubStyle.button("Статистика",15)
 	stats.pressed.connect(func():add_child(load("res://hub/player_stats_screen.gd").new()))
 	top.add_child(stats)
@@ -273,13 +272,39 @@ func _show_card(g: Dictionary, animate: bool = true) -> void:
 
 # --- Пати --------------------------------------------------------------------------
 
+func _party_content(panel: PanelContainer, column: VBoxContainer) -> VBoxContainer:
+	var header := HubStyle.hbox(8)
+	var title := HubStyle.neon_label("PARTY", 18, HubStyle.CYAN)
+	title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	header.add_child(title)
+	var toggle := HubStyle.button("", 14)
+	toggle.name = "PartyCollapse"
+	toggle.custom_minimum_size = Vector2(32, 26)
+	header.add_child(toggle)
+	column.add_child(header)
+	var body := HubStyle.vbox(8)
+	column.add_child(body)
+	var expanded_width := panel.custom_minimum_size.x
+	var sync := func():
+		body.visible = not _party_collapsed
+		panel.custom_minimum_size.x = 0.0 if _party_collapsed else expanded_width
+		toggle.text = "+" if _party_collapsed else "−"
+		toggle.tooltip_text = "Развернуть окно пати" if _party_collapsed else "Свернуть окно пати"
+		panel.reset_size.call_deferred()
+	toggle.pressed.connect(func():
+		_party_collapsed = not _party_collapsed
+		sync.call())
+	sync.call()
+	return body
+
+
 ## Без пати: создать или войти.
 func _party_create_panel() -> Control:
 	var p := HubStyle.panel(HubStyle.CYAN)
 	p.custom_minimum_size = Vector2(290, 0)
 	var v := HubStyle.vbox(9)
 	p.add_child(v)
-	v.add_child(HubStyle.neon_label("PARTY", 18, HubStyle.CYAN))
+	v = _party_content(p, v)
 	var hint := HubStyle.label("Соберитесь один раз — и играйте во что угодно: при смене игры пати не распадается.", 13, HubStyle.MUTED)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.custom_minimum_size = Vector2(250, 0)
@@ -319,7 +344,7 @@ func _party_panel() -> Control:
 	p.custom_minimum_size = Vector2(290, 0)
 	var v := HubStyle.vbox(8)
 	p.add_child(v)
-	v.add_child(HubStyle.neon_label("PARTY", 18, HubStyle.CYAN))
+	v = _party_content(p, v)
 	var humans: Array = data["members"].filter(func(m): return m["kind"] != "bot")
 	if _watch_peer != 0:
 		var follow := CheckButton.new()

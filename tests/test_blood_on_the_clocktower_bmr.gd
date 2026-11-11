@@ -59,8 +59,36 @@ func _run() -> void:
 	_demons()
 	_death_triggers()
 	_nights()
+	_audit_11()
 	print("Clocktower BMR: %d проверок, %d ошибок." % [checks, failures])
 	quit(1 if failures > 0 else 0)
+
+## Аудит ролей 11.11: Моряк — только живые, Бабушка с нарушенной способностью, Лунатик-Зомбуул.
+func _audit_11() -> void:
+	var g := fixture()
+	g.alive[3] = false
+	g.abilities._wake(2, "sailor")
+	var seats: Array = g.requests[2].options.map(func(o: Dictionary): return int(o.target))
+	check(not seats.has(3) and seats.has(4), "Моряк выбирает только живого игрока")
+	g = fixture()
+	g.abilities._add_drunk(1, 2, 3)
+	g.abilities._wake(1, "grandmother")
+	check(g.requests.has(0) and str(g.requests[0].title).contains("Бабушка"), "Бабушке внука выбирает рассказчик")
+	respond(g, 0)
+	check(g.requests.has(0) and g.requests[0].options.size() > 5 and str(g.requests[0].title).contains("Бабушка"), "Пьяной Бабушке рассказчик может назвать любую добрую роль")
+	g = fixture()
+	g.abilities._wake(1, "grandmother")
+	respond(g, 0)
+	check(not g.requests.has(0) and str(g.private_log[1].back()).contains("—"), "Трезвая Бабушка сразу узнаёт правду")
+	g = fixture(["grandmother", "sailor", "chambermaid", "exorcist", "gambler", "lunatic", "assassin", "zombuul"])
+	g.shown_roles[6] = "zombuul"
+	g.abilities.night_no = 2
+	g.abilities.day_died = true
+	g.abilities._wake(6, "lunatic")
+	check(not g.requests.has(6), "Лунатик-Зомбуул не просыпается, если днём кто-то умер")
+	g.abilities.day_died = false
+	g.abilities._wake(6, "lunatic")
+	check(g.requests.has(6), "Лунатик-Зомбуул просыпается, если днём никто не умер")
 
 func _protection() -> void:
 	var g := fixture()

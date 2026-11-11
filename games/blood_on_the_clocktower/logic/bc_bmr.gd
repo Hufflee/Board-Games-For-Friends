@@ -133,8 +133,18 @@ func _receive_extra(context: Dictionary, selected: Variant) -> void:
 		"drunk_choice":
 			_add_drunk(int(selected.target), actor, 1)
 		"grandchild":
-			g.status[actor]["grandchild"] = int(selected.target)
-			g.add_private(actor, "%s — %s." % [g.players[int(selected.target)].name, g.catalog[g.roles[int(selected.target)]].name])
+			var child := int(selected.target)
+			g.status[actor]["grandchild"] = child
+			if healthy(actor):
+				g.add_private(actor, "%s — %s." % [g.players[child].name, g.catalog[g.roles[child]].name])
+			else:
+				# Нарушенная способность: рассказчик называет любую добрую роль (ложь допустима).
+				var options: Array = []
+				for id: String in g.catalog:
+					if g.catalog[id].edition == g.edition and g.catalog[id].side == "good":
+						var text := "%s — %s." % [g.players[child].name, g.catalog[id].name]
+						options.append({"label": text, "text": text})
+				_information(actor, options)
 		"godfather_info":
 			g.add_private(actor, str(selected.text))
 		"shabaloth_revive":
@@ -207,7 +217,7 @@ func _wake(actor: int, id: String) -> void:
 		return
 	match id:
 		"sailor":
-			_ask_targets(actor, "Моряк: выберите игрока", id)
+			_ask_targets(actor, "Моряк: выберите живого игрока", id, true)
 		"devils_advocate":
 			_ask_targets(actor, "Адвокат: выберите живого игрока", id, true, false, [int(g.status[actor].get("previous", -1))])
 		"exorcist":
@@ -259,6 +269,8 @@ func _wake(actor: int, id: String) -> void:
 		"lunatic":
 			var fake := str(g.shown_roles[actor])
 			if night_no == 1 and fake != "pukka":
+				return
+			if fake == "zombuul" and day_died:
 				return
 			if fake == "shabaloth":
 				_ask_many(actor, id, 2)

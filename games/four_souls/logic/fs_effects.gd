@@ -100,6 +100,9 @@ func _effect(a: Dictionary) -> bool:
 				return false
 			resolving["kept_as_soul"] = true
 			_gain_soul_card(target, {"id": int(resolving.card), "value": amount})
+		"add_soul":
+			if not host_add_soul(target):
+				return false
 		"destroy_soul":
 			var index: int = int(a.get("item", -1))
 			if index < 0 or index >= soul_cards[target].size():
@@ -247,10 +250,7 @@ func _effect(a: Dictionary) -> bool:
 				return false
 			if items[owner][own_index].eternal or items[target][other_index].eternal:
 				return false
-			var own := _remove_item(owner, own_index)
-			var other := _remove_item(target, other_index)
-			items[owner].insert(own_index, other)
-			items[target].insert(other_index, own)
+			_swap_items14(owner, items[owner][own_index], target, items[target][other_index])
 		"item_to_soul":
 			var i: int = int(a.get("item", -1))
 			if i < 0 or i >= items[target].size() or items[target][i].eternal or _room_has20(779) or curses[target].has(744):
@@ -334,4 +334,29 @@ func _effect(a: Dictionary) -> bool:
 		_note("Эффект карты: %s · %s · %d" % [name_of(target), manual_titles[op], amount])
 		return true
 	_note("Эффект карты: %s · %s · %d" % [name_of(target), {"coins":"монеты","loot":"взять лут","damage":"урон","heal":"лечение","souls":"души","attack":"атака","max_hp":"здоровье","treasure":"сокровища","roll":"изменить бросок","reroll":"перебросить","cancel":"отмена","recharge":"перезарядка","destroy":"уничтожение","steal":"кража","counter":"счётчики","monster_damage":"урон монстру","peek_loot":"просмотр лута","peek_treasure":"просмотр сокровищ","peek_monster":"просмотр монстров","ready_character":"перезарядка персонажа","temporary_attack":"атака до конца хода","extra_attack":"добавить атаки","extra_buy":"добавить покупки","extra_loot":"добавить розыгрыш лута","monster_hp":"здоровье монстра","prevent_death":"предотвращение смерти","cancel_attack":"отмена атаки"}.get(op,op),amount])
+	return true
+
+
+## Панель хоста, «Добавить игроку душу» (11.11): душа — всегда карта, поэтому берём свободную бонусную душу,
+## а когда они кончились — верхнюю карту сброса монстров. Запреты на души (комната, проклятие) не обходятся.
+func host_add_soul(target: int) -> bool:
+	if target < 0 or target >= players.size() or is_out(target):
+		return false
+	if _room_has20(779) or curses[target].has(744):
+		_note("Получение души запрещено: " + name_of(target))
+		return false
+	var soul_id := -1
+	for id: Variant in bonuses:
+		if not claimed.has(id):
+			soul_id = int(id)
+			claimed.append(id)
+			break
+	if soul_id < 0 and not discards.monster.is_empty():
+		soul_id = int(discards.monster.pop_back())
+	if soul_id < 0:
+		_note("Нет свободной карты для души: сброс монстров пуст, бонусные души разобраны")
+		return false
+	_gain_soul_card(target, {"id": soul_id, "value": 1})
+	_note("Хост добавил душу: %s · %s" % [name_of(target), FSData.title(soul_id)], soul_id)
+	_check_win()
 	return true

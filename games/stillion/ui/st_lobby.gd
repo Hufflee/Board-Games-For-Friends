@@ -1,5 +1,5 @@
 extends Control
-## Лобби «Стиллиона»: игроки (2–8), боты на одном компьютере, ключ jev для проверки ответов, старт, чат.
+## Лобби «Стиллиона»: игроки (2–8), боты на одном компьютере, режим (письменный / устный), время на ответ, старт, чат.
 
 var app: Node
 var _body: VBoxContainer
@@ -80,40 +80,21 @@ func _rebuild() -> void:
 		lrow.add_child(bot_btn)
 		_body.add_child(lrow)
 	if data["mode"] == "offline":
-		var tl := STStyle.label("Пушка целится в игрока — он садится к клавиатуре и печатает ответ." if not bots else "Вы против ботов: пушка будет целиться и в них.", STStyle.CAP, STStyle.muted())
+		var tl := STStyle.label("Пушка целится в игрока — он садится к клавиатуре и отвечает." if not bots else "Вы против ботов: пушка будет целиться и в них.", STStyle.CAP, STStyle.muted())
 		tl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_body.add_child(tl)
 	# настройки партии (меняет хост)
 	_body.add_child(STStyle.label("НАСТРОЙКИ ПАРТИИ", STStyle.CAP, STStyle.muted(), HORIZONTAL_ALIGNMENT_LEFT, "bold"))
 	_body.add_child(SeatShuffle.settings_row(func(t, _z): return STStyle.button(t, STStyle.CAP), func(t, _z): return STStyle.label(t, STStyle.CAP)))
 	_choice_row("Жизни", "st_lives", int(s.get("st_lives", STRules.MAX_LIVES)), [1, 2, 3, 4, 5], host)
-	_choice_row("Шкала", "st_meter", int(s.get("st_meter", STRules.METER_MAX)), [10, 15, 20, 30], host,
-		"Сколько очков ответов нужно набрать, чтобы вернуть жизнь.")
-	var casual := bool(s.get("st_casual", false))
-	_choice_row("Редкость", "st_casual", casual, [false, true], host,
-		"Знатоки — редкость ответа как в списке.\nОбычные игроки — ответ ценится на ступень выше: умник засчитывается как эрудит,\nшкольник — как умник, менее очевидная половина общеизвестных — как школьник.",
-		["Знатоки", "Обычные игроки"])
-	# проверка ответов
-	_body.add_child(STStyle.label("ПРОВЕРКА ОТВЕТОВ", STStyle.CAP, STStyle.muted(), HORIZONTAL_ALIGNMENT_LEFT, "bold"))
-	var jev_on := STJev.available()
-	var st := STStyle.label("Jev подключён: незнакомые ответы проверит нейросеть." if jev_on else "Только по встроенным спискам ответов. Чтобы принимать любые верные ответы, подключите Jev.", STStyle.CAP, STStyle.GREEN if jev_on else STStyle.muted())
-	st.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	_body.add_child(st)
-	if host:
-		var krow := STStyle.hbox(8)
-		var key := LineEdit.new()
-		key.secret = true
-		key.placeholder_text = "Ключ Typesafe API (Jev)"
-		key.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		key.tooltip_text = "Ключ хранится только на этом компьютере (user://stillion.cfg) и нужен только ведущему."
-		krow.add_child(key)
-		var save := STStyle.button("Сохранить", STStyle.CAP)
-		save.pressed.connect(func():
-			STJev.save_key(key.text)
-			key.text = ""
-			_rebuild())
-		krow.add_child(save)
-		_body.add_child(krow)
+	_choice_row("Время", "st_time", int(s.get("st_time", int(STRules.ANSWER_TIME))), [5, 10, 15, 20], host,
+		"Сколько секунд даётся на ответ, пока пушка не выстрелит.")
+	var oral := bool(s.get("st_oral", false))
+	_choice_row("Режим", "st_oral", oral, [false, true], host,
+		"Письменный — ответ печатают в поле, первая буква ответа гаснет.
+Устный — игрок жмёт свободную букву мышью и говорит ответ вслух.
+Сомнительный ответ остальные могут оспорить.",
+		["Письменный", "Устный"])
 	var start_row := STStyle.hbox(12)
 	if host:
 		var start := STStyle.primary("Зарядить пушку!", STStyle.BODY, 240)

@@ -200,9 +200,20 @@ func _swap_items14(first: int, left: Dictionary, second: int, right: Dictionary)
 	var ri: int = items[second].find(right)
 	if li < 0 or ri < 0:
 		return
+	# 11.11: бонусы предмета записаны в самой карте. Без снятия у прежнего владельца «Палец!» переносил
+	# предмет здоровья, не меняя здоровье никому, а потом сброс отнимал чужой бонус у нового владельца.
+	var health_before := [int(max_hp[first]), int(max_hp[second])]
+	_strip_item_bonus(first, left)
+	_strip_item_bonus(second, right)
 	items[first][li] = right
 	items[second][ri] = left
 	_refresh_passive_stats()
+	var owners := [first, second]
+	for k in 2:
+		var seat: int = owners[k]
+		var grown: int = int(max_hp[seat]) - int(health_before[k])
+		if grown > 0 and not dead[seat]:
+			hp[seat] = mini(int(max_hp[seat]), int(hp[seat]) + grown)
 	var change := _copy_allowances13(current) - before
 	free_loot += change.x
 	buy_left += change.y
