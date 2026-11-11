@@ -236,14 +236,19 @@ static func restyle_chat(chat: Control) -> void:
 ## Фон: тёмные обои с дамасским узором, по краям — виньетка.
 class Backdrop:
 	extends Control
+	var _motion := Vector2.ZERO
 
 	func _ready() -> void:
 		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 		resized.connect(queue_redraw)
+		preload("res://hub/cursor_parallax.gd").watch(self, func(shift: Vector2):
+			_motion = shift
+			queue_redraw())
 
 	func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, size), GLStyle.COAL)
+		draw_set_transform(_motion)
 		var line := Color(GLStyle.SILVER, 0.06)
 		var step := Vector2(120, 150)
 		var row := 0
@@ -258,9 +263,10 @@ class Backdrop:
 		# полосы обоев
 		var sx := 0.0
 		while sx < size.x:
-			draw_line(Vector2(sx, 0), Vector2(sx, size.y), Color(0, 0, 0, 0.18), 2.0)
+			draw_line(Vector2(sx, -16), Vector2(sx, size.y + 16), Color(0, 0, 0, 0.18), 2.0)
 			sx += step.x * 2.0
 		# виньетка
+		draw_set_transform(Vector2.ZERO)
 		for i in 14:
 			var k := i / 14.0
 			var w := 70.0 * (1.0 - k)

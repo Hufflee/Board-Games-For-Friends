@@ -223,6 +223,7 @@ class Backdrop extends Control:
 			if STStyle.dark():
 				tr.modulate = Color(0.55, 0.5, 0.45)
 			add_child(tr)
+			preload("res://hub/cursor_parallax.gd").follow_texture(tr)
 		resized.connect(queue_redraw)
 
 	func _draw() -> void:

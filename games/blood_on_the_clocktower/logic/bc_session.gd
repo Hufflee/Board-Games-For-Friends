@@ -56,6 +56,7 @@ func reset_lobby() -> void:
 	setup_key = ""
 	setup_error = ""
 	setup_revision += 1
+	net.settings.erase("bc_story_whispers")
 
 func story_index() -> int:
 	return clampi(int(net.settings.get("bc_storyteller", 0)), 0, maxi(0, int(net.player_total()) - 1))
@@ -111,7 +112,7 @@ func receive_setup(packet: Dictionary) -> void:
 func public_settings() -> Dictionary:
 	var result: Dictionary = net.settings.duplicate(true)
 	for key: String in result.keys():
-		if key.begins_with("bc_") and not key in ["bc_edition", "bc_storyteller", "bc_timer"]:
+		if key.begins_with("bc_") and not key in ["bc_edition", "bc_storyteller", "bc_timer", "bc_story_whispers"]:
 			result.erase(key)
 	return result
 
@@ -123,8 +124,10 @@ func configure(peer: int, candidate: Dictionary, revision: int) -> void:
 	if net.mode == "offline" and peer != 1:
 		return
 	# Владелец 07.11: игру настраивает рассказчик — и сценарий тоже, а не только состав.
-	if candidate.has("bc_timer"):
-		net.settings["bc_timer"] = bool(candidate.bc_timer)
+	if candidate.has("bc_timer") or candidate.has("bc_story_whispers"):
+		for key: String in ["bc_timer", "bc_story_whispers"]:
+			if candidate.get(key) is bool:
+				net.settings[key] = candidate[key]
 		net._broadcast_lobby()
 		return
 	if candidate.has("bc_edition"):
@@ -170,6 +173,7 @@ func create(players: Array) -> String:
 	var options := setup_private.duplicate(true)
 	options["bc_edition"] = str(net.settings.get("bc_edition", "tb"))
 	options["bc_timer"] = bool(net.settings.get("bc_timer", false))
+	options["bc_story_whispers"] = bool(net.settings.get("bc_story_whispers", false))
 	options["bc_storyteller"] = net._new_seat(story_index())
 	net.bc = Rules.new()
 	var error: String = net.bc.new_game(players, options)
@@ -202,8 +206,11 @@ func handle_action(peer: int, seat: int, kind: String, arg: Variant) -> void:
 			net.bc.public_revision += 1
 			net._push_state()
 		return
+	net.host_tools.before_action(kind)
 	if net.bc.action(seat, kind, arg):
 		net._push_state()
+	else:
+		net.host_tools.discard_action()
 
 func view(seat: int, local: bool) -> Dictionary:
 	var actual := int(net.bc_view_seat) if local else seat

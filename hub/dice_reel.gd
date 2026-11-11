@@ -104,8 +104,12 @@ func _present(delta: float) -> void:
 	var die_transform := die.get_global_transform()
 	var origin := die_transform * (die.size * 0.5)
 	var base := die_transform.get_scale().abs() * base_scale
-	var local_point := (get_global_mouse_position() - origin) / base + ART_BOUNDS.get_center()
-	var hover := active and (ART_BOUNDS.has_point(local_point) or ART_BOUNDS.has_point(get_local_mouse_position()))
+	var viewport := get_viewport()
+	var pointer := Prefs.pointer_position if viewport == get_tree().root else viewport.get_mouse_position()
+	var cursor := get_canvas_transform().affine_inverse() * pointer
+	var local_point := (cursor - origin) / base + ART_BOUNDS.get_center()
+	var displayed_point := get_global_transform().affine_inverse() * cursor
+	var hover := active and (ART_BOUNDS.has_point(local_point) or ART_BOUNDS.has_point(displayed_point))
 	var centered := _held_at_center if _held else required
 	var weight := 1.0 - exp(-delta * 18.0)
 	_lift = lerpf(_lift, 1.0 if centered or _held or hover else 0.0, weight)

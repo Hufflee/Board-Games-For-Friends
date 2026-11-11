@@ -9,6 +9,7 @@ var top: TopBar
 var circle: Control
 var seat_nodes: Dictionary = {}
 var phase_label: Label
+var phase_badge: PanelContainer
 var nomination: Label
 var controls: VBoxContainer
 var event_label: Label
@@ -61,6 +62,7 @@ var preview_icon: TextureRect
 var preview_name: Label
 var preview_text: Label
 var _last_messages := ""
+var _message_seat := -2
 var _last_log := ""
 var _last_grimoire := ""
 var _choice_sent := false
@@ -73,7 +75,7 @@ func _ready() -> void:
 		var button := Style.button(item[0], Style.SMALL)
 		button.pressed.connect(item[1])
 		top.actions.add_child(button)
-	var leave := Style.button("Выйти", Style.SMALL)
+	var leave := Style.button("Выйти" if Net.is_host() else "Выйти из пати", Style.SMALL)
 	LeaveGuard.wire(leave, "Выйти?", "Вернуться к выбору игры.", app.back_to_hub)
 	top.actions.add_child(leave)
 	var body := HBoxContainer.new()
@@ -90,9 +92,12 @@ func _ready() -> void:
 	body.add_child(square)
 	var title_row := HBoxContainer.new()
 	square.add_child(title_row)
-	phase_label = Style.label("", Style.H1, Style.INK, true)
-	phase_label.size_flags_horizontal = SIZE_EXPAND_FILL
-	title_row.add_child(phase_label)
+	phase_badge = PanelContainer.new()
+	phase_badge.size_flags_horizontal = SIZE_SHRINK_BEGIN
+	title_row.add_child(phase_badge)
+	phase_label = Style.label("", Style.BODY, Style.INK, true)
+	phase_badge.add_child(phase_label)
+	title_row.add_spacer(false)
 	solo = OptionButton.new()
 	solo.name = "SoloSeat"
 	solo.add_theme_font_size_override("font_size", Style.SMALL)
@@ -128,9 +133,11 @@ func _ready() -> void:
 	target.custom_minimum_size.x = 180
 	target.size_flags_horizontal = SIZE_EXPAND_FILL
 	choose.add_child(target)
-	for operation: Array in [["nominate", "Номинировать"], ["slay", "Заявить выстрел"], ["evil_vote", "Предложить жертву"], ["hand", "Поднять руку"], ["cast_vote", "Проголосовать"], ["end_speech", "Закончить речь"], ["show_victory", "Показать итоги"]]:
+	for operation: Array in [["nominate", "Номинировать"], ["slay", "Заявить выстрел"], ["evil_vote", "Предложить жертву"], ["hand", "Поднять руку"], ["cast_vote", "Голосую"], ["abstain", "Воздержаться"], ["end_speech", "Закончить речь"], ["show_victory", "Показать итоги"]]:
 		var button := _action(operation[0], operation[1], choose)
 		if operation[0] == "hand": button.name = "RaiseHand"
+		if operation[0] == "cast_vote":
+			button.add_theme_stylebox_override("normal", Style.box(Style.ACCENT))
 		# Кнопка у всех: по правилам выстрел Истребителя можно заявить блефом, иначе кнопка выдавала бы роль.
 		if operation[0] == "slay":
 			button.tooltip_text = "Публично заявить выстрел Истребителя в выбранного игрока — один раз за партию.\nЕсли вы не Истребитель или цель не демон, все увидят «ничего не произошло»."
@@ -283,6 +290,7 @@ func _ready() -> void:
 	private_text.name = "WhisperText"
 	private_text.placeholder_text = "Личное сообщение…"
 	private_text.max_length = 500
+	private_text.keep_editing_on_text_submit = true
 	private_text.text_submitted.connect(func(_text: String): _send_whisper())
 	side.add_child(private_text)
 	var talk := HBoxContainer.new()
@@ -292,7 +300,6 @@ func _ready() -> void:
 	var send := Style.button("Прошептать", Style.SMALL)
 	send.name = "Whisper"
 	send.size_flags_horizontal = SIZE_EXPAND_FILL
-	send.tooltip_text = "Лично выбранному игроку: текст видит только он, остальные — что вы шепчетесь"
 	send.pressed.connect(_send_whisper)
 	talk.add_child(send)
 	shout_button = Style.button("Прокричать", Style.SMALL)
@@ -339,9 +346,9 @@ func _send(kind: String) -> void:
 		arg["raised"] = not bool(view.players[me].hand) if me >= 0 else false
 	if kind == "count_vote":
 		arg["voter"] = int(view.get("next_voter", -1))
-	if kind == "cast_vote":
-		var voter := int(view.get("you", -1))
-		arg["raised"] = bool(view.players[voter].hand) if voter >= 0 else false
+	if kind in ["cast_vote", "abstain"]:
+		arg["raised"] = kind == "cast_vote"
+		kind = "cast_vote"
 	if kind in ["artist", "gossip"]: arg["text"] = statement.text
 	Net.send_action(kind, arg)
 
@@ -353,18 +360,17 @@ func update_view(next: Dictionary) -> void:
 	var storyteller := int(view.get("storyteller", -2))
 	var is_story := me == storyteller
 	var phase := str(view.get("phase", ""))
-	var labels := {"setup": "Подготовка", "night": "Ночь", "discussion": "Обсуждение", "nominations": "Номинации", "defense": "Защита", "voting": "Голосование", "dusk": "Сумерки", "game_over": "Партия завершена"}
-	phase_label.text = str(labels.get(phase, phase))
-	top.info.text = "День %d · %s" % [int(view.get("day", 0)), phase_label.text]
+	_update_phase(phase)
 	var text := "Роли других игроков скрыты. Обсуждайте, сомневайтесь и блефуйте."
 	# Последнее публичное событие дня (выстрел, смерть, шёпот) видно без открытия журнала.
 	var events: Array = view.get("log", [])
 	if phase in ["discussion", "nominations", "defense", "dusk"] and not events.is_empty():
 		text = str(events.back())
 	var nominee := int(view.get("nominee", -1))
+	var voter := int(view.get("next_voter", -1))
 	if nominee >= 0:
 		text = "Номинирован: %s" % people[nominee].name
-		if phase == "voting": text += " · голосов: %d · далее: %s" % [int(view.get("vote_total", 0)), _person(int(view.get("next_voter", -1)))]
+		if phase == "voting": text += " · голосует %s · за: %d" % [_person(voter), int(view.get("vote_total", 0))]
 	elif int(view.get("leader", -1)) >= 0:
 		text = "На плахе: %s · %d голосов" % [_person(int(view.leader)), int(view.high_vote)]
 	if phase == "game_over": text = "Победило %s" % ("добро" if view.get("winner") == "good" else "зло")
@@ -376,6 +382,7 @@ func update_view(next: Dictionary) -> void:
 		match str(timer.kind):
 			"speech": text = "Говорит %s · %s" % [_person(int(timer.get("speaker", -1))), clock]
 			"talk": text = "Общее обсуждение · %s" % clock
+			"nominations": text += " · осталось %s" % clock
 			"vote": text += " · на голос %s" % clock
 	nomination.text = text
 	nomination.tooltip_text = text
@@ -401,7 +408,7 @@ func update_view(next: Dictionary) -> void:
 		# Плашка узкая (текст ~104 px): состояние — одной короткой строкой, рука — стрелкой у имени,
 		# полное пояснение — в подсказке. «Мёртв» без пометки — последний голос уже потрачен.
 		var vote: bool = bool(entry.alive) or bool(entry.dead_vote)
-		refs.state.text = "Жив" if entry.alive else ("Мёртв · голос" if vote else "Мёртв")
+		refs.state.text = "Голосует" if seat == voter else ("Жив" if entry.alive else ("Мёртв · голос" if vote else "Мёртв"))
 		# Значки не прячем, а делаем прозрачными: их глифы выше строки ника, и появление «↑»/«…»
 		# от чужого действия меняло высоту плашки — она подпрыгивала на площади.
 		refs.hand.modulate.a = 1.0 if bool(entry.hand) else 0.0
@@ -411,8 +418,7 @@ func update_view(next: Dictionary) -> void:
 		refs.panel.tooltip_text = "%s%s\n%s%s%s" % [refs.name_label.text, (" (%s)" % refs.role.text) if refs.role.visible else "",
 			"Жив" if entry.alive else ("Мёртв, остался последний голос" if vote else "Мёртв, голоса больше нет"),
 			"\nРука поднята" if entry.hand else "", "\nСейчас шепчется" if whispering else ""]
-		refs.panel.modulate = Color.WHITE if entry.alive else Color(0.7, 0.74, 0.8)
-		refs.panel.add_theme_stylebox_override("panel", Style.box(Style.ACCENT if seat == nominee else Style.PANEL))
+		refs.panel.modulate = Color.WHITE if entry.alive or seat == voter else Color(0.7, 0.74, 0.8)
 	_sync_evil_votes(phase)
 	_fit_nicks(role_of)
 	_place_seats.call_deferred()
@@ -429,6 +435,7 @@ func update_view(next: Dictionary) -> void:
 		if phase == "night" and not is_story and i != storyteller: continue
 		listeners.append(i)
 	_sync_people(receiver, people, listeners)
+	receiver.tooltip_text = "Текст видят собеседник и рассказчик." if bool(view.get("story_reads_whispers", false)) else "Текст видит только собеседник."
 	var my_side := str(view.get("side", ""))
 	side_label.visible = not my_side.is_empty()
 	side_label.text = "Команда добра" if my_side == "good" else "Команда зла"
@@ -484,25 +491,25 @@ func update_view(next: Dictionary) -> void:
 	actions.close_day.visible = is_story and phase == "nominations"
 	actions.tinker.visible = is_story and view.edition == "bmr"
 	actions.madness_execution.visible = is_story and view.edition == "sv"
-	actions.nominate.visible = not is_story and alive and phase == "nominations"
+	actions.nominate.visible = not is_story and alive and phase == "nominations" and not view.get("nominators", []).has(me)
 	actions.slay.visible = not is_story and alive and day and view.edition == "tb" and not bool(people[me].get("slayer_shot", false))
 	actions.evil_vote.visible = bool(view.get("evil_vote_open", false))
 	actions.show_victory.visible = phase == "game_over" and Net.is_host() and not bool(view.get("victory_open", false))
-	actions.hand.visible = not is_story and me >= 0 and phase == "voting"
+	var can_raise: bool = me >= 0 and (alive or bool(people[me].dead_vote))
+	actions.hand.visible = not is_story and can_raise and phase == "voting" and not view.get("counted", []).has(me)
 	if me >= 0: actions.hand.text = "Опустить руку" if bool(people[me].hand) else "Поднять руку"
-	# Своя очередь голосовать: «Проголосовать» засчитывает текущее положение руки и передаёт ход дальше.
-	var my_turn := me >= 0 and phase == "voting" and int(view.get("next_voter", -1)) == me
+	var my_turn := me >= 0 and phase == "voting" and voter == me
 	actions.cast_vote.visible = not is_story and my_turn
+	actions.cast_vote.disabled = blocked or not can_raise
+	actions.abstain.visible = actions.cast_vote.visible
 	var speech: Dictionary = view.get("day_timer", {})
 	actions.end_speech.visible = str(speech.get("kind", "")) == "speech" and (is_story or int(speech.get("speaker", -1)) == me)
-	if my_turn:
-		actions.cast_vote.text = "Проголосовать: %s" % ("за" if bool(people[me].hand) else "не голосую")
-		actions.cast_vote.add_theme_stylebox_override("normal", Style.box(Style.ACCENT))
 	actions.artist.visible = not is_story and day and role_key == "artist"
 	actions.savant.visible = not is_story and day and role_key == "savant"
 	actions.gossip.visible = not is_story and alive and day and view.edition == "bmr"
 	actions.juggle.visible = not is_story and alive and day and view.edition == "sv"
 	_sync_targets(people, me, storyteller)
+	actions.nominate.disabled = blocked or not target.visible
 	_paint_picks()
 	statement.get_parent().visible = actions.artist.visible or actions.savant.visible or actions.gossip.visible or actions.juggle.visible
 	statement.visible = actions.artist.visible or actions.gossip.visible
@@ -516,6 +523,19 @@ func update_view(next: Dictionary) -> void:
 		grimoire_text.text = ""
 	private_text.editable = me >= 0 and phase != "game_over"
 	_hold_controls_height.call_deferred()
+
+func _update_phase(phase: String) -> void:
+	var labels := {"setup": "Подготовка", "night": "Ночь", "discussion": "День",
+		"nominations": "Номинации", "defense": "Номинации · защита", "voting": "Номинации · голосование",
+		"dusk": "Сумерки", "game_over": "Партия завершена"}
+	phase_label.text = str(labels.get(phase, phase))
+	var fill: Color = {"night": Style.INSET, "discussion": Style.LINE, "dusk": Style.PANEL.lerp(Style.ACCENT, 0.5),
+		"nominations": Style.ACCENT, "defense": Style.ACCENT, "voting": Style.ACCENT}.get(phase, Style.PANEL)
+	var badge := Style.box(fill)
+	badge.content_margin_top = 4
+	badge.content_margin_bottom = 4
+	phase_badge.add_theme_stylebox_override("panel", badge)
+	top.info.text = "День %d" % int(view.get("day", 0)) if int(view.get("day", 0)) > 0 else phase_label.text
 
 func _ensure_seats(people: Array) -> void:
 	if not seat_nodes.is_empty(): return
@@ -850,11 +870,12 @@ func _paint_picks() -> void:
 		marked = [target.get_selected_id()]
 	for seat: int in seat_nodes:
 		var refs: Dictionary = seat_nodes[seat]
-		var on := marked.has(seat)
-		var box := Style.box(Style.ACCENT if seat == int(view.get("nominee", -1)) else Style.PANEL)
-		if on:
+		var voting := seat == int(view.get("next_voter", -1))
+		var fill := Style.ACCENT if seat == int(view.get("nominee", -1)) else Style.PANEL
+		var box := Style.box(fill.lightened(0.12) if voting else fill)
+		if voting or marked.has(seat):
 			box.set_border_width_all(3)
-			box.border_color = Style.GOOD
+			box.border_color = Style.INK if voting else Style.GOOD
 		refs.panel.add_theme_stylebox_override("panel", box)
 	if request_summary == null: return
 	var names: Array[String] = []
@@ -926,10 +947,20 @@ func _confirm_choice() -> void:
 
 func _update_texts() -> void:
 	var text := "\n\n".join(view.get("messages", []))
-	if text != _last_messages:
+	var seat := int(view.get("you", -1))
+	if text != _last_messages or seat != _message_seat:
+		if seat == _message_seat and not _last_messages.is_empty() and text.begins_with(_last_messages + "\n\n"):
+			messages.add_text(text.substr(_last_messages.length()))
+		else:
+			var scroll := messages.get_v_scroll_bar()
+			var previous := scroll.value
+			var follow := seat != _message_seat or previous >= scroll.max_value - scroll.page - 1.0
+			messages.clear()
+			messages.add_text(text)
+			messages.get_content_height()
+			scroll.value = scroll.max_value - scroll.page if follow else previous
 		_last_messages = text
-		messages.text = text
-		messages.scroll_to_line(maxi(0, messages.get_line_count() - 1))
+		_message_seat = seat
 	text = "\n\n".join(view.get("log", []))
 	if text != _last_log:
 		_last_log = text

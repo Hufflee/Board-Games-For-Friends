@@ -105,6 +105,7 @@ class Background extends Control:
 		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 		resized.connect(queue_redraw)
+		preload("res://hub/cursor_parallax.gd").add_light(self, TGStyle.GOLD)
 	func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, size), TGStyle.BG)
 		for i in range(1, 3):

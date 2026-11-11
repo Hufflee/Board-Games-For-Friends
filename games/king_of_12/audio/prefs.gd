@@ -25,6 +25,7 @@ var dice_style := "classic"
 var shelf_camera_zoom := 1.0
 const SHELF_ZOOM_MIN := 0.75
 const SHELF_ZOOM_MAX := 1.6
+var minigame_zoom := true  # окно мини-игр само увеличивается при наведении на поле
 var magnifier_shift := true  # зажатый Shift включает лупу и держит её, даже если увести курсор с карты
 var pointer_position := Vector2.ZERO
 
@@ -76,6 +77,7 @@ func _ready() -> void:
 		dice_style = "reel" if cfg.get_value("game", "dice_style", "classic") == "reel" else "classic"
 		shelf_camera_zoom = clampf(float(cfg.get_value("video", "shelf_camera_zoom", 1.0)), SHELF_ZOOM_MIN, SHELF_ZOOM_MAX)
 		magnifier_shift = bool(cfg.get_value("game", "magnifier_shift", magnifier_shift))
+		minigame_zoom = bool(cfg.get_value("game", "minigame_zoom", minigame_zoom))
 		tutorial_seen = cfg.get_value("game", "tutorial_seen", tutorial_seen)
 		graphics = cfg.get_value("video", "graphics", graphics)
 		show_fps = cfg.get_value("video", "show_fps", show_fps)
@@ -220,6 +222,7 @@ func save() -> void:
 	cfg.set_value("video", "parallax", parallax)
 	cfg.set_value("video", "card_preview_mode", card_preview_mode)
 	cfg.set_value("game", "magnifier_shift", magnifier_shift)
+	cfg.set_value("game", "minigame_zoom", minigame_zoom)
 	cfg.set_value("game", "dice_style", dice_style)
 	cfg.set_value("video", "shelf_camera_zoom", shelf_camera_zoom)
 	cfg.set_value("game", "tutorial_seen", tutorial_seen)

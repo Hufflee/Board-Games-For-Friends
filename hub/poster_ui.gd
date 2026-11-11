@@ -29,7 +29,7 @@ func _ready() -> void:
 	_icon = HubStyle.button("", 14)
 	_icon.name = "PosterGallery"
 	_icon.custom_minimum_size = ICON
-	_icon.tooltip_text = "Заменить картинку плаката — выбрать фото"
+	_icon.tooltip_text = "Заменить картинку плаката — выбрать фото или GIF"
 	_icon.draw.connect(_draw_gallery)
 	_icon.pressed.connect(_choose_picture)
 	_icon.visible = false
@@ -73,7 +73,7 @@ func _apply() -> void:
 		if hash.is_empty():
 			poster.show_default()
 		elif poster.picture_key != hash:
-			var texture: Texture2D = Net.stickers.poster_texture(hash)
+			var texture: Resource = Net.stickers.poster_texture(hash)
 			if texture != null:
 				poster.set_picture(texture, hash)
 		_room.set_poster_position(slot, center, Net.stickers.poster_layer(_peer(), slot))
@@ -162,7 +162,7 @@ func _choose_picture() -> void:
 	if slot < 0:
 		return
 	_icon_left = SHOW_TIME
-	var filters := PackedStringArray(["*.png, *.jpg, *.jpeg, *.webp, *.bmp ; Картинки"])
+	var filters := PackedStringArray(["*.png, *.jpg, *.jpeg, *.webp, *.bmp, *.gif ; Картинки и GIF"])
 	var start := OS.get_system_dir(OS.SYSTEM_DIR_PICTURES)
 	var err := DisplayServer.file_dialog_show("Картинка для плаката", start, "", false, DisplayServer.FILE_DIALOG_MODE_OPEN_FILE, filters,
 		func(status: bool, paths: PackedStringArray, _filter: int): _picked(slot, status, paths))
@@ -173,12 +173,21 @@ func _choose_picture() -> void:
 func _picked(slot: int, status: bool, paths: PackedStringArray) -> void:
 	if not status or paths.is_empty() or slot < 0 or slot >= _room.posters.size():
 		return
-	var image := Image.load_from_file(paths[0])
-	if image == null or image.is_empty():
-		_toast("Эту картинку не получилось открыть — подойдут PNG, JPG, WEBP, BMP")
-		return
 	var poster: Node3D = _room.posters[slot]
-	var hash: String = Net.stickers.set_poster_picture(slot, image, Vector2(poster.position.x, poster.position.y))
+	var center := Vector2(poster.position.x, poster.position.y)
+	var hash: String
+	if paths[0].get_extension().to_lower() == "gif":
+		var file := FileAccess.open(paths[0], FileAccess.READ)
+		if file == null or file.get_length() > Stickers.POSTER_MAX_BYTES:
+			_toast("Не удалось открыть GIF. Максимальный размер — 900 КБ.")
+			return
+		hash = Net.stickers.set_poster_gif(slot, file.get_buffer(file.get_length()), center)
+	else:
+		var image := Image.load_from_file(paths[0])
+		if image == null or image.is_empty():
+			_toast("Эту картинку не получилось открыть — подойдут PNG, JPG, WEBP, BMP и GIF")
+			return
+		hash = Net.stickers.set_poster_picture(slot, image, center)
 	if hash != "":
 		Sfx.play("card_place", -6, 0.08)
 		_apply()

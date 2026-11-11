@@ -354,14 +354,18 @@ static func restyle_chat(chat: Control) -> void:
 ## Фон: бумага афиши с выгоревшими лучами солнца 80-х и лёгким зерном.
 class Backdrop:
 	extends Control
+	var _motion := Vector2.ZERO
 
 	func _ready() -> void:
 		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		preload("res://hub/cursor_parallax.gd").watch(self, func(shift: Vector2):
+			_motion = shift
+			queue_redraw())
 
 	func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, size), RSBStyle.PAPER)
-		var c := Vector2(size.x * 0.5, size.y * 1.15)
+		var c := Vector2(size.x * 0.5, size.y * 1.15) + _motion
 		var rays := 28
 		for i in rays:
 			if i % 2 == 1:

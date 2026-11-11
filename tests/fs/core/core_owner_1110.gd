@@ -62,11 +62,18 @@ func _start_and_remove(t: Check) -> void:
 	g.choose_character_at_start = true
 	g.new_game([{"name": "Первый", "steam_id": 111}, {"name": "Второй", "steam_id": 222}], false, 24)
 	var first: Array = g.get_view(0).character_offers
-	t.equal(first.size(), 2, "Хост предлагает двух персонажей")
-	t.equal(g.get_view(1).character_offers.size(), 0, "Второй игрок не видит варианты первого")
-	t.check(g.action(0, "choose_character", {"card": int(first[0].card)}), "Первый выбирает персонажа")
 	var second: Array = g.get_view(1).character_offers
-	t.check(g.action(1, "choose_character", {"card": int(second[0].card)}), "Второй выбирает персонажа")
+	t.equal(first.size(), 2, "Хост предлагает двух персонажей")
+	t.equal(second.size(), 2, "Второй видит свои варианты одновременно с первым")
+	t.check(first.all(func(offer): return not second.has(offer)), "Две раздачи не пересекаются")
+	t.check(g.get_view(-1).character_offers.is_empty(), "Зритель не получает закрытые варианты")
+	t.check(not g.action(1, "choose_character", {"card": int(first[0].card)}), "Чужой вариант отклонён")
+	t.check(g.action(1, "choose_character", {"card": int(second[0].card)}), "Второй может выбрать раньше первого")
+	t.equal(g.get_view(1).character_offers.size(), 0, "Подтвердивший игрок ждёт остальных")
+	t.equal(g.get_view(0).character_remaining, 1, "Хост сообщает число оставшихся выборов")
+	t.check(not g.action(1, "choose_character", {"card": int(second[1].card)}), "Повторный выбор отклонён")
+	t.equal(g.chars, [-1, -1], "Раздача ждёт последнего игрока")
+	t.check(g.action(0, "choose_character", {"card": int(first[0].card)}), "Последний выбор завершает раздачу")
 	t.equal(g.chars, [int(first[0].card), int(second[0].card)], "В партии только выбранные персонажи")
 	t.equal(g.get_view(1).players[0].steam_id, 111, "Клиент получает Steam ID для аватарки")
 

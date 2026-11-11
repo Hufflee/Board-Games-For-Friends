@@ -152,7 +152,28 @@ static func clean(value: Variant) -> Dictionary:
 		return {}
 	if selected != "" and (not allowed.has(selected) or Shelf.is_figure(selected)):
 		selected = ""
-	return {"config": config, "placements": placements.duplicate(true), "poses": poses, "selected": selected, "editor": value.get("editor", false), "custom": custom}
+	var clean_room := {"config": config, "placements": placements.duplicate(true), "poses": poses,
+		"selected": selected, "editor": value.get("editor", false), "custom": custom}
+	var camera := _clean_camera(value.get("camera", {}))
+	if not camera.is_empty():
+		clean_room["camera"] = camera
+	return clean_room
+
+
+static func _clean_camera(value: Variant) -> Dictionary:
+	if not value is Dictionary or not value.get("frame") is Array or value.frame.size() != 7:
+		return {}
+	var zoom: Variant = value.get("zoom")
+	if not (zoom is int or zoom is float) or not is_finite(float(zoom)) or float(zoom) < 0.75 or float(zoom) > 1.6:
+		return {}
+	var frame: Array = value.frame
+	for number: Variant in frame:
+		if not (number is int or number is float) or not is_finite(float(number)) or absf(float(number)) > 12.0:
+			return {}
+	var rotation := Quaternion(frame[3], frame[4], frame[5], frame[6])
+	if absf(rotation.length_squared() - 1.0) > 0.001:
+		return {}
+	return {"zoom": float(zoom), "frame": frame.duplicate()}
 
 static func _bounded(value: Variant, depth: int, budget: Array = [512]) -> bool:
 	if depth == 0:

@@ -419,8 +419,14 @@ static func row_layout(
 	capacity: float = 0.0
 ) -> Dictionary:
 	var figures: Array = []
+	var outside := {}
 	for id: String in ids:
-		if not is_figure(id) or capacity <= 0.0:
+		if not is_figure(id):
+			continue
+		if sizes[id] == Vector3.ZERO:
+			outside[id] = Transform3D.IDENTITY
+			continue
+		if capacity <= 0.0:
 			continue
 		var ratio: float = float(figure_ratio.get(id, -1.0)) if figure_ratio is Dictionary else float(figure_ratio)
 		if ratio < 0.0:
@@ -438,7 +444,7 @@ static func row_layout(
 		figure_end = float(figure.right)
 	var piles: Array = []
 	for id in ids:
-		if figures.any(func(figure): return figure.id == str(id)):
+		if outside.has(id) or figures.any(func(figure): return figure.id == str(id)):
 			continue
 		var lying: bool = int(poses.get(id, 1)) in [2, 3] and not is_figure(id)
 		var ext := item_occupied(str(id), sizes[id], int(poses.get(id, 1)))
@@ -457,7 +463,7 @@ static func row_layout(
 			pile.lying = lying
 		else:
 			piles.append({"ids": [id], "lying": lying, "width": ext.x, "depth": ext.z, "height": ext.y})
-	var boxes: Dictionary = {}
+	var boxes: Dictionary = outside
 	var x := 0.0
 	for pile: Dictionary in piles:
 		for figure: Dictionary in figures:
@@ -511,7 +517,8 @@ static func figure_ratios(config: Dictionary) -> Variant:
 
 ## Миграция идёт по видимым группам, сохраняя внутренний порядок горизонтальных стопок.
 static func visible_order(ids: Array, sizes: Dictionary, poses: Dictionary, config: Dictionary) -> Array:
-	var layout := row_layout(ids, sizes, poses, float(config.height), figure_ratios(config), float(config.width) - GAP)
+	var occupied := sizes_on_shelf(config, sizes)
+	var layout := row_layout(ids, occupied, poses, float(config.height), figure_ratios(config), float(config.width) - GAP)
 	var groups: Array = layout.piles.duplicate(true)
 	for id: String in ids:
 		if is_figure(id) and not groups.any(func(group): return group.ids.has(id)):
@@ -522,6 +529,15 @@ static func visible_order(ids: Array, sizes: Dictionary, poses: Dictionary, conf
 	for group: Dictionary in groups:
 		ordered.append_array(group.ids)
 	return ordered
+
+
+## Фигурка на отдельной поверхности остаётся в сохранении, но не занимает место в ячейке.
+static func sizes_on_shelf(config: Dictionary, sizes: Dictionary, entering: String = "") -> Dictionary:
+	var occupied := sizes.duplicate()
+	for id: String in config.get("figure_surfaces", {}):
+		if id != entering and is_figure(id) and occupied.has(id):
+			occupied[id] = Vector3.ZERO
+	return occupied
 
 
 static func normalized(source: Dictionary) -> Dictionary:
@@ -584,6 +600,7 @@ static func solve(
 	config: Dictionary, placements: Array, sizes: Dictionary, poses: Dictionary, old_cols: int = 1, allow_repack: bool = true
 ) -> Dictionary:
 	var cfg := normalized(config)
+	sizes = sizes_on_shelf(cfg, sizes)
 	var count: int = cell_count(cfg)
 	var explicit := has_cells(cfg)  # свои ячейки: номера ячеек в placements уже совпадают
 	var cells: Array = []

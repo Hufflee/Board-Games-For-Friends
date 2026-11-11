@@ -93,6 +93,8 @@ var gloom: GLRules = null  # Gloom
 var fours = null  # FSRules; без типа — Айзека может не быть в сборке (тогда он «Скоро»)
 var cg_transfer: Node
 var stickers: Node  # hub/sticker_net.gd
+var chat: Node  # hub/chat_net.gd — вкладки чата, личные сообщения, реакции, картинки
+var minigames: Node  # hub/minigames/mg_net.gd — шахматы, шашки и го один на один
 var cg = null  # Пользовательская JSON-игра, только хост.
 var cg_view_seat := 0
 var bc = null  # Clocktower: правила на хосте, отдельные приватные view.
@@ -164,6 +166,10 @@ var steam_lobbies_error := ""
 var _steam_lobby_refresh_again := false
 var _steam_lobby_request := 0
 var _steam_lobby_source: Object
+var _join_generation := 0
+var _joining := false
+var _join_transport_ready := false
+var _connection_notice: AcceptDialog
 
 
 func _ready() -> void:
@@ -174,6 +180,12 @@ func _ready() -> void:
 	stickers = load("res://hub/sticker_net.gd").new()  # стикеры хаба: коробки и доска друзей (узел Net/Stickers)
 	stickers.name = "Stickers"
 	add_child(stickers)
+	chat = load("res://hub/chat_net.gd").new()
+	chat.name = "Chat"
+	add_child(chat)
+	minigames = load("res://hub/minigames/mg_net.gd").new()
+	minigames.name = "MiniGames"
+	add_child(minigames)
 	Diag.attach_net(self)
 	settings["manual"] = K12Cards.FIRST_GAME.duplicate()
 	multiplayer.peer_connected.connect(_on_peer_connected)
@@ -293,7 +305,7 @@ func host_enet(port: int = PORT, game_id: String = "king_of_12") -> Error:
 	var peer := ENetMultiplayerPeer.new()
 	var err := peer.create_server(port, NETWORK_CAPACITY - 1)
 	if err != OK:
-		status_changed.emit("Не удалось открыть порт %d (ошибка %d)." % [port, err])
+		_connection_error("Не удалось открыть порт %d. Возможно, он уже занят. Код ошибки %d." % [port, err])
 		return err
 	multiplayer.multiplayer_peer = peer
 	mode = "enet"
@@ -305,14 +317,16 @@ func host_enet(port: int = PORT, game_id: String = "king_of_12") -> Error:
 
 func join_enet(address: String, port: int = PORT) -> Error:
 	leave()
-	last_join = {"mode": "enet", "ip": address}
+	last_join = {"mode": "enet", "ip": address, "port": port}
 	var peer := ENetMultiplayerPeer.new()
 	var err := peer.create_client(address, port)
 	if err != OK:
-		status_changed.emit("Не удалось подключиться (ошибка %d)." % err)
+		var reason := "Адрес не найден" if err == ERR_CANT_RESOLVE else "Не удалось открыть сетевое подключение"
+		_connection_error("%s: %s:%d. Код ошибки %d." % [reason, address, port, err])
 		return err
 	multiplayer.multiplayer_peer = peer
 	mode = "enet"
+	_wait_for_join()
 	status_changed.emit("Подключаемся к %s:%d…" % [address, port])
 	return OK
 
@@ -330,13 +344,14 @@ func host_steam(game_id: String = "king_of_12") -> void:
 
 func join_steam(id: int) -> void:
 	if not steam_ok:
-		status_changed.emit(steam_error)
+		_connection_error(steam_error)
 		return
 	if id <= 0:
-		status_changed.emit("Неверный код лобби.")
+		_connection_error("Неверный код лобби.")
 		return
 	leave()
 	last_join = {"mode": "steam", "lobby": id}
+	_wait_for_join()
 	status_changed.emit("Входим в лобби…")
 	steam.joinLobby(id)
 
@@ -470,11 +485,11 @@ func join_public_steam_lobby(id: int) -> bool:
 			listed = true
 			break
 	if not listed or not _steam_public_lobby_matches(id):
-		status_changed.emit("Эта комната больше недоступна. Обновите список.")
+		_connection_error("Эта комната больше недоступна. Обновите список.")
 		return false
 	var capacity: int = steam.getLobbyMemberLimit(id)
 	if capacity <= 0 or int(steam.getNumLobbyMembers(id)) >= capacity:
-		status_changed.emit("В этой комнате нет свободных мест. Обновите список.")
+		_connection_error("В этой комнате нет свободных мест. Обновите список.")
 		return false
 	join_steam(id)
 	return true
@@ -498,6 +513,7 @@ func leave(reason: String = "Добровольный выход или смен
 		return
 	_hand_over_host()
 	_leaving = true
+	_stop_join()
 	Sfx.stop_victory()
 	if not mode.is_empty():
 		last_disconnect = {
@@ -624,14 +640,14 @@ func _reset_host() -> void:
 func _on_lobby_created(result: int, id: int) -> void:
 	if result != 1:
 		_hosting_steam = false
-		status_changed.emit("Steam не создал лобби (код %d)." % result)
+		_connection_error("Steam не создал лобби (код %d)." % result)
 		return
 	lobby_id = id
 	_publish_steam_lobby(id)
 	var peer: MultiplayerPeer = ClassDB.instantiate("SteamMultiplayerPeer")
 	var err: int = peer.create_host(0)
 	if err != OK:
-		status_changed.emit("Не удалось запустить хост Steam (ошибка %d)." % err)
+		_fail_join("Не удалось запустить хост Steam (ошибка %d)." % err)
 		return
 	multiplayer.multiplayer_peer = peer
 	mode = "steam"
@@ -716,16 +732,13 @@ func _follow_steam_owner() -> void:
 		await get_tree().create_timer(0.25).timeout
 	_migrating = false
 	if owner == 0 or owner == old_owner:
-		var was_playing := not view.is_empty()
-		leave("server_disconnected: хост вышел, новый владелец лобби не найден")
-		session_closed.emit("Связь с хостом потеряна. Если партия ещё идёт — нажмите «Вернуться в партию»." if was_playing else "Хост покинул игру.")
+		_fail_join("Связь с хостом потеряна. Steam не назначил нового ведущего пати.")
 		return
 	_reset_party_session()
 	if owner == my_steam_id or owner == int(steam.getSteamID()):
 		var peer: MultiplayerPeer = ClassDB.instantiate("SteamMultiplayerPeer")
 		if peer.create_host(0) != OK:
-			leave("migration: не удалось стать хостом")
-			session_closed.emit("Хост вышел, а стать новым хостом не получилось.")
+			_fail_join("Хост вышел. Не удалось открыть подключение для нового хоста Steam.")
 			return
 		multiplayer.multiplayer_peer = peer
 		mode = "steam"
@@ -742,11 +755,11 @@ func _follow_steam_owner() -> void:
 	_host_steam_id = owner
 	var client: MultiplayerPeer = ClassDB.instantiate("SteamMultiplayerPeer")
 	if client.create_client(owner, 0) != OK:
-		leave("migration: не удалось подключиться к новому хосту")
-		session_closed.emit("Хост вышел, а подключиться к новому хосту не получилось.")
+		_fail_join("Хост вышел. Steam не открыл подключение к новому ведущему.")
 		return
 	multiplayer.multiplayer_peer = client
 	mode = "steam"
+	_wait_for_join()
 	status_changed.emit("Хост вышел — переходим к новому ведущему…")
 
 
@@ -758,6 +771,10 @@ func _follow_enet_successor() -> void:
 	status_changed.emit("Хост вышел — передаём пати…")
 	if stickers != null and stickers.has_method("reset_party"):
 		stickers.reset_party()
+	if chat != null:
+		chat.reset_party()
+	if minigames != null:
+		minigames.reset_party()
 	if int(target.peer) == me:
 		host_enet(PORT, party_game if not handoff.is_empty() else "")  # с партией — сразу в ту же игру, без хаба
 		_resume_handoff(handoff)
@@ -865,34 +882,51 @@ func _reset_party_session() -> void:
 	disconnected.clear()
 	if stickers != null and stickers.has_method("reset_party"):
 		stickers.reset_party()
+	if chat != null:
+		chat.reset_party()
+	if minigames != null:
+		minigames.reset_party()
 
 
 func _publish_steam_lobby(id: int) -> void:
 	steam.setLobbyData(id, "game", LOBBY_TAG)
 	steam.setLobbyData(id, "host", my_name)
 	steam.setLobbyData(id, "appid", str(steam.getAppID()))
+	steam.setLobbyData(id, "party_version", _network_version())
 	steam.setLobbyJoinable(id, true)
 
 
 func _on_lobby_joined(id: int, _permissions: int, _locked: bool, response: int) -> void:
 	if _hosting_steam:
 		return  # хост тоже получает lobby_joined для своего лобби
+	if not _joining or id != int(last_join.get("lobby", 0)):
+		if response == 1 and id != lobby_id:
+			steam.leaveLobby(id)
+		return
 	if response != 1:
-		status_changed.emit("Не удалось войти в лобби (код %d). Лобби закрыто или полное." % response)
+		var causes := {2: "лобби больше не существует", 3: "доступ закрыт", 4: "лобби заполнено", 6: "вам запрещён вход"}
+		var cause: String = causes.get(response, "Steam вернул ошибку %d" % response)
+		_fail_join("Не удалось войти в лобби: %s." % cause)
 		return
 	if steam.getLobbyData(id, "game") != LOBBY_TAG:
 		steam.leaveLobby(id)
-		status_changed.emit("Это лобби не от «Дюжины короля».")
+		_fail_join("Этот код относится к лобби другой игры.")
+		return
+	var host_version: String = steam.getLobbyData(id, "party_version")
+	if host_version != _network_version():
+		steam.leaveLobby(id)
+		_fail_join(_version_error(host_version))
 		return
 	var owner: int = steam.getLobbyOwner(id)
 	if owner == steam.getSteamID():
+		_stop_join()
 		return
 	lobby_id = id
 	_host_steam_id = owner
 	var peer: MultiplayerPeer = ClassDB.instantiate("SteamMultiplayerPeer")
 	var err: int = peer.create_client(owner, 0)
 	if err != OK:
-		status_changed.emit("Не удалось подключиться к хосту (ошибка %d)." % err)
+		_fail_join("Steam не открыл подключение к хосту. Код ошибки %d." % err)
 		return
 	multiplayer.multiplayer_peer = peer
 	mode = "steam"
@@ -908,18 +942,71 @@ func _on_join_requested(id: int, _friend_id: int) -> void:
 func _on_connected_to_server() -> void:
 	_dbg("connected")
 	_configure_enet_timeout(1)
-	_rpc_hello.rpc_id(1, my_name, my_steam_id, bc_bridge.resume_token)
+	_join_transport_ready = true
+	_rpc_hello.rpc_id(1, my_name, my_steam_id, _network_version() + "|" + bc_bridge.resume_token)
+
+
+func _network_version() -> String:
+	return str(ProjectSettings.get_setting("application/config/version", ""))
+
+
+func _version_error(other: String, client: bool = false) -> String:
+	var side := "У подключающегося игрока" if client else "У хоста"
+	var version := other.left(32) if not other.is_empty() else "версия не указана"
+	return "Версии игры не совпадают. %s — %s. Требуется версия %s." % [side, version, _network_version()]
+
+
+func _wait_for_join() -> void:
+	_join_generation += 1
+	_joining = true
+	_join_transport_ready = false
+	get_tree().create_timer(20.0).timeout.connect(_join_timeout.bind(_join_generation))
+
+
+func _stop_join() -> void:
+	_join_generation += 1
+	_joining = false
+	_join_transport_ready = false
+
+
+func _join_timeout(generation: int) -> void:
+	if not _joining or generation != _join_generation:
+		return
+	var reason := "Хост не подтвердил вход в пати. Проверьте, совпадают ли версии игры." if _join_transport_ready else "Время подключения истекло. Хост или Steam не ответил."
+	_fail_join(reason)
+
+
+func _fail_join(reason: String) -> void:
+	leave(reason)
+	session_closed.emit(reason)
+	_connection_error(reason)
+
+
+func _connection_error(reason: String) -> void:
+	status_changed.emit(reason)
+	if DisplayServer.get_name() == "headless":
+		return
+	if not is_instance_valid(_connection_notice):
+		_connection_notice = AcceptDialog.new()
+		_connection_notice.title = "Подключение"
+		_connection_notice.ok_button_text = "Закрыть"
+		_connection_notice.dialog_autowrap = true
+		add_child(_connection_notice)
+	_connection_notice.dialog_text = reason
+	_connection_notice.popup_centered(Vector2i(460, 150))
 
 
 func _on_connection_failed() -> void:
 	if _leaving or mode.is_empty():
 		return
-	leave("connection_failed: подключение не установлено")
-	session_closed.emit("Не удалось подключиться к хосту.")
+	_fail_join("Не удалось подключиться к хосту. Проверьте адрес, порт и доступность сети.")
 
 
 func _on_server_disconnected() -> void:
 	if _leaving or mode.is_empty():
+		return
+	if _joining:
+		_fail_join("Хост разорвал соединение до подтверждения входа в пати.")
 		return
 	if mode == "steam" and steam_ok and lobby_id != 0:
 		_follow_steam_owner()
@@ -930,9 +1017,12 @@ func _on_server_disconnected() -> void:
 	var was_playing := not view.is_empty()
 	leave("server_disconnected: транспорт потерял связь с хостом")
 	if was_playing:
-		session_closed.emit("Связь с хостом потеряна. Если партия ещё идёт — нажмите «Вернуться в партию».")
+		var reason := "Связь с хостом потеряна. Если партия ещё идёт — нажмите «Вернуться в партию»."
+		session_closed.emit(reason)
+		_connection_error(reason)
 	else:
 		session_closed.emit("Хост покинул игру.")
+		_connection_error("Хост покинул игру или соединение с ним разорвалось.")
 
 
 ## Повторно подключиться туда же, где были (после вылета).
@@ -941,11 +1031,13 @@ func rejoin() -> void:
 		"steam":
 			join_steam(int(last_join["lobby"]))
 		"enet":
-			join_enet(str(last_join["ip"]))
+			join_enet(str(last_join["ip"]), int(last_join.get("port", PORT)))
 
 
 func _on_peer_connected(id: int) -> void:
-	_configure_enet_timeout(id)
+	# На клиенте сигналы о других участниках приходят тоже, но ENet-связь прямая только с хостом.
+	if id == 1 or multiplayer.is_server():
+		_configure_enet_timeout(id)
 	# Данные участника придут отдельно через _rpc_hello.
 
 
@@ -1005,6 +1097,12 @@ func _rpc_hello(player_name: String, steam_id: int = 0, resume_key: String = "")
 	if not is_host():
 		return
 	var id := multiplayer.get_remote_sender_id()
+	var separator := resume_key.find("|")
+	var client_version := resume_key.left(separator) if separator >= 0 else ""
+	if client_version != _network_version():
+		_rpc_kicked.rpc_id(id, _version_error(client_version, true))
+		return
+	resume_key = resume_key.substr(separator + 1)
 	var nm := player_name.strip_edges().left(24)
 	if in_game:
 		var seat := -1
@@ -1051,8 +1149,7 @@ func _rpc_hello(player_name: String, steam_id: int = 0, resume_key: String = "")
 
 @rpc("authority", "reliable")
 func _rpc_kicked(reason: String) -> void:
-	leave("Исключение из пати: " + reason)
-	session_closed.emit(reason)
+	_fail_join(reason)
 
 
 func set_bots(n: int) -> void:
@@ -1124,6 +1221,7 @@ func _broadcast_lobby() -> void:
 		"cg_ready": cg_transfer.verified.duplicate(), "cg_progress": cg_transfer.progress.duplicate(),
 		"mode": mode,
 		"code": lobby_code(),
+		"version": _network_version(),
 		"party_game": party_game,
 		"in_game": in_game,
 		"seated": seat_peers.duplicate() if in_game else [],
@@ -1138,6 +1236,15 @@ func _broadcast_lobby() -> void:
 
 @rpc("authority", "reliable")
 func _rpc_lobby(data: Dictionary) -> void:
+	if _joining:
+		var host_version := str(data.get("version", ""))
+		if host_version != _network_version():
+			_fail_join(_version_error(host_version))
+			return
+		var me := multiplayer.get_unique_id()
+		if not (data.get("members", []) as Array).any(func(member: Dictionary): return int(member.get("peer", 0)) == me):
+			return
+		_stop_join()
 	_apply_lobby(data)
 
 
@@ -1563,7 +1670,7 @@ func _deliver_client_start() -> void:
 # =============================================================================
 
 func send_action(kind: String, arg = null) -> void:
-	_dbg("send %s %s" % [kind, arg])
+	_dbg("send %s %s" % [kind, "" if kind == "whisper" else arg])
 	if is_host():
 		_handle_action(1, kind, arg)
 	else:
@@ -3560,8 +3667,12 @@ func _rpc_chat_up(text: String, kind: String) -> void:
 		_host_chat(multiplayer.get_remote_sender_id(), text, kind)
 
 
-func _host_chat(peer: int, text: String, kind: String) -> void:
+## extra — дополнения нового чата (hub/chat_net.gd): цитата ответа и картинка.
+func _host_chat(peer: int, text: String, kind: String, extra: Dictionary = {}) -> void:
 	text = text.strip_edges().left(200)
+	var additions: Dictionary = chat.clean_extra(extra) if chat != null else {}
+	if text.is_empty() and additions.has("image"):
+		text = chat.IMAGE_ONLY
 	if not members.has(peer) or text.is_empty() or kind not in ["chat", "emote", "team", "team_emote"]:
 		return
 	var private_team := kind in ["team", "team_emote"]
@@ -3587,7 +3698,14 @@ func _host_chat(peer: int, text: String, kind: String) -> void:
 		"game_id": game_id,
 		"voice": _voice_of(peer),  # реплики звучат голосом персонажа, закреплённого за игроком
 	}
+	entry.merge(additions)
 	if private_team:
+		if chat != null:
+			var team_peers: Array = []
+			for teammate in join_order:
+				if chat_team(int(teammate)) == sender_team:
+					team_peers.append(int(teammate))
+			chat.stamp(entry, team_peers)
 		if chat_team(1) == sender_team:
 			_apply_chat(entry)
 		if mode != "offline":
@@ -3658,6 +3776,8 @@ func _system_chat(text: String) -> void:
 
 
 func _send_chat_entry(entry: Dictionary) -> void:
+	if chat != null:
+		chat.stamp(entry, [])
 	_apply_chat(entry)
 	if mode != "offline":
 		_rpc_chat_down.rpc(entry)

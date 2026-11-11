@@ -8,6 +8,12 @@ var _selected: Array = []
 var _unlocked_seat := -2
 var _preview: Control
 var _knock: AudioStreamPlayer
+const Ouija := preload("res://games/phantom_ink/ui/pi_ouija.gd")
+var _ouija: Ouija
+var _writing_row := Vector2i(-1, -1)
+var _received_letters := ""
+var _shown_letters := ""
+var _clue_buttons := {}
 # Намерение продолжить только собственное текущее угадывание после ответа духа.
 var _guess_focus: Dictionary = {}
 
@@ -37,6 +43,10 @@ func _ready() -> void:
 	add_child(margin)
 	_body = PIStyle.vbox(12)
 	margin.add_child(_body)
+	_ouija = Ouija.new()
+	add_child(_ouija)
+	_ouija.letter_shown.connect(_show_ouija_letter)
+	_ouija.dismissed.connect(_clear_ouija)
 	Net.state_changed.connect(_changed)
 	_changed(Net.view)
 
@@ -47,8 +57,10 @@ func _changed(view: Dictionary) -> void:
 		_knock.play()
 	if not _guess_focus.is_empty() and not _same_guess(view):
 		_guess_focus.clear()
+	_sync_ouija(view)
 	_v = view
 	PIStyle.clear(_body)
+	_clue_buttons.clear()
 	if is_instance_valid(_preview):
 		_preview.queue_free()
 	var team_name: String = ["Солнце", "Луна"][int(view.team)]
@@ -99,6 +111,64 @@ func _changed(view: Dictionary) -> void:
 	history.pressed.connect(_discard)
 	col.add_child(history)
 
+
+func _sync_ouija(view: Dictionary) -> void:
+	# В хот-сите занавес остаётся приватным при передаче места.
+	if Net.mode == "offline" and _unlocked_seat != int(view.seat):
+		_ouija.hide()
+		_clear_ouija()
+		return
+	if view.phase == "writing":
+		var team := int(view.team)
+		var key := Vector2i(team, (view.rows[team] as Array).size() - 1)
+		if key.y >= 0 and (key != _writing_row or not _ouija.visible):
+			_writing_row = key
+			var clue := str(view.rows[key.x][key.y].text)
+			_shown_letters = clue if _v.is_empty() or _v.get("phase") == "writing" else ""
+			_received_letters = _shown_letters
+			_ouija.begin(_shown_letters.right(1))
+	if _writing_row.x < 0:
+		return
+	if _writing_row.y >= view.rows[_writing_row.x].size():
+		_ouija.hide()
+		_clear_ouija()
+		return
+	var received := str(view.rows[_writing_row.x][_writing_row.y].text)
+	if not received.begins_with(_received_letters):
+		_ouija.hide()
+		_clear_ouija()
+		return
+	for letter in received.substr(_received_letters.length()):
+		_ouija.enqueue(letter)
+	_received_letters = received
+	if view.phase != "writing":
+		_ouija.finish()
+
+
+func _clear_ouija() -> void:
+	var row: Button = _clue_buttons.get(_writing_row)
+	if is_instance_valid(row):
+		row.remove_theme_color_override("font_color")
+		row.remove_theme_color_override("font_disabled_color")
+	_writing_row = Vector2i(-1, -1)
+	_shown_letters = ""
+	_received_letters = ""
+
+
+func _show_ouija_letter(letter: String) -> void:
+	if _writing_row.x < 0:
+		return
+	_shown_letters += letter
+	var row: Button = _clue_buttons.get(_writing_row)
+	if is_instance_valid(row):
+		row.text = _clue_text(_writing_row.x, _writing_row.y, _v.rows[_writing_row.x][_writing_row.y])
+
+
+func _clue_text(team: int, index: int, data: Dictionary) -> String:
+	var number := str(index + 1) + ("  ◉  " if PIData.EYES[team].has(index) else "      ")
+	var text := _shown_letters if Vector2i(team, index) == _writing_row else str(data.text)
+	return number + text + ("." if data.complete and text == str(data.text) else "")
+
 func _curtain() -> void:
 	var center := CenterContainer.new()
 	center.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -147,6 +217,13 @@ func _board_team(parent: Control, t: int) -> void:
 		else:
 			text += "—"
 		var row := PIStyle.button(text, PIStyle.BODY)
+		if data.get("kind", "") == "clue":
+			row.text = _clue_text(t, i, data)
+			_clue_buttons[Vector2i(t, i)] = row
+			if Vector2i(t, i) == _writing_row:
+				row.add_theme_color_override("font_color", Color("f0d49a"))
+				row.add_theme_color_override("font_disabled_color", Color("f0d49a"))
+				_ouija.track_clue(row, parent)
 		row.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		row.custom_minimum_size.y = 44
 		row.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS

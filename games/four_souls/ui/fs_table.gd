@@ -3,6 +3,7 @@ extends Control
 const HealthBar := preload("res://games/four_souls/ui/fs_health.gd")
 const MonsterStats := preload("res://games/four_souls/ui/fs_monster_stats.gd")
 const ActionFeed := preload("res://games/four_souls/ui/fs_action_feed.gd")
+const CharacterChoice := preload("res://games/four_souls/ui/fs_character_choice.gd")
 const PassiveRules := preload("res://games/four_souls/logic/fs_passives.gd")
 const Packet26 := preload("res://games/four_souls/logic/fs_packet26_cards.gd")
 const FX := preload("res://games/four_souls/ui/fs_fx.gd")
@@ -19,6 +20,7 @@ var _fly_seen28 := -1  # последний розыгрыш, показанны
 var app: Node
 var _v: Dictionary = {}
 var _body: VBoxContainer
+var _character_choice: CharacterChoice
 var _action_feed: ActionFeed
 var _action_feed_slot: Control
 var _top: TopBar
@@ -227,6 +229,10 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 				return  # придёт состояние уже для ходящего
 	var prev28: Dictionary = _v
 	_v = view
+	if view.phase != "starting_character" and is_instance_valid(_character_choice):
+		_character_choice.hide()
+		_character_choice.queue_free()
+		_character_choice = null
 	_update_preview_stats()
 	_fx_anchor28.clear()
 	_show_fx28.call_deferred(prev28, view)
@@ -280,8 +286,9 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 			var col := FSStyle.vbox(24)
 			panel.add_child(col)
 			_note(col, "Передайте экран игроку «%s»" % view.players[int(view.seat)].name, FSStyle.H1)
-			_note(col, "Остальные должны отвернуться: сейчас откроется личная рука.")
-			var open := FSStyle.primary("Открыть мою руку")
+			var choosing: bool = view.phase == "starting_character"
+			_note(col, "Остальные должны отвернуться: сейчас откроются ваши варианты." if choosing else "Остальные должны отвернуться: сейчас откроется личная рука.")
+			var open := FSStyle.primary("Показать мои варианты" if choosing else "Открыть мою руку")
 			open.pressed.connect(
 				func():
 					_unlocked = int(view.seat)
@@ -292,8 +299,13 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 			_action_feed.hide()
 			_action_feed.close_popup()
 			_action_feed_slot = null
+			if is_instance_valid(_character_choice):
+				_character_choice.hide()
 			_die.visible = false
 			return
+	if view.phase == "starting_character":
+		_show_character_choice(view)
+		return
 	# 06.11 (владелец): панели всегда целиком, с верхней и нижней рамкой — прокручивается
 	# только содержимое внутри панелей и центральной колонки, а не весь стол.
 	var main := FSStyle.hbox(12)
@@ -1354,28 +1366,26 @@ func _inventory(seat: int) -> void:
 	for id in _v.players[seat].get("hand", []):
 		_card(extra,int(id),Vector2(72,100),func(): _show_preview(int(id)))
 	_close_button(col)
+func _show_character_choice(view: Dictionary) -> void:
+	_action_feed.hide()
+	_action_feed_slot = null
+	_die.hide()
+	if not is_instance_valid(_character_choice):
+		_character_choice = CharacterChoice.new()
+		add_child(_character_choice)
+		_character_choice.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		_character_choice.offset_top = TopBar.HEIGHT + (52 if Net.mode == "offline" else 0)
+		_character_choice.chosen.connect(func(card: int): _send("choose_character", {"card": card}))
+	_character_choice.show()
+	_character_choice.sync(view.get("character_offers", []), int(view.get("character_remaining", 0)))
+
+
 func _controls(col: Control) -> void:
 	if bool(_v.get("starting_pending", false)):
 		_note(col, "Завершите подготовку партии", FSStyle.H1)
 		_note(col, "Применятся начальные свойства выбранного предмета, затем начнётся первый ход.")
 		if _v.seat == _v.current:
 			_button(col, "Начать первый ход", "finish_start", null, true)
-		return
-	if _v.phase == "starting_character":
-		_note(col, "Выбор персонажа", FSStyle.H1)
-		if _v.seat != _v.actor:
-			_note(col, "Выбирает " + str(_v.players[int(_v.actor)].name))
-			return
-		for offer: Dictionary in _v.get("character_offers", []):
-			var row := FSStyle.hbox(8)
-			col.add_child(row)
-			var select_character := func(): _send("choose_character", {"card": int(offer.card)})
-			_card(row, int(offer.card), Vector2(80, 112), select_character)
-			if int(offer.item) >= 0:
-				_card(row, int(offer.item), Vector2(80, 112), func(): _card_dialog(int(offer.item), "", "", null, false))
-			else:
-				_note(row, "Выбор предмета\nпосле раздачи", FSStyle.CAP)
-			_button(col, "Выбрать · " + FSData.title(int(offer.card)), "choose_character", {"card": int(offer.card)})
 		return
 	if _v.phase == "starting_item":
 		_note(col, "Предмет Эдема", FSStyle.H1)

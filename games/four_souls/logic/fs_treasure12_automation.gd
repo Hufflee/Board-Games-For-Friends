@@ -363,13 +363,19 @@ func _treasure12_passives(event: String, data: Dictionary) -> void:
 		for candle: Dictionary in _red_candles.duplicate():
 			if int(candle.turn) == turn_serial and int(candle.face) == int(data.get("value", 0)):
 				_queue_passive(int(candle.owner), 136, {}, [{"op": "trinket_automation", "amount": 1, "context": "candle_roll", "data": data.duplicate(true)}])
+	var abaddon_queued := false
 	for owner in players.size():
 		for entry: Dictionary in _ability_items20(owner).duplicate():
 			var id: int = int(entry.id)
 			var triggered := false
 			var details := data.duplicate(true)
 			match id:
-				124, 147, 150:
+				124:
+					# Смертельный урон уже объявляет смерть. Абаддон превращает в неё
+					# только несмертельный удар, иначе одна защита расходуется дважды.
+					triggered = not abaddon_queued and event == "damage" and int(data.get("seat", -1)) == owner and hp[owner] > 0
+					abaddon_queued = abaddon_queued or triggered
+				147, 150:
 					triggered = event == "damage" and int(data.get("seat", -1)) == owner
 				127:
 					triggered = event == "combat_monster_damage" and int(data.get("seat", -1)) == owner

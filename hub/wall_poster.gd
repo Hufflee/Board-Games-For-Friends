@@ -11,13 +11,16 @@ const BORDER := 0.015  # белая рамка с каждой стороны
 var slot := 0
 var default_path := ""
 var tilt := 0.0  # небольшой наклон «как повесили»
-var picture: Texture2D
+var picture: Resource
 var picture_key := ""  # что сейчас показано: путь стандартной картинки или хэш своей
 var size_scale := 1.0  # 1 — обычный плакат, до 2 — вдвое больше (по стороне)
 var _quad: MeshInstance3D
 var _frame: MeshInstance3D
 var _shape: BoxShape3D
 var _material: StandardMaterial3D
+var _animation: SpriteFrames
+var _frame_index := 0
+var _frame_time := 0.0
 
 
 func setup(index: int, path: String, angle: float) -> void:
@@ -68,17 +71,43 @@ func show_default() -> void:
 
 
 ## Новая картинка: пропорции — от картинки, площадь — постоянная.
-func set_picture(texture: Texture2D, key: String) -> void:
-	picture = texture
+func set_picture(source: Resource, key: String) -> void:
+	if source != picture:
+		_animation = source as SpriteFrames
+		_frame_index = 0
+		_frame_time = 0.0
+		set_process(_animation != null)
+	picture = source
 	picture_key = key
+	var texture := _animation.get_frame_texture(&"default", _frame_index) if _animation != null else source as Texture2D
 	var aspect := clampf(float(texture.get_width()) / maxf(1.0, float(texture.get_height())), ASPECT_RANGE.x, ASPECT_RANGE.y)
 	var size := Vector2(sqrt(AREA * aspect), sqrt(AREA / aspect)) * size_scale
 	(_quad.mesh as QuadMesh).size = size
-	_material.albedo_texture = texture
-	_material.emission_texture = texture
+	_set_frame_texture(texture)
 	(_frame.mesh as BoxMesh).size = Vector3(size.x + BORDER * 2.0, size.y + BORDER * 2.0, 0.005)
 	_shape.size = Vector3(size.x + BORDER * 2.0, size.y + BORDER * 2.0, 0.03)
 	_quad.set_meta("poster_source", key)
+
+
+func _process(delta: float) -> void:
+	if _animation == null or not is_visible_in_tree():
+		return
+	_frame_time += minf(delta, 0.25)
+	var duration := _animation.get_frame_duration(&"default", _frame_index)
+	var next := _frame_index
+	while _frame_time >= duration:
+		_frame_time -= duration
+		next = (next + 1) % _animation.get_frame_count(&"default")
+		duration = _animation.get_frame_duration(&"default", next)
+	if next != _frame_index:
+		_frame_index = next
+		_set_frame_texture(_animation.get_frame_texture(&"default", _frame_index))
+
+
+func _set_frame_texture(texture: Texture2D) -> void:
+	_material.albedo_texture = texture
+	_material.emission_texture = texture
+	_material.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_SCISSOR if texture.has_alpha() else BaseMaterial3D.TRANSPARENCY_DISABLED
 
 
 ## Размер плаката (1..2): площадь растёт, пропорции картинки те же.

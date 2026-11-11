@@ -135,7 +135,6 @@ func _resolve_passive(effect: Dictionary) -> void:
 			"loot": _draw_loot(seat, amount)
 			"treasure":
 				_give_treasures21(seat, amount)
-			"kill_self": hp[seat] = 0
 			"expand_shop":
 				for i in amount:
 					var card := _draw("treasure")

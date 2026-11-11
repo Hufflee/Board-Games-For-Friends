@@ -91,6 +91,7 @@ func _host() -> void:
 	marker("day")
 	await until(func(): return has_marker("observer_ready"), "наблюдатель открыл окна", 30000)
 	await until(func(): return has_marker("whispered"), "игрок прошептал")
+	check(not "Секрет для p3" in var_to_str(net.view), "по умолчанию хост-рассказчик не получает текст чужого шёпота")
 	send("open_nominations")
 	await until(func(): return net.bc.phase == "defense", "игрок номинировал")
 	send("start_vote")

@@ -129,11 +129,15 @@ func _seat_picks(table: Control) -> void:
 	voting.next_voter = me
 	table.update_view(voting)
 	await frames()
-	check(table.actions.cast_vote.visible and table.actions.hand.visible, "В свою очередь — «Проголосовать» рядом с рукой")
+	check(table.actions.cast_vote.visible and table.actions.cast_vote.text == "Голосую"
+		and table.actions.abstain.visible and table.actions.abstain.text == "Воздержаться", "Две кнопки голоса в свою очередь")
+	check(picked_border(table, me) and table.seat_nodes[me].state.text == "Голосует", "Текущее место выделено на площади")
+	check(table.phase_label.text == "Номинации · голосование", "Видна фаза голосования")
+	await shot("voting_1280x720")
 	voting.next_voter = a
 	table.update_view(voting)
 	await frames()
-	check(not table.actions.cast_vote.visible, "Не в свою очередь «Проголосовать» нет")
+	check(not table.actions.cast_vote.visible and not table.actions.abstain.visible and picked_border(table, a), "На чужом ходе кнопки скрыты, подсветка переходит")
 	# Голоса приспешников — квадратики цвета голосующих у ника жертвы.
 	v.erase("request")
 	v.evil_votes = [{"from": a, "target": c}, {"from": b, "target": c}]
@@ -155,12 +159,13 @@ func _seat_picks(table: Control) -> void:
 func shot(file: String) -> void:
 	await process_frame
 	await RenderingServer.frame_post_draw
-	root.get_texture().get_image().save_png("res://build/shots/botc/" + file + ".png")
+	var mode := str(root.get_node("Prefs").theme_mode)
+	root.get_texture().get_image().save_png("res://build/shots/botc/" + file + "_" + mode + ".png")
 
 func _run() -> void:
 	root.size = Vector2i(1280, 720)
 	net = root.get_node("Net")
-	root.get_node("Prefs").theme_mode = "light"
+	root.get_node("Prefs").theme_mode = "dark" if OS.get_environment("BC_TEST_THEME") == "dark" else "light"
 	var app: Control = load("res://games/blood_on_the_clocktower/ui/bc_app.gd").new()
 	root.add_child(app)
 	await frames()
@@ -171,6 +176,9 @@ func _run() -> void:
 	await frames()
 	check(app.mode == "lobby", "Лобби открыто")
 	check(app.screen.secret.visible, "Закрытая подготовка доступна соло-рассказчику")
+	check(not app.screen.whispers_box.button_pressed, "Подслушивание выключено по умолчанию")
+	app.screen.whispers_box.button_pressed = true
+	check(bool(net.lobby_view.settings.get("bc_story_whispers", false)), "Настройка шёпота доходит до хоста и лобби")
 	check(app.screen.roles.item_count == 22, "Редактор показывает роли сценария")
 	var lobby_id: int = app.screen.get_instance_id()
 	app.screen.roles.select(0, false)
@@ -199,6 +207,8 @@ func _run() -> void:
 	await shot("lobby_16_1280x720")
 	net.set_bots(7)
 	await frames()
+	net.bc_configure({"bc_roles": ["washerwoman", "empath", "monk", "soldier", "fortune_teller", "poisoner", "imp"],
+		"bc_bluffs": ["chef", "mayor", "slayer"]})
 	check(net.start_game().is_empty(), "Партия начинается")
 	await frames()
 	check(app.mode == "table", "Постоянный стол открыт")
@@ -224,6 +234,34 @@ func _run() -> void:
 	net.send_action("begin_night", {"revision": int(net.view.revision)})
 	await frames()
 	check(net.bc.abilities.started, "Рассказчик запускает первую ночь")
+	var previous_revision := int(net.view.revision)
+	var host_panel: CanvasLayer = load("res://hub/host_panel.gd").new()
+	root.add_child(host_panel)
+	var undo_available := false
+	for button: Button in host_panel.find_children("*", "Button", true, false):
+		if button.text.contains("Отменить предыдущее действие"):
+			undo_available = not button.disabled
+			if undo_available:
+				button.pressed.emit()
+			break
+	check(undo_available, "Отмена доступна в панели хоста")
+	host_panel.queue_free()
+	check(net.bc.phase == "first_night" and not net.bc.abilities.started and int(net.view.revision) > previous_revision,
+		"Отмена восстанавливает планировщик и увеличивает ревизию")
+	check(net.host_tools.can_redo() and net.host_tools.redo() and net.bc.abilities.started, "Повтор возвращает начало ночи")
+	if net.bc.requests.is_empty():
+		check(false, "Первая ночь дошла до адресного запроса")
+		quit(1)
+		return
+	var pending_seat: int = net.bc.requests.keys()[0]
+	var old_token := str(net.bc.requests[pending_seat].token)
+	net.send_action("view_seat", {"seat": pending_seat})
+	net.send_action("private_reply", {"token": old_token, "index": 0})
+	check(net.host_tools.undo(), "Отмена возвращает отвеченный ночной запрос")
+	var restored_token := str(net.bc.requests[pending_seat].token)
+	check(old_token != restored_token, "Восстановленный запрос получает новый токен")
+	net.send_action("private_reply", {"token": old_token, "index": 0})
+	check(str(net.bc.requests[pending_seat].token) == restored_token, "Повторный пакет со старым токеном отклоняется")
 	var steps := 0
 	while net.bc.phase == "night" and steps < 300:
 		steps += 1
@@ -255,10 +293,61 @@ func _run() -> void:
 	check(table.role_key == str(net.view.get("role", "")), "Личная карточка соответствует известной роли")
 	# Состав случайный: Шпион по правилам видит гримуар, остальные — нет.
 	check(table.grimoire_text.text.is_empty() or str(net.view.get("role", "")) == "spy", "Закрытый гримуар очищен у обычного игрока")
+	await _chat_history(table)
 	await _seat_picks(table)
+	_vote_buttons(table)
 	app.queue_free()
 	net.leave()
 	await frames()
 	print("Clocktower стол: %d проверок, %d ошибок." % [checks, failures])
 	quit(1 if failures else 0)
+
+func _chat_history(table: Control) -> void:
+	for i in 40:
+		net.send_action("shout", {"text": "Сообщение площади %d" % i})
+	await frames()
+	var scroll: VScrollBar = table.messages.get_v_scroll_bar()
+	check(scroll.max_value > scroll.page + 100, "В истории шёпота есть прокрутка")
+	scroll.value = 80.0
+	net.send_action("shout", {"text": "Новое сообщение внизу"})
+	await frames()
+	check(is_equal_approx(scroll.value, 80.0), "Новый крик сохраняет позицию чтения")
+	var receiver: OptionButton = table.receiver
+	receiver.select(receiver.get_item_index(2))
+	table.private_text.text = "Отправлено клавишей Enter"
+	table.private_text.grab_focus()
+	await frames()
+	var enter := InputEventKey.new()
+	enter.keycode = KEY_ENTER
+	enter.pressed = true
+	root.push_input(enter)
+	await frames()
+	check(table.private_text.has_focus() and table.private_text.text.is_empty(), "Enter отправляет шёпот и оставляет фокус")
+	check(is_equal_approx(scroll.value, 80.0), "Свой шёпот сохраняет позицию чтения")
+	check(str(net.bc.get_view(0).messages.back()).contains("Отправлено клавишей Enter"), "Настройка даёт рассказчику копию чужого шёпота")
+	net.bc.action(2, "whisper", {"target": int(net.view.you), "text": "Входящий шёпот"})
+	net._push_state()
+	await frames()
+	check(is_equal_approx(scroll.value, 80.0) and table.messages.get_parsed_text().contains("Входящий шёпот"), "Входящий шёпот сохраняет позицию чтения")
+	scroll.value = scroll.max_value - scroll.page
+	net.send_action("shout", {"text": "Следуем за концом"})
+	await frames()
+	check(is_equal_approx(scroll.value, scroll.max_value - scroll.page), "У конца истории новые сообщения видны сразу")
+
+func _vote_buttons(table: Control) -> void:
+	net.send_action("view_seat", {"seat": 0})
+	net.send_action("open_nominations", {"revision": int(net.view.revision)})
+	net.send_action("view_seat", {"seat": 1})
+	net.send_action("nominate", {"revision": int(net.view.revision), "target": 2})
+	net.send_action("view_seat", {"seat": 0})
+	net.send_action("start_vote", {"revision": int(net.view.revision)})
+	var voter := int(net.view.get("next_voter", -1))
+	net.send_action("view_seat", {"seat": voter})
+	table.actions.cast_vote.pressed.emit()
+	check(net.bc.vote_total == 1 and net.bc.vote_cursor == 1, "«Голосую» подаёт голос без предварительной руки")
+	voter = int(net.view.get("next_voter", -1))
+	net.send_action("view_seat", {"seat": voter})
+	table.actions.hand.pressed.emit()
+	table.actions.abstain.pressed.emit()
+	check(net.bc.vote_total == 1 and net.bc.vote_cursor == 2 and not net.bc.hands[voter], "«Воздержаться» отменяет поднятую руку и передаёт очередь")
 

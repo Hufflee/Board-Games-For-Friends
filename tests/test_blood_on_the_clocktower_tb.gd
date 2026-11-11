@@ -202,6 +202,13 @@ func _information() -> void:
 	game.execution_death = 6
 	game.abilities._wake(2, "undertaker")
 	check(str(game.private_log[2].back()).contains("Святой"), "Гробовщик узнаёт настоящую роль казнённого")
+	game.roles[6] = "spy"
+	game.abilities._wake(2, "undertaker")
+	check(str(game.private_log[2].back()).contains("Шпион") and not game.requests.has(0), "Здоровому Гробовщику роль приходит автоматически")
+	game.status[2]["drunk"] = true
+	game.abilities._wake(2, "undertaker")
+	check(game.requests.has(0), "Для пьяного Гробовщика информацию выбирает рассказчик")
+	respond(game, 0, 0)
 	game.abilities._wake(4, "butler")
 	check(target_response(game, 2) and game.status[4].master == 2, "Дворецкий выбирает хозяина")
 	game = fixture(["chef", "empath", "monk", "soldier", "slayer", "saint", "poisoner", "imp"])

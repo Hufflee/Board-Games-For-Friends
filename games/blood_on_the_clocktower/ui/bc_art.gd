@@ -33,3 +33,4 @@ static func backdrop(parent: Control) -> void:
 	image.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	image.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	parent.add_child(image)
+	preload("res://hub/cursor_parallax.gd").follow_texture(image)

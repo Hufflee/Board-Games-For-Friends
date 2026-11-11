@@ -2,6 +2,7 @@ shader_type canvas_item;
 // Ночное небо подземелья: фиолетовый градиент, луна с ореолом, ползущий туман, лёгкое мерцание.
 
 uniform vec2 rect_size = vec2(1280.0, 720.0);
+uniform vec2 cursor_shift = vec2(0.0);
 
 // хэш без sin(): у sin() на больших координатах теряется точность — туман шёл «ступеньками»
 float hash(vec2 p) {
@@ -21,7 +22,7 @@ float fbm(vec2 p) {
 
 void fragment() {
 	vec2 uv = UV;
-	vec2 p = uv * rect_size;
+	vec2 p = uv * rect_size - cursor_shift;
 	float t = TIME;
 	vec3 top = vec3(0.10, 0.04, 0.17);
 	vec3 bottom = vec3(0.03, 0.02, 0.06);

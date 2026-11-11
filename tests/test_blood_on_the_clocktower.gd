@@ -46,6 +46,7 @@ func _run() -> void:
 	_owner_rules_06()
 	_owner_rules_07()
 	_drunk_undertaker()
+	_butler_votes()
 	print("Clocktower: %d проверок, %d ошибок. Способности/Net/UI ещё не проверены." % [checks, failures])
 	quit(1 if failures > 0 else 0)
 
@@ -224,10 +225,15 @@ func _owner_rules_07() -> void:
 	check(not timed.action(3 if speaker != 3 else 4, "end_speech", {}), "Чужую речь закончить нельзя")
 	check(timed.action(speaker, "end_speech", {}), "Говорящий заканчивает речь досрочно")
 	check(int(timed.get_view(2).day_timer.speaker) != speaker, "Слово у следующего")
-	for i in 10:
+	for i in 8:
+		if timed.phase != "discussion":
+			break
 		timed.tick(61.0)
-	check(timed.phase == "nominations" and timed.day_timer.is_empty(), "После речей и 2 минут номинации открылись сами")
+	check(timed.phase == "nominations" and timed.day_timer.left == 60.0, "После обсуждения начинается минута номинаций")
+	timed.tick(10.0)
 	check(timed.action(1, "nominate", {"target": 2, "revision": timed.public_revision}), "Номинация в режиме таймера")
+	timed.tick(90.0)
+	check(timed.phase == "defense" and timed.nomination_left == 50.0, "Во время защиты минута номинаций стоит")
 	check(timed.action(0, "start_vote", {"revision": timed.public_revision}), "Голосование в режиме таймера")
 	check(timed.get_view(3).day_timer.kind == "vote" and is_equal_approx(float(timed.get_view(3).day_timer.left), 15.0), "На голос — 15 секунд")
 	var voter: int = timed.vote_order[0]
@@ -236,6 +242,11 @@ func _owner_rules_07() -> void:
 	check(timed.vote_cursor == 1 and timed.vote_total == 1, "За 15 с не нажал — засчитана поднятая рука")
 	timed.tick(15.5)
 	check(timed.vote_cursor == 2 and timed.vote_total == 1, "Опущенная рука по времени — без голоса")
+	for i in timed.vote_order.size() - timed.vote_cursor:
+		timed.tick(15.5)
+	check(timed.phase == "nominations" and timed.day_timer.left == 50.0, "После голосования возвращается остаток минуты")
+	timed.tick(50.0)
+	check(timed.phase == "dusk", "При истечении минуты день закрывается")
 	check(not base().get_view(2).has("day_timer"), "Без режима таймера времени нет")
 	# 8–10, 12. Рассказчик видит очередь ночи и действия игроков, Шпиону это не приходит.
 	var night := base()
@@ -381,6 +392,7 @@ func _public_whispers() -> void:
 	check(str(outsider.messages.back()) == "Игрок 1 и Игрок 3 шепчутся.", "В личных сообщениях постороннего — факт разговора: " + str(outsider.messages.back()))
 	check(not outsider.log.has("Игрок 1 и Игрок 3 шепчутся."), "Факт шёпота не в общем журнале")
 	check(not JSON.stringify(outsider).contains("секрет"), "Текст шёпота не уходит постороннему")
+	check(not JSON.stringify(game.get_view(0)).contains("секрет"), "По умолчанию рассказчик не получает чужой текст")
 	check(str(game.get_view(3).messages.back()).contains("секрет"), "Адресат получил текст")
 	check(game.public_revision == revision, "Шёпот не сдвигает ревизию и не отклоняет чужие действия")
 	var size_after: int = game.private_log[2].size()
@@ -391,9 +403,42 @@ func _public_whispers() -> void:
 	check(game.get_view(2).last_whisper == [1, 3], "Пара с рассказчиком не попадает в публичный снимок («…» не появляется)")
 	check(not JSON.stringify(game.get_view(2)).contains("Вопрос по роли") and not JSON.stringify(game.get_view(2)).contains("рассказчиком"), "Посторонний не узнаёт о разговоре с рассказчиком")
 	check(str(game.get_view(0).messages.back()).contains("Вопрос по роли"), "Рассказчик получил текст")
+	game.story_reads_whispers = true
+	check(game.action(1, "whisper", {"target": 3, "text": "Слышно ведущему"}), "Шёпот при включённой опции")
+	for seat: int in [-1, 0, 1, 2, 3, 4, 5]:
+		check(JSON.stringify(game.get_view(seat)).contains("Слышно ведущему") == (seat in [0, 1, 3]),
+			"Копия шёпота адресована только рассказчику и собеседникам, место %d" % seat)
 	game.phase = "dusk"
 	game.dawn()
 	check(game.get_view(2).last_whisper.is_empty(), "Новый день сбрасывает отметку шёпота")
+
+func _butler_votes() -> void:
+	for scenario: String in ["рука опущена", "рука поднята", "голос засчитан", "голос пропущен", "мастер без жетона", "способность отключена"]:
+		var game := base()
+		var butler := 3
+		var master := 4
+		game.roles[butler] = "butler"
+		game.status[butler]["master"] = master
+		game.dawn()
+		act(game, 0, "open_nominations")
+		var target := 2 if scenario in ["рука опущена", "рука поднята", "мастер без жетона", "способность отключена"] else 3
+		act(game, 1, "nominate", {"target": target})
+		act(game, 0, "start_vote")
+		if scenario == "рука поднята":
+			game.action(master, "hand", {"raised": true})
+		if scenario == "мастер без жетона":
+			game.alive[master] = false
+			game.dead_votes[master] = false
+			check(not game.action(master, "hand", {"raised": true}), "Мёртвый хозяин без жетона не может поднять руку")
+		if scenario == "способность отключена":
+			game.status[butler]["drunk"] = true
+		while game.vote_order[game.vote_cursor] != butler:
+			var voter: int = game.vote_order[game.vote_cursor]
+			game.action(voter, "cast_vote", {"raised": voter == master and scenario == "голос засчитан"})
+		var before := game.vote_total
+		check(game.action(butler, "cast_vote", {"raised": true}), "Подсчёт проходит: " + scenario)
+		var allowed := scenario in ["рука поднята", "голос засчитан", "способность отключена"]
+		check(game.vote_total == before + int(allowed), "Условие голоса Дворецкого: " + scenario)
 
 ## Ревью 05.11: руки поднимают одновременно с одним и тем же view — ни одно нажатие не теряется.
 func _simultaneous_hands() -> void:
@@ -403,6 +448,7 @@ func _simultaneous_hands() -> void:
 	act(game, 1, "nominate", {"target": 2})
 	act(game, 0, "start_vote")
 	var stale: int = game.public_revision
+	check(not game.action(1, "hand", {"revision": stale - 1, "raised": true}), "Рука с ревизией до начала голосования отклоняется")
 	for seat: int in [1, 3, 4]:
 		check(game.action(seat, "hand", {"revision": stale, "raised": true}), "Одновременная рука места %d принята" % seat)
 	check(game.hands[1] and game.hands[3] and game.hands[4], "Все три руки подняты")

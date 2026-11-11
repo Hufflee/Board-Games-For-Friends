@@ -179,6 +179,17 @@ var _starting_choices: Array = []
 var choose_character_at_start := false
 var _character_offers: Array = []
 var _chosen_characters: Array = []
+
+func awaits_character_choice(seat: int) -> bool:
+	return phase == "starting_character" and seat >= 0 and seat < _character_offers.size() and (seat >= _chosen_characters.size() or _chosen_characters[seat] == null)
+
+
+func remaining_character_choices() -> int:
+	var remaining := 0
+	for seat in _character_offers.size():
+		if awaits_character_choice(seat):
+			remaining += 1
+	return remaining
 var _withdrawn: Dictionary = {}
 
 

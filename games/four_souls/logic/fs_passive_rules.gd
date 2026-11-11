@@ -20,8 +20,6 @@ const REGISTRY := {
 	76: [{"event": "turn_end", "conditions": {"owner_current": true},
 		"operations": [{"op": "coins", "amount": 1}]}],
 	85: [{"event": "roll", "conditions": {"face": 2}, "operations": [{"op": "counter", "amount": 1}]}],
-	124: [{"event": "damage", "conditions": {"owner_subject": true},
-		"operations": [{"op": "kill_self", "amount": 1}]}],
 	165: [{"event": "roll", "conditions": {"face": 5}, "operations": [{"op": "coins", "amount": 3}]}],
 	166: [{"event": "death", "conditions": {"owner_subject": true},
 		"operations": [{"op": "coins", "amount": 8}]}],

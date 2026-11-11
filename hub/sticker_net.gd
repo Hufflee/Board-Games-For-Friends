@@ -15,6 +15,8 @@ const POSTER_DIR := "user://posters/"  # свои картинки плакат�
 const CHUNK := 48000
 
 const Stickers := preload("res://hub/stickers.gd")
+const PosterGif := preload("res://hub/poster_gif.gd")
+const POSTER_TEXTURES_LIMIT := 4
 
 var rooms: Dictionary = {}  # peer → {"boxes": {...}, "board": [...]}, у хоста и всех клиентов
 var local := {"boxes": {}, "board": []}  # свои данные (сохраняются на диск)
@@ -26,7 +28,7 @@ var _poster_bytes: Dictionary = {}  # хост: хэш → байты карти
 var _incoming: Dictionary = {}  # сборка кусков: ключ → {count, parts}
 var _wanted: Dictionary = {}  # клиент: уже запрошенные хэши
 var _uploaded: Dictionary = {}  # клиент: какие свои картинки уже отданы хосту в этой пати
-var _textures: Dictionary = {}  # хэш → Texture2D
+var _textures: Dictionary = {}  # хэш → Texture2D или SpriteFrames
 var _waiters: Dictionary = {}  # хост: хэш → кто ждёт картинку, которой у хоста ещё нет
 var _pulled: Dictionary = {}  # хост: у кого уже попросили картинку (хэш → время запроса)
 ## Самовосстановление (07.11): плакаты друга после партии были стандартными, пока он не сдвинет плакат —
@@ -190,14 +192,29 @@ func set_poster_picture(slot: int, image: Image, center: Vector2) -> String:
 	var bytes := image.save_jpg_to_buffer(0.88)
 	if bytes.size() > Stickers.POSTER_MAX_BYTES:
 		bytes = image.save_jpg_to_buffer(0.7)
+	return _set_poster_bytes(slot, bytes, center)
+
+
+func set_poster_gif(slot: int, bytes: PackedByteArray, center: Vector2) -> String:
+	if bytes.size() > Stickers.POSTER_MAX_BYTES:
+		notice.emit("GIF для плаката должен весить не больше 900 КБ")
+		return ""
+	var texture := PosterGif.texture(bytes)
+	if texture == null:
+		notice.emit("GIF повреждён или превышает лимит размеров и кадров")
+		return ""
+	return _set_poster_bytes(slot, bytes, center, texture)
+
+
+func _set_poster_bytes(slot: int, bytes: PackedByteArray, center: Vector2, texture: Resource = null) -> String:
+	if slot < 0 or slot >= 3 or bytes.is_empty() or bytes.size() > Stickers.POSTER_MAX_BYTES:
+		return ""
 	var hash := _sha(bytes)
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(POSTER_DIR))
-	var file := FileAccess.open(POSTER_DIR + hash + ".jpg", FileAccess.WRITE)
-	if file == null:
+	if not _write_poster(hash, bytes):
 		notice.emit("Не удалось сохранить картинку плаката")
 		return ""
-	file.store_buffer(bytes)
-	file.close()
+	if texture != null:
+		_remember_poster(hash, texture)
 	_poster_to_top(slot)
 	var list := _poster_list()
 	var old: Array = list[slot]
@@ -242,7 +259,7 @@ func _pull(hash: String) -> void:
 
 
 ## Картинка плаката по хэшу (своя или друга). Нет на диске — просим у хоста, придёт сигнал poster_ready.
-func poster_texture(hash: String) -> Texture2D:
+func poster_texture(hash: String) -> Resource:
 	if hash.is_empty():
 		return null
 	if _textures.has(hash):
@@ -252,8 +269,7 @@ func poster_texture(hash: String) -> Texture2D:
 		bytes = _poster_bytes[hash]
 	if not bytes.is_empty():
 		var texture := _texture(bytes)
-		if texture != null:
-			_textures[hash] = texture
+		_remember_poster(hash, texture)
 		return texture
 	if _party() and _net().is_host():
 		_pull(hash)
@@ -266,11 +282,35 @@ func poster_texture(hash: String) -> Texture2D:
 
 
 func _poster_file(hash: String) -> PackedByteArray:
+	if hash.length() != 64 or not hash.is_valid_hex_number(false):
+		return PackedByteArray()
 	var path := POSTER_DIR + hash + ".jpg"
+	if not FileAccess.file_exists(path):
+		path = POSTER_DIR + hash + ".gif"
 	return FileAccess.get_file_as_bytes(path) if FileAccess.file_exists(path) else PackedByteArray()
 
 
-static func _texture(bytes: PackedByteArray) -> Texture2D:
+func _remember_poster(hash: String, texture: Resource) -> void:
+	_textures.erase(hash)
+	if _textures.size() >= POSTER_TEXTURES_LIMIT:
+		_textures.erase(_textures.keys()[0])
+	_textures[hash] = texture
+
+
+func _write_poster(hash: String, bytes: PackedByteArray) -> bool:
+	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(POSTER_DIR))
+	var suffix := ".gif" if PosterGif.matches(bytes) else ".jpg"
+	var file := FileAccess.open(POSTER_DIR + hash + suffix, FileAccess.WRITE)
+	if file == null:
+		return false
+	file.store_buffer(bytes)
+	file.close()
+	return true
+
+
+static func _texture(bytes: PackedByteArray) -> Resource:
+	if PosterGif.matches(bytes):
+		return PosterGif.texture(bytes)
 	var image := Image.new()
 	if image.load_jpg_from_buffer(bytes) != OK:
 		return null
@@ -370,11 +410,8 @@ func _rpc_poster_deliver(hash: String, index: int, count: int, chunk: PackedByte
 	var bytes := _collect("down:" + hash, index, count, chunk)
 	if bytes.is_empty() or bytes.size() > Stickers.POSTER_MAX_BYTES or _sha(bytes) != hash:
 		return
-	DirAccess.make_dir_recursive_absolute(ProjectSettings.globalize_path(POSTER_DIR))
-	var file := FileAccess.open(POSTER_DIR + hash + ".jpg", FileAccess.WRITE)
-	if file != null:
-		file.store_buffer(bytes)
-		file.close()
+	if not _write_poster(hash, bytes):
+		return
 	_wanted.erase(hash)
 	_textures.erase(hash)
 	poster_ready.emit(hash)

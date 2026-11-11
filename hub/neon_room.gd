@@ -46,6 +46,7 @@ const DRAG_LIFT := 0.07  # м: взятая коробка выдвигаетс�
 const PublicRoom := preload("res://hub/public_room.gd")
 var remote_view := false
 var remote_follow := true
+var _remote_zoom := 1.0
 var _local_room: Dictionary = {}
 var _remote_selected := ""
 var _remote_editor := false
@@ -142,7 +143,7 @@ func _ready() -> void:
 	_init_custom_shelf()
 	_lights()
 	camera = Camera3D.new()
-	camera.fov = _shelf_camera_fov()
+	camera.fov = CAMERA_FOV
 	camera.position = Vector3(SHELF_X - 0.1, 0.9, 0.12)
 	add_child(camera)
 	camera.look_at(Vector3(SHELF_X, 0.84, BACK + 0.2))
@@ -157,6 +158,7 @@ func _ready() -> void:
 	_make_shelf_ui()
 	if FileAccess.file_exists(ShelfConfig.FILE):
 		_frame_shelf()
+	camera.fov = _shelf_camera_fov()
 	# «презентационный» свет от камеры: слабый всегда, ярче — когда коробка в руках
 	_present = SpotLight3D.new()
 	_present.light_color = Color("fff3fb")
@@ -1467,8 +1469,31 @@ func _frame_shelf() -> void:
 
 ## Масштаб меняет угол обзора, сохраняя точку съёмки и перспективу комнаты.
 func _shelf_camera_fov() -> float:
-	var zoom := 1.0 if remote_view else Prefs.shelf_camera_zoom
-	return rad_to_deg(2.0 * atan(tan(deg_to_rad(CAMERA_FOV) * 0.5) / zoom))
+	if board_focused():
+		return CAMERA_FOV
+	var zoom := _remote_zoom if remote_view else Prefs.shelf_camera_zoom
+	var tangent := tan(deg_to_rad(CAMERA_FOV) * 0.5) / zoom
+	if not _editor_on and not (remote_view and _remote_editor):
+		# Оставляем запас под габариты куба и покачивание камеры. Старая настройка
+		# сохраняется, но кадр не может закрыть единственный вход в редактор.
+		var point := _cam_home.affine_inverse() * shelf_top_right
+		var depth := maxf(0.1, -point.z - 0.12)
+		var viewport_size := get_viewport().get_visible_rect().size
+		var aspect := viewport_size.x / maxf(1.0, viewport_size.y)
+		var vertical := (absf(point.y) + 0.14) / depth
+		var horizontal := (absf(point.x) + 0.14) / (depth * maxf(0.1, aspect))
+		tangent = maxf(tangent, maxf(vertical, horizontal))
+	return rad_to_deg(2.0 * atan(tangent))
+
+
+func reset_shelf_camera() -> void:
+	if remote_view:
+		return
+	Prefs.shelf_camera_zoom = 1.0
+	Prefs.save()
+	if is_instance_valid(_editor_ui):
+		_editor_ui.call("sync_zoom")
+	shelf_hint.emit("Приближение камеры сброшено")
 
 
 func set_shelf_camera_zoom(value: float) -> void:
@@ -2407,13 +2432,11 @@ func _reflow(animate: bool) -> void:
 		var info: Dictionary = _row_info[r]
 		var cascade := _drag_box != null and not _drag_cascade.is_empty()
 		var row: Array = (_drag_cascade[r] if cascade else _rows[r]).duplicate()
-		if _shelf_placeholders.has(r):
-			(_shelf_placeholders[r] as Node3D).visible = (
-				row.is_empty() and not (_drag_box != null and _drag_to.x == r)
-			)
 		if _drag_box != null and _drag_to.x == r and not cascade:
 			row.insert(_drag_to.y, _drag_box)
 		var layout := _layout_row(row, r)
+		if _shelf_placeholders.has(r):
+			(_shelf_placeholders[r] as Node3D).visible = float(layout.width) < 0.001
 		for b: GameBox in row:
 			if b == _drag_box:
 				continue
@@ -2429,9 +2452,10 @@ func _reflow(animate: bool) -> void:
 
 ## Единая раскладка стопок для изображения, проверки вместимости и переноса.
 func _layout_row(row: Array, cell: int) -> Dictionary:
+	var entering := _shelf_id(_drag_box) if _drag_box != null and _drag_surface.is_empty() else ""
 	return ShelfConfig.row_layout(
 		row.map(func(box): return _shelf_id(box)),
-		_shelf_sizes(),
+		ShelfConfig.sizes_on_shelf(_cabinet, _shelf_sizes(), entering),
 		_box_modes,
 		float(_row_info[cell].get("height", CELL_H)),
 		ShelfConfig.figure_ratios(_cabinet),
@@ -2704,7 +2728,7 @@ func _cascade_rows(cell: int, index: int) -> Array:
 			var order: Array = range(row.size() - 1, -1, -1) if direction > 0 else range(row.size())
 			for k: int in order:
 				var item: GameBox = row[k]
-				if item != _drag_box and not item.is_cups():
+				if item != _drag_box and not item.is_cups() and not _cabinet.get("figure_surfaces", {}).has(_shelf_id(item)):
 					pick = k
 					break
 			if pick < 0:
@@ -2986,10 +3010,15 @@ func public_snapshot() -> Dictionary:
 		var id := str(box.game.get("id", ""))
 		if id.begins_with("custom:"):
 			custom[id] = {"title": str(box.game.get("title", "Своя игра")).left(64), "size": [box.size.x, box.size.y, box.size.z]}
+	var frame: Transform3D = _cam_home if _board_cam_saved == null else _board_cam_saved
+	var orientation := frame.basis.get_rotation_quaternion()
 	return PublicRoom.clean({
 		"config": state.config, "placements": state.placements, "poses": state.poses,
 		"selected": str(focused.game.get("id", "")) if focused != null else "",
-		"editor": _editor_on, "custom": custom
+		"editor": _editor_on, "custom": custom,
+		"camera": {"zoom": Prefs.shelf_camera_zoom, "frame": [
+			frame.origin.x, frame.origin.y, frame.origin.z, orientation.x, orientation.y, orientation.z, orientation.w
+		]}
 	})
 
 
@@ -3059,6 +3088,7 @@ func show_remote(snapshot: Dictionary, follow: bool = true) -> bool:
 			_local_room.remote_boxes.append(box)
 		_local_room.custom = clean.custom.duplicate(true)
 	remote_follow = follow
+	_remote_zoom = float(clean.get("camera", {}).get("zoom", 1.0))
 	var state_changed: bool = custom_changed or _cabinet != clean.config or _shelf_ids() != clean.placements or _box_modes != clean.poses
 	if state_changed:
 		var local_selected: String = _shelf_id(focused) if focused != null else ""
@@ -3075,6 +3105,14 @@ func show_remote(snapshot: Dictionary, follow: bool = true) -> bool:
 			if local_selected != "":
 				focus_id(local_selected)
 	_remote_editor = clean.editor
+	var frame: Array = clean.get("camera", {}).get("frame", [])
+	if remote_follow and not frame.is_empty():
+		var rotation := Quaternion(frame[3], frame[4], frame[5], frame[6])
+		var owner_frame := Transform3D(Basis(rotation), Vector3(frame[0], frame[1], frame[2]))
+		if board_focused():
+			_board_cam_saved = owner_frame
+		else:
+			_cam_home = owner_frame
 	if remote_follow and (state_changed or _remote_selected != clean.selected):
 		release()
 		if clean.selected != "":

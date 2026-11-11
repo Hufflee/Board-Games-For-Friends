@@ -5,6 +5,7 @@ uniform sampler2D planks : source_color, repeat_enable, filter_linear_mipmap;
 uniform sampler2D wood : source_color, repeat_enable, filter_linear_mipmap;
 uniform sampler2D leather : source_color, repeat_enable, filter_linear_mipmap;
 uniform vec2 rect_size = vec2(1280.0, 720.0);
+uniform vec2 cursor_shift = vec2(0.0);
 uniform bool show_table = true;
 uniform vec2 table_center = vec2(640.0, 300.0);
 uniform vec2 table_radii = vec2(600.0, 255.0);
@@ -55,10 +56,10 @@ void fragment() {
 	float t = TIME;
 
 	// --- пол ---
-	vec3 floor_col = texture(planks, p / 420.0).rgb;
+	vec3 floor_col = texture(planks, (p - cursor_shift) / 420.0).rgb;
 	floor_col *= vec3(1.0, 0.82, 0.62) * 0.55;
 	float flicker = 0.94 + 0.04 * sin(t * 7.3) + 0.02 * sin(t * 13.1 + 1.7);
-	float pool = 1.0 - smoothstep(150.0, 900.0, length((p - table_center) * vec2(0.85, 1.25)));
+	float pool = 1.0 - smoothstep(150.0, 900.0, length((p - table_center - cursor_shift) * vec2(0.85, 1.25)));
 	vec3 col = floor_col * (0.35 + 0.95 * pool * flicker);
 	// виньетка
 	vec2 vuv = UV - 0.5;

@@ -11,6 +11,7 @@ func _ready() -> void:
 	var mat := ShaderMaterial.new()
 	mat.shader = load("res://games/dangerous_words/ui/dw_night.gdshader")
 	material = mat
+	preload("res://hub/cursor_parallax.gd").watch(self, func(shift: Vector2): mat.set_shader_parameter("cursor_shift", shift))
 	resized.connect(func(): mat.set_shader_parameter("rect_size", size))
 	mat.set_shader_parameter("rect_size", size)
 	var layer := Control.new()

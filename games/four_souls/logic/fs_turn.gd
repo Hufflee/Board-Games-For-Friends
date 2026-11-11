@@ -277,7 +277,9 @@ func _check_win() -> void:
 			winner = seat; phase = "game_over"; _note("Четыре души! Победитель: " + name_of(seat)); return
 func actor() -> int:
 	if phase == "starting_character":
-		return _chosen_characters.size()
+		for seat in players.size():
+			if awaits_character_choice(seat):
+				return seat
 	if phase == "battle_roll":
 		return _battle_roller15()
 	if phase == "forced_discard":

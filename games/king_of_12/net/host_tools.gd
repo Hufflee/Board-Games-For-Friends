@@ -11,6 +11,7 @@ extends RefCounted
 const LIMIT := 40  # сколько действий можно отменить
 const MAX_DEPTH := 12
 const RECENT := 8  # «этот/прошлый ход» для «Убрать карту»: столько последних действий назад
+const ClocktowerAbilities := preload("res://games/blood_on_the_clocktower/logic/bc_abilities.gd")
 
 var net: Node
 var _undo: Array = []  # [{snap, hands}]
@@ -32,26 +33,26 @@ func reset() -> void:
 
 
 func can_undo() -> bool:
-	return net.get("bc") == null and not _undo.is_empty()
+	return not _undo.is_empty()
 
 
 func can_redo() -> bool:
-	return net.get("bc") == null and not _redo.is_empty()
+	return not _redo.is_empty()
 
 
 # --- история ---------------------------------------------------------------
 
 ## Перед действием игрока (Net._handle_action).
 func before_action(kind: String) -> void:
-	# Скрытую информацию нельзя «разучить» отменой; история Clocktower отключена.
-	if net.get("bc") != null:
-		return
 	if restoring or kind in ["view_seat"]:
 		return
 	var g: Object = net._game_obj()
 	if g == null:
 		return
 	_pending = {"snap": snapshot(g), "hands": _hands(g)}
+
+func discard_action() -> void:
+	_pending = null
 
 
 ## Состояние разослано (Net._push_state): действие что-то поменяло — кладём снимок «до» в историю.
@@ -82,8 +83,12 @@ func _step(from: Array, to: Array) -> bool:
 		return false
 	to.append({"snap": snapshot(g), "hands": _hands(g)})
 	var entry: Dictionary = from.pop_back()
+	var clocktower: BCRules = g as BCRules
+	var previous_revision := clocktower.public_revision if clocktower != null else -1
 	restoring = true
 	restore(entry.snap)
+	if clocktower != null:
+		clocktower.invalidate_actions_after_restore(previous_revision)
 	_pending = null
 	net._phase_time = 0.0
 	net._stamp_turn = true
@@ -135,6 +140,9 @@ static func _snap(v: Variant, depth: int) -> Variant:
 				return v  # узлы, ресурсы и встроенные объекты — по ссылке
 			var vars := {}
 			for p: Dictionary in o.get_property_list():
+				# Вычисляемое поле ведёт обратно в объект правил через WeakRef.
+				if p.name == &"g" and o is ClocktowerAbilities:
+					continue
 				if int(p.usage) & PROPERTY_USAGE_SCRIPT_VARIABLE:
 					vars[p.name] = _snap(o.get(p.name), depth + 1)
 			return {"__obj": o, "vars": vars}

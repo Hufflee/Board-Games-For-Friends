@@ -38,6 +38,12 @@ func verify(state: Dictionary, sizes: Dictionary) -> void:
 
 func _initialize() -> void:
 	_four_poses()
+	var single := {"rows": 1, "cols": 1, "width": 0.45, "height": 0.3, "cups": 0}
+	var items := {"shelf_andy": Vector3(0.18, 0.16, 0.14), "box": Vector3(0.31, 0.24, 0.2)}
+	check(not ShelfConfig.solve(single, [["box", "shelf_andy"]], items, {}).ok, "Динозавр в ячейке занимает место")
+	single["figure_surfaces"] = {"shelf_andy": {"surface": "tv", "x": 0.6}}
+	var moved := ShelfConfig.solve(single, [["box", "shelf_andy"]], items, {})
+	check(moved.ok and moved.placements[0].has("shelf_andy"), "Динозавр на телевизоре сохраняется и освобождает ячейку")
 	var sizes: Dictionary = {
 		"a": Vector3(0.05, 0.3, 0.25), "b": Vector3(0.08, 0.3, 0.2), "c": Vector3(0.06, 0.28, 0.3)
 	}

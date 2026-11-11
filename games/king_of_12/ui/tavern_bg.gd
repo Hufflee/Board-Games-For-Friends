@@ -32,6 +32,7 @@ func _ready() -> void:
 	mat.set_shader_parameter("rim_width", RIM)
 	mat.set_shader_parameter("leather_width", LEATHER)
 	material = mat
+	preload("res://hub/cursor_parallax.gd").watch(self, func(shift: Vector2): mat.set_shader_parameter("cursor_shift", shift))
 	resized.connect(_update)
 	_update()
 

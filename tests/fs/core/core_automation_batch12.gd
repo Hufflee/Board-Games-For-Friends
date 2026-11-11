@@ -30,6 +30,29 @@ func run(t: Check) -> void:
 	t.equal(abaddon.g.attack[0], 4, "124даёт3атаки")
 	_trigger(abaddon, "damage", {"seat": 0, "amount": 1})
 	t.equal(abaddon.g.hp[0], 0, "124получив урон умирает")
+	for save in [553, 849]:
+		for starting_hp in [1, 2]:
+			var protected = _game(t, 124)
+			if save == 553:
+				protected._take(553)
+				protected.g.hands[0].append(553)
+				protected.ok(0, "loot", {"card": 553})
+				protected.close()
+				protected.choose(0, "holy_card", {"target": 0})
+			else:
+				_item(protected, 0, 849)
+				protected.ok(0, "activate", {"item": protected.g.items[0].size() - 1})
+				protected.close()
+				protected.choose(0, "holy_save26", {"target": 0})
+			protected.g.hp[0] = starting_hp
+			protected.g._damage_player(0, 1)
+			protected.g._check_deaths()
+			for response in 4:
+				if protected.g.phase != "priority":
+					break
+				protected.close()
+			t.check(protected.g.hp[0] > 0 and not protected.g.dead[0], "Защита %d спасает Абаддона после одного удара при %d HP" % [save, starting_hp])
+			t.check(not protected.g._holy_saves.has(0) and not protected.g._death_queue.has(0), "Защита расходуется один раз без повторной смерти")
 	var athame = _game(t, 125)
 	athame.ok(0, "activate", {"item": 1})
 	t.equal(athame.g.phase, "effect", "125оплата раньше окна ответа")

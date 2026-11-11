@@ -8,6 +8,8 @@ var edition: OptionButton
 var teller: OptionButton
 var random_teller: Button
 var timer_box: CheckBox
+var whispers_box: CheckBox
+var leave: Button
 var roster: GridContainer
 var roster_title: Label
 var roster_key := ""
@@ -39,7 +41,7 @@ func _ready() -> void:
 	var public := VBoxContainer.new()
 	public.custom_minimum_size.x = 350
 	public.size_flags_horizontal = SIZE_EXPAND_FILL
-	public.add_theme_constant_override("separation", 16)
+	public.add_theme_constant_override("separation", 8)
 	columns.add_child(public)
 	public.add_child(Style.label("Часовая башня", Style.H1, Style.INK, true))
 	public.add_child(Style.label("Подготовка партии", Style.BODY, Style.MUTED))
@@ -75,15 +77,23 @@ func _ready() -> void:
 	teller_row.add_child(random_teller)
 	timer_box = CheckBox.new()
 	timer_box.name = "DayTimer"
-	timer_box.text = "Таймер дня: речь по минуте, 2 мин обсуждения, 15 с на голос"
+	timer_box.text = "Таймер дня"
+	timer_box.tooltip_text = "Минута на речь, две минуты на обсуждение, минута на номинации и 15 секунд на голос."
 	timer_box.add_theme_font_size_override("font_size", Style.SMALL)
 	timer_box.toggled.connect(func(on: bool):
 		if updating: return
 		if Net.is_host(): Net.set_setting("bc_timer", on)
 		else: Net.bc_configure({"bc_timer": on}))
 	public.add_child(timer_box)
-	# Участники: заголовок со счётом и сетка ников в 3 колонки (16 мест помещаются без прокрутки в 720p).
-	# Заголовок списка и кнопки соло-мест — одной строкой, чтобы 16 ников влезали без прокрутки.
+	whispers_box = CheckBox.new()
+	whispers_box.name = "StoryReadsWhispers"
+	whispers_box.text = "Рассказчик читает шёпот между игроками"
+	whispers_box.add_theme_font_size_override("font_size", Style.SMALL)
+	whispers_box.toggled.connect(func(on: bool):
+		if not updating:
+			Net.bc_configure({"bc_story_whispers": on}))
+	public.add_child(whispers_box)
+	# Участники: три колонки и кнопки соло-мест в заголовке.
 	var roster_head := HBoxContainer.new()
 	roster_head.add_theme_constant_override("separation", 8)
 	public.add_child(roster_head)
@@ -124,7 +134,7 @@ func _ready() -> void:
 	handbook.size_flags_horizontal = SIZE_EXPAND_FILL
 	handbook.pressed.connect(app.show_handbook)
 	footer.add_child(handbook)
-	var leave := Style.button("К выбору игры", Style.SMALL)
+	leave = Style.button("", Style.SMALL)
 	leave.name = "Leave"
 	leave.size_flags_horizontal = SIZE_EXPAND_FILL
 	LeaveGuard.wire(leave, "Выйти?", "Вернуться в хаб.", app.back_to_hub)
@@ -201,6 +211,9 @@ func refresh() -> void:
 	random_teller.visible = Net.is_host()
 	timer_box.set_pressed_no_signal(bool(options.get("bc_timer", false)))
 	timer_box.disabled = not Net.bc_bridge.is_story_lobby()
+	whispers_box.set_pressed_no_signal(bool(options.get("bc_story_whispers", false)))
+	whispers_box.disabled = timer_box.disabled
+	leave.text = "К выбору игры" if Net.is_host() else "Выйти из пати"
 	var names: Array[String] = []
 	for member: Dictionary in members:
 		names.append(str(member.get("name", "Игрок")))

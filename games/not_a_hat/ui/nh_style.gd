@@ -213,14 +213,19 @@ static func restyle_chat(chat: Control) -> void:
 ## Фон: розовый с белыми каракулями (подарки, стрелки, спирали), как на коробке.
 class Backdrop:
 	extends Control
+	var _motion := Vector2.ZERO
 
 	func _ready() -> void:
 		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 		resized.connect(queue_redraw)
+		preload("res://hub/cursor_parallax.gd").watch(self, func(shift: Vector2):
+			_motion = shift
+			queue_redraw())
 
 	func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, size), NHStyle.PINK)
+		draw_set_transform(_motion)
 		var rng := RandomNumberGenerator.new()
 		rng.seed = 17
 		var c := Color(1, 1, 1, 0.13)

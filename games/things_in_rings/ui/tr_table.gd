@@ -37,6 +37,7 @@ const Flip := preload("res://hub/card_flip.gd")
 func _ready() -> void:
 	_hand_orders = app.hand_orders
 	_dark = Prefs.dark_theme()
+	preload("res://hub/cursor_parallax.gd").add_light(self, Style.ink())
 	_top = TopBar.make(self, "Things in Rings", Style.button, null, Style.ink(), Style.HEAD)
 	for item: Array in [["Правила", app.show_rules], ["Настройки", app.show_settings]]:
 		var b := Style.button(item[0], 16)

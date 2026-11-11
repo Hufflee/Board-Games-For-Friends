@@ -286,7 +286,11 @@ func _wake(actor: int, id: String) -> void:
 			_numeric(actor, _empath_values(actor), 2, "Среди ваших живых соседей злых: %d.")
 		"undertaker":
 			if int(g.execution_death) >= 0:
-				_role_information(actor, int(g.execution_death), "Казнённый был: %s.")
+				var victim := int(g.execution_death)
+				if healthy(actor):
+					g.add_private(actor, "Казнённый был: %s." % g.catalog[g.roles[victim]].name)
+				else:
+					_role_information(actor, victim, "Казнённый был: %s.")
 			else:
 				# По альманаху Гробовщик (и Пьяница в его роли) узнаёт только казнённого; ночная смерть — не повод.
 				g.story_log.append("Ночь %d · %s (%s) не просыпается: сегодня никто не казнён." % [night_no, g.players[actor].name, _story_role(actor)])

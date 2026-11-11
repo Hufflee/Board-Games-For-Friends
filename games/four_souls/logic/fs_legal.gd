@@ -101,7 +101,7 @@ static func candidates(g: FSRules, seat: int) -> Array:
 			out.append(_a("room_attack24", {"index": int(room_action.index)}))
 	match g.phase:
 		"starting_character":
-			if seat == g.actor():
+			if g.awaits_character_choice(seat):
 				for offer: Dictionary in g._character_offers[seat]:
 					out.append(_a("choose_character", {"card": int(offer.card)}))
 		"starting_item":

@@ -29,5 +29,12 @@ func _run() -> void:
 	check(not (clean.get("placements", [[], []])[1] as Array).has("game_from_future"), "незнакомая игра пропущена")
 	check(clean.get("config", {}).get("figure_cells", {}).has("figure:abc123"), "место фигурки из мастерской передаётся")
 	check(ShelfConfig.is_figure("figure:abc123") and ShelfConfig.is_figure("shelf_mummy") and not ShelfConfig.is_figure("perudo"), "is_figure")
+	var camera := {"zoom": 1.5, "frame": [0, 1.2, 2, 0, 0, 0, 1]}
+	room["camera"] = camera
+	clean = load("res://hub/public_room.gd").clean(room)
+	check(clean.get("camera") == camera, "Масштаб и ракурс передаются в публичной комнате")
+	camera.frame[6] = 2.0
+	clean = load("res://hub/public_room.gd").clean(room)
+	check(not clean.is_empty() and not clean.has("camera"), "Неверный ракурс пропускается, шкаф остаётся доступным")
 	print("СОВМЕСТИМОСТЬ КОМНАТ: ", checks, " проверок, ", fails, " ошибок")
 	quit(1 if fails > 0 else 0)

@@ -33,6 +33,7 @@ func _ready() -> void:
 	background.mouse_filter = MOUSE_FILTER_IGNORE
 	background.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	add_child(background)
+	preload("res://hub/cursor_parallax.gd").add_light(background, Style.ink())
 	_top = TopBar.make(self, "Пользовательская игра", Style.button, null, Style.ink(), Style.HEAD)
 	var theme_button := Style.button("Тема", 16)
 	theme_button.pressed.connect(func(): Prefs.set_value("theme_mode", "light" if Style.dark() else "dark"))

@@ -24,6 +24,7 @@ var _dark := false
 
 func _ready() -> void:
 	_dark = Prefs.dark_theme()
+	preload("res://hub/cursor_parallax.gd").add_light(self, Style.ink())
 	_top = TopBar.make(self, "Хором!", Style.button, null, Style.ink(), Style.HEAD)
 	for item: Array in [["Правила", app.show_rules], ["Настройки", app.show_settings]]:
 		var b := Style.button(item[0], 16)

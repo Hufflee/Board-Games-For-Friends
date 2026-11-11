@@ -288,26 +288,31 @@ class Coin:
 ## Фон: доски стола — горизонтальные планки с прожилками, светлее сверху (свет сверху).
 class Backdrop:
 	extends Control
+	var _motion := Vector2.ZERO
 
 	func _ready() -> void:
 		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 		resized.connect(queue_redraw)
+		preload("res://hub/cursor_parallax.gd").watch(self, func(shift: Vector2):
+			_motion = shift
+			queue_redraw())
 
 	func _draw() -> void:
 		var dark := BRStyle.dark()
 		var base := BRStyle.WOOD_DARK if dark else BRStyle.WOOD
 		draw_rect(Rect2(Vector2.ZERO, size), base)
 		var h := 72.0
-		var y := 0.0
-		var i := 0
+		var y := -h
+		var i := 2
 		var rng := RandomNumberGenerator.new()
 		rng.seed = 7
-		while y < size.y:
+		draw_set_transform(_motion)
+		while y < size.y + h:
 			var tone := base.lightened(0.04 * (i % 3)) if not dark else base.darkened(0.06 * (i % 3))
-			draw_rect(Rect2(0, y, size.x, h - 3), tone)
-			draw_rect(Rect2(0, y + h - 3, size.x, 3), Color(0, 0, 0, 0.28))
-			draw_rect(Rect2(0, y, size.x, 2), Color(1, 1, 1, 0.05))
+			draw_rect(Rect2(-16, y, size.x + 32, h - 3), tone)
+			draw_rect(Rect2(-16, y + h - 3, size.x + 32, 3), Color(0, 0, 0, 0.28))
+			draw_rect(Rect2(-16, y, size.x + 32, 2), Color(1, 1, 1, 0.05))
 			for k in 5:
 				var gy := y + rng.randf_range(10, h - 12)
 				var x0 := rng.randf_range(-100, size.x)
@@ -317,6 +322,7 @@ class Backdrop:
 			draw_rect(Rect2(jx, y, 3, h - 3), Color(0, 0, 0, 0.22))
 			y += h
 			i += 1
+		draw_set_transform(Vector2.ZERO)
 		for k in 10:
 			var t := k / 10.0
 			draw_rect(Rect2(0, size.y * t, size.x, size.y / 10.0 + 1), Color(0, 0, 0, 0.025 * k))

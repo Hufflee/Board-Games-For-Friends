@@ -221,6 +221,14 @@ func _ready() -> void:
 	shift_hint.custom_minimum_size.x = 400
 	shift_hint.modulate.a = 0.75
 	gameplay.add_child(shift_hint)
+	var mini_zoom := CheckBox.new()
+	mini_zoom.text = "Увеличивать окно мини-игр при наведении"
+	mini_zoom.tooltip_text = "Шахматы, шашки и го: окно вырастает, пока курсор над полем, и возвращается на место, когда курсор уходит"
+	mini_zoom.add_theme_font_size_override("font_size", 17)
+	_ink(mini_zoom)
+	mini_zoom.button_pressed = Prefs.minigame_zoom
+	mini_zoom.toggled.connect(func(on): Prefs.set_value("minigame_zoom", on))
+	gameplay.add_child(mini_zoom)
 	var dice_row := K12UI.hbox(8)
 	dice_row.add_child(_label("Бросок кубика", K12UI.BODY))
 	var dice_style := OptionButton.new()

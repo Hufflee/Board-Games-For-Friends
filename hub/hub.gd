@@ -116,16 +116,31 @@ func _rebuild() -> void:
 	var top := HubStyle.hbox(8)
 	top.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
 	top.grow_horizontal = Control.GROW_DIRECTION_BEGIN
-	top.offset_left = -610
+	top.offset_left = -740
 	top.offset_right = -20
 	top.offset_top = 18
 	top.alignment = BoxContainer.ALIGNMENT_END
 	var news := HubStyle.button("Что нового?", 15)
 	news.pressed.connect(func(): add_child(load("res://hub/whats_new.gd").new()))
 	top.add_child(news)
+	if in_party:
+		var chat_button := HubStyle.button("Чат", 15)
+		chat_button.tooltip_text = "Чат пати (Enter)"
+		chat_button.pressed.connect(func():
+			for panel: Node in _ui.find_children("*", "K12ChatPanel", false, false):
+				(panel as K12ChatPanel).expanded = not (panel as K12ChatPanel).expanded)
+		top.add_child(chat_button)
+	var mini_games := HubStyle.button("Мини-игры", 15)
+	mini_games.tooltip_text = "Шахматы, шашки и го один на один с участником пати"
+	mini_games.pressed.connect(func(): Net.minigames.toggle_panel())
+	top.add_child(mini_games)
 	var stats := HubStyle.button("Статистика",15)
 	stats.pressed.connect(func():add_child(load("res://hub/player_stats_screen.gd").new()))
 	top.add_child(stats)
+	var camera_reset := HubStyle.button("Сброс камеры", 15)
+	camera_reset.visible = _watch_peer == 0
+	camera_reset.pressed.connect(_room.reset_shelf_camera)
+	top.add_child(camera_reset)
 	var settings := HubStyle.button("Настройки", 15)
 	settings.pressed.connect(func():
 		var screen := SettingsScreen.new()
@@ -155,6 +170,7 @@ func _rebuild() -> void:
 	_ui.add_child(_status)
 	if in_party:
 		var chat := K12ChatPanel.new()
+		chat.external_button = true
 		_ui.add_child(chat)
 	if not _selected.is_empty():
 		_show_card(_selected)
@@ -313,7 +329,7 @@ func _party_panel() -> Control:
 		follow.button_pressed = not _watch_follow
 		follow.toggled.connect(_toggle_watch_follow)
 		v.add_child(follow)
-	v.add_child(HubStyle.label("Участники (%d/%d)" % [humans.size(), Net.MAX_PLAYERS], 13, HubStyle.MUTED))
+	v.add_child(HubStyle.label("Участники (%d/%d)" % [humans.size(), Net.party_capacity()], 13, HubStyle.MUTED))
 	for m in humans:
 		var row := HubStyle.hbox(6)
 		row.add_child(PlayerTag.make(m, data["members"], 16, HubStyle.TEXT))

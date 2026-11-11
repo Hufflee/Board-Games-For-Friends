@@ -76,7 +76,11 @@ func _ready() -> void:
 	_cards.add_theme_constant_override("h_separation", 16)
 	_cards.add_theme_constant_override("v_separation", 16)
 	_scroll.add_child(_cards)
-	var reminder := Style.label("Памятка: смерть не раскрывает роль. Мёртвый может говорить и имеет один последний голос.\nНоминируют только живые, по одному разу в день. При равенстве лидеров казнь не происходит.", Style.SMALL, Style.MUTED)
+	var reminder := Style.label(
+		"Смерть не раскрывает роль. Мёртвый может говорить и имеет один последний голос.\n" +
+		"Номинируют только живые, по одному разу в день. При равенстве лидеров казнь не происходит.\n" +
+		"Отравление даёт гарантированную дезинформацию. При опьянении рассказчик решает, дать верную или ложную информацию.",
+		Style.SMALL, Style.MUTED)
 	reminder.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	column.add_child(reminder)
 	resized.connect(_layout)
