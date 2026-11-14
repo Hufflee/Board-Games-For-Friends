@@ -102,6 +102,22 @@ const TEXTURES := {
 	# «Мачи Коро» — одна монета на обе темы: tools/coin_machi_koro.py (согласована 06.11)
 	"machi_koro": [COINS + "machi_koro_coin.png", COINS + "machi_koro_coin.png"],
 	"machi_koro_secret": [COINS + "machi_koro_secret_coin.png", COINS + "machi_koro_secret_coin.png"],
+	"colt_express": [COINS + "colt_express_coin.png", COINS + "colt_express_coin.png"],
+	"colt_express_dark": [COINS + "colt_express_dark_coin.png", COINS + "colt_express_dark_coin.png"],
+	"colt_express_secret": [COINS + "colt_express_secret_coin.png", COINS + "colt_express_secret_coin.png"],
+	"colt_express_dark_secret": [COINS + "colt_express_dark_secret_coin.png", COINS + "colt_express_dark_secret_coin.png"],
+	"first_contact": [COINS + "first_contact_coin.png", COINS + "first_contact_coin.png"],
+	"first_contact_dark": [COINS + "first_contact_dark_coin.png", COINS + "first_contact_dark_coin.png"],
+	"first_contact_secret": [COINS + "first_contact_secret_coin.png", COINS + "first_contact_secret_coin.png"],
+	"first_contact_dark_secret": [COINS + "first_contact_dark_secret_coin.png", COINS + "first_contact_dark_secret_coin.png"],
+	"green_team_wins": [COINS + "green_team_wins_coin.png", COINS + "green_team_wins_coin.png"],
+	"green_team_wins_dark": [COINS + "green_team_wins_dark_coin.png", COINS + "green_team_wins_dark_coin.png"],
+	"green_team_wins_secret": [COINS + "green_team_wins_secret_coin.png", COINS + "green_team_wins_secret_coin.png"],
+	"green_team_wins_dark_secret": [COINS + "green_team_wins_dark_secret_coin.png", COINS + "green_team_wins_dark_secret_coin.png"],
+	"in_broad_strokes": [COINS + "in_broad_strokes_coin.png", COINS + "in_broad_strokes_coin.png"],
+	"in_broad_strokes_dark": [COINS + "in_broad_strokes_dark_coin.png", COINS + "in_broad_strokes_dark_coin.png"],
+	"in_broad_strokes_secret": [COINS + "in_broad_strokes_secret_coin.png", COINS + "in_broad_strokes_secret_coin.png"],
+	"in_broad_strokes_dark_secret": [COINS + "in_broad_strokes_dark_secret_coin.png", COINS + "in_broad_strokes_dark_secret_coin.png"],
 }
 ## Области сторон на листах. Круглая отрисовка отсекает фон за ободком.
 const COIN_REGIONS := {
@@ -134,19 +150,40 @@ const COIN_REGIONS := {
 	"blood_on_the_clocktower_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
 	"machi_koro": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
 	"machi_koro_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"colt_express": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"colt_express_dark": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"colt_express_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"colt_express_dark_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"first_contact": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"first_contact_dark": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"first_contact_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"first_contact_dark_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"green_team_wins": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"green_team_wins_dark": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"green_team_wins_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"green_team_wins_dark_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"in_broad_strokes": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"in_broad_strokes_dark": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"in_broad_strokes_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
+	"in_broad_strokes_dark_secret": [Rect2(0, 0, 887, 887), Rect2(887, 0, 887, 887)],
 }
 ## Листы, где монета нарисована целиком (с гуртом и выступами): рисуем по альфе листа, без круглой маски.
 const FULL_ART := ["the_mind", "the_mind_dark", "the_mind_secret", "the_mind_dark_secret", "the_gang", "things_in_rings", "things_in_rings_secret", "poker", "poker_secret",
 	"khorom", "khorom_secret", "khorom_dark", "khorom_dark_secret", "phantom_ink", "phantom_ink_secret",
 	"four_souls", "four_souls_secret", "stillion", "stillion_secret", "gloom_secret",
 	"hues_and_cues", "hues_and_cues_dark", "hues_and_cues_secret", "hues_and_cues_dark_secret", "blood_on_the_clocktower", "blood_on_the_clocktower_secret",
-	"machi_koro", "machi_koro_secret"]
+	"machi_koro", "machi_koro_secret",
+	"colt_express", "colt_express_dark", "colt_express_secret", "colt_express_dark_secret",
+	"first_contact", "first_contact_dark", "first_contact_secret", "first_contact_dark_secret",
+	"green_team_wins", "green_team_wins_dark", "green_team_wins_secret", "green_team_wins_dark_secret",
+	"in_broad_strokes", "in_broad_strokes_dark", "in_broad_strokes_secret", "in_broad_strokes_dark_secret"]
 ## Игры со своей монетой (кроме Перудо) и есть ли у неё вариант для тёмной темы.
 ## Порядок важен: tip_top_18 раньше tip_top.
 const GAME_COINS := [["phantom_ink", false], ["four_souls", false], ["stillion", false], ["tip_top_18", false], ["tip_top", false], ["king_of_12", false], ["dangerous_words", false],
 	["ready_set_bet", true], ["word_slam", true], ["wavelength", true], ["not_a_hat", false],
 	["hues_and_cues", true], ["brodilka", false], ["gloom", false], ["the_gang", false], ["things_in_rings", false],
-	["poker", false], ["khorom", true], ["the_mind", true], ["blood_on_the_clocktower", false], ["machi_koro", false]]
+	["poker", false], ["khorom", true], ["the_mind", true], ["blood_on_the_clocktower", false], ["machi_koro", false],
+	["colt_express", true], ["first_contact", true], ["green_team_wins", true], ["in_broad_strokes", true]]
 static var _tex_cache := {}
 
 var _vel := Vector2.ZERO

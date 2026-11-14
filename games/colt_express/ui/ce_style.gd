@@ -302,20 +302,23 @@ static func draw_wagon(ci: CanvasItem, cx: float, roof: float, rail: float, w: f
 	var edge := c("wood_dark")
 	ci.draw_rect(Rect2(left + 4, body_bottom + 2, w - 8, 4), Color(0, 0, 0, 0.25))
 	if engine:
-		var cab := Rect2(left + w * 0.58, body_top, w * 0.38, body_bottom - body_top)
+		# паровоз смотрит по ходу поезда (вправо): будка — к вагонам (слева), котёл, труба и
+		# скотосбрасыватель — впереди (справа)
+		var cab := Rect2(left + w * 0.04, body_top, w * 0.38, body_bottom - body_top)
 		ci.draw_rect(cab, wood)
 		ci.draw_rect(Rect2(cab.position.x + 6, cab.position.y + 8, cab.size.x - 12, 18), c("window"))
 		ci.draw_rect(Rect2(cab.position.x - 4, body_top - 4, cab.size.x + 8, 6), edge)
-		var boiler := Rect2(left + 4, body_top + (body_bottom - body_top) * 0.38, w * 0.56, (body_bottom - body_top) * 0.62)
+		var boiler := Rect2(left + w * 0.4, body_top + (body_bottom - body_top) * 0.38, w * 0.56, (body_bottom - body_top) * 0.62)
 		ci.draw_rect(boiler, Color("3b3330") if not dark() else Color("2a2424"))
 		for i in 3:
 			ci.draw_line(Vector2(boiler.position.x + boiler.size.x * (0.25 + i * 0.25), boiler.position.y),
 				Vector2(boiler.position.x + boiler.size.x * (0.25 + i * 0.25), boiler.end.y), Color("c48a2c", 0.6), 2)
-		var stack := Rect2(left + w * 0.12, body_top - 2, w * 0.1, boiler.position.y - body_top + 2)
+		var stack := Rect2(left + w * 0.78, body_top - 2, w * 0.1, boiler.position.y - body_top + 2)
 		ci.draw_rect(stack, Color("2a2424"))
 		ci.draw_rect(Rect2(stack.position.x - 4, stack.position.y - 6, stack.size.x + 8, 7), Color("2a2424"))
-		ci.draw_colored_polygon(PackedVector2Array([Vector2(left, body_bottom), Vector2(left - 12, body_bottom + 8),
-			Vector2(left + 6, body_bottom + 8)]), Color("2a2424"))
+		var nose := left + w
+		ci.draw_colored_polygon(PackedVector2Array([Vector2(nose, body_bottom), Vector2(nose + 12, body_bottom + 8),
+			Vector2(nose - 6, body_bottom + 8)]), Color("2a2424"))
 	else:
 		ci.draw_rect(Rect2(left, body_top, w, body_bottom - body_top), wood)
 		var plank := (body_bottom - body_top) / 5.0

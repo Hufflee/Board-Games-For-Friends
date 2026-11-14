@@ -28,6 +28,7 @@ var _history_key := ""
 var _last_score := 0
 var _result_correct := false
 var _guess_text := ""
+var side_scroll: ScrollContainer
 
 
 class Backdrop:
@@ -141,6 +142,10 @@ func _menu(_reason: String = "") -> void:
 
 
 func _leave() -> void:
+	# хост пати выходит — вся пати возвращается в главное меню, пати сохраняется (владелец, 15.11)
+	if Net.is_party() and Net.is_host():
+		Net.return_to_party()
+		return
 	Net.leave()
 	get_tree().change_scene_to_file("res://hub/hub.tscn")
 
@@ -203,6 +208,28 @@ func _lobby() -> void:
 		var card := _dict_card(option[1], option[2], current == key, not host)
 		card.pressed.connect(func() -> void: Net.set_setting("ibs_words", key))
 		dict_row.add_child(card)
+	rc.add_child(HSeparator.new())
+	# кто угадывает первым: случайно или выбранный игрок; дальше — по разу каждый за круг (владелец, 15.11)
+	rc.add_child(IBSStyle.heading("Первым угадывает", 26))
+	var critic_row := HFlowContainer.new()
+	critic_row.add_theme_constant_override("h_separation", 8)
+	critic_row.add_theme_constant_override("v_separation", 8)
+	rc.add_child(critic_row)
+	var chosen_critic := int(Net.settings.get("ibs_critic", -1))
+	if chosen_critic >= members.size():
+		chosen_critic = -1
+	var critic_options: Array = [[-1, "Случайно"]]
+	for i in members.size():
+		critic_options.append([i, str(members[i].get("name", "Игрок %d" % (i + 1)))])
+	for option: Array in critic_options:
+		var seat_value: int = option[0]
+		var pick := _button(option[1], 15, "tool")
+		pick.toggle_mode = true
+		pick.button_pressed = chosen_critic == seat_value
+		pick.disabled = not host
+		pick.pressed.connect(func() -> void: Net.set_setting("ibs_critic", seat_value))
+		critic_row.add_child(pick)
+	_label(rc, "Дальше искусствовед выбирается случайно, и каждый побудет им по разу, прежде чем кто-то станет снова.", IBSStyle.CAP, "regular", "muted")
 	rc.add_child(HSeparator.new())
 	rc.add_child(IBSStyle.heading("Как играть", 26))
 	for line in ["Искусствовед не видит слово — его видят художники.", "Художник проводит на листе две прямые или одну кривую.", "Листы накладываются друг на друга — картинка растёт.", "После каждого слоя — две попытки угадать."]:
@@ -317,6 +344,7 @@ func _table() -> void:
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	col.add_child(scroll)
+	side_scroll = scroll
 	side = VBoxContainer.new()
 	side.add_theme_constant_override("separation", 10)
 	side.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -407,6 +435,11 @@ func _track_history() -> void:
 			for i in history.size():
 				if history[i].begins_with(entry) and history[i].ends_with("на проверке"):
 					history[i] = entry + " — мимо"
+		# слово угадано (сразу или засчитано художником) — эта попытка помечается «угадано!»
+		if state.phase == "result" and _result_correct:
+			for i in history.size():
+				if history[i].begins_with(entry):
+					history[i] = entry + " — угадано!"
 
 
 func _draw_state(next: Dictionary) -> void:
@@ -522,7 +555,18 @@ func _update_side() -> void:
 	if history.is_empty():
 		_label(side, "Пока не было", IBSStyle.BODY, "regular", "muted")
 	for h in history:
-		_label(side, h, IBSStyle.BODY, "regular", "muted")
+		var won := h.ends_with("угадано!")
+		_label(side, h, IBSStyle.BODY, "bold" if won else "regular", "accent" if won else "muted")
+	# самые новые попытки внизу — прокрутить к ним (владелец, 15.11)
+	_scroll_to_end.call_deferred()
+
+
+func _scroll_to_end() -> void:
+	if not is_instance_valid(side_scroll):
+		return
+	await get_tree().process_frame
+	if is_instance_valid(side_scroll):
+		side_scroll.scroll_vertical = int(side_scroll.get_v_scroll_bar().max_value)
 
 
 func _update_action() -> void:

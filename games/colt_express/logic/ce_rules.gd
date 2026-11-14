@@ -52,6 +52,8 @@ var elapsed := 0.0
 ## Пауза после переворота верхней карты стопки, прежде чем действие разыграется на поезде (владелец, 14.11).
 ## Только при запуске кнопкой «Следующее действие» без выбора; в повторах паузы нет.
 const FLIP_LEAD := 2.0
+## Скорость показа действий и повторов (хост: 1, 2 или 4) — владелец, 15.11.
+var speed := 1.0
 var options: Array[Dictionary] = []
 var reactions: Array[Dictionary] = []
 var staged_clip: Dictionary = {}
@@ -384,6 +386,13 @@ func _open() -> void:
 func action(seat: int, kind: String, arg: Dictionary, host: bool) -> bool:
 	if seat < 0 or seat >= players.size():
 		return false
+	# ускорение и пропуск анимаций — только хост, правил не меняют
+	if host and kind == "anim_speed":
+		speed = clampf(float(arg.get("value", 1.0)), 1.0, 4.0)
+		return true
+	if host and kind == "skip_anim" and phase in ["animate", "replay", "match_replay"]:
+		_skip_animation()
+		return true
 	if phase == "select" and seat == turn and kind == "select":
 		return _select(seat,int(arg.get("id",-1)))
 	if phase == "travel" and seat == turn and kind == "travel" and int(arg.get("serial",-1)) == serial:
@@ -1055,10 +1064,63 @@ func _pick_pocket(b: Dictionary) -> void:
 			l.owner = b.id
 			return
 
+## Пропуск: текущее действие заканчивается сразу; повтор раунда — к последнему клипу; повтор партии — к итогам.
+func _skip_animation() -> void:
+	if phase == "match_replay":
+		_finish()
+		return
+	if phase == "replay" and not history.is_empty():
+		replay_index = history.size() - 1
+		clip = history[replay_index]
+	elapsed = float(clip.get("duration", 0.0)) + float(clip.get("lead", 0.0))
+
+
+## Фазы, в которых идут часы хода (настройка комнаты «Время на ход»).
+const TIMED := ["select", "travel", "mount", "plan", "discard", "reserve", "reflex", "choose", "reaction"]
+
+
+## Время хода вышло — хост ходит за игрока самым безопасным вариантом (владелец, 15.11):
+## бандит — первый свободный, планирование — взять 3 карты (или сыграть первую подходящую),
+## сохранение руки и рефлекс — «Готово», выбор — первый вариант, верхом — войти в вагон.
+func timeout() -> bool:
+	if phase not in TIMED:
+		return false
+	var token := {"serial": serial}
+	match phase:
+		"select":
+			for id in range(NAMES.size()):
+				if _bandit(id) == {}:
+					return _select(turn, id)
+			return prison and _select(turn, 7)
+		"travel":
+			token["car"] = 1
+			return action(turn, "travel", token, false)
+		"mount":
+			var acted := false
+			for b in bandits.duplicate():
+				if not b.has("mounted") and not mount_votes.has(b.id) and phase == "mount":
+					acted = action(b.seat, "mount", {"serial": serial, "land": true}, false) or acted
+			return acted
+		"plan":
+			if flask_plays == 0 and action(turn, "draw", token, false):
+				return true
+			var hand: Array = players[turn].hand
+			for i in hand.size():
+				if hand[i].kind != "bullet" and not (steps[step] == "к" and hand[i].kind in ["shoot", "punch"]):
+					return action(turn, "play", {"serial": serial, "index": i, "hidden": false}, false)
+			return action(turn, "draw", token, false)
+		"discard", "reserve", "reflex":
+			return action(turn, "keep", token, false)
+		"choose", "reaction":
+			token["index"] = 0
+			return action(turn, "choose", token, false)
+	return false
+
+
 func tick(delta: float) -> bool:
 	if phase not in ["animate", "replay", "match_replay"]:
 		return false
-	elapsed += delta
+	elapsed += delta * speed
 	if elapsed < float(clip.duration) + (float(clip.get("lead", 0.0)) if phase == "animate" else 0.0):
 		return false
 	elapsed = 0.0
@@ -1121,6 +1183,7 @@ func _finish() -> void:
 			least = mini(least,b.ammo)
 	for s in players.size():
 		var score: int = players[s].ransom
+		var shooter := false  # бонус лучшего стрелка — для разбивки итога на столе
 		for b in bandits:
 			if b.seat != s:
 				continue
@@ -1138,6 +1201,7 @@ func _finish() -> void:
 				score += 200
 			if not duel and not teams and b.ammo == least:
 				score += 1000
+				shooter = true
 			for l in loot:
 				if l.owner == b.id and not (_round_event() == "sharing" and l.kind == "case"):
 					score += l.value
@@ -1148,7 +1212,7 @@ func _finish() -> void:
 						score += floori(float(l.value)/colocated.size())
 		var eligible := bandits.any(func(b: Dictionary) -> bool:
 			return b.seat == s and not b.get("fallen",false) and (_round_event() != "crime" or not b.get("cell",false)) and (_round_event() != "escape" or b.id == 6 or b.id in escaped or b.car == -2))
-		results.append({"seat":s,"score":score,"received":players[s].received,"eligible":eligible})
+		results.append({"seat":s,"score":score,"received":players[s].received,"eligible":eligible,"shooter":shooter})
 	if teams:
 		for s in range(0,players.size(),2):
 			var total: int = results[s].score + results[s+1].score
@@ -1239,4 +1303,4 @@ func get_view(seat: int) -> Dictionary:
 		"card":pending.duplicate() if phase in ["reveal","choose","reaction"] else clip.get("card",{}),
 		"options":options.duplicate(true) if phase in ["choose","reaction"] and seat == turn else [],
 		"clip":clip.duplicate(true) if phase in ["animate", "replay", "match_replay"] else {},
-		"progress":elapsed,"results":results.duplicate(true)}
+		"progress":elapsed,"results":results.duplicate(true),"speed":speed}

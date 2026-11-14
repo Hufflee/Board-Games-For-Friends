@@ -16,14 +16,30 @@ var layers: Array = []
 var previous: Array = []
 var guess := ""
 var elapsed := 0.0
+var critic_pool: Array = []  # кто ещё не был искусствоведом в этом круге (владелец, 15.11)
 
 ## options.words: "simple" — 200 простых слов (IBSWords.SIMPLE), "shared" — общий словарь SharedWords.
 func new_game(seats: Array, options: Dictionary = {}) -> void:
 	players = seats.duplicate(true)
 	words = preload("res://games/in_broad_strokes/logic/ibs_words.gd").pick(str(options.get("words", "simple")))
 	words.shuffle()
-	critic = randi_range(0,players.size()-1)
+	# первый искусствовед — выбранный в лобби или случайный; дальше — случайно из тех, кто ещё не был им в круге
+	var first := int(options.get("critic", -1))
+	critic = first if first >= 0 and first < players.size() else randi_range(0, players.size() - 1)
+	critic_pool = range(players.size()).filter(func(s: int) -> bool: return s != critic)
 	_round()
+
+
+## Следующий искусствовед: случайный из ещё не бывших в этом круге; круг закончился — все снова в пуле.
+func _next_critic() -> void:
+	if critic_pool.is_empty():
+		critic_pool = range(players.size())  # новый круг — снова все
+	# в начале нового круга не повторять того, кто угадывал последним
+	var choices: Array = critic_pool.filter(func(s: int) -> bool: return s != critic)
+	if choices.is_empty():
+		choices = critic_pool
+	critic = choices.pick_random()
+	critic_pool.erase(critic)
 
 func _round() -> void:
 	if remaining == 0 or words.is_empty():
@@ -78,7 +94,7 @@ func action(seat: int, kind: String, arg: Dictionary, host: bool) -> bool:
 	elif phase in ["draw","guess","judge"] and host and kind == "give_up":
 		_finish(false)
 	elif phase == "result" and host and kind == "next":
-		critic = (artist+1)%players.size()
+		_next_critic()
 		_round()
 	else:
 		return false
@@ -108,10 +124,63 @@ func _valid(strokes: Variant) -> bool:
 			return false
 		if strokes.size() == 2 and path.size() != 2:
 			return false
+		if strokes.size() == 1 and path.size() > 2 and not curve_ok(path):
+			return false
 		for pt: Vector2 in path:
 			if not pt.is_finite() or pt.x < 0 or pt.y < 0 or pt.x > 1 or pt.y > 1:
 				return false
 	return true
+
+## Кривая гнётся только в одну сторону (правила: круг и спираль можно, «S» — нельзя).
+## Повороты между соседними отрезками длиной от CURVE_STEP должны быть одного знака; мелкое дрожание
+## руки (синус угла меньше CURVE_TOLERANCE) поворотом не считается. Той же функцией проверяет и стол.
+const CURVE_STEP := 0.012
+const CURVE_TOLERANCE := 0.15
+
+
+static func curve_ok(path: PackedVector2Array) -> bool:
+	var turn_sign := 0
+	var anchor := path[0]
+	var prev_dir := Vector2.ZERO
+	for i in range(1, path.size()):
+		var seg := path[i] - anchor
+		if seg.length() < CURVE_STEP:
+			continue
+		var dir := seg.normalized()
+		if prev_dir != Vector2.ZERO:
+			var turn := prev_dir.cross(dir)
+			if absf(turn) > CURVE_TOLERANCE:
+				var s := 1 if turn > 0 else -1
+				if turn_sign == 0:
+					turn_sign = s
+				elif s != turn_sign:
+					return false
+		prev_dir = dir
+		anchor = path[i]
+	return true
+
+
+## Фазы с часами хода.
+const TIMED := ["draw", "guess", "judge"]
+
+
+## Время вышло (владелец, 15.11): художник не нарисовал — ход переходит следующему художнику (лист не
+## тратится); искусствовед — пас; художник не решил — догадка не засчитывается.
+func timeout() -> bool:
+	match phase:
+		"draw":
+			artist = (artist + 1) % players.size()
+			if artist == critic:
+				artist = (artist + 1) % players.size()
+			turn = artist
+			serial += 1
+			return true
+		"guess":
+			return action(critic, "pass", {"serial": serial}, false)
+		"judge":
+			return action(artist, "reject", {"serial": serial}, false)
+	return false
+
 
 func tick(delta: float) -> bool:
 	if phase != "merge":

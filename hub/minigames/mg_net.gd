@@ -16,10 +16,10 @@ signal notice(text: String)
 signal won(id: String)  # я победил в партии — окно сыплет конфетти и звенит
 
 const GAMES := ["chess", "checkers", "go", "connect4"]  # один на один, по приглашению
-const ROOMS := ["balls", "stars"]  # общие комнаты
+const ROOMS := ["balls", "stars", "blackjack"]  # общие комнаты
 const SOLO := ["mines"]
 const TITLES := {"chess": "Шахматы", "checkers": "Шашки", "go": "Го", "connect4": "4 в ряд",
-	"balls": "Сумо", "stars": "Лови звёздочку", "mines": "Сапёр"}
+	"balls": "Сумо", "stars": "Лови звёздочку", "blackjack": "Блэкджек", "mines": "Сапёр"}
 const RULES := {
 	"chess": preload("res://hub/minigames/logic/mg_chess.gd"),
 	"checkers": preload("res://hub/minigames/logic/mg_checkers.gd"),
@@ -29,6 +29,7 @@ const RULES := {
 }
 const Balls := preload("res://hub/minigames/logic/mg_balls.gd")
 const Stars := preload("res://hub/minigames/logic/mg_stars.gd")
+const Blackjack := preload("res://hub/minigames/logic/mg_blackjack.gd")
 const StarOverlay := preload("res://hub/minigames/mg_star_overlay.gd")
 const ROOM_STEP := 1.0 / 30.0  # шаг физики комнаты на хосте
 const ROOM_TICK := 1.0 / 15.0  # как часто хост рассылает положение шариков
@@ -666,11 +667,14 @@ func _host_room_join(peer: int, game: String) -> void:
 	if game not in ROOMS or (_online() and _member(peer).is_empty()):
 		return
 	if not _rooms.has(game):
-		_rooms[game] = {"state": Balls.new_state() if game == "balls" else Stars.new_state(), "acc": 0.0, "tick": 0.0}
+		var fresh: Dictionary = Balls.new_state() if game == "balls" else (Blackjack.new_state() if game == "blackjack" else Stars.new_state())
+		_rooms[game] = {"state": fresh, "acc": 0.0, "tick": 0.0}
 	var room: Dictionary = _rooms[game]
 	var color := int(_member(peer).get("color", 0))
 	if game == "balls":
 		Balls.join(room.state, peer, _room_name(peer), color, _room_rng)
+	elif game == "blackjack":
+		Blackjack.join(room.state, peer, _room_name(peer), color)
 	else:
 		Stars.join(room.state, peer, _room_name(peer), color)
 	_room_push(game)
@@ -682,6 +686,8 @@ func _host_room_leave(peer: int, game: String) -> void:
 	var room: Dictionary = _rooms[game]
 	if game == "balls":
 		Balls.leave(room.state, peer)
+	elif game == "blackjack":
+		Blackjack.leave(room.state, peer)
 	else:
 		Stars.leave(room.state, peer)
 	if _room_peers(game).is_empty():
@@ -699,6 +705,8 @@ func _room_peers(game: String) -> Array:
 
 func _room_snapshot(game: String) -> Dictionary:
 	var state: Dictionary = _rooms[game].state
+	if game == "blackjack":
+		return Blackjack.snapshot(state)
 	return Balls.snapshot(state) if game == "balls" else Stars.snapshot(state)
 
 
@@ -779,6 +787,12 @@ func _host_room_act(peer: int, game: String, action: Dictionary) -> void:
 		if Stars.catch_star(room.state, peer, int(action.catch), _room_rng):
 			_send(peer, "_rpc_star_caught", [1])
 			_room_push(game)
+	elif game == "blackjack":
+		var error: String = Blackjack.act(room.state, peer, action, _room_rng)
+		if error != "":
+			_tell(peer, error)
+			return
+		_room_push(game)
 
 
 @rpc("authority", "reliable")
@@ -835,6 +849,8 @@ func _rooms_process(delta: float) -> void:
 			room.acc = float(room.acc) - ROOM_STEP
 			if game == "balls":
 				dirty = not Balls.step(room.state, ROOM_STEP, _room_rng).is_empty() or dirty
+			elif game == "blackjack":
+				dirty = Blackjack.step(room.state, ROOM_STEP, _room_rng) or dirty  # дилер добирает по карте
 			else:
 				dirty = Stars.step(room.state, ROOM_STEP, _room_rng) or dirty
 		if dirty:

@@ -87,6 +87,21 @@ func action(seat: int, kind: String, data: Dictionary, host: bool) -> bool:
 		return true
 	return false
 
+## Время на ответ вышло (владелец, 15.11): кто не ответил — случайный вариант карты; на карте с пропуском —
+## «нет ответа» (у каждого свой, поэтому в большинство не попадает).
+func timeout() -> bool:
+	if phase != "answer":
+		return false
+	var id: String = cards[turn_no]
+	var acted := false
+	for s in players.size():
+		if phase != "answer" or answers.has(s):
+			continue
+		var value := "нет ответа %d" % (s + 1) if id.begins_with("blank") else str(randi_range(1, 3 if id.begins_with("three") else 2))
+		acted = action(s, "answer", {"round": turn_no, "answer": value}, false) or acted
+	return acted
+
+
 func _score() -> void:
 	var counts: Dictionary = {}
 	for answer: String in groups.values():

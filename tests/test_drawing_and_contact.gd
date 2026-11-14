@@ -16,7 +16,7 @@ func _initialize() -> void:
 	_check(drawing.action(drawing.critic,"guess",{"serial":drawing.serial,"word":drawing.word},false), 16)
 	_check(drawing.score == 1 and drawing.remaining == 24, 17)
 	var contact := Contact.new()
-	contact.new_game([{}, {}, {}, {}])
+	contact.new_game([{}, {}, {}, {}], {"aliens": 2})  # двое на двое: число инопланетян выбирается в лобби (15.11)
 	_check(contact.get_view(0).targets.is_empty(), 20)
 	_check(contact.get_view(2).targets.size() == 2, 21)
 	# первый раунд — только обучение (владелец, 14.11): подсказка и голосование — со второго

@@ -6,12 +6,15 @@ extends Control
 
 signal draft_changed
 
+const Rules := preload("res://games/in_broad_strokes/logic/ibs_rules.gd")
+
 var data: Dictionary = {}
 var draft: Array[PackedVector2Array] = []
 var current := PackedVector2Array()
 var curve := false
 var anim := 0.0
 var drawing := false
+var blocked := false  # кривая упёрлась в запрет «изгиб в другую сторону» — подсказка на листе
 
 
 func present(view: Dictionary) -> void:
@@ -73,6 +76,7 @@ func _gui_input(event: InputEvent) -> void:
 				draft_changed.emit()
 			current = PackedVector2Array()
 			drawing = false
+			blocked = false
 			accept_event()
 		queue_redraw()
 	elif event is InputEventMouseMotion and drawing:
@@ -87,8 +91,16 @@ func _normalized(area: Rect2, point: Vector2) -> Vector2:
 func _sample(area: Rect2, point: Vector2) -> void:
 	var pos := _normalized(area, point)
 	if curve:
-		if current.size() < 180 and current[-1].distance_to(pos) > 0.002:
-			current.append(pos)
+		# точки — не чаще шага проверки; точка, которая загнула бы кривую в другую сторону, не ставится
+		# (та же проверка, что у хоста: IBSRules.curve_ok)
+		if current.size() < 180 and current[-1].distance_to(pos) >= Rules.CURVE_STEP:
+			var candidate := current.duplicate()
+			candidate.append(pos)
+			if Rules.curve_ok(candidate):
+				current = candidate
+				blocked = false
+			else:
+				blocked = true
 	else:
 		current[1] = pos
 
@@ -129,6 +141,8 @@ func _draw() -> void:
 				var w := f.get_string_size(hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 24).x
 				draw_string(f, active.get_center() + Vector2(-w / 2, 8), hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 24, Color(IBSStyle.c("muted"), 0.8))
 			_caption(active.position + Vector2(0, active.size.y + 34), "новый слой · осталось линий: %d" % maxi(0, strokes_left()))
+			if curve and drawing and blocked:
+				draw_string(IBSStyle.font("title"), active.position + Vector2(12, 30), "кривая гнётся только в одну сторону", HORIZONTAL_ALIGNMENT_LEFT, -1, 20, IBSStyle.c("red"))
 		else:
 			_caption(active.position + Vector2(0, active.size.y + 34), "новый слой · рисует %s" % str(data.names[data.artist]))
 	elif data.phase == "merge" and layers.size() > 1:

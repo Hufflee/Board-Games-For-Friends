@@ -177,6 +177,34 @@ static func acting(game: String, view: Dictionary) -> Array:
 			out = _k12(view, phase, players)
 		"four_souls":
 			out = _seat(view.get("actor", view.get("current", -1)))
+		# новые игры (15.11): без этих правил рамка «твой ход» и блок мини-игр в свой ход не включались
+		"colt_express":
+			if phase in ["select", "travel", "plan", "discard", "reserve", "reflex", "choose", "reaction"]:
+				out = _seat(view.get("turn", -1))
+			elif phase == "mount" and bool(view.get("can_mount", false)):
+				out = _seat(view.get("seat", -1))
+		"first_contact":
+			var humans := _int(view.get("humans", 0), 0)
+			var names: Array = view.get("names", [])
+			match phase:
+				"opening", "ask", "clue":
+					out = _seat(view.get("turn", -1))
+				"teach":
+					out = range(humans, names.size())  # на примеры отвечает вся команда инопланетян
+				"vote":
+					var answered: Array = view.get("answered", [])
+					for s in humans:
+						if not answered.has(s):
+							out.append(s)
+		"in_broad_strokes":
+			if phase in ["draw", "guess", "judge"]:
+				out = _seat(view.get("turn", -1))
+		"green_team_wins":
+			if phase == "answer":
+				var answered: Array = view.get("answered", [])
+				for s in (view.get("names", []) as Array).size():
+					if not answered.has(s):
+						out.append(s)
 	return out
 
 

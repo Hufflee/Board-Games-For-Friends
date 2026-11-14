@@ -34,7 +34,9 @@ var previous_asks: Array = []
 func new_game(seats: Array, config: Dictionary = {}) -> void:
 	players = seats.duplicate(true)
 	low = players.size() < 4
-	aliens = 1 if low else mini(3,players.size()/2)
+	# правила (стр. 2): игроки сами делятся на команды — инопланетян не больше 3, землян не больше 4.
+	# config.aliens — выбор в лобби; 0 или вне допустимого — наименьшее возможное (владелец, 15.11)
+	aliens = 1 if low else clampi(int(config.get("aliens", 0)), min_aliens(players.size()), max_aliens(players.size()))
 	humans = players.size()-aliens
 	goal = 8 if low else (5 if config.get("hard",false) else 3)
 	cards = range(60)
@@ -53,6 +55,15 @@ func new_game(seats: Array, config: Dictionary = {}) -> void:
 	opening = bool(config.get("opening",false))
 	if opening:
 		phase = "opening"
+
+## Допустимое число инопланетян при count игроках: землян не больше 4, инопланетян 1–3.
+static func min_aliens(count: int) -> int:
+	return 1 if count < 4 else maxi(1, count - 4)
+
+
+static func max_aliens(count: int) -> int:
+	return 1 if count < 4 else mini(3, count - 1)
+
 
 func action(seat: int, kind: String, arg: Dictionary, host: bool) -> bool:
 	if seat >= 0 and seat < humans and kind == "note":
@@ -170,6 +181,35 @@ func _resolve() -> void:
 		energy -= 1
 	phase = "result"
 	turn = -1
+
+## Фазы с часами хода.
+const TIMED := ["opening", "ask", "teach", "clue", "vote"]
+
+
+## Время вышло — хост ходит за задумавшихся (владелец, 15.11): случайный пример, знак, подсказка
+## одним знаком; в голосовании — случайный ещё не найденный предмет за всех, кто не проголосовал.
+func timeout() -> bool:
+	if phase not in TIMED:
+		return false
+	var free: Array = range(25).filter(func(s: int) -> bool: return not owned.has(s))
+	match phase:
+		"opening":
+			var left: Array = range(FEATURES.size()).filter(func(f: int) -> bool: return f not in previous_asks)
+			return action(turn, "opening", {"serial": serial, "feature": left.pick_random()}, false)
+		"ask":
+			return action(turn, "ask", {"serial": serial, "slots": [free.pick_random()]}, false)
+		"teach":
+			return action(humans, "teach", {"serial": serial, "feature": randi_range(0, FEATURES.size() - 1)}, false)
+		"clue":
+			return action(turn, "clue", {"serial": serial, "signs": [randi_range(1, FEATURES.size())]}, false)
+		"vote":
+			var acted := false
+			for seat in humans:
+				if phase == "vote" and not ballots.has(seat):
+					acted = action(seat, "vote", {"serial": serial, "slots": [free.pick_random()]}, false) or acted
+			return acted
+	return false
+
 
 func get_view(seat: int) -> Dictionary:
 	var alien := seat >= humans and seat < players.size()

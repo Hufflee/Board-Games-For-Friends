@@ -168,6 +168,10 @@ func _menu(_reason: String = "") -> void:
 
 
 func _leave() -> void:
+	# хост пати выходит — вся пати возвращается в главное меню, пати сохраняется (владелец, 15.11)
+	if Net.is_party() and Net.is_host():
+		Net.return_to_party()
+		return
 	Net.leave()
 	get_tree().change_scene_to_file("res://hub/hub.tscn")
 

@@ -243,6 +243,10 @@ func _menu(_reason: String = "") -> void:
 
 
 func _leave() -> void:
+	# хост пати выходит — вся пати возвращается в главное меню, пати сохраняется (владелец, 15.11)
+	if Net.is_party() and Net.is_host():
+		Net.return_to_party()
+		return
 	Net.leave()
 	get_tree().change_scene_to_file("res://hub/hub.tscn")
 
@@ -292,7 +296,23 @@ func _lobby() -> void:
 	rc.add_theme_constant_override("separation", 10)
 	right.add_child(rc)
 	rc.add_child(FCStyle.heading("Настройки", 20))
-	var options := [["fc_hard", "Сложный режим", "Несколько инопланетян со своими заданиями · от 4 игроков", members.size() < 4],
+	# команды по правилам: инопланетян 1–3, землян не больше 4 (владелец, 15.11)
+	var low_alien := Rules.min_aliens(members.size())
+	var high_alien := Rules.max_aliens(members.size())
+	var aliens_now := clampi(int(Net.settings.get("fc_aliens", 0)), low_alien, high_alien)
+	rc.add_child(FCStyle.label("Инопланетян в команде", 16, "bold"))
+	var alien_row := HBoxContainer.new()
+	alien_row.add_theme_constant_override("separation", 8)
+	rc.add_child(alien_row)
+	for n in range(1, 4):
+		var pick := _button("%d" % n, FCStyle.BODY, "primary" if n == aliens_now else "secondary")  # выбранное — охрой
+		pick.disabled = not host or n < low_alien or n > high_alien
+		pick.custom_minimum_size.x = 64
+		pick.pressed.connect(func() -> void: Net.set_setting("fc_aliens", n))
+		alien_row.add_child(pick)
+	var team_hint := FCStyle.label("Землян: %d · инопланетян: %d (по правилам землян не больше 4)" % [members.size() - aliens_now, aliens_now], FCStyle.CAP, "regular", "muted")
+	rc.add_child(team_hint)
+	var options := [["fc_hard", "Сложный режим", "Длиннее партия: инопланетянину нужно 5 предметов вместо 3 · от 4 игроков", members.size() < 4],
 		["fc_opening", "Нулевой ход", "Перед игрой земляне узнают знаки нескольких признаков", false]]
 	for option: Array in options:
 		var key: String = option[0]
@@ -782,7 +802,8 @@ func _sign_keyboard() -> void:
 				if negative:
 					signs.pop_back()
 				signs.append((feature + 1) * (-1 if negative else 1))
-				_update_ship())
+				_update_ship()
+				_update_action(true))
 		grid.add_child(b)
 	if not teach:
 		var row := HBoxContainer.new()
@@ -799,7 +820,8 @@ func _sign_keyboard() -> void:
 		row.add_child(neg)
 		_add(row, "Стереть", func() -> void:
 			signs.clear()
-			_update_ship(), "quiet")
+			_update_ship()
+			_update_action(true), "quiet")
 
 
 ## Заметка землянина: «знак = признак» — догадки сохраняются у хоста.

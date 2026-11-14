@@ -208,8 +208,9 @@ func _theme_changed() -> void:
 
 
 func _party_changed(_id: String) -> void:
+	# хост выбрал другую игру или вернул всех в меню — переходим вместе с пати, не покидая её
 	if Net.party_game != "colt_express":
-		_to_hub()
+		get_tree().change_scene_to_file("res://hub/hub.tscn")
 
 
 func _lobby_changed() -> void:
@@ -484,6 +485,10 @@ func _choice_card(title: String, caption: String, on: bool, locked: bool) -> But
 
 
 func _to_hub() -> void:
+	# хост пати выходит — вся пати возвращается в главное меню, пати сохраняется (владелец, 15.11)
+	if Net.is_party() and Net.is_host():
+		Net.return_to_party()
+		return
 	Net.leave()
 	get_tree().change_scene_to_file("res://hub/hub.tscn")
 
@@ -570,6 +575,7 @@ func _show_table() -> void:
 	bottom.add_child(stage)
 	preview_slot = _poster(8)
 	preview_slot.custom_minimum_size.x = 156
+	preview_slot.clip_contents = true  # содержимое просмотра не растягивает низ стола — панели не прыгают
 	bottom.add_child(preview_slot)
 	controls = VBoxContainer.new()
 	controls.add_theme_constant_override("separation", 8)
@@ -693,6 +699,14 @@ func _caption(card: Dictionary) -> String:
 	if kind == "hidden":
 		return "Закрытая карта"
 	return Rules.ACTIONS.get(kind, "")
+
+
+## Способность бандита (для подсказки на строке бандитов и в правой панели); у маршала и Мэй — пусто.
+func _ability(id: int) -> String:
+	for ability: Array in ABILITIES:
+		if id >= 0 and id < Rules.NAMES.size() and ability[0] == Rules.NAMES[id]:
+			return ability[1]
+	return ""
 
 
 func _character_name(id: int) -> String:
@@ -824,6 +838,7 @@ func _update_roster(active: int) -> void:
 			box.set_border_width_all(3)
 		panel.add_theme_stylebox_override("panel", box)
 		panel.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		panel.tooltip_text = _ability(id)
 		roster.add_child(panel)
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 8)
@@ -960,6 +975,10 @@ func _update_side(phase: String) -> void:
 				row.add_child(chip)
 			if phase == "plan":
 				side.add_child(_wrap(_label(STEP_HINTS.get(steps[view.step], ""), 13, "regular", "muted")))
+	if phase != "select" and not view.get("spectator", false):
+		for b: Dictionary in view.board.bandits:
+			if int(b.seat) == int(view.get("seat", -1)) and _ability(b.id) != "":
+				side.add_child(_wrap(_label("Ваша способность · %s: %s" % [_character_name(b.id), _ability(b.id)], 13, "regular", "muted")))
 	if phase == "select":
 		side.add_child(CEStyle.heading("Способности", 20))
 		for ability: Array in ABILITIES:
@@ -1018,6 +1037,8 @@ func _update_bottom(phase: String, active: int, mine: bool) -> void:
 			_stage_card(mine)
 		"reveal", "animate", "replay", "match_replay":
 			_stage_card(false)
+			if Net.is_host() and phase != "reveal":
+				_animation_controls(phase)
 		"end":
 			_stage_end()
 	if phase in HAND_PHASES and mine:
@@ -1028,6 +1049,16 @@ func _update_bottom(phase: String, active: int, mine: bool) -> void:
 		wait.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		wait.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		stage.add_child(wait)
+
+
+## Хост ускоряет показ действий (×1 → ×2 → ×4) или пропускает текущее действие / повтор (владелец, 15.11).
+func _animation_controls(phase: String) -> void:
+	var speed := float(view.get("speed", 1.0))
+	var next_speed := 2.0 if speed < 2.0 else (4.0 if speed < 4.0 else 1.0)
+	var faster := _add_button(controls, "Быстрее · ×%d" % int(next_speed) if next_speed > 1.0 else "Обычная скорость", func() -> void: _send("anim_speed", {"value": next_speed}))
+	faster.tooltip_text = "Сейчас ×%d" % int(speed)
+	var skip_text := "Пропустить действие" if phase == "animate" else ("Пропустить повтор" if phase == "replay" else "К итогам")
+	_add_button(controls, skip_text, func() -> void: _send("skip_anim"), "quiet")
 
 
 func _stage_select(mine: bool) -> void:
@@ -1166,6 +1197,9 @@ func _stage_end() -> void:
 			text = "%s · маршал · целей %d из 5" % [_player(result.seat), result.marshal_goals]
 		else:
 			text = "%s · $%d · пуль получено: %d" % [_player(result.seat), result.score, result.received]
+			if result.get("shooter", false):
+				# разбивка: бонус лучшего стрелка входит в итог (правила: меньше всех пуль осталось — +$1000)
+				text = "%s · $%d (добыча $%d + лучший стрелок $1000) · пуль получено: %d" % [_player(result.seat), result.score, int(result.score) - 1000, result.received]
 		if result.get("co_winner", false):
 			text += " · победа вместе с маршалом"
 		col.add_child(_label(("★ " if i == 0 else "   ") + text, CEStyle.BODY, "bold" if i == 0 else "regular", "ink" if i == 0 else "muted"))
@@ -1257,10 +1291,14 @@ func _preview_action(entry: Dictionary) -> void:
 	col.add_theme_constant_override("separation", 4)
 	col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	preview_slot.add_child(col)
-	col.add_child(_card_image(entry.texture, Vector2(140, 150)))
-	col.add_child(CEStyle.heading(_caption(entry.card), 17))
+	col.add_child(_card_image(entry.texture, Vector2(140, 124)))
+	var title := CEStyle.heading(_caption(entry.card), 16)
+	title.clip_text = true
+	title.custom_minimum_size.x = 140
+	col.add_child(title)
 	var hint := _wrap(_label(_action_hint(entry.card.kind), 12, "regular", "muted"))
-	hint.custom_minimum_size.x = 140
+	hint.custom_minimum_size = Vector2(140, 0)
+	hint.max_lines_visible = 3
 	col.add_child(hint)
 
 
@@ -1323,7 +1361,7 @@ func _close_mini_preview() -> void:
 func _process(delta: float) -> void:
 	if not is_instance_valid(board) or not board.is_inside_tree() or view.get("clip", {}).is_empty() or Net.paused:
 		return
-	clip_time += delta
+	clip_time += delta * float(view.get("speed", 1.0))
 	# пока показываются действия, поезд мчится: пейзаж едет; в выборе и в паузе переворота — стоит (владелец, 14.11)
 	if _anim_time() >= 0.0:
 		board.scroll += delta * CEStyle.SCROLL_SPEED

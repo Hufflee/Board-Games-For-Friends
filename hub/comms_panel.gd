@@ -15,7 +15,8 @@ const REACTIONS := ["Думаю...", "Блефую!", "Кидаю кость!", 
 const BallsView := preload("res://hub/minigames/mg_balls_view.gd")
 const Confetti := preload("res://hub/confetti.gd")
 const MinesView := preload("res://hub/minigames/mg_mines_view.gd")
-const ICONS := {"chess": "♙", "checkers": "◉", "go": "○", "connect4": "●", "balls": "◎", "stars": "★", "mines": "▦"}
+const BlackjackView := preload("res://hub/minigames/mg_blackjack_view.gd")
+const ICONS := {"chess": "♙", "checkers": "◉", "go": "○", "connect4": "●", "balls": "◎", "stars": "★", "blackjack": "♠", "mines": "▦"}
 const SIDE_NAMES := {"chess": ["белые", "чёрные"], "checkers": ["белые", "чёрные"], "go": ["чёрные", "белые"], "connect4": ["красные", "жёлтые"]}
 const EMOTE := Color("ffd479")
 const SYSTEM := Color("b8c7c0")
@@ -1348,7 +1349,8 @@ func _show_lobby() -> void:
 func _lobby_rooms(col: VBoxContainer) -> void:
 	col.add_child(_text("ОБЩИЕ КОМНАТЫ — ВСЕ ПРОТИВ ВСЕХ", 11, c_muted))
 	var tips := {"balls": "Толкайте шарики друг друга за край арены. Очки сбрасываются каждые 3 минуты",
-		"stars": "Звёздочка появляется где угодно на экране — кто первым нажал, тому очко"}
+		"stars": "Звёздочка появляется где угодно на экране — кто первым нажал, тому очко",
+		"blackjack": "Все против дилера: наберите ближе к 21, чем он, но не больше. На старте одна фишка"}
 	for game: String in _mg.ROOMS:
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", px(6))
@@ -1523,6 +1525,13 @@ func _show_room(id: String, session: Dictionary) -> void:
 			view.status = _status  # таймер сброса view обновляет сам каждый кадр
 			view.size_flags_vertical = Control.SIZE_EXPAND_FILL
 			col.add_child(view)
+		elif game == "blackjack":
+			var table_view := BlackjackView.new()
+			table_view.name = "Blackjack"
+			table_view.mg = _mg
+			table_view.panel = self
+			table_view.id = id
+			col.add_child(table_view)
 		else:
 			var title_label := _label("Ищи звезду", 22, EMOTE)
 			title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -1559,6 +1568,16 @@ func _show_room(id: String, session: Dictionary) -> void:
 		_status.text = ("Очки: %d · сброс через %d:%02d · щелчок — рывок" % [mine, left / 60, left % 60]) if not list.is_empty() else "Входим в комнату…"
 		var feed: Array = state.get("feed", [])
 		foot_label.text = " · ".join(parts) + (("\n" + str(feed[0])) if not feed.is_empty() else "")
+	elif game == "blackjack":
+		var chips := 0
+		for row: Dictionary in list:
+			if int(row.peer) == me:
+				chips = int(row.chips)
+		_status.text = ("За столом: %d · ваши фишки: %d" % [list.size(), chips]) if not list.is_empty() else "Входим в комнату…"
+		var table_view := _game_box.find_child("Blackjack", true, false)
+		if table_view != null:
+			table_view.refresh()
+		foot_label.text = ""
 	else:
 		_status.text = ("В комнате: %d" % list.size()) if not list.is_empty() else "Входим в комнату…"
 		var table := _game_box.find_child("Table", true, false) as VBoxContainer

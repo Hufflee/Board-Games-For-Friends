@@ -1,4 +1,4 @@
-"""Светлая монета «Кольт Экспресс». Запуск: python tools/coin_colt_express.py [secret | dark_secret] [путь к PNG]."""
+"""Монета «Кольт Экспресс». Запуск: python tools/coin_colt_express.py [dark | secret | dark_secret] [путь к PNG]."""
 from coin_common import SIZE, outline, star
 from coin_painted import blank, disk, polygon, sparkle, stroke, write_sheet, xy
 
@@ -10,11 +10,12 @@ CREAM = "#f3dca6"
 
 
 def draw(heads, variant):
-    dark = variant == "dark_secret"
+    dark = variant.startswith("dark")
+    secret = variant.endswith("secret")
     paper = "#2e2947" if dark else PAPER
-    brass = "#e2ac4a" if variant else BRASS
+    brass = "#e2ac4a" if secret or dark else BRASS
     img, d, _ = blank(paper, brass, "#8a5a36", INK, 14)
-    if variant:
+    if secret:
         for i, (x, y) in enumerate([(22,29),(78,29),(23,71),(76,70)]):
             sparkle(d, x, y, 4, brass, i)
         # Тёмная пробоина в металле с неровным краем.
@@ -37,7 +38,7 @@ def draw(heads, variant):
             disk(d, x, 67, r, brass, INK, 20+i, 2.1)
             disk(d, x, 67, 1.9, INK, INK, 30+i, .25)
     else:
-        if variant:
+        if secret:
             for i, (x, y) in enumerate([(50,15),(50,85),(19,51),(81,51)]):
                 sparkle(d, x, y, 4, brass, 91+i)
         disk(d, 50, 50, 29, "#b99363", "#8a5a36", 30, 1.1)

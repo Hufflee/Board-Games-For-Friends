@@ -70,7 +70,7 @@ var lobby_id := 0
 var members := {}  # peer_id -> {name}
 var join_order: Array[int] = []
 var bots := 0
-var settings := {"ibs_words": "simple", "fc_hard": false, "fc_opening": false, "ce_teams": false, "ce_cursed": false, "ce_marshal": false, "ce_prison": false, "ce_coach": false, "ce_time_car": false, "ce_horses": false, "ce_whiskey": false, "ce_sprites": false, "bc_edition": "tb", "bc_storyteller": 0, "mk_plus": false, "mk_sharp": false, "mk_limited": false, "cg_example": "card_race", "pk_mode": "classic", "pk_target": 0, "pk_open": false, "kh_rounds": 6, "kh_timer": 90, "tr_rings": ["Attribute", "Word", "Context"], "tr_knower": 0, "tr_coop": false, "tr_mode": "classic", "tr_timer": 0, "tr_want": [], "deck_mode": "first", "manual": [], "promo": "", "tournament": true, "reveal_speed": "normal", "perudo_dice": 5, "perudo_maputo": true, "wl_mode": "teams", "wl_local_teams": [], "dw_rooms": "3-7", "dw_monster": "random", "dw_hard": false, "dw_curses": true, "dw_time": 60, "hc_laps": 0, "hc_free": false, "hc_mode": "classic", "rsb_speed": "normal", "ws_mode": "teams", "ws_catalog": "basic", "ws_cards": "standard", "ws_names": true, "ws_time": 120, "turn_time": 60, "tt_expert": false, "pi_roles": [], "fs_dlc": false, "fs_timer": 0, "fs_character_choice": false, "st_bots": false, "st_lives": 2, "st_time": 10, "st_oral": false, "shuffle_seats": false, "cg_bots": false, "cg_lobby": {}}
+var settings := {"ibs_words": "simple", "ibs_critic": -1, "fc_aliens": 0, "fc_hard": false, "fc_opening": false, "ce_teams": false, "ce_cursed": false, "ce_marshal": false, "ce_prison": false, "ce_coach": false, "ce_time_car": false, "ce_horses": false, "ce_whiskey": false, "ce_sprites": false, "bc_edition": "tb", "bc_storyteller": 0, "mk_plus": false, "mk_sharp": false, "mk_limited": false, "cg_example": "card_race", "pk_mode": "classic", "pk_target": 0, "pk_open": false, "kh_rounds": 6, "kh_timer": 90, "tr_rings": ["Attribute", "Word", "Context"], "tr_knower": 0, "tr_coop": false, "tr_mode": "classic", "tr_timer": 0, "tr_want": [], "deck_mode": "first", "manual": [], "promo": "", "tournament": true, "reveal_speed": "normal", "perudo_dice": 5, "perudo_maputo": true, "wl_mode": "teams", "wl_local_teams": [], "dw_rooms": "3-7", "dw_monster": "random", "dw_hard": false, "dw_curses": true, "dw_time": 60, "hc_laps": 0, "hc_free": false, "hc_mode": "classic", "rsb_speed": "normal", "ws_mode": "teams", "ws_catalog": "basic", "ws_cards": "standard", "ws_names": true, "ws_time": 120, "turn_time": 60, "tt_expert": false, "pi_roles": [], "fs_dlc": false, "fs_timer": 0, "fs_character_choice": false, "st_bots": false, "st_lives": 2, "st_time": 10, "st_oral": false, "shuffle_seats": false, "cg_bots": false, "cg_lobby": {}}
 var disconnected := {}  # место -> имя вылетевшего игрока (может вернуться)
 var chat_log: Array = []
 var last_join := {}  # куда подключались в последний раз — для «Вернуться в партию»
@@ -1489,11 +1489,11 @@ func start_game() -> String:
 		auto_advance_time = 0.0
 	elif party_game == "first_contact":
 		first_contact = load("res://games/first_contact/logic/fc_rules.gd").new()
-		first_contact.new_game(players,{"hard":settings.get("fc_hard",false),"opening":settings.get("fc_opening",false)})
+		first_contact.new_game(players,{"hard":settings.get("fc_hard",false),"opening":settings.get("fc_opening",false),"aliens":settings.get("fc_aliens",0)})
 		auto_advance_time = 0.0
 	elif party_game == "in_broad_strokes":
 		strokes_game = load("res://games/in_broad_strokes/logic/ibs_rules.gd").new()
-		strokes_game.new_game(players, {"words": settings.get("ibs_words", "simple")})
+		strokes_game.new_game(players, {"words": settings.get("ibs_words", "simple"), "critic": settings.get("ibs_critic", -1)})
 		auto_advance_time = 0.0
 	elif party_game == "green_team_wins":
 		green_team = load("res://games/green_team_wins/logic/gtw_rules.gd").new()
@@ -1873,13 +1873,16 @@ func _handle_action(peer: int, kind: String, arg) -> void:
 		var request: Dictionary = arg if arg is Dictionary else {}
 		if mode == "offline" and peer == 1:
 			if kind == "fc_seat":
-				if int(request.get("seat",-1)) == first_contact.turn and first_contact.turn >= 0:
-					fc_seat = first_contact.turn
+				var wanted := int(request.get("seat",-1))
+				# на примеры отвечает вся команда инопланетян — за одним компьютером управление можно отдать любому из них
+				var alien_answer: bool = first_contact.phase == "teach" and wanted >= first_contact.humans and wanted < first_contact.players.size()
+				if (wanted == first_contact.turn and first_contact.turn >= 0) or alien_answer:
+					fc_seat = wanted
 					_push_state()
 				return
 			seat = fc_seat
 		if first_contact.action(seat,kind,request,peer == 1):
-			if first_contact.turn != fc_seat:
+			if first_contact.turn != fc_seat and not (first_contact.phase == "teach" and fc_seat >= first_contact.humans):
 				fc_seat = -1
 			_push_state()
 		return
@@ -1922,7 +1925,7 @@ func _handle_action(peer: int, kind: String, arg) -> void:
 					ce_view_seat = requested
 					_push_state()
 				return
-			seat = 0 if kind == "next" else ce_view_seat
+			seat = 0 if kind in ["next", "anim_speed", "skip_anim"] else ce_view_seat  # кнопки хоста — от места хоста
 		var previous_turn: int = colt.turn
 		if colt.action(seat, kind, payload, peer == 1):
 			if colt.turn != previous_turn:
@@ -2102,15 +2105,29 @@ func _process(delta: float) -> void:
 		_tr_process(delta)
 		return
 	if first_contact != null:
+		# голосование тайное и одновременное — часы на всю фазу, а не на каждого
+		var fc_key := "fc/%s/%d/%d" % [first_contact.phase, first_contact.turn_no, -1 if first_contact.phase == "vote" else first_contact.serial]
+		if _timed_new_game(first_contact, fc_key, delta):
+			fc_seat = -1
+			_push_state()
 		return
 	if strokes_game != null:
 		if strokes_game.tick(delta):
 			_push_state()
+		elif _timed_new_game(strokes_game, "ibs/%s/%d" % [strokes_game.phase, strokes_game.serial], delta):
+			ibs_seat = -1
+			_push_state()
 		return
 	if green_team != null:
+		if _timed_new_game(green_team, "gtw/%s/%d" % [green_team.phase, green_team.turn_no], delta):
+			gtw_seat = -1
+			_push_state()
 		return
 	if colt != null:
 		if colt.tick(delta):
+			ce_view_seat = -1
+			_push_state()
+		elif _timed_new_game(colt, "ce/%s/%d/%d" % [colt.phase, colt.turn, colt.serial], delta):
 			ce_view_seat = -1
 			_push_state()
 		return
@@ -2396,6 +2413,8 @@ func _seat_view(s: int, names: Array, left: float, show_all: bool) -> Dictionary
 	if phantom != null and tl != INF:
 		v["turn_left"] = phantom.time_left
 		v["clock"] = true
+	if (colt != null or first_contact != null or strokes_game != null or green_team != null) and tl != INF:
+		v["clock"] = true  # фазы новых игр не из общего списка TurnClock.PHASES — часы включает Net
 	if fours != null:
 		v["turn_total"] = int(fours.turn_time)
 		v["turn_left"] = fours.turn_time_left()
@@ -2734,10 +2753,30 @@ func _tr_process(delta: float) -> void:
 		_push_state()
 
 
+## Хост: часы хода новых игр (Кольт, Первый контакт, В общих чертах, Green Team Wins). Новая фаза/ход —
+## отсчёт заново; время вышло — правила игры ходят за игрока (rules.timeout()).
+func _timed_new_game(rules: Object, key: String, delta: float) -> bool:
+	if key != _last_phase:
+		_last_phase = key
+		_phase_time = 0.0
+		_stamp_turn = true
+	_phase_time += delta
+	if paused or _phase_time < turn_limit():
+		return false
+	_phase_time = 0.0
+	return bool(rules.timeout())
+
+
 ## Время на ход из настроек комнаты (0 — без ограничения).
 func turn_limit() -> float:
-	if bc != null or colt != null or first_contact != null or strokes_game != null or green_team != null:
+	if bc != null:
 		return INF
+	# новые игры (15.11): часы только в фазах, где кто-то думает; «0» в настройке — без ограничения
+	if colt != null or first_contact != null or strokes_game != null or green_team != null:
+		var limit := int(settings.get("turn_time", 60))
+		var timed: bool = (colt != null and colt.phase in colt.TIMED) or (first_contact != null and first_contact.phase in first_contact.TIMED) \
+			or (strokes_game != null and strokes_game.phase in strokes_game.TIMED) or (green_team != null and green_team.phase == "answer")
+		return float(limit) if limit > 0 and timed else INF
 	if cg != null:
 		return float(cg.state.turn_seconds) if float(cg.state.turn_seconds) > 0 and cg.phase != "game_over" else INF
 	if mk != null:

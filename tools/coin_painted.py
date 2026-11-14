@@ -55,7 +55,7 @@ def sparkle(d, x, y, radius, color, seed):
 
 def write_sheet(game, draw):
     args = sys.argv[1:]
-    variant = args.pop(0) if args and args[0] in ("secret", "dark_secret") else ""
+    variant = args.pop(0) if args and args[0] in ("dark", "secret", "dark_secret") else ""
     suffix = f"_{variant}" if variant else ""
     path = Path(args[0]) if args else (
         Path(__file__).resolve().parents[1] / "hub" / "art" / "coins" / f"{game}{suffix}_coin.png"

@@ -1,4 +1,4 @@
-"""Светлая монета Green Team Wins. Запуск: python tools/coin_green_team_wins.py [secret | dark_secret] [путь к PNG]."""
+"""Монета Green Team Wins. Запуск: python tools/coin_green_team_wins.py [dark | secret | dark_secret] [путь к PNG]."""
 from pathlib import Path
 
 from coin_common import SIZE, font, text_center
@@ -12,12 +12,13 @@ CREAM = "#fffdf6"
 
 
 def draw(heads, variant):
-    dark = variant == "dark_secret"
+    dark = variant.startswith("dark")
+    secret = variant.endswith("secret")
     field = "#1c3b44" if dark else TURQUOISE
     pattern = "#3d585e" if dark else PATTERN
-    green = "#8fd654" if variant else GREEN
-    img, d, _ = blank(field, green if variant else "#eaf6f3", pattern, INK, 38)
-    if variant:
+    green = "#8fd654" if secret or dark else GREEN
+    img, d, _ = blank(field, green if secret else ("#3d585e" if dark else "#eaf6f3"), pattern, INK, 38)
+    if secret:
         for i, (x, y, color) in enumerate([
             (24,28,"#f7a043"), (76,27,green), (18,60,green), (80,60,"#f7a043"),
             (34,74,"#f7a043"), (65,74,green),
@@ -36,7 +37,7 @@ def draw(heads, variant):
         font_path = Path(__file__).resolve().parents[1] / "games/green_team_wins/art/fonts/BalsamiqSans-Bold.ttf"
         number = font(str(font_path), SIZE*.162)
         for i, (x, y) in enumerate([(28,51),(50,46),(72,52)], 1):
-            fill = green if variant and i == 2 else CREAM
+            fill = green if secret and i == 2 else CREAM
             disk(d, x, y, 10.4, fill, INK, 22+i, 2.2)
             text_center(d, *xy(x, y), str(i), number, fill=INK)
     return img

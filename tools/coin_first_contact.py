@@ -1,4 +1,4 @@
-"""Светлая монета «Первый контакт». Запуск: python tools/coin_first_contact.py [secret | dark_secret] [путь к PNG]."""
+"""Монета «Первый контакт». Запуск: python tools/coin_first_contact.py [dark | secret | dark_secret] [путь к PNG]."""
 from math import sin, pi
 
 from PIL import ImageColor
@@ -14,12 +14,13 @@ ALIEN = "#15a99c"
 
 
 def draw(heads, variant):
-    dark = variant == "dark_secret"
+    dark = variant.startswith("dark")
+    secret = variant.endswith("secret")
     field = ("#232338" if heads else "#0d2a31") if dark else (PAPER if heads else SHIP)
     ink = "#f0e4c8" if dark else INK
-    alien = "#3fe0cf" if variant else ALIEN
-    img, d, _ = blank(field, alien if variant else "#b8975a", OCHRE, INK, 22)
-    if variant:
+    alien = "#3fe0cf" if secret or dark else ALIEN
+    img, d, _ = blank(field, alien if secret else "#b8975a", OCHRE, INK, 22)
+    if secret:
         for i, (x, y) in enumerate([(20,41),(80,41),(25,65),(76,63)]):
             sparkle(d, x, y, 3.5, alien, i)
         # Корабль и пирамида дополняют прежние символы.
@@ -37,7 +38,7 @@ def draw(heads, variant):
         disk(d, 49, 45.5, 8, OCHRE, INK, 16, 1.8)
         disk(d, 49, 45.5, 3.6, INK, INK, 17, .3)
     else:
-        if variant:
+        if dark or secret:
             glow(img, lambda brush, color: brush.line(
                 [xy(50,26), xy(72,65), xy(28,65), xy(50,26)], fill=color, width=int(SIZE*.07)
             ), ImageColor.getrgb(alien), SIZE*.025, 165)

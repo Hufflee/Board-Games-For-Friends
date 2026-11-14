@@ -1,4 +1,4 @@
-"""Светлая монета «В общих чертах». Запуск: python tools/coin_in_broad_strokes.py [secret | dark_secret] [путь к PNG]."""
+"""Монета «В общих чертах». Запуск: python tools/coin_in_broad_strokes.py [dark | secret | dark_secret] [путь к PNG]."""
 from PIL import ImageDraw
 
 from coin_common import SIZE, clip, new_layer, outline
@@ -13,14 +13,15 @@ TAPE = (242, 217, 128)
 
 
 def draw(heads, variant):
-    dark = variant == "dark_secret"
-    paper = "#16396a" if variant else PAPER
-    grid_color = "#28568f" if variant else GRID
-    stroke_color = "#f3f8ff" if variant else STROKE
-    sheet = "#1b3f72" if variant else "#fbfcf8"
-    tape = "#ffd166" if variant else TAPE
-    rim = ("#4f7ab4" if dark else "#ffd166") if variant else "#b9c6c1"
-    img, d, inner = blank(paper, rim, "#1a2c45" if variant else "#9fb2ad", INK, 56)
+    dark = variant.startswith("dark")
+    secret = variant.endswith("secret")
+    paper = "#16396a" if dark or secret else PAPER
+    grid_color = "#28568f" if dark or secret else GRID
+    stroke_color = "#f3f8ff" if dark or secret else STROKE
+    sheet = "#1b3f72" if dark or secret else "#fbfcf8"
+    tape = "#ffd166" if secret else ("#a6bfe0" if dark else TAPE)
+    rim = ("#4f7ab4" if dark else "#ffd166") if dark or secret else "#b9c6c1"
+    img, d, inner = blank(paper, rim, "#1a2c45" if dark or secret else "#9fb2ad", INK, 56)
     grid = new_layer()
     dg = ImageDraw.Draw(grid)
     for i in range(10, 91, 8):
@@ -28,7 +29,7 @@ def draw(heads, variant):
         dg.line([xy(10, i), xy(90, i)], fill=grid_color, width=int(SIZE*.003))
     img.alpha_composite(clip(grid, inner))
     outline(d, inner, INK, SIZE*.009)
-    if variant:
+    if secret:
         polygon(d, [(24,26),(76,26),(76,74),(24,74)], paper, tape, 51, 1.6)
         sparkle(d, 50, 20, 5, tape, 53)
     if heads:

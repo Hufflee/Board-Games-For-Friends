@@ -62,10 +62,6 @@ func _draw() -> void:
 		var destination := _spot(target, after, spacing, roof, rail) if not target.is_empty() else origin
 		actors[b.id] = [origin, destination]
 	var h := clampf(spacing * 0.40, 30, 54)
-	for item: Dictionary in (before.loot if t < 0.55 else after.loot):
-		var x := _center(before.coach if item.car == -2 else item.car, spacing) - spacing * 0.36 + (int(item.index) % 4) * 15.0
-		var y := rail + 31 if item.car == -2 else (roof - 7 if item.roof else rail - 24)
-		CEStyle.draw_loot(self, Vector2(x, y), item.kind)
 	for id in actors:
 		var pos := _movement(actors[id][0], actors[id][1], t)
 		if _find(before, id).car != -2 and _find(after, id).get("car", 0) != -2 and (t < 0.75 or not _find(after, id).is_empty()):
@@ -74,6 +70,11 @@ func _draw() -> void:
 	var marshal_to := Vector2(_center(after.marshal, spacing), rail - 16)
 	if int(before.marshal) >= 0:
 		_actor(6, _movement(marshal_from, marshal_to, t), h)
+	# добыча — поверх фигурок, чтобы монеты и самоцветы не прятались за бандитами (владелец, 15.11)
+	for item: Dictionary in (before.loot if t < 0.55 else after.loot):
+		var x := _center(before.coach if item.car == -2 else item.car, spacing) - spacing * 0.36 + (int(item.index) % 4) * 15.0
+		var y := rail + 31 if item.car == -2 else (roof - 7 if item.roof else rail - 24)
+		CEStyle.draw_loot(self, Vector2(x, y), item.kind)
 	var horses_from: Array = before.get("horses", [])
 	var horses_to: Array = after.get("horses", [])
 	for i in horses_from.size():

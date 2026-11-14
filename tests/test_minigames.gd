@@ -9,6 +9,7 @@ const Connect4 := preload("res://hub/minigames/logic/mg_connect4.gd")
 const Mines := preload("res://hub/minigames/logic/mg_mines.gd")
 const Balls := preload("res://hub/minigames/logic/mg_balls.gd")
 const Stars := preload("res://hub/minigames/logic/mg_stars.gd")
+const Blackjack := preload("res://hub/minigames/logic/mg_blackjack.gd")
 
 var _failed := 0
 var _checks := 0
@@ -40,6 +41,7 @@ func _init() -> void:
 	_mines()
 	_balls()
 	_stars()
+	_blackjack()
 	print("Мини-игры: проверок %d, ошибок %d" % [_checks, _failed])
 	quit(1 if _failed > 0 else 0)
 
@@ -532,3 +534,62 @@ func _stars() -> void:
 	check((state.star as Dictionary).is_empty() and str(state.last).contains("улетела"), "Звёздочки: непойманная звезда улетает")
 	Stars.leave(state, 3)
 	check((Stars.snapshot(state).list as Array).size() == 1, "Звёздочки: вышедший пропал из таблицы")
+
+
+## «Блэкджек»: очки руки, раздача после ставок всех, дилер до 17, расчёт, «Начать заново», вход посреди раздачи.
+func _blackjack() -> void:
+	check(Blackjack.value([0, 12]) == 21 and Blackjack.is_blackjack([0, 12]), "блэкджек: туз + король = 21")
+	check(Blackjack.value([0, 0, 8]) == 21, "блэкджек: два туза и девятка = 21 (туз за 1)")
+	check(Blackjack.value([9, 10, 11]) == 30, "блэкджек: перебор считается")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var st := Blackjack.new_state()
+	Blackjack.join(st, 1, "А", 0)
+	Blackjack.join(st, 2, "Б", 1)
+	check(Blackjack.act(st, 1, {"bet": 1}, rng) == "" and st.phase == "bet", "блэкджек: раздача ждёт ставку второго")
+	check(Blackjack.act(st, 2, {"bet": 2}, rng) != "", "блэкджек: ставка больше фишек отклонена")
+	check(Blackjack.act(st, 2, {"bet": 1}, rng) == "" and st.phase in ["play", "dealer"], "блэкджек: все поставили — раздача")
+	Blackjack.join(st, 3, "В", 2)
+	check(str(st.players[3].status) == "wait", "блэкджек: вошедший посреди раздачи ждёт следующую")
+	var snap := Blackjack.snapshot(st)
+	if st.phase == "play":
+		check(int((snap.dealer as Array)[1]) == -1, "блэкджек: закрытая карта дилера скрыта")
+	for peer in [1, 2]:
+		if str(st.players[peer].status) == "play":
+			check(Blackjack.act(st, peer, {"stand": true}, rng) == "", "блэкджек: «Хватит»")
+	var guard := 0
+	while st.phase == "dealer" and guard < 100:
+		Blackjack.step(st, 1.0, rng)
+		guard += 1
+	check(st.phase == "done", "блэкджек: дилер добрал и рассчитал")
+	check(Blackjack.value(st.dealer) >= 17 or (st.players as Dictionary).values().all(func(p: Dictionary) -> bool: return p.status == "done" and p.result in ["Перебор", "Блэкджек!"]), "блэкджек: дилер добирает до 17")
+	for peer in [1, 2]:
+		var p: Dictionary = st.players[peer]
+		check(int(p.chips) == 1 + int(p.delta), "блэкджек: фишки изменились ровно на результат")
+	check(Blackjack.act(st, 1, {"next": true}, rng) == "" and st.phase == "bet", "блэкджек: новая раздача")
+	check(str(st.players[3].status) == "bet", "блэкджек: ждавший садится за стол")
+	# много раздач подряд: фишки не уходят в минус, «Начать заново» возвращает одну
+	for round_no in 300:
+		for peer: int in st.players.keys():
+			var p: Dictionary = st.players[peer]
+			if p.status == "broke":
+				check(Blackjack.act(st, peer, {"restart": true}, rng) == "" and int(p.chips) == 1, "блэкджек: начать заново с одной фишкой")
+		for peer: int in st.players.keys():
+			if st.players[peer].status == "bet":
+				Blackjack.act(st, peer, {"bet": 1}, rng)
+		var steps := 0
+		while st.phase == "play" and steps < 50:
+			steps += 1
+			for peer: int in st.players.keys():
+				if st.players[peer].status == "play":
+					Blackjack.act(st, peer, {"hit": true} if Blackjack.value(st.players[peer].hand) < 15 else {"stand": true}, rng)
+		while st.phase == "dealer":
+			Blackjack.step(st, 1.0, rng)
+		check(st.phase == "done", "блэкджек: раздача %d завершилась" % round_no)
+		for p: Dictionary in (st.players as Dictionary).values():
+			check(int(p.chips) >= 0, "блэкджек: фишки не уходят в минус")
+		Blackjack.act(st, 1, {"next": true}, rng)
+	Blackjack.leave(st, 1)
+	Blackjack.leave(st, 2)
+	Blackjack.leave(st, 3)
+	check((st.players as Dictionary).is_empty(), "блэкджек: все вышли")
