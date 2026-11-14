@@ -120,6 +120,8 @@ func _card_at(point: Vector2) -> Dictionary:
 			if not node is TextureRect:
 				continue
 			var found := _sample(node as TextureRect, point, offered)
+			if found.has("screen"):
+				return found
 			if not found.is_empty():
 				best = found  # последний в дереве — верхний на экране
 		if not best.is_empty():
@@ -168,6 +170,10 @@ func _sample(rect: TextureRect, point: Vector2, offered: bool) -> Dictionary:
 		var aspect := maxf(screen_size.x, screen_size.y) / maxf(1.0, minf(screen_size.x, screen_size.y))
 		if long_side < CARD_SIDE.x or long_side > CARD_SIDE.y or aspect < 1.15 or aspect > 1.95:
 			return {}
+	var title := rect.get_node_or_null("CardTitle") as Control
+	if title != null and title.is_visible_in_tree():
+		# Снимок лица сохраняет независимый текст поверх иллюстрации.
+		return {"screen": true}
 	var region := Vector4(0, 0, 1, 1)
 	var base: Texture2D = texture
 	if texture is AtlasTexture:

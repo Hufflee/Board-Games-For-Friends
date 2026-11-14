@@ -1,5 +1,7 @@
 extends Node3D
 ## Мини-корзина хаба. Удержание открывает снятие, перетаскивание двигает по стене.
+## Корзин две (владелец 14.11): key "basket" — у шкафа (задняя стена), "basket_left" — на левой стене с полками.
+## Место — на развёрнутой стене NeonRoom (x левее −3 — левая стена); каждая корзина остаётся на своей стене.
 
 const FILE := "user://room_props.cfg"
 const DEFAULT_AT := Vector2(-1.29, 0.94)
@@ -7,13 +9,14 @@ const RIM_RADIUS := 0.095
 const RIM_THICKNESS := 0.009
 const RIM_DEPTH := 0.27
 const HOLD_TIME := 0.38
-const Fanfare := preload("res://games/king_of_12/audio/music/victory.mp3")
 const Confetti := preload("res://hub/confetti.gd")
 const RoomIcons := preload("res://hub/room_icons.gd")
 const REMOVE_SIZE := Vector2(40, 40)
 const NET_LOOPS := 10
 
 var room: Node3D
+var key := "basket"  # раздел в room_props.cfg и поле в снимке для друзей
+var default_at := DEFAULT_AT
 var _remove: Button
 var _held := false
 var _dragging := false
@@ -22,6 +25,7 @@ var _press_at := Vector2.ZERO
 var _start := Vector3.ZERO
 var _wall_offset := Vector2.ZERO
 var _score_cooldown := 0
+var _remote := false  # сейчас показана корзина друга (режим наблюдения), своя — в файле
 
 
 func _ready() -> void:
@@ -54,9 +58,37 @@ func _ready() -> void:
 	add_child(_remove)
 	var prefs := ConfigFile.new()
 	prefs.load(FILE)
-	var saved: Variant = prefs.get_value("basket", "at", DEFAULT_AT)
-	_set_wall_at(saved if saved is Vector2 else DEFAULT_AT)
-	visible = bool(prefs.get_value("basket", "installed", true))
+	var saved: Variant = prefs.get_value(key, "at", default_at)
+	_set_wall_at(saved if saved is Vector2 else default_at)
+	visible = bool(prefs.get_value(key, "installed", key == "basket"))  # вторую корзину вешают сами
+	_publish.call_deferred()
+
+
+## Своя корзина — в общий снимок комнаты: друзья в режиме наблюдения видят её там же.
+func _publish() -> void:
+	var net: Node = room.get_node_or_null("/root/Net")
+	if net != null and net.get("stickers") != null:
+		net.stickers.set_basket(room.wall_coord(self) if visible else null, key)
+
+
+## Какую корзину показать: своя комната — из своего файла; комната друга — из его снимка (entry = [x, y] или пусто).
+func show_room(entry: Variant, own: bool) -> void:
+	if own:
+		if _remote:
+			_remote = false
+			var prefs := ConfigFile.new()
+			prefs.load(FILE)
+			var saved: Variant = prefs.get_value(key, "at", default_at)
+			_set_wall_at(saved if saved is Vector2 else default_at)
+			visible = bool(prefs.get_value(key, "installed", key == "basket"))
+		return
+	_remote = true
+	_held = false
+	_dragging = false
+	var at: Array = entry if entry is Array else []
+	visible = at.size() == 2
+	if visible:
+		_set_wall_at(Vector2(float(at[0]), float(at[1])))
 
 
 func _make_net() -> void:
@@ -120,13 +152,17 @@ func _rope_vertex(mesh: SurfaceTool, ring: Dictionary, side: int) -> void:
 	mesh.add_vertex((ring.center as Vector3) + normal * 0.00165)
 
 
+## Кнопка корзины в редакторе шкафа — переключатель (владелец, 14.11): висит — снимаем, нет — вешаем.
 func install() -> void:
 	if visible:
-		room.shelf_hint.emit("Корзина уже висит · удерживайте её для переноса или снятия")
+		_set_installed(false)
+		room.shelf_hint.emit("Корзина снята · нажмите ещё раз, чтобы повесить")
 		return
-	_set_wall_at(DEFAULT_AT)
+	# свободное место на стене текущего вида — не на доске, плакате, шкафу (щит 0,32 × 0,5 вместе с кольцом)
+	var spot: Vector2 = room.free_wall_spot(Vector2(0.32, 0.5))
+	_set_wall_at(spot + Vector2(0, 0.05) if room.wall_is_left(spot.x) == (key == "basket_left") else default_at)
 	_set_installed(true)
-	room.shelf_hint.emit("Корзина под окном · удерживайте для переноса")
+	room.shelf_hint.emit(("Корзина на стене с полками" if key == "basket_left" else "Корзина под окном") + " · удерживайте для переноса")
 
 
 func _set_installed(on: bool) -> void:
@@ -140,22 +176,30 @@ func _set_installed(on: bool) -> void:
 func _save() -> void:
 	var prefs := ConfigFile.new()
 	prefs.load(FILE)
-	prefs.set_value("basket", "installed", visible)
-	prefs.set_value("basket", "at", Vector2(position.x, position.y))
+	prefs.set_value(key, "installed", visible)
+	prefs.set_value(key, "at", room.wall_coord(self))
 	prefs.save(FILE)
+	_publish()
 
 
 func _set_wall_at(at: Vector2) -> void:
-	position = Vector3(clampf(at.x, -2.72, 2.68), clampf(at.y, 0.36, 1.92), room.BACK + 0.012)
+	var left := key == "basket_left"
+	if room.wall_is_left(at.x) != left:
+		at = default_at  # каждая корзина — на своей стене
+	if left:
+		at = Vector2(clampf(at.x, -7.0, -3.25), clampf(at.y, 0.36, 1.92))
+	else:
+		at = Vector2(clampf(at.x, -2.72, 2.68), clampf(at.y, 0.36, 1.92))
+	room._hang(self, at, 0.012)
 
 
 func _hit(screen: Vector2) -> bool:
 	var cam: Camera3D = room.camera
-	var center := global_position + Vector3(0, 0.055, 0.03)
+	var center := global_transform * Vector3(0, 0.055, 0.03)
 	if cam.is_position_behind(center):
 		return false
-	var a := cam.unproject_position(global_position + Vector3(-0.15, -0.115, RIM_DEPTH))
-	var b := cam.unproject_position(global_position + Vector3(0.15, 0.18, 0.0))
+	var a := cam.unproject_position(global_transform * Vector3(-0.15, -0.115, RIM_DEPTH))
+	var b := cam.unproject_position(global_transform * Vector3(0.15, 0.18, 0.0))
 	var bounds := Rect2(a, b - a).abs().grow(5)
 	return bounds.has_point(screen) and room._box_at(screen) == null
 
@@ -167,7 +211,7 @@ func _process(_delta: float) -> void:
 	if _held and not _dragging and Time.get_ticks_msec() - _press_time >= int(HOLD_TIME * 1000):
 		_remove.show()
 	if _remove.visible:
-		var p: Vector2 = room.camera.unproject_position(global_position + Vector3.UP * 0.23)
+		var p: Vector2 = room.camera.unproject_position(global_transform * Vector3.UP * 0.23)
 		_remove.position = (p - Vector2(REMOVE_SIZE.x * 0.5, REMOVE_SIZE.y)).clamp(
 			Vector2(8, 8), get_viewport().get_visible_rect().size - REMOVE_SIZE - Vector2(8, 8))
 
@@ -177,11 +221,11 @@ func _input(event: InputEvent) -> void:
 		return
 	if event is InputEventMouseMotion and Time.get_ticks_msec() - _press_time >= int(HOLD_TIME * 1000):
 		if _dragging or event.position.distance_to(_press_at) > 8.0:
-			var hit: Variant = room._wall_point(event.position)
-			if hit is Vector3:
+			var hit: Variant = room.wall_hit(event.position)
+			if hit is Vector2:
 				_dragging = true
 				_remove.hide()
-				_set_wall_at(Vector2(hit.x, hit.y) + _wall_offset)
+				_set_wall_at((hit as Vector2) + _wall_offset)
 			get_viewport().set_input_as_handled()
 	elif event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 		if _dragging:
@@ -190,7 +234,7 @@ func _input(event: InputEvent) -> void:
 		_dragging = false
 		get_viewport().set_input_as_handled()
 	elif event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE:
-		position = _start
+		_set_wall_at(Vector2(_start.x, _start.y))
 		_held = false
 		_dragging = false
 		_remove.hide()
@@ -206,22 +250,44 @@ func _unhandled_input(event: InputEvent) -> void:
 		if not _hit(event.position):
 			_remove.hide()
 			return
-		var hit: Variant = room._wall_point(event.position)
-		if not hit is Vector3:
+		var hit: Variant = room.wall_hit(event.position)
+		if not hit is Vector2:
 			return
 		_held = true
 		_press_at = event.position
 		_press_time = Time.get_ticks_msec()
-		_start = position
-		_wall_offset = Vector2(position.x - hit.x, position.y - hit.y)
+		var at: Vector2 = room.wall_coord(self)
+		_start = Vector3(at.x, at.y, 0.0)
+		_wall_offset = at - (hit as Vector2)
 		get_viewport().set_input_as_handled()
+
+
+const MAGNET_REACH := 0.84  # м по горизонтали: дальше магнит не тянет (владелец: радиус ×2)
+const MAGNET_PULL := 8.05  # м/с² у самого кольца (+15 %)
+
+
+## Невидимый «магнит» под кольцом (владелец 14.11, модели нет). Ускорение мяча к кольцу: мяч выше кольца и рядом по горизонтали — слегка тянется к центру
+## (сильнее ближе к кольцу), снизу не притягивается. Попадать в корзину чаще, но не «само».
+func magnet_pull(ball_at: Vector3) -> Vector3:
+	if not visible or _dragging or room.remote_view:
+		return Vector3.ZERO
+	var center := transform * Vector3(0, 0, RIM_DEPTH)  # кольцо — перед стеной (у левой — по X)
+	var rise := ball_at.y - center.y
+	if rise < -0.02 or rise > 0.9:
+		return Vector3.ZERO
+	var flat := Vector3(center.x - ball_at.x, 0.0, center.z - ball_at.z)
+	var distance := flat.length()
+	if distance < 0.005 or distance > MAGNET_REACH:
+		return Vector3.ZERO
+	var strength := MAGNET_PULL * (1.0 - distance / MAGNET_REACH) * (1.0 - clampf(rise / 0.9, 0.0, 1.0) * 0.6)
+	return flat / distance * strength
 
 
 ## Контакт сферы с круглым металлическим ободом. Внутри остаётся отверстие для мяча.
 func rim_contact(ball_at: Vector3, velocity: Vector3, radius: float) -> Array:
 	if not visible or _dragging or room.remote_view:
 		return []
-	var center := position + Vector3.BACK * RIM_DEPTH
+	var center := transform * Vector3(0, 0, RIM_DEPTH)  # кольцо — перед стеной (у левой — по X)
 	var tube := RIM_THICKNESS * 0.5
 	var reach := radius + tube
 	var gap := ball_at - center
@@ -245,11 +311,11 @@ func rim_contact(ball_at: Vector3, velocity: Vector3, radius: float) -> Array:
 func check_ball(previous: Vector3, next: Vector3, radius: float) -> bool:
 	if not visible or _dragging or room.remote_view or Time.get_ticks_msec() < _score_cooldown:
 		return false
-	var center := position + Vector3.BACK * RIM_DEPTH
+	var center := transform * Vector3(0, 0, RIM_DEPTH)  # кольцо — перед стеной (у левой — по X)
 	if previous.y < center.y or next.y >= center.y:
 		return false
 	var cross_at := previous.lerp(next, inverse_lerp(previous.y, next.y, center.y))
-	if Vector2(cross_at.x - center.x, cross_at.z - center.z).length() > RIM_RADIUS - radius:
+	if Vector2(cross_at.x - center.x, cross_at.z - center.z).length() > RIM_RADIUS - radius * 0.4:
 		return false
 	_score_cooldown = Time.get_ticks_msec() + 1000
 	var conf := Confetti.make(Color("ffba78"))
@@ -262,12 +328,6 @@ func check_ball(previous: Vector3, next: Vector3, radius: float) -> bool:
 	conf.z_index = 20
 	add_child(conf)
 	Confetti.start(conf)
-	var chime := AudioStreamPlayer.new()
-	chime.stream = Fanfare
-	chime.bus = "SFX"
-	chime.volume_db = -19.0
-	add_child(chime)
-	chime.play()
-	chime.create_tween().tween_callback(chime.queue_free).set_delay(1.1)
+	Sfx.play("mini_win", -8.0, 0.0)  # короткий свой звук (tools/sfx_mini_win.py), как при победе в мини-игре
 	room.shelf_hint.emit("Попадание!")
 	return true

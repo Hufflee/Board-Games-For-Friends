@@ -37,9 +37,17 @@ func prepare(id: String) -> void:
 		error = str(built.error)
 		return
 	var definition := Library.load_game(id)
-	manifest = {"uuid": id, "hash": built.hash, "size": built.size, "title": str(definition.meta.title), "roles": definition.rules.get("roles", [{"id": "leader", "name": "Ведущий"}, {"id": "player", "name": "Игрок"}]).duplicate(true)}
+	manifest = {"uuid": id, "hash": built.hash, "size": built.size, "title": str(definition.meta.title), "roles": definition.rules.get("roles", [{"id": "leader", "name": "Ведущий"}, {"id": "player", "name": "Игрок"}]).duplicate(true), "options": lobby_options(definition)}
 	_outgoing = FileAccess.get_file_as_bytes(built.path)
 	verified[1] = str(built.hash)
+
+## Настройки лобби игры (переменные с признаком lobby): что показать в лобби до загрузки пакета.
+static func lobby_options(definition: Dictionary) -> Array:
+	var out: Array = []
+	for v: Dictionary in definition.get("rules", {}).get("vars", []):
+		if bool(v.get("lobby", false)) and str(v.get("type", "number")) in ["number", "bool"] and out.size() < 16:
+			out.append({"id": str(v.id), "title": str(v.get("title", v.id)).left(64), "type": str(v.get("type", "number")), "init": v.get("init", 0), "min": v.get("lobby_min", v.get("init", 0)), "max": v.get("lobby_max", v.get("init", 0))})
+	return out
 
 func can_start() -> bool:
 	if manifest.is_empty() or not error.is_empty():
@@ -66,6 +74,10 @@ func receive_manifest(data: Dictionary) -> void:
 		if not role is Dictionary or not role.get("id") is String or not role.get("name", "") is String or str(role.id).length() > 64 or str(role.get("name", "")).length() > 128:
 			error = "Неверная роль в описании пакета."
 			return
+	var lobby_list: Variant = data.get("options", [])
+	if not lobby_list is Array or lobby_list.size() > 16 or not lobby_list.all(func(option: Variant): return option is Dictionary and option.get("id") is String and option.get("title", "") is String and str(option.get("title", "")).length() <= 64 and option.get("type") in ["number", "bool"]):
+		error = "Неверные настройки лобби в описании пакета."
+		return
 	var size_value := int(data.size)
 	if not is_finite(float(data.size)) or float(size_value) != float(data.size) or size_value < 22 or size_value > Package.LIMIT:
 		error = "Размер пакета хоста превышает лимит."

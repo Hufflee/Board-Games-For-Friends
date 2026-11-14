@@ -97,6 +97,12 @@ static func value(r: Object, expression: Variant, ctx: Dictionary, depth: int = 
 				return null
 			return r.state.cards[id].data.get(str(expression.get("field", "")))
 		"var": return r.get_var(str(expression.get("id", "")), int(number(r, expression.get("player", {"op": "actor"}), ctx, depth + 1)))
+		# Поле-ходилка: клетка фишки игрока (с 0) и «фишка на клетке с меткой».
+		"piece_cell": return int(r.state.get("pieces", {}).get(str(int(number(r, expression.get("player", {"op": "actor"}), ctx, depth + 1))), 0))
+		"on_tag":
+			var cell := int(r.state.get("pieces", {}).get(str(int(number(r, expression.get("player", {"op": "actor"}), ctx, depth + 1))), 0))
+			var cells: Array = r.definition.elements.get("track", {}).get("cells", [])
+			return cell >= 0 and cell < cells.size() and str(cells[cell].get("tag", "")).strip_edges().to_lower() == str(expression.get("tag", "")).strip_edges().to_lower()
 		"random":
 			if not (a is int or a is float) or not (b is int or b is float):
 				r.last_error = "Границы случайного числа должны быть числами."
@@ -303,6 +309,25 @@ static func run(r: Object, frames: Array) -> String:
 						r.state.round = int(r.state.round) + 1
 						frames.append_array(r.frames_for("round_start", sub))
 					frames.append_array(end)
+			"move_piece", "place_piece":
+				var mover := int(number(r, block.get("player", {"op": "actor"}), ctx))
+				var track: Dictionary = r.definition.elements.get("track", {})
+				var cells: int = track.get("cells", []).size()
+				if mover < 0 or mover >= r.players.size() or cells == 0:
+					r.last_error = "Фишка или поле не найдены."
+					continue
+				var pieces: Dictionary = r.state.get("pieces", {})
+				var at := int(pieces.get(str(mover), 0))
+				var target := at + int(number(r, block.steps, ctx)) if op == "move_piece" else int(number(r, block.cell, ctx))
+				# Кольцо — по кругу, иначе — до края поля.
+				target = posmod(target, cells) if bool(track.get("loop", false)) else clampi(target, 0, cells - 1)
+				pieces[str(mover)] = target
+				r.state["pieces"] = pieces
+				r.state["piece_moved"] = {"seat": mover, "from": at, "to": target, "id": int(r.state.get("piece_moved", {}).get("id", 0)) + 1}
+				var landed := ctx.duplicate(true)
+				landed.actor = mover
+				landed.depth = int(ctx.get("depth", 0)) + 1
+				frames.append_array(r.frames_for("landed", landed))
 			"skip", "eliminate", "leader":
 				var who := int(number(r, block.player, ctx))
 				if who < 0 or who >= r.players.size():
@@ -423,7 +448,12 @@ static func run(r: Object, frames: Array) -> String:
 ## set — id набора из «Элементы → Кубики»: по нему стол рисует цвет и грани.
 static func roll(r: Object, who: int, count: int, visibility: String, set_id: String = "") -> void:
 	var dice: Array = []
-	for i in count: dice.append(r.rng.randi_range(1, 6))
+	# Граней у набора (d4–d20); бросок без набора — обычный d6, как раньше.
+	var faces := 6
+	for entry: Variant in r.definition.elements.get("dice", []):
+		if entry is Dictionary and not set_id.is_empty() and str(entry.get("id", "")) == set_id:
+			faces = int(entry.get("sides", 6))
+	for i in count: dice.append(r.rng.randi_range(1, faces))
 	r.state.dice[str(who)] = {"values": dice, "visible": visibility}
 	if not set_id.is_empty():
 		r.state.dice[str(who)]["set"] = set_id

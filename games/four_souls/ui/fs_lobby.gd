@@ -8,7 +8,7 @@ func _ready() -> void:
 	var margin := MarginContainer.new()
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	margin.offset_left = 48; margin.offset_right = -340; margin.offset_top = 40; margin.offset_bottom = -40
-	add_child(margin)
+	preload("res://hub/lobby_layout.gd").mount(self, margin)
 	var panel := FSStyle.panel(); margin.add_child(panel)
 	var scroll := ScrollContainer.new(); panel.add_child(scroll)
 	_body = FSStyle.vbox(16); _body.size_flags_horizontal = Control.SIZE_EXPAND_FILL; scroll.add_child(_body)
@@ -41,12 +41,12 @@ func _rebuild() -> void:
 	timer.disabled = not Net.is_host()
 	timer.toggled.connect(func(value: bool): Net.set_setting("fs_timer", 20 if value else 0))
 	_body.add_child(timer)
-	var character_choice := CheckBox.new()
-	character_choice.text = "Выбор персонажа из двух"
-	character_choice.button_pressed = bool(data.settings.get("fs_character_choice", false))
-	character_choice.disabled = not Net.is_host()
-	character_choice.toggled.connect(func(value: bool): Net.set_setting("fs_character_choice", value))
-	_body.add_child(character_choice)
+	var count := int(data.settings.get("fs_character_options", 2 if data.settings.get("fs_character_choice", false) else 1))
+	_options("Персонажи на выбор", ["1", "2", "3", "4"], count - 1,
+		func(index: int): Net.set_setting("fs_character_options", index + 1))
+	_options("Бонусные души", ["Три стандартные", "Три случайные, включая DLC"],
+		int(data.settings.get("fs_random_bonus_souls", false)),
+		func(index: int): Net.set_setting("fs_random_bonus_souls", index == 1))
 	var text := FSStyle.label("Базовый набор повторяет состав третьего мода. DLC добавляет расширенные карты из второго. Все карты на русском.",FSStyle.CAP)
 	text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART; _body.add_child(text)
 	var info := FSStyle.label("Стол как в Tabletop Simulator: колоды, ресурсы и бой ведёт игра, сложные эффекты карт выполняют игроки через панель эффекта. Ботов нет.",FSStyle.CAP)
@@ -60,3 +60,15 @@ func _rebuild() -> void:
 	for entry in [["Правила",app.show_rules],["Настройки",app.show_settings],["К выбору игры",app.back_to_hub]]:
 		var b := FSStyle.button(entry[0],FSStyle.CAP); b.pressed.connect(entry[1]); row.add_child(b)
 	_body.add_child(row); _error = FSStyle.label("",FSStyle.CAP); _body.add_child(_error)
+
+func _options(caption: String, labels: Array, selected: int, changed: Callable) -> void:
+	var row := FSStyle.hbox()
+	row.add_child(FSStyle.label(caption))
+	var options := OptionButton.new()
+	for label: String in labels:
+		options.add_item(label)
+	options.select(clampi(selected, 0, labels.size() - 1))
+	options.disabled = not Net.is_host()
+	options.item_selected.connect(changed)
+	row.add_child(options)
+	_body.add_child(row)

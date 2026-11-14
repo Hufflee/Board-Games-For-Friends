@@ -12,6 +12,8 @@ static func decide(rules: RefCounted, seat: int, rng: RandomNumberGenerator) -> 
 	var need: int = rules.to_call(seat)
 	var pot: int = rules.pot()
 	var strength: float = preflop_strength(rules.hole[seat]) if rules.board.is_empty() else equity(rules, seat, rng)
+	if rules.board.is_empty() and rules.cheat != null and rules.cheat.reverse:
+		strength = 1.0 - strength
 	var pot_odds := float(need) / float(pot + need) if need > 0 else 0.0
 	var bluff := rng.randf() < 0.07
 	var bb: int = rules.BB
@@ -57,16 +59,20 @@ static func preflop_strength(cards: Array) -> float:
 
 ## Доля выигранных розыгрышей до ривера против случайных рук живых соперников.
 static func equity(rules: RefCounted, seat: int, rng: RandomNumberGenerator) -> float:
-	var opponents := 0
+	var opponents: Array[int] = []
 	for other: int in rules.players.size():
 		if other != seat and rules.in_hand(other):
-			opponents += 1
-	opponents = mini(opponents, MAX_OPPONENTS)
+			opponents.append(other)
+	opponents.resize(mini(opponents.size(), MAX_OPPONENTS))
 	var known: Array = rules.hole[seat] + rules.board
-	var pool := []
-	for card: int in 52:
-		if not known.has(card):
-			pool.append(card)
+	# После замены часть карт в игре пришла из прежних колод. Примерная выборка
+	# учитывает копии, не заглядывая в настоящую колоду или чужие руки.
+	var copies: int = 1 + rules.cheat.deck_replacements if rules.cheat != null else 1
+	var pool := range(52)
+	for _copy: int in range(1, copies):
+		pool.append_array(range(52))
+	for card: int in known:
+		pool.erase(card)
 	var wins := 0.0
 	for _i: int in SAMPLES:
 		var deck := pool.duplicate()
@@ -79,11 +85,14 @@ static func equity(rules: RefCounted, seat: int, rng: RandomNumberGenerator) -> 
 		var table: Array = rules.board.duplicate()
 		while table.size() < 5:
 			table.append(draw.call())
-		var mine: Dictionary = TGPoker.evaluate(rules.hole[seat] + table)
+		var mine: Dictionary = rules.evaluate(rules.hole[seat] + table, seat)
 		var result := 1.0
-		for _o: int in opponents:
-			var theirs: Dictionary = TGPoker.evaluate([draw.call(), draw.call()] + table)
-			var cmp := TGPoker.compare(mine, theirs)
+		for other: int in opponents:
+			var sampled := table.duplicate()
+			for _card: int in rules.hole[other].size():
+				sampled.append(draw.call())
+			var theirs: Dictionary = rules.evaluate(sampled, other)
+			var cmp: int = rules.compare(mine, theirs)
 			if cmp < 0:
 				result = 0.0
 				break

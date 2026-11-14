@@ -62,6 +62,9 @@ func _draw() -> void:
 	if sides == 8:
 		_draw_d8(s)
 		return
+	if sides in [4, 10, 12, 20]:
+		_draw_polyhedral(s)
+		return
 	var r := Rect2(Vector2.ZERO, Vector2(s, s))
 	if highlight.a > 0.0:
 		var glow := StyleBoxFlat.new()
@@ -104,6 +107,46 @@ func _draw() -> void:
 		return
 	for p in PIPS.get(value, []):
 		draw_circle(p * s, s * 0.085, pip)
+
+## d4 — треугольник, d10 — ромб-«воздушный змей», d12 — пятиугольник, d20 — шестиугольник с гранью-треугольником.
+## Тело — цвет кости, число — цветом точек (как на d6 с цифрами). Только для игр из редактора.
+func _draw_polyhedral(side: float) -> void:
+	var c := Vector2(side, side) * 0.5
+	var radius := side * 0.48
+	var points := PackedVector2Array()
+	match sides:
+		4:
+			for i in 3:
+				points.append(c + Vector2.from_angle(-PI / 2 + TAU * i / 3.0) * radius + Vector2(0, side * 0.08))
+		10:
+			points = PackedVector2Array([c + Vector2(0, -radius), c + Vector2(radius * 0.92, -radius * 0.1), c + Vector2(0, radius), c + Vector2(-radius * 0.92, -radius * 0.1)])
+		12:
+			for i in 5:
+				points.append(c + Vector2.from_angle(-PI / 2 + TAU * i / 5.0) * radius)
+		_:
+			for i in 6:
+				points.append(c + Vector2.from_angle(-PI / 2 + TAU * i / 6.0) * radius)
+	var body := color.darkened(0.45) if dim else color
+	var shadow := points.duplicate()
+	for index in shadow.size():
+		shadow[index].y += side * 0.05
+	draw_colored_polygon(shadow, Color(0, 0, 0, 0.25))
+	draw_colored_polygon(points, body)
+	var outline := points.duplicate()
+	outline.append(points[0])
+	draw_polyline(outline, body.darkened(0.3), 2, true)
+	if sides == 20:
+		var inner := PackedVector2Array([c + Vector2.from_angle(-PI / 2) * radius * 0.96, c + Vector2.from_angle(PI / 6) * radius * 0.96, c + Vector2.from_angle(5 * PI / 6) * radius * 0.96, c + Vector2.from_angle(-PI / 2) * radius * 0.96])
+		draw_polyline(inner, body.darkened(0.2), 1, true)
+	var ivory := color == Color("f3ead2")
+	var ink := Color("7a1414") if ivory else (Color("1b1b1b") if color.get_luminance() > 0.62 else Color.WHITE)
+	if pip_color.a > 0.0:
+		ink = pip_color
+	var font := ThemeDB.fallback_font
+	var font_size := int(side * (0.3 if sides in [4, 20] else 0.34))
+	var text := str(value)
+	var width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size).x
+	draw_string(font, Vector2((side - width) * 0.5, c.y + font_size * 0.36 + (side * 0.06 if sides in [4, 20] else 0.0)), text, HORIZONTAL_ALIGNMENT_LEFT, -1, font_size, ink.darkened(0.5) if dim else ink)
 
 ## Числовой D8 использует ту же2D-механику TossDie, без отдельной физики.
 func _draw_d8(side: float) -> void:

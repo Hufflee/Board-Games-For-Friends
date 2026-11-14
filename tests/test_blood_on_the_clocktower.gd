@@ -244,8 +244,10 @@ func _owner_rules_07() -> void:
 	check(timed.vote_cursor == 2 and timed.vote_total == 1, "Опущенная рука по времени — без голоса")
 	for i in timed.vote_order.size() - timed.vote_cursor:
 		timed.tick(15.5)
-	check(timed.phase == "nominations" and timed.day_timer.left == 50.0, "После голосования возвращается остаток минуты")
-	timed.tick(50.0)
+	check(timed.phase == "nominations" and timed.day_timer.left == 60.0, "После голосования начинается новая минута номинаций")
+	timed.tick(59.0)
+	check(timed.phase == "nominations", "Встречная номинация доступна почти всю новую минуту")
+	timed.tick(1.0)
 	check(timed.phase == "dusk", "При истечении минуты день закрывается")
 	check(not base().get_view(2).has("day_timer"), "Без режима таймера времени нет")
 	# 8–10, 12. Рассказчик видит очередь ночи и действия игроков, Шпиону это не приходит.

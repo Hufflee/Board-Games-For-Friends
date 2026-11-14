@@ -445,6 +445,15 @@ func _complete_purchase(effect: Dictionary) -> void:
 	var seat: int = int(effect.owner)
 	var slot: int = int(effect.slot)
 	var price: int = effect.get("cost", _purchase_cost(seat, slot))
+	if slot >= 0 and effect.has("card"):
+		slot = shop.find(int(effect.card))
+		if slot < 0:
+			_note("Покупка не состоялась: " + FSData.title(int(effect.card)) + " больше не в магазине")
+			_continue_stack()
+			return
+	if slot >= shop.size():
+		_continue_stack()
+		return
 	if coins[seat] >= price:
 		var id: int = _draw("treasure") if slot == -1 else (int(discards.treasure.pop_back()) if slot == -2 else int(shop[slot]))
 		if id >= 0:

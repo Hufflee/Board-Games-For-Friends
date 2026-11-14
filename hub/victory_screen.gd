@@ -124,12 +124,13 @@ func sync(view: Dictionary) -> void:
 		if blind != null:
 			blind.visible = bool(view.get("won", false)) and not bool(view.get("blind", false))
 	var next: Dictionary = Result.resolve(game, view)
+	next["award"] = view.get("match_award", {})
 	visible = bool(next.finished)
 	top_bar.set_victory_backdrop(visible and _showing, _top_ink())
 	if not visible:
 		_restore_layers()
 		return
-	var signature := str([game, view.get("game_id", ""), next.winners, view.get("players", [])])
+	var signature := str([game, view.get("game_id", ""), next.winners, view.get("players", []), next.award])
 	if _key != signature:
 		_key = signature
 		outcome = next
@@ -245,6 +246,17 @@ func _add_person(seat: int, winner: bool) -> void:
 	card.set_meta("winner", winner)
 	_surface.add_child(card)
 	_cards.append(card)
+	var award: Dictionary = outcome.get("award", {})
+	if int(award.get("seat", -1)) == seat:
+		var badge := Label.new()
+		badge.name = "MatchAward"
+		badge.text = str(award.title)
+		badge.tooltip_text = str(award.description)
+		badge.mouse_filter = Control.MOUSE_FILTER_STOP
+		badge.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		badge.add_theme_font_size_override("font_size", 14)
+		badge.add_theme_color_override("font_color", accent)
+		card.add_child(badge)
 	var avatar := TextureRect.new()
 	avatar.name = "Avatar"
 	# Аватарка Steam для всех игр; пока её нет (офлайн, бот, Steam ещё грузит) — цветной кружок игрока
@@ -427,6 +439,11 @@ func _layout() -> void:
 			nick.add_theme_font_size_override("font_size", 14 if team_win and win_count >= 8 else 18)
 		nick.position = Vector2(0, avatar.position.y + side + 6)
 		nick.size = Vector2(card.size.x, 46 if winner else 38)
+		var badge := card.get_node_or_null("MatchAward") as Label
+		if badge != null:
+			var width := maxf(card.size.x, badge.get_combined_minimum_size().x + 12.0)
+			badge.size = Vector2(width, 24)
+			badge.position = Vector2((card.size.x - width) * 0.5, nick.position.y + nick.size.y - 4.0)
 		if not winner:
 			nick.add_theme_color_override("font_color", Color("b4b2ad") if _dark() else Color("3c3831"))
 		card.queue_redraw()

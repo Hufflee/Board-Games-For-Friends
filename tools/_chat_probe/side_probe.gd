@@ -71,6 +71,17 @@ func _run() -> void:
 	var open_rect := Rect2(panel.position, panel.size)
 	print("CORNER mini=", mini_rect, " open=", open_rect, " same_corner=", mini_rect.end.is_equal_approx(open_rect.end))
 	await _shot("side_open_corner")
+	if OS.get_environment("PROBE_MINK") == "1":  # 12.11: самый маленький размер окна
+		panel.k = panel.K_MIN
+		panel._restyle()
+		panel._rescale_body()
+		panel._apply()
+		for tab: String in ["chat", "games"]:
+			if tab == "games":
+				panel.open_games()
+			await get_tree().create_timer(0.4).timeout
+			print("MIN size=", panel.size)
+			await _shot("side_min_" + tab)
 	panel.toggle()
 	await get_tree().create_timer(0.3).timeout
 	print("BACK ", Rect2(panel.position, panel.size).is_equal_approx(mini_rect))

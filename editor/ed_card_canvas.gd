@@ -72,7 +72,10 @@ func _place() -> void:
 	queue_redraw()
 
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), Style.panel().darkened(0.08))
+	# Подложка вокруг предпросмотра — цвета оболочки редактора («Неоновый портал»), сам предпросмотр — стиля игры.
+	var shell: GDScript = load("res://editor/ed_style.gd")
+	draw_rect(Rect2(Vector2.ZERO, size), Color(shell.bg(), 0.55))
+	draw_rect(Rect2(Vector2.ZERO, size), Color(shell.accent2(), 0.3), false, 1)
 
 func _rect(index: int) -> Rect2:
 	var rect: Array = layers[index].rect

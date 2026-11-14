@@ -480,7 +480,8 @@ static func row_layout(
 			var z := float(pile.depth) * 0.5 + dz
 			if mode in [0, 1, 2, 3] or str(id) in ["shelf_girl", "perudo"]:
 				var own_depth: float = item_occupied(str(id), sizes[id], mode).z
-				z = CELL_DEPTH - 0.024 - own_depth * 0.5 + dz
+				# У переднего края; слишком глубокая коробка упирается в заднюю стенку, а не уходит в неё.
+				z = maxf(own_depth * 0.5, CELL_DEPTH - 0.024 - own_depth * 0.5 + dz)
 			boxes[id] = Transform3D(
 				item_basis(str(id), mode).rotated(Vector3.UP, angle),
 				Vector3(x + float(pile.width) * 0.5 + dx, y + ext.y * 0.5, z)
@@ -827,8 +828,10 @@ static func save_state(
 	return cfg.save(path)
 
 
+## parked — новые коробки, которые ждут выбора места (hub/rooms/arrivals.gd): стоят на нижней полке
+## левой стены и места в ячейках не занимают — шкаф ради них не расширяется.
 static func load_state(
-	default_config: Dictionary, default_rows: Array, sizes: Dictionary, path: String = FILE
+	default_config: Dictionary, default_rows: Array, sizes: Dictionary, path: String = FILE, parked: Array = []
 ) -> Dictionary:
 	var file := ConfigFile.new()
 	var config := default_config
@@ -856,6 +859,13 @@ static func load_state(
 				surfaces[id] = (DEFAULT_FIGURE_SURFACES[id] as Dictionary).duplicate()
 		config.figure_surfaces = surfaces
 		config.fig_tv_31 = true
+	if not parked.is_empty():
+		config = config.duplicate(true)
+		var anchors: Dictionary = (config.get("figure_surfaces", {}) as Dictionary).duplicate(true)
+		for id: String in parked:
+			if not str((anchors.get(id, {}) as Dictionary).get("surface", "")).begins_with("wall_"):
+				anchors[id] = {"surface": "wall_lower", "x": 0.0}
+		config.figure_surfaces = anchors
 	if sizes.has("perudo") and not rows.any(func(row): return row.has("perudo")):
 		rows = rows.duplicate(true)
 		var cup_cell: int = clampi(int(config.get("cups", 2)), 0, cell_count(normalized(config)) - 1)

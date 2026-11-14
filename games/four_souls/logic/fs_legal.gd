@@ -89,6 +89,10 @@ static func candidates(g: FSRules, seat: int) -> Array:
 	if seat < 0 or seat >= g.players.size() or g.phase == "game_over":
 		return out
 	var is_current: bool = seat == g.current
+	for offer: Dictionary in g._coin_offers.values():
+		if int(offer.target) == seat:
+			for accept in [true, false]:
+				out.append(_a("answer_trade", {"sender": int(offer.sender), "id": int(offer.id), "accept": accept}))
 	if g.phase in ["turn", "priority", "battle_roll", "death"] and not g.dead[seat] and g._character_can_pay24(seat):
 		out.append(_a("character"))
 		if g._item_count(seat, 5) > 0:

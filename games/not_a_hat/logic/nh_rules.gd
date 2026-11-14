@@ -105,7 +105,9 @@ func respond(seat: int, accept: bool) -> bool:
 	if phase != "respond" or seat != receiver:
 		return false
 	if accept:
-		stats_risks.append({"seat":giver,"error":false});stats_risks.append({"seat":receiver,"error":false})
+		var truthful: bool = int(card["g"]) == claim
+		stats_risks.append({"seat": giver, "error": false, "award": "" if truthful else "bluff", "truthful_gift": truthful})
+		stats_risks.append({"seat": receiver, "error": false})
 		_log("accept")
 		hands[receiver].append(card)  # новый подарок — сверху столбика
 		# теперь он дарит свой «старый» подарок
@@ -116,6 +118,9 @@ func respond(seat: int, accept: bool) -> bool:
 		return true
 	var truth: bool = int(card["g"]) == claim
 	var loser := receiver if truth else giver
+	stats_risks.append({"seat": giver, "award_only": true, "truthful_gift": truth})
+	if not truth:
+		stats_risks.append({"seat": receiver, "award_only": true, "award": "caught"})
 	stats_risks.append({"seat":giver,"error":loser==giver});stats_risks.append({"seat":receiver,"error":loser==receiver})
 	reveal = {"g": card["g"], "claim": claim, "loser": loser, "receiver": receiver, "giver": giver, "truth": truth}
 	_log("truth" if truth else "lie")

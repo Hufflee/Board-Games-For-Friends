@@ -177,6 +177,9 @@ var _plan_c_owner := -1
 var _character_attack_bonuses: Array = []
 var _starting_choices: Array = []
 var choose_character_at_start := false
+var character_offer_count := 1
+var random_bonus_souls := false
+var _coin_offers: Dictionary = {}
 var _character_offers: Array = []
 var _chosen_characters: Array = []
 
@@ -526,6 +529,7 @@ func new_game(members: Array, expanded: bool = false, seed_value: int = 0) -> vo
 	_character_attack_bonuses.clear()
 	_starting_choices.clear()
 	_character_offers.clear()
+	_coin_offers.clear()
 	_chosen_characters.clear()
 	_withdrawn.clear()
 	bonus_progress = {"deaths": 0, "treasures": 0, "monsters": 0}
@@ -536,9 +540,20 @@ func new_game(members: Array, expanded: bool = false, seed_value: int = 0) -> vo
 		# 06.11 (владелец): частично автоматизированные карты временно не попадают в колоды настоящей партии.
 		decks[kind] = decks[kind].filter(func(id): return int(id) not in excluded_cards28)
 		_shuffle(decks[kind]); discards[kind] = []
-	bonuses = FSData.pool("bonus", dlc)
+	bonuses = FSData.pool("bonus", random_bonus_souls)
+	if random_bonus_souls:
+		_shuffle(bonuses)
+		bonuses.resize(3)
 	var characters := FSData.characters(dlc).duplicate(true)
 	_shuffle(characters)
+	var offer_count := clampi(maxi(character_offer_count, 2 if choose_character_at_start else 1), 1, 4)
+	var required := players.size() * offer_count
+	if characters.size() < required:
+		var reserve := FSData.characters(true).filter(func(character): return not character.base)
+		_shuffle(reserve)
+		while characters.size() < required:
+			characters.append(reserve.pop_back())
+		_shuffle(characters)
 	for seat in players.size():
 		damage_shields.append(0)
 		_eggs_players.append({"white": 0, "red": 0, "black": 0})
@@ -553,8 +568,11 @@ func new_game(members: Array, expanded: bool = false, seed_value: int = 0) -> vo
 		var chosen: Dictionary = characters.pop_back()
 		chars.append(-1)
 		max_hp.append(2); hp.append(2); attack.append(1); coins.append(3); souls.append(0); character_ready.append(true); dead.append(false); hands.append([]); items.append([]); soul_cards.append([]); curses.append([])
-		if choose_character_at_start:
-			_character_offers.append([chosen, characters.pop_back()])
+		if offer_count > 1:
+			var offers := [chosen]
+			for option in range(1, offer_count):
+				offers.append(characters.pop_back())
+			_character_offers.append(offers)
 		else:
 			_deal_character(seat, chosen)
 	if not _character_offers.is_empty():

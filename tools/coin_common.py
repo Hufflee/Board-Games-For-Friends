@@ -78,10 +78,10 @@ def volume(img, face, c, r, light, shade, strength=70, seed=0):
     img.alpha_composite(clip(lay, face))
 
 
-def edge(img, c, r, color, ink, seed, drop=0.028):
+def edge(img, c, r, color, ink, seed, drop=0.028, amp=0.012):
     """Гурт: толщина монеты видна снизу — тёмный край под ободом."""
     d = ImageDraw.Draw(img)
-    pts = wobble(c + SIZE * drop * 0.25, c + SIZE * drop, r, seed)
+    pts = wobble(c + SIZE * drop * 0.25, c + SIZE * drop, r, seed, amp)
     d.polygon(pts, fill=color)
     outline(d, pts, ink, SIZE * 0.012)
     # вертикальные насечки на видимой части гурта

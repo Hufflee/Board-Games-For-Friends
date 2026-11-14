@@ -1,12 +1,16 @@
 extends RefCounted
 ## Гибридный редактор правил: шапка события и вертикальные цепочки с вложенными гнёздами.
 
-const Style := preload("res://games/custom/ui/cg_style.gd")
+const Style := preload("res://editor/ed_style.gd")
+## Стиль игр — для предпросмотров того, что увидят игроки.
+const Game := preload("res://games/custom/ui/cg_style.gd")
+
 const Model := preload("res://editor/ed_logic_model.gd")
 const Socket := preload("res://editor/ed_socket.gd")
 const Blocks := preload("res://games/custom/logic/cg_blocks.gd")
 const Minimap := preload("res://editor/ed_logic_map.gd")
 const Canvas := preload("res://editor/ed_logic_canvas.gd")
+const Puzzle := preload("res://editor/ed_puzzle.gd")
 var app: Control
 var document: RefCounted
 var model: RefCounted
@@ -29,7 +33,15 @@ func _refresh() -> void:
 	app._status_text()
 	app._render.call_deferred()
 
+## Куда можно бросить перенесённый блок: {button, array, index} (index −1 — в начало цепочки/списка).
+var _targets: Array = []
+var _board: Control
+
 func _selected(button: Button) -> void:
+	if button is Puzzle:
+		button.selected = true
+		button.queue_redraw()
+		return
 	# Цвет выбранного блока сохраняет контраст с обычным текстом в обеих темах.
 	for state: String in ["normal", "hover", "pressed"]:
 		var amount := 0.24 if state == "normal" else 0.32
@@ -39,6 +51,11 @@ func _build() -> void:
 	var data: Array = document.data.rules.get("chains", [])
 	if app._logic_chain >= data.size():
 		app._logic_chain = data.size() - 1
+	var templates := Style.primary("Шаблоны правил…")
+	templates.name = "RuleTemplates"
+	templates.tooltip_text = "Готовые цепочки: взять или сыграть карту, бросок кубиков, игра до N очков…"
+	templates.pressed.connect(app._rule_templates_dialog)
+	tools.add_child(templates)
 	var event := MenuButton.new()
 	event.text = "+ Событие"
 	event.custom_minimum_size.y = 40
@@ -73,8 +90,11 @@ func _build() -> void:
 	scroll.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	workspace.add_child(scroll)
-	var chains := Style.column(16)
-	chains.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	# Свободное поле: цепочки-пазлы лежат на фоне, у каждой своё место (chain.pos); без места — столбиком.
+	var chains := Control.new()
+	chains.mouse_filter = Control.MOUSE_FILTER_PASS
+	_board = chains
+	_targets.clear()
 	var canvas := Canvas.new()
 	scroll.add_child(canvas)
 	canvas.setup(chains, app._logic_zoom)
@@ -83,18 +103,30 @@ func _build() -> void:
 	_map.setup(scroll, canvas)
 	_restore_scroll(scroll, app._logic_scroll)
 	if data.is_empty():
-		chains.add_child(Style.label("Добавьте событие, затем выберите действия слева."))
+		var empty := Style.label("Добавьте событие, затем выберите действия слева.")
+		empty.position = Vector2(24, 24)
+		chains.add_child(empty)
+	var auto_y := 24.0
 	for index in data.size():
 		var chain: Dictionary = data[index]
 		if not app._logic_phase.is_empty() and chain.get("event", {}).get("phase", "") not in ["", app._logic_phase]:
 			continue
 		var panel := PanelContainer.new()
-		panel.add_theme_stylebox_override("panel", Style.box(Style.panel()))
-		var col := Style.column(8)
-		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		panel.name = "LogicChain%d" % index
+		panel.add_theme_stylebox_override("panel", StyleBoxEmpty.new())
+		var col := Style.column(0)
+		col.custom_minimum_size.x = 360
 		panel.add_child(col)
 		chains.add_child(panel)
-		var hat := Style.button(Blocks.event_label(str(chain.get("event", {}).get("type", ""))))
+		var hat := Puzzle.new()
+		hat.text = Blocks.event_label(str(chain.get("event", {}).get("type", "")))
+		hat.setup("event", true, false)
+		hat.tooltip_text = "Зажмите и тяните, чтобы переложить цепочку"
+		hat.dragged.connect(func(_button: Button, delta: Vector2): panel.position += delta)
+		hat.dropped.connect(func(_button: Button, _point: Vector2):
+			document.set_value(["rules", "chains", index, "pos"], [roundf(panel.position.x), roundf(panel.position.y)], "Переместить цепочку")
+			_refresh())
+		_targets.append({"button": hat, "array": ["rules", "chains", index, "blocks"], "index": -1})
 		hat.pressed.connect(func():
 			app._logic_chain = index
 			app._logic_path = []
@@ -134,6 +166,14 @@ func _build() -> void:
 			col.add_child(note)
 		if not app._logic_collapsed.has(index):
 			_rows(col, ["rules", "chains", index, "blocks"], 0)
+		# Место на поле: сохранённое или следующее в столбике.
+		var spot: Variant = chain.get("pos")
+		if spot is Array and spot.size() == 2:
+			panel.position = Vector2(float(spot[0]), float(spot[1]))
+		else:
+			panel.position = Vector2(24, auto_y)
+		auto_y = maxf(auto_y, panel.position.y) + panel.get_combined_minimum_size().y + 40
+	_fit_board.call_deferred()
 	if app._logic_chain < 0:
 		properties.add_child(Style.label("Выберите или добавьте событие"))
 		return
@@ -199,15 +239,22 @@ func _blocks_palette(query: String) -> void:
 			label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			_palette.add_child(label)
 			category = next
-		var button := Style.button(title)
-		button.clip_text = true
+		# Пазл палитры: нажатие — добавить в выбранную цепочку, зажать и перетащить — положить в нужное место.
+		var button := Puzzle.new()
+		button.text = title
+		button.setup(Puzzle.group_of(op), false, false)
+		button.custom_minimum_size.y = 40
+		button.add_theme_font_size_override("font_size", 13)
 		button.disabled = document.data.rules.get("chains", []).is_empty()
+		button.tooltip_text = "Нажмите — добавить в выбранную цепочку; зажмите и тяните — положить в нужное место"
 		button.pressed.connect(func():
 			if app._logic_chain < 0:
 				app._logic_chain = 0
 			var target: Array = app._logic_target if not app._logic_target.is_empty() else ["rules", "chains", app._logic_chain, "blocks"]
 			app._logic_path = model.add_block(op, target)
 			_refresh())
+		button.dragged.connect(func(source: Button, _delta: Vector2): _drag_ghost(source))
+		button.dropped.connect(func(_source: Button, point: Vector2): _drop_new(op, point))
 		_palette.add_child(button)
 
 func _rows(parent: VBoxContainer, path: Array, depth: int) -> void:
@@ -215,16 +262,25 @@ func _rows(parent: VBoxContainer, path: Array, depth: int) -> void:
 	if not blocks is Array or depth > 16:
 		return
 	if blocks.is_empty():
-		parent.add_child(Style.label("   + Выберите действие слева"))
+		var hint := Style.label("   + Выберите действие слева")
+		hint.custom_minimum_size.y = 36
+		hint.mouse_filter = Control.MOUSE_FILTER_PASS
+		parent.add_child(hint)
+		_targets.append({"button": hint, "array": path.duplicate(), "index": -1})
 	for index in mini(200, blocks.size()):
 		var block: Variant = blocks[index]
 		if not block is Dictionary:
 			continue
 		var block_path := path + [index]
-		var row := Style.row(8)
-		row.add_child(Style.label("│"))
-		var button := Style.button(Blocks.label(str(block.get("op", ""))))
+		var row := Style.row(0)
+		var button := Puzzle.new()
+		button.text = Blocks.label(str(block.get("op", "")))
+		button.setup(Puzzle.group_of(str(block.get("op", ""))), false, false)
 		button.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		button.tooltip_text = "Зажмите и тяните, чтобы переложить блок"
+		button.dragged.connect(func(moved: Button, delta: Vector2): moved.position += delta)
+		button.dropped.connect(func(_moved: Button, point: Vector2): _drop_block(block_path, point))
+		_targets.append({"button": button, "array": path.duplicate(), "index": index})
 		button.pressed.connect(func():
 			app._logic_chain = int(block_path[2])
 			app._logic_path = block_path.duplicate()
@@ -238,13 +294,95 @@ func _rows(parent: VBoxContainer, path: Array, depth: int) -> void:
 		for key: String in ["then", "else", "body"]:
 			if not block.has(key):
 				continue
-			var margin := MarginContainer.new()
-			margin.add_theme_constant_override("margin_left", 24)
-			parent.add_child(margin)
-			var nested := Style.column(8)
-			margin.add_child(nested)
-			nested.add_child(Style.label({"then": "Если да", "else": "Иначе", "body": "Повторяем"}[key]))
+			# Скоба: боковина цвета группы блока, внутрь — вложенные пазлы.
+			var bracket := PanelContainer.new()
+			var side := StyleBoxFlat.new()
+			side.bg_color = Color(Puzzle.FILL.get(Puzzle.group_of(str(block.get("op", ""))), "7a6a2c"), 0.35)
+			side.border_color = Color(Puzzle.EDGE.get(Puzzle.group_of(str(block.get("op", ""))), "f2d36b"), 0.8)
+			side.border_width_left = 14
+			side.set_corner_radius_all(4)
+			side.content_margin_left = 22
+			side.content_margin_top = 10
+			side.content_margin_bottom = 10
+			bracket.add_theme_stylebox_override("panel", side)
+			parent.add_child(bracket)
+			var nested := Style.column(0)
+			bracket.add_child(nested)
+			var caption := Style.label({"then": "Если да", "else": "Иначе", "body": "Повторяем"}[key], 13)
+			caption.modulate.a = 0.75
+			nested.add_child(caption)
 			_rows(nested, block_path + [key], depth + 1)
+
+## Поле по размеру цепочек: прокрутка и масштаб видят всё, плюс запас, чтобы класть цепочки дальше.
+func _fit_board() -> void:
+	if not is_instance_valid(_board):
+		return
+	# Запас для переноса цепочек дальше — только когда цепочки есть; пустое поле помещается без прокрутки.
+	var has_chains := _board.get_children().any(func(child: Node): return child is PanelContainer)
+	var extent := Vector2.ZERO
+	for child: Node in _board.get_children():
+		if child is Control:
+			extent = extent.max((child as Control).position + (child as Control).get_combined_minimum_size() + (Vector2(320, 240) if has_chains else Vector2(16, 16)))
+	_board.custom_minimum_size = extent
+	_board.size = extent
+
+## Блок отпущен: ищем пазл под курсором — встаём после него (или перед, если над серединой),
+## на шляпку — в начало цепочки, на «+ Выберите действие» — в пустой список. Мимо — блок возвращается.
+func _drop_block(from: Array, point: Vector2) -> void:
+	for target: Dictionary in _targets:
+		var control: Control = target.button
+		var array: Array = target.array
+		# Сам перетаскиваемый блок (он под курсором) и всё, что в него вложено, — не цель.
+		var own: Array = array + [int(target.index)]
+		if own == from or array.size() >= from.size() and array.slice(0, from.size()) == from:
+			continue
+		if not is_instance_valid(control) or not control.get_global_rect().grow(6).has_point(point):
+			continue
+		var index := int(target.index)
+		if index < 0:
+			index = 0
+		elif point.y > control.get_global_rect().get_center().y:
+			index += 1
+		var moved: Array = model.relocate(from, array, index)
+		if not moved.is_empty():
+			app._logic_chain = int(moved[2])
+			app._logic_path = moved
+			app._logic_target = moved.slice(0, moved.size() - 1)
+		break
+	_refresh()
+
+## Призрак пазла из палитры летит за курсором поверх всего редактора (палитра обрезана прокруткой).
+var _ghost: Button
+
+func _drag_ghost(source: Button) -> void:
+	if not is_instance_valid(_ghost):
+		_ghost = Puzzle.new()
+		_ghost.text = source.text
+		_ghost.setup(source.group, false, false)
+		_ghost.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		_ghost.size = source.size
+		_ghost.modulate.a = 0.9
+		_ghost.z_index = 100
+		app.add_child(_ghost)
+	_ghost.global_position = app.get_global_mouse_position() - Vector2(24, 20)
+
+## Новый блок из палитры отпущен над цепочкой: добавить и поставить на место под курсором.
+func _drop_new(op: String, point: Vector2) -> void:
+	if is_instance_valid(_ghost):
+		_ghost.queue_free()
+	for target: Dictionary in _targets:
+		var control: Control = target.button
+		if not is_instance_valid(control) or not control.get_global_rect().grow(6).has_point(point):
+			continue
+		var array: Array = target.array
+		var index := 0 if int(target.index) < 0 else int(target.index) + (1 if point.y > control.get_global_rect().get_center().y else 0)
+		var added: Array = model.add_block(op, array, index)
+		if not added.is_empty():
+			app._logic_path = added
+			app._logic_chain = int(added[2])
+			app._logic_target = array.duplicate()
+		break
+	_refresh()
 
 func _phases() -> void:
 	var row := HFlowContainer.new()
@@ -461,7 +599,7 @@ func _block_properties(block: Dictionary) -> void:
 				app._status_text())
 			continue
 		var kind := "number"
-		var captions := {"zone": "Зона", "from": "Откуда", "to": "Куда", "card": "Карта", "player": "Кто", "for": "Кому", "count": "Количество", "var": "Ресурс", "value": "Значение", "phase": "Фаза", "condition": "Условие", "seconds": "Секунд", "text": "Сообщение", "options": "Варианты", "min": "От", "max": "До", "name": "Название звука", "visible": "Кому виден результат", "mode": "По каким очкам"}
+		var captions := {"steps": "На сколько клеток (минус — назад)", "cell": "Номер клетки (с 0)", "zone": "Зона", "from": "Откуда", "to": "Куда", "card": "Карта", "player": "Кто", "for": "Кому", "count": "Количество", "var": "Ресурс", "value": "Значение", "phase": "Фаза", "condition": "Условие", "seconds": "Секунд", "text": "Сообщение", "options": "Варианты", "min": "От", "max": "До", "name": "Название звука", "visible": "Кому виден результат", "mode": "По каким очкам"}
 		if key in ["zone", "from", "to"]: kind = "zone"
 		elif key in ["card", "phase", "text", "options"]: kind = key
 		elif key == "player": kind = "audience" if op == "win" else "player"
@@ -507,6 +645,41 @@ func _block_properties(block: Dictionary) -> void:
 		app._logic_target = []
 		_refresh())
 	properties.add_child(remove)
+
+## «Настройка в лобби»: хост перед партией меняет начальное значение (число — в границах «от/до»).
+func _lobby_controls(col: VBoxContainer, entry: Dictionary, index: int, popup: Window) -> void:
+	var lobby := CheckBox.new()
+	lobby.name = "VarLobby%d" % index
+	lobby.text = "Настройка в лобби (хост меняет перед партией)"
+	lobby.button_pressed = bool(entry.get("lobby", false))
+	lobby.toggled.connect(func(on: bool):
+		var copy: Dictionary = document.data.duplicate(true)
+		var target: Dictionary = copy.rules.vars[index]
+		target["lobby"] = on
+		if on and str(target.get("type", "number")) == "number" and not target.has("lobby_min"):
+			target["lobby_min"] = mini(0, int(target.get("init", 0)))
+			target["lobby_max"] = maxi(int(target.get("init", 0)) * 2, int(target.get("init", 0)) + 10)
+		document.replace(copy, "Настройка в лобби")
+		# Окно пересобирается сразу — появляются поля «от/до».
+		popup.queue_free()
+		_resources()
+		_refresh())
+	col.add_child(lobby)
+	if not bool(entry.get("lobby", false)) or str(entry.get("type", "number")) != "number":
+		return
+	var bounds := Style.row(8)
+	for pair: Array in [["lobby_min", "от"], ["lobby_max", "до"]]:
+		bounds.add_child(Style.label(pair[1]))
+		var spin := SpinBox.new()
+		spin.name = "VarLobby%d_%s" % [index, pair[0]]
+		spin.min_value = -999999
+		spin.max_value = 999999
+		spin.value = float(entry.get(pair[0], entry.get("init", 0)))
+		spin.value_changed.connect(func(value: float):
+			document.set_value(["rules", "vars", index, pair[0]], int(value), "Границы настройки")
+			app._status_text())
+		bounds.add_child(spin)
+	col.add_child(bounds)
 
 func _resources() -> void:
 	var popup := Window.new()
@@ -569,6 +742,11 @@ func _resources() -> void:
 				initial.toggled.connect(commit)
 				col.add_child(initial)
 			"text":
+				pass
+		if str(entry.get("type", "number")) in ["number", "bool"]:
+			_lobby_controls(col, entry, index, popup)
+		match str(entry.get("type", "number")):
+			"text":
 				var initial := LineEdit.new()
 				initial.text = str(entry.get("init", ""))
 				initial.max_length = 4096
@@ -592,8 +770,10 @@ func _resources() -> void:
 			_refresh())
 	col.add_child(add)
 	col.add_child(Style.heading("РОЛИ"))
-	for index in document.data.rules.roles.size():
-		var role: Dictionary = document.data.rules.roles[index]
+	# У проектов из старых шаблонов ролей может не быть — тогда роли по умолчанию (ведущий и игрок).
+	var role_list: Array = document.data.rules.get("roles", [{"id": "leader", "name": "Ведущий"}, {"id": "player", "name": "Игрок"}])
+	for index in role_list.size():
+		var role: Dictionary = role_list[index]
 		var title := LineEdit.new()
 		title.text = str(role.get("name", role.id))
 		title.text_changed.connect(func(text: String):

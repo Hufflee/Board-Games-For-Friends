@@ -58,6 +58,83 @@ static func basket(button: Control, color: Color) -> void:
 		center + Vector2(3, 11), center + Vector2(6, 3)]), color, WIDTH, true)
 
 
+## Комната: стены в перспективе (дальняя стена — прямоугольник, от углов — рёбра к краям).
+static func room(button: Control, color: Color) -> void:
+	# шкаф с ячейками: корпус, полки, перегородки, ножки
+	var c := button.size * 0.5
+	var body := Rect2(c + Vector2(-10, -12), Vector2(20, 22))
+	button.draw_rect(body, color, false, WIDTH, true)
+	for k in [1, 2]:
+		var y: float = body.position.y + body.size.y * k / 3.0
+		button.draw_line(Vector2(body.position.x, y), Vector2(body.end.x, y), color, WIDTH * 0.8, true)
+	button.draw_line(Vector2(c.x, body.position.y), Vector2(c.x, body.position.y + body.size.y / 3.0), color, WIDTH * 0.8, true)
+	button.draw_line(Vector2(c.x + 2, body.position.y + body.size.y * 2 / 3.0), Vector2(c.x + 2, body.end.y), color, WIDTH * 0.8, true)
+	for x: float in [body.position.x + 2, body.end.x - 2]:
+		button.draw_line(Vector2(x, body.end.y), Vector2(x, body.end.y + 3), color, WIDTH, true)
+
+
+## Дверь (выбор комнаты): рама, полотно, ручка (референс владельца).
+static func door(button: Control, color: Color) -> void:
+	var c := button.size * 0.5
+	var frame := Rect2(c + Vector2(-8, -13), Vector2(16, 26))
+	button.draw_rect(frame, color, false, WIDTH, true)
+	var leaf := frame.grow(-3.0)
+	button.draw_line(leaf.position, Vector2(leaf.end.x, leaf.position.y), color, WIDTH * 0.8, true)
+	button.draw_line(Vector2(leaf.end.x, leaf.position.y), leaf.end, color, WIDTH * 0.8, true)
+	button.draw_line(leaf.end, Vector2(leaf.position.x, leaf.end.y), color, WIDTH * 0.8, true)
+	button.draw_line(leaf.position, Vector2(leaf.position.x, c.y - 4), color, WIDTH * 0.8, true)
+	button.draw_line(Vector2(leaf.position.x, c.y + 4), Vector2(leaf.position.x, leaf.end.y), color, WIDTH * 0.8, true)
+	button.draw_rect(Rect2(Vector2(leaf.position.x - 1.5, c.y - 3), Vector2(3, 6)), color, false, WIDTH * 0.8, true)
+	button.draw_line(Vector2(leaf.position.x + 1.5, c.y - 1), Vector2(leaf.position.x + 5, c.y - 1), color, WIDTH * 0.8, true)
+
+
+## Предметы комнаты (кнопка, раскрывающая плакат, мяч, доску, корзину): квадрат, круг, плюс.
+static func items(button: Control, color: Color) -> void:
+	var c := button.size * 0.5
+	button.draw_rect(Rect2(c + Vector2(-11, -10), Vector2(10, 10)), color, false, WIDTH, true)
+	button.draw_arc(c + Vector2(6, -5), 5.0, 0, TAU, 20, color, WIDTH, true)
+	button.draw_rect(Rect2(c + Vector2(-11, 2), Vector2(10, 9)), color, false, WIDTH, true)
+	button.draw_line(c + Vector2(6, 2), c + Vector2(6, 11), color, WIDTH, true)
+	button.draw_line(c + Vector2(1.5, 6.5), c + Vector2(10.5, 6.5), color, WIDTH, true)
+
+
+static func _room_at(canvas: CanvasItem, c: Vector2, color: Color, k: float) -> void:
+	var outer := Rect2(c + Vector2(-12, -10) * k, Vector2(24, 20) * k)
+	var inner := Rect2(c + Vector2(-5, -4) * k, Vector2(10, 8) * k)
+	canvas.draw_rect(outer, color, false, WIDTH, true)
+	canvas.draw_rect(inner, color, false, WIDTH * 0.8, true)
+	for pair: Array in [[outer.position, inner.position], [Vector2(outer.end.x, outer.position.y), Vector2(inner.end.x, inner.position.y)],
+			[Vector2(outer.position.x, outer.end.y), Vector2(inner.position.x, inner.end.y)], [outer.end, inner.end]]:
+		canvas.draw_line(pair[0], pair[1], color, WIDTH * 0.8, true)
+
+
+## Значок комнаты в списке (HubRooms: поле icon): winter — снежинка, neon — месяц и звезда, иначе — комната.
+static func room_icon(canvas: Control, kind: String, color: Color) -> void:
+	var c := canvas.size * 0.5
+	match kind:
+		"winter":
+			for i in 6:
+				var dir := Vector2.from_angle(i * TAU / 6.0 - PI * 0.5)
+				var side := Vector2(-dir.y, dir.x)
+				canvas.draw_line(c, c + dir * 12.0, color, WIDTH, true)
+				var at := c + dir * 7.5
+				canvas.draw_line(at, at + (dir - side) * 3.2, color, WIDTH * 0.8, true)
+				canvas.draw_line(at, at + (dir + side) * 3.2, color, WIDTH * 0.8, true)
+		"neon":
+			# месяц: дуги двух окружностей сходятся в рожках (точки пересечения посчитаны заранее)
+			var mc := c + Vector2(-4, 1)
+			canvas.draw_arc(mc, 10.0, 0.99, TAU - 0.99, 28, color, WIDTH, true)
+			canvas.draw_arc(mc + Vector2(4, 0), 8.5, 1.397, TAU - 1.397, 24, color, WIDTH, true)
+			var star := PackedVector2Array()
+			var sc := c + Vector2(8, -5)
+			for i in 11:
+				var r := 5.0 if i % 2 == 0 else 2.2
+				star.append(sc + Vector2.from_angle(i * TAU / 10.0 - PI * 0.5) * r)
+			canvas.draw_polyline(star, color, WIDTH * 0.8, true)
+		_:
+			_room_at(canvas, c, color, 0.9)
+
+
 static func _plus(button: Control, at: Vector2, color: Color) -> void:
 	button.draw_circle(at, 6.5, Color(0.08, 0.05, 0.16, 0.9))
 	button.draw_line(at + Vector2(-3.5, 0), at + Vector2(3.5, 0), color, WIDTH, true)

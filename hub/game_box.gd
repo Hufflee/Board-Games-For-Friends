@@ -836,7 +836,7 @@ func stop_shelf_motion() -> void:
 
 
 ## Вылететь к игроку: target — куда, лицом к камере.
-func fly_to(target: Transform3D) -> void:
+func fly_to(target: Transform3D, duration: float = 0.71) -> void:
 	_focus_target = target
 	view_spin = Vector2.ZERO
 	focused = true
@@ -847,7 +847,7 @@ func fly_to(target: Transform3D) -> void:
 	# сначала чуть вытянуть из шкафа, потом лететь
 	var pull := home.translated(Vector3(0, 0.02, 0.18))
 	_tween.tween_property(self, "transform", pull, 0.16)
-	_tween.chain().tween_property(self, "transform", target, 0.55)
+	_tween.chain().tween_property(self, "transform", target, duration - 0.16)
 	if _halo:
 		_tween.tween_property(_halo.material_override, "shader_parameter/strength", 0.0, 0.3)
 	_tween.tween_method(_set_glow, _glow, 0.4, 0.3)
@@ -855,7 +855,7 @@ func fly_to(target: Transform3D) -> void:
 		Sfx.play("die_shake", -6)
 	else:
 		Sfx.play("card_shove", -8, 0.05)  # картон трётся о полку
-		get_tree().create_timer(0.62).timeout.connect(func(): Sfx.play("card_place", -10, 0.05))
+		get_tree().create_timer(duration - 0.09).timeout.connect(func(): Sfx.play("card_place", -10, 0.05))
 
 
 ## Вернуться на своё место в шкаф.

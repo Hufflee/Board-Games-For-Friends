@@ -121,7 +121,7 @@ func set_size_scale(scale: float) -> void:
 	set_picture(picture, picture_key)
 
 
-## Плакат с рамкой на стене (x, y; без учёта небольшого наклона).
+## Плакат с рамкой на стене (ширина, высота; без учёта небольшого наклона).
 func wall_size() -> Vector2:
 	var size: Vector2 = (_quad.mesh as QuadMesh).size if is_instance_valid(_quad) else Vector2(0.46, 0.34)
 	return size + Vector2.ONE * BORDER * 2.0
@@ -129,7 +129,8 @@ func wall_size() -> Vector2:
 
 func wall_rect() -> Rect2:
 	var extent := wall_size()
-	return Rect2(Vector2(position.x, position.y) - extent / 2.0, extent)
+	var at: Vector2 = get_meta("wall_at", Vector2(position.x, position.y))  # развёрнутая стена (NeonRoom.wall_xform)
+	return Rect2(at - extent / 2.0, extent)
 
 
 ## Плакат висит / снят (снятый не виден и не ловит клики). Номера с 3 и дальше — добавленные игроком.

@@ -105,25 +105,35 @@ func _layout(new_cards: Array = []) -> void:
 	# первая раскладка — сразу на места: иначе новые карты «прилетают» в руку из угла
 	var first := not _laid_out
 	_laid_out = true
-	var step := minf(
-		64.0 * card_size.x / 96.0,
-		maxf(12.0 * card_size.x / 96.0, (size.x - card_size.x) / maxi(1, order.size() - 1))
-	)
+	var step := fan_step(card_size.x, size.x, order.size())
 	for i in order.size():
 		var card: K12TableCard = _cards[order[i]]
 		if card.dragging:
 			continue
 		var off := float(i) - float(order.size() - 1) * 0.5
-		var center := Vector2(size.x * 0.5 + off * step, card_size.y * 0.5 + 10 + minf(off * off, 16) * 0.5)
 		var highlighted: bool = order[i] == _hover and get_node("/root/Prefs").card_preview_mode != "magnifier"
-		if highlighted:
-			center.y -= 24 * card_size.y / 140.0
+		var center := Vector2(size.x * 0.5, card_size.y * 0.5 + 10)
+		center += fan_offset(off, step, card_size.y, highlighted)
 		card.z_index = 50 if highlighted else i
 		if first or card in new_cards:
-			card.place(center, off * 0.012, 1.0)
+			card.place(center, fan_angle(off), 1.0)
 		else:
-			card.move_to(center, 0.0 if highlighted else off * 0.012, 1.08 if highlighted else 1.0, 0.12)
+			card.move_to(center, 0.0 if highlighted else fan_angle(off), 1.08 if highlighted else 1.0, 0.12)
 	_sync_order.call_deferred()
+
+
+## Общая геометрия веера. Вызывающий задаёт позицию руки и размер карт.
+static func fan_step(width: float, available: float, count: int) -> float:
+	return minf(64.0 * width / 96.0, maxf(12.0 * width / 96.0, (available - width) / maxi(1, count - 1)))
+
+
+static func fan_offset(offset: float, step: float, height: float, highlighted: bool) -> Vector2:
+	var lift := 24.0 * height / 140.0 if highlighted else 0.0
+	return Vector2(offset * step, minf(offset * offset, 16.0) * 0.5 - lift)
+
+
+static func fan_angle(offset: float) -> float:
+	return offset * 0.012
 
 
 func _sync_order() -> void:

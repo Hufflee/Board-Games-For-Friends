@@ -30,7 +30,8 @@ func new_game(seats: Array, options: Dictionary = {}) -> String:
 		return "Число игроков не подходит для этой игры."
 	players = seats.duplicate(true)
 	for player: Dictionary in players:
-		player["bot"] = false
+		# Бот — место, за которое ходит хост (cg_bot.gd); для правил это обычный игрок.
+		player["bot"] = bool(player.get("bot", false))
 		player["eliminated"] = false
 		if player.has("steam_id"):
 			player.steam_id = str(player.steam_id)
@@ -43,7 +44,13 @@ func new_game(seats: Array, options: Dictionary = {}) -> String:
 	TurnOrder.initialize(self)
 	for s in players.size():
 		state.vars.player.append({})
-	for v: Dictionary in definition.rules.get("vars", []):
+	var lobby: Variant = options.get("vars", {})
+	for raw: Dictionary in definition.rules.get("vars", []):
+		# Настройка лобби: допустимое значение хоста заменяет начальное.
+		var v := raw
+		if bool(raw.get("lobby", false)) and lobby is Dictionary and lobby.has(str(raw.id)):
+			v = raw.duplicate()
+			v["init"] = lobby_value(raw, lobby[str(raw.id)])
 		match str(v.get("scope", "shared")):
 			"shared": state.vars.shared[v.id] = v.get("init", 0)
 			"player":
@@ -89,16 +96,43 @@ func new_game(seats: Array, options: Dictionary = {}) -> String:
 					state.cards[id] = {"id": id, "deck": deck.id, "row": row, "data": deck.rows[row].duplicate(true), "face_up": false, "visible_to": []}
 					state.zones[destination].append(id)
 	for token: Dictionary in definition.elements.get("tokens", []):
-		var destination := str(token.get("zone", "table"))
-		if not state.zones.has(destination):
-			return "Для жетона не найдена общая зона."
-		for index in int(token.get("count", 1)):
-			card_no += 1
-			var id := "c%d" % card_no
-			var data := token.duplicate(true)
-			data["kind"] = "token"
-			state.cards[id] = {"id": id, "deck": token.id, "data": data, "face_up": true, "visible_to": []}
-			state.zones[destination].append(id)
+		var zone := str(token.get("zone", "table"))
+		var zone_owner := str(zone_def(zone).get("owner", "shared"))
+		# Цвет игрока/команды: у каждого места (у каждой команды) свой набор, помеченный местом.
+		var owners: Array = [-1]
+		if token.get("color") == "player":
+			owners = range(players.size())
+		elif token.get("color") == "team":
+			owners = []
+			var teams := {}
+			for seat in players.size():
+				if not teams.has(players[seat].get("team", 0)):
+					teams[players[seat].get("team", 0)] = true
+					owners.append(seat)
+		for owner_seat: int in owners:
+			var destination := zone
+			if owner_seat >= 0 and zone_owner == "player":
+				destination = "%s@%d" % [zone, owner_seat]
+			elif owner_seat >= 0 and zone_owner == "team":
+				destination = "%s#%s" % [zone, str(players[owner_seat].get("team", 0))]
+			if not state.zones.has(destination):
+				return "Для жетона «%s» не найдена зона." % str(token.get("title", token.id))
+			for index in int(token.get("count", 1)):
+				card_no += 1
+				var id := "c%d" % card_no
+				var data := token.duplicate(true)
+				data["kind"] = "token"
+				data["home"] = destination
+				if owner_seat >= 0:
+					data["seat"] = owner_seat
+				state.cards[id] = {"id": id, "deck": token.id, "data": data, "face_up": true, "visible_to": []}
+				state.zones[destination].append(id)
+	# Фишки поля-ходилки: у каждого места — клетка (с 0), «старт» поля.
+	if not definition.elements.get("track", {}).get("cells", []).is_empty():
+		var pieces := {}
+		for seat in players.size():
+			pieces[str(seat)] = clampi(int(definition.elements.track.get("start", 0)), 0, definition.elements.track.cells.size() - 1)
+		state["pieces"] = pieces
 	last_error = ""
 	steps = 0
 	var context := {"actor": int(state.current), "depth": 0}
@@ -108,9 +142,26 @@ func new_game(seats: Array, options: Dictionary = {}) -> String:
 	state.rng_state = str(rng.state)
 	return error
 
+## Значение настройки лобби в границах переменной; неподходящее — начальное значение автора.
+static func lobby_value(v: Dictionary, wanted: Variant) -> Variant:
+	match str(v.get("type", "number")):
+		"bool":
+			return wanted if wanted is bool else v.get("init", false)
+		"number":
+			if not (wanted is int or wanted is float) or not is_finite(float(wanted)):
+				return v.get("init", 0)
+			var low := float(v.get("lobby_min", v.get("init", 0)))
+			var high := float(v.get("lobby_max", v.get("init", 0)))
+			var value := clampf(float(wanted), low, high)
+			return int(value) if is_equal_approx(value, roundf(value)) else value
+	return v.get("init", "")
+
 func zone_defs() -> Array:
 	var out: Array = []
 	for screen: Dictionary in definition.layout.get("screens", []):
+		# Экран роли повторяет зоны общего экрана (место и подпись) — сами зоны задаёт общий экран.
+		if screen.has("role"):
+			continue
 		for item: Dictionary in screen.get("items", []):
 			if item.get("kind") == "zone":
 				out.append(item)
@@ -167,7 +218,33 @@ func move_card(id: String, destination: String, position: String = "top") -> boo
 		target.insert(rng.randi_range(0, target.size()), id)
 	else:
 		target.append(id)
+	_refill_token(id, source)
 	return true
+
+## Жетоны «без ограничения»: когда из запаса взяли последний, там появляется новый (всего не больше 1000 компонентов).
+func _refill_token(id: String, source: String) -> void:
+	var data: Dictionary = state.cards[id].data
+	if data.get("kind") != "token" or not bool(data.get("unlimited", false)) or str(data.get("home", "")) != source or source == card_zone(id):
+		return
+	var deck := str(state.cards[id].deck)
+	if state.zones[source].any(func(other: String): return str(state.cards[other].deck) == deck) or state.cards.size() >= 1000:
+		return
+	var number: int = state.cards.size() + 1
+	while state.cards.has("c%d" % number):
+		number += 1
+	var copy: Dictionary = data.duplicate(true)
+	if bool(copy.get("flipped", false)):
+		_flip_token(copy)
+	state.cards["c%d" % number] = {"id": "c%d" % number, "deck": deck, "data": copy, "face_up": true, "visible_to": []}
+	state.zones[source].append("c%d" % number)
+
+## Перевернуть двусторонний жетон: меняются сторона и номиналы лица/оборота (правила видят текущий номинал).
+static func _flip_token(data: Dictionary) -> void:
+	data["flipped"] = not bool(data.get("flipped", false))
+	if data.has("back_value"):
+		var face_value: Variant = data.get("value", 1)
+		data["value"] = data.back_value
+		data["back_value"] = face_value
 
 func next_player(from: int) -> int:
 	for distance in range(1, players.size() + 1):
@@ -312,7 +389,10 @@ func act(seat: int, kind: String, data: Dictionary) -> bool:
 				if ok:
 					ok = fire("move", {"actor": seat, "card": id, "from": action.id, "to": action.to, "depth": 0}).is_empty()
 			elif kind == "manual_flip":
-				state.cards[str(action.card)].face_up = not bool(state.cards[str(action.card)].face_up)
+				if state.cards[str(action.card)].data.get("kind") == "token":
+					_flip_token(state.cards[str(action.card)].data)
+				else:
+					state.cards[str(action.card)].face_up = not bool(state.cards[str(action.card)].face_up)
 				ok = true
 			elif kind == "manual_shuffle":
 				ok = Interp.run(self, [{"blocks": [{"op": "shuffle", "zone": action.id}], "index": 0, "context": {"actor": seat}}]).is_empty()
@@ -395,7 +475,7 @@ func _legal_actions(seat: int) -> Array:
 			if card_visible(id, seat):
 				if zone_def(source).get("view") == "free":
 					out.append({"kind": "manual_place", "id": source, "card": id, "pos": [0.5, 0.5]})
-				if state.cards[id].data.get("kind") != "token":
+				if state.cards[id].data.get("kind") != "token" or bool(state.cards[id].data.get("two_sided", false)):
 					out.append({"kind": "manual_flip", "id": source, "card": id})
 			elif id != str(cards.back()):
 				continue

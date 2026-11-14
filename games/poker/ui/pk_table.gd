@@ -7,6 +7,7 @@ extends Control
 ## (край стола, где нет мест) и переворачиваются по одной. Выигрыш — фишки слетаются к победителю,
 ## его стек растёт плавно. Только тёмная тема.
 const Style := preload("res://games/poker/ui/pk_style.gd")
+const CheatHand := preload("res://games/poker/ui/pk_cheat_hand.gd")
 const LEFT_W := 216.0
 const GAP := 16.0
 const ACTION_H := 76.0
@@ -32,6 +33,7 @@ var _action: PanelContainer
 var _action_row: HBoxContainer
 var _overlay: PanelContainer
 var _preview: TextureRect
+var _cheat_hand: Control
 var _raise_edit: LineEdit
 var _raise_slider: HSlider
 var _raise_button: Button
@@ -42,6 +44,7 @@ var _timer_bar: Control
 var _board_layer: Control  # общие карты живут между пересборками (идёт анимация раздачи)
 var _board_nodes: Array[TextureRect] = []
 var _board_hand := -1
+var _board_session := -1
 var _mine_layer: Control  # свои карты — тоже: пересборка не должна обрывать вытягивание края
 var _mine_key := ""
 var _mine_flips: Array[Node] = []
@@ -152,6 +155,8 @@ func _ready() -> void:
 	_preview.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	_preview.visible = false
 	add_child(_preview)
+	_cheat_hand = CheatHand.new()
+	add_child(_cheat_hand)
 	resized.connect(_layout)
 	Net.state_changed.connect(_state)
 	if not Net.view.is_empty():
@@ -182,7 +187,7 @@ func _state(next: Dictionary) -> void:
 
 func _sounds(old_board: int, old_phase: String) -> void:
 	var phase := str(view.phase)
-	if phase == "showdown" and old_phase == "hand":
+	if phase == "showdown" and old_phase in ["hand", "cheat_pick", "cheat_reveal"]:
 		Sfx.play("chips_win", -4)
 	elif view.board.size() > old_board:
 		pass  # звук — на каждом перевороте карты стола
@@ -209,12 +214,17 @@ func _process(delta: float) -> void:
 		_update_stack_labels()
 	var text := ""
 	match str(view.mode):
-		"sport":
+		"sport", "cheat", "cheat_experimental":
 			text = "Сессия %d · раздача %d/%d" % [int(view.session_no), int(view.hand_no), int(view.session_hands)]
 		_:
 			text = "Раздача %d" % int(view.hand_no)
 	if str(view.phase) == "game_over":
 		text = "Итоги партии"
+	elif view.has("cheat"):
+		var mode_name := "Cheat Poker (experimental)" if view.mode == "cheat_experimental" else "Cheat Poker"
+		text = mode_name + " · " + text
+		if view.cheat.reverse:
+			text += " · Гипноз"
 	_top.info.text = text
 
 
@@ -253,6 +263,7 @@ func _layout() -> void:
 	_timer_bar.size = size
 	_timer_bar.queue_redraw()
 	_build_overlay()
+	_cheat_hand.sync(view, _center, size, minf(_action.position.x - GAP, size.x * 0.44))
 
 
 # ---------------------------------------------------------------- сукно, банк, ставки
@@ -295,16 +306,16 @@ func _draw_piles() -> void:
 	for amount: int in view.bets:
 		street_bets += amount
 	var pot: int = int(view.pot) - street_bets
-	if phase == "hand" and pot > 0:
+	if phase in ["hand", "cheat_pick", "cheat_reveal"] and pot > 0:
 		_pile(c + Vector2(0, -BOARD_CARD.y * 0.5 - 50), pot, big, 0.62, "Банк %d" % int(view.pot), Style.CYAN)
 	# ставки перед местами
 	for seat: int in view.players.size():
 		var bet: int = int(view.bets[seat])
-		if phase == "hand" and bet > 0:
+		if phase in ["hand", "cheat_pick", "cheat_reveal"] and bet > 0:
 			_pile(_bet_pos(seat), bet, big, 0.45, str(bet), Style.felt_ink())
 	# выигрыш не лежит кучей: фишки слетаются к победителю (_fly_win)
 	# кнопка дилера и блайнды
-	if phase in ["hand", "showdown"]:
+	if phase in ["hand", "cheat_pick", "cheat_reveal", "showdown"]:
 		_disc(_marker_pos(int(view.button)), "D", Color("f7f1ff"), Color("2a1840"))
 		if int(view.sb) >= 0 and int(view.sb) != int(view.button):
 			_disc(_marker_pos(int(view.sb)), "SB", Color(Style.CYAN, 0.9), Color("10202a"))
@@ -404,7 +415,7 @@ func _build_seats() -> void:
 		col.add_child(head)
 		var note := str(view.last_action[seat])
 		if out:
-			note = "выбыл до конца сессии" if str(view.mode) == "sport" else "без фишек"
+			note = "выбыл до конца сессии" if str(view.mode) != "classic" else "без фишек"
 		elif turn:
 			note = "думает…"
 		var sub := Style.label(note, 12, Style.PINK if turn else Color("c9b8e6"))
@@ -412,7 +423,7 @@ func _build_seats() -> void:
 		sub.clip_text = true
 		col.add_child(sub)
 		_seats_layer.add_child(plate)
-		if seat == me and phase == "showdown" and (view.hole[seat] as Array).size() == 2:
+		if seat == me and phase == "showdown" and not (view.hole[seat] as Array).is_empty():
 			_add_eye(plate)
 
 
@@ -446,7 +457,7 @@ func _build_cards() -> void:
 		if cards.is_empty() or seat == me:
 			continue
 		var p := _seat_pos(seat)
-		var revealed := int(cards[0]) >= 0 or int(cards[1]) >= 0
+		var revealed := cards.any(func(id: int) -> bool: return id >= 0)
 		var sz := SHOW_CARD if revealed and showdown else SMALL_CARD
 		# карты не там, где куча ставки (она — по пути к центру): у верхних мест — справа от таблички,
 		# у боковых и нижних — над табличкой
@@ -457,7 +468,7 @@ func _build_cards() -> void:
 		for k: int in cards.size():
 			var pos := anchor + Vector2(-sz.x + k * (sz.x - 14) + 6, -sz.y * 0.5)
 			var id := int(cards[k])
-			var key := "%d_%d_%d" % [int(view.hand_no), seat, k]
+			var key := "%d_%d_%d_%d_%d" % [int(view.session_no), int(view.hand_no), seat, k, id]
 			var fresh := id >= 0 and not _seen_open.has(key)
 			var card := _card(-1 if fresh else id, Rect2(pos, sz), "Hole%d_%d" % [seat, k], _cards_layer)
 			card.rotation = deg_to_rad(-6 + k * 12)
@@ -526,21 +537,27 @@ func _dealer_pos() -> Vector2:
 func _sync_board() -> void:
 	var board: Array = view.board
 	var hand := int(view.hand_no)
-	if hand != _board_hand or board.size() < _board_nodes.size():
+	if hand != _board_hand or int(view.session_no) != _board_session or board.size() < _board_nodes.size():
 		for node: TextureRect in _board_nodes:
 			node.queue_free()
 		_board_nodes.clear()
 		# сели за стол посреди раздачи — карты уже лежат, без анимации
 		var instant := _board_hand == -1 and not board.is_empty()
 		_board_hand = hand
+		_board_session = int(view.session_no)
 		if instant:
 			for i: int in board.size():
-				_board_nodes.append(_card(int(board[i]), Rect2(_board_slot(i), BOARD_CARD), "Board%d" % i, _board_layer))
+				var node := _card(int(board[i]), Rect2(_board_slot(i), BOARD_CARD), "Board%d" % i, _board_layer)
+				node.set_meta("board_id", board[i])
+				_board_nodes.append(node)
 			return
 	for i: int in _board_nodes.size():
 		var node := _board_nodes[i]
 		if not bool(node.get_meta("moving", false)):
 			node.position = _board_slot(i)
+			if view.has("cheat") and int(node.get_meta("board_id", board[i])) != int(board[i]):
+				node.set_meta("board_id", board[i])
+				_flip_open(node, int(board[i]), 0.0)
 	var first := _board_nodes.size()
 	var count := board.size() - first
 	if count <= 0:
@@ -551,6 +568,7 @@ func _sync_board() -> void:
 		var i := first + j
 		var card := _card(-1, Rect2(from, BOARD_CARD), "Board%d" % i, _board_layer)
 		card.set_meta("moving", true)
+		card.set_meta("board_id", board[i])
 		card.rotation = deg_to_rad(randf_range(-25.0, 25.0))
 		card.scale = Vector2(0.7, 0.7)
 		card.modulate.a = 0.0
@@ -582,7 +600,7 @@ func _sync_mine() -> void:
 	var showdown := str(view.phase) == "showdown"
 	var opens: Array = view.get("open", [])
 	var open: Array = opens[me] if me >= 0 and me < opens.size() else [false, false]
-	var key := "" if cards.is_empty() else "%d:%s" % [int(view.hand_no), str(cards)]
+	var key := "" if cards.is_empty() else "%d:%d:%s" % [int(view.session_no), int(view.hand_no), str(cards)]
 	if key != _mine_key:
 		_mine_key = key
 		for f: Node in _mine_flips:
@@ -590,7 +608,8 @@ func _sync_mine() -> void:
 				f.cancel()
 		_mine_flips.clear()
 		Style.clear(_mine_layer)
-		_mine_faces = [false, false]  # новая раздача — снова рубашкой
+		_mine_faces.resize(cards.size())
+		_mine_faces.fill(false)
 		for k: int in cards.size():
 			_add_mine(int(cards[k]), k, bool(open[k]) or _open_mode())
 	# показанные всем карты — лицом вверх (переворотом, если были закрыты)
@@ -602,7 +621,7 @@ func _sync_mine() -> void:
 	if cards.is_empty():
 		return
 	var p := _seat_pos(me)
-	var w := MY_CARD.x * 2 - 22
+	var w := MY_CARD.x + (cards.size() - 1) * (MY_CARD.x - 22)
 	var base := Vector2(p.x - w * 0.5, p.y - SEAT.y * 0.5 - MY_CARD.y + 18)
 	for k: int in mini(_mine_layer.get_child_count(), _mine_flips.size()):
 		var card := _mine_layer.get_child(k) as Control
@@ -642,7 +661,8 @@ func _shown_mine(index: int) -> bool:
 ## Глазик слева от моей таблички после раздачи: нажать — показать руку всем (действие "show", обе карты).
 ## Значок — тот же, что «Посмотреть комнату» в хабе (EyeIcon).
 func _add_eye(plate: Control) -> void:
-	var shown := _shown_mine(0) and _shown_mine(1)
+	var flags: Array = view.open[_me()]
+	var shown := flags.all(func(flag: bool) -> bool: return flag)
 	var eye := Style.button("", 16)
 	eye.name = "ShowHand"
 	eye.custom_minimum_size = Vector2(44, 40)
@@ -679,7 +699,7 @@ func _sync_disp() -> void:
 		_disp_from = _disp.duplicate()
 		_disp_t = 1.0
 		return
-	var win := str(view.phase) == "showdown" and not _prev.is_empty() and str(_prev.get("phase", "")) == "hand"
+	var win := str(view.phase) == "showdown" and not _prev.is_empty() and str(_prev.get("phase", "")) in ["hand", "cheat_pick", "cheat_reveal"]
 	if win:
 		_disp_from = _disp.duplicate()
 		_disp_t = 0.0
@@ -796,7 +816,7 @@ func _build_side() -> void:
 	Style.clear(_side)
 	_stack_labels = _stack_labels.filter(func(e: Array) -> bool: return str(e[2]) == "seat")
 	var people: Array = view.players
-	var sport := str(view.mode) == "sport"
+	var sport := str(view.mode) != "classic"
 	if sport:
 		_side.add_child(Style.section("Сессия %d · раздача %d/%d" % [int(view.session_no), int(view.hand_no), int(view.session_hands)]))
 		_side.add_child(Style.label("Победа — %d очков" % int(view.target), 12, Style.muted()))
@@ -828,9 +848,13 @@ func _build_side() -> void:
 			if int(view.rebuys[seat]) > 0:
 				line.add_child(Style.label("×%d" % (int(view.rebuys[seat]) + 1), 12, Style.muted()))
 		_side.add_child(line)
+	if view.has("cheat"):
+		for effect: String in view.cheat.get("effects", []):
+			_side.add_child(Style.label(effect, 12, Style.GOLD))
 	Style.clear(_log)
 	var entries: Array = view.log
-	for i: int in range(maxi(0, entries.size() - 9), entries.size()):
+	var count := 4 if view.has("cheat") and size.y < 800 else 9
+	for i: int in range(maxi(0, entries.size() - count), entries.size()):
 		var entry := Style.label(str(entries[i]), 12, Style.muted() if i < entries.size() - 1 else Style.ink())
 		entry.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		entry.custom_minimum_size.x = LEFT_W - 28
@@ -883,6 +907,14 @@ func _status_text() -> String:
 		"hand":
 			var seat: int = int(view.to_act)
 			return ("Ходит %s" % people[seat].name if seat >= 0 else "Открываем карты…") + mine
+		"cheat_pick":
+			var labels := {"preflop": "префлоп", "flop": "флоп", "turn": "тёрн"}
+			var label := "Жульничество · %s" % labels[view.street]
+			if _me() >= 0 and not view.folded[_me()] and view.cheat.options.is_empty() and int(view.cheat.played) < 0:
+				label += " · нет доступных карт"
+			return label
+		"cheat_reveal":
+			return "Вскрытие жульнических карт"
 		"showdown":
 			if float(view.get("reveal_in", -1.0)) > 0.0:
 				return "Колл — вскрываемся…"

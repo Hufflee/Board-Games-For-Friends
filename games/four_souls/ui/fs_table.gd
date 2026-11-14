@@ -333,7 +333,8 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 		player_row.name = "Player%d" % i
 		player_col.add_child(player_row)
 		if int(player.char) >= 0:
-			_card(player_row, int(player.char), Vector2(40, 56), func(): _inventory(i), "c:%d" % i)
+			var portrait := _card(player_row, int(player.char), Vector2(40, 56), func(): _inventory(i), "c:%d" % i)
+			_card_counters(portrait.get_parent(), int(player.get("spider_tokens15", 0)), 0, "Паук")
 		var details := FSStyle.vbox(2)
 		details.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		player_row.add_child(details)
@@ -478,7 +479,8 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 		var room_col := FSStyle.vbox(4)
 		shop_row.add_child(room_col)
 		room_col.tooltip_text = "Комната %d" % (index + 2)
-		_card(room_col, int(source.id), market_size, func(): _room_dialog20(index))
+		_card(room_col, int(source.id), market_size, func(): _room_dialog20(index),
+			_room_charge_key(index, source) if bool(source.get("room_item20", false)) else "")
 	var bonus_row := top_row28
 	var open_souls: Array = view.bonuses.filter(func(id): return not view.claimed.has(id))
 	if not open_souls.is_empty():
@@ -516,6 +518,9 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 			b.mouse_entered.connect(func(): _schedule_preview(int(id)))
 			b.mouse_exited.connect(_hide_preview)
 			bonus_row.add_child(b)
+			var counter: String = {692: "deaths", 693: "treasures", 696: "monsters"}.get(int(id), "")
+			if counter != "":
+				_card_counters(b, int(view.get("bonus_progress", {}).get(counter, 0)), 0, "Жетоны души", true)
 	# 07.11 (владелец): видимый таймер окна ответов — сколько секунд осталось, пока стек не разрешится сам.
 	_response_bar28 = null
 	if float(view.get("response_left28", -1.0)) >= 0.0:
@@ -711,11 +716,11 @@ func _hands(view: Dictionary) -> void:
 	var loot: Array = []
 	if bool(view.get("can_top_loot20", false)) and int(view.get("loot_top20", -1)) >= 0:
 		loot.append({"key": "top_loot:%d" % int(view.loot_top20), "id": int(view.loot_top20), "top_loot20": true, "texture": FSData.texture(int(view.loot_top20))})
-	# Подсветка ответа не меняет порядок и положение карт.
-	var ready: Array = view.get("loot_moment28", [])
+	# 12.11 (владелец): подсказка «карту можно разыграть в ответ» (подсветка и покачивание) отключена.
+	# 12.11: в чужой ход карты для ответов (бомбы, бобы, осколки, сердца) лежат справа — без подсветки.
 	for id in view.hand:
-		loot.append({"key": "loot:%d" % id, "id": int(id), "texture": FSData.texture(int(id)),
-			"ready28": view.seat != view.current and int(id) in ready})
+		loot.append({"key": "loot:%d" % id, "id": int(id), "texture": FSData.texture(int(id)), "ready28": false,
+			"reactive28": view.seat != view.current and FSData.reactive_loot28(int(id))})
 	_own_fan = _fan(in_play, board, "%d:board" % int(view.seat), true, Vector2(150, 219))
 	if loot.is_empty():
 		var empty := FSStyle.label("Карт лута нет", FSStyle.CAP)
@@ -753,6 +758,9 @@ func _fan(parent: Control, entries: Array, key: String, movable: bool, card_size
 				beside = maxi(0, order.find(str(entry.key)))
 				break
 		order.insert(beside, character_key)
+	var right: Array = entries.filter(func(e): return bool(e.get("reactive28", false))).map(func(e): return str(e.key))
+	if not right.is_empty():
+		order = order.filter(func(k): return k not in right) + order.filter(func(k): return k in right)
 	if cached:
 		parent.add_child(fan)
 		fan.sync_cards(entries, order)
@@ -1062,9 +1070,9 @@ func _card(parent: Control,id: int,dimensions: Vector2,callback: Callable,charge
 		_fx_anchor28["k:" + charge_key] = button
 	return image
 
-func _card_counters(parent: Control, count: int, eggs: int = 0) -> void:
+func _card_counters(parent: Control, count: int, eggs: int = 0, caption: String = "", show_zero: bool = false) -> void:
 	var badge := parent.get_node_or_null("CardCounters") as Label
-	if count == 0 and eggs == 0:
+	if count == 0 and eggs == 0 and not show_zero:
 		if badge != null:
 			badge.hide()
 		return
@@ -1072,12 +1080,18 @@ func _card_counters(parent: Control, count: int, eggs: int = 0) -> void:
 		badge = FSStyle.label("", FSStyle.CAP)
 		badge.name = "CardCounters"
 		badge.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		badge.add_theme_stylebox_override("normal", FSStyle.box(FSStyle.COAL))
+		var background := FSStyle.box(FSStyle.COAL)
+		if caption != "":
+			background.set_content_margin_all(2)
+			badge.add_theme_font_size_override("font_size", 12)
+		badge.add_theme_stylebox_override("normal", background)
 		parent.add_child(badge)
 		badge.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_RIGHT)
 		badge.grow_horizontal = Control.GROW_DIRECTION_BEGIN
 		badge.grow_vertical = Control.GROW_DIRECTION_BEGIN
-	badge.text = ("● %d" % count if count > 0 else "") + ("  яйца: %d" % eggs if eggs > 0 else "")
+	badge.text = ("● %d" % count if count > 0 or show_zero else "") + ("  яйца: %d" % eggs if eggs > 0 else "")
+	if caption != "":
+		parent.tooltip_text += ("\n" if parent.tooltip_text != "" else "") + "%s · %d" % [caption, count]
 	badge.show()
 
 
@@ -1119,7 +1133,16 @@ func _collect_charge(view: Dictionary) -> Dictionary:
 		out["c:%d" % seat] = not bool(p.get("ready", true))
 		for item: Dictionary in p.get("items", []):
 			out[_item_charge_key(seat, item)] = bool(item.get("tapped", false))
+	var rooms: Array = view.get("extra_rooms20", [])
+	for index in rooms.size():
+		var source: Dictionary = rooms[index]
+		if bool(source.get("room_item20", false)):
+			out[_room_charge_key(index, source)] = bool(source.get("tapped", false))
 	return out
+
+
+func _room_charge_key(index: int, source: Dictionary) -> String:
+	return "r:%d:%d" % [index, int(source.get("physical_id13", source.id))]
 
 
 func _item_charge_key(seat: int, item: Dictionary) -> String:
@@ -1381,6 +1404,16 @@ func _show_character_choice(view: Dictionary) -> void:
 
 
 func _controls(col: Control) -> void:
+	if _v.phase != "game_over":
+		for offer: Dictionary in _v.get("coin_offers", []):
+			var sender := int(offer.sender)
+			_note(col, "%s предлагает %d¢" % [_v.players[sender].name, int(offer.amount)], FSStyle.BODY)
+			var buttons := FSStyle.hbox(4)
+			col.add_child(buttons)
+			var accept := _button(buttons, "Принять", "answer_trade", {"sender": sender, "id": int(offer.id), "accept": true})
+			var decline := _button(buttons, "Отказаться", "answer_trade", {"sender": sender, "id": int(offer.id), "accept": false})
+			accept.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			decline.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	if bool(_v.get("starting_pending", false)):
 		_note(col, "Завершите подготовку партии", FSStyle.H1)
 		_note(col, "Применятся начальные свойства выбранного предмета, затем начнётся первый ход.")
@@ -1606,10 +1639,15 @@ func _trade() -> void:
 	var col := _dialog(); _note(col,"Передать монеты",FSStyle.H1)
 	var target := OptionButton.new()
 	for i in _v.players.size():
-		if i != _v.seat: target.add_item(str(_v.players[i].name),i)
+		if i != _v.seat and not bool(_v.players[i].get("withdrawn", false)):
+			target.add_item(str(_v.players[i].name), i)
 	col.add_child(target)
 	var amount := SpinBox.new(); amount.min_value = 1; amount.max_value = maxi(1,int(_v.players[int(_v.seat)].coins)); amount.value = 1; col.add_child(amount)
-	var send := FSStyle.primary("Передать"); send.pressed.connect(func(): _send("trade",{"target":target.get_selected_id(),"amount":int(amount.value)})); col.add_child(send); _close_button(col)
+	var send := FSStyle.primary("Предложить")
+	send.disabled = target.item_count == 0 or int(_v.players[int(_v.seat)].coins) <= 0
+	send.pressed.connect(func(): _send("trade", {"target": target.get_selected_id(), "amount": int(amount.value)}))
+	col.add_child(send)
+	_close_button(col)
 
 func _bonus_dialog(id: int) -> void:
 	var col := _dialog()

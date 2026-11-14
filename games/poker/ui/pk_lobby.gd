@@ -3,23 +3,33 @@ extends Control
 const Style := preload("res://games/poker/ui/pk_style.gd")
 var app: Node
 var body: VBoxContainer
+var actions: VBoxContainer
 
 
 func _ready() -> void:
-	var margin := MarginContainer.new()
-	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	for side: String in ["left", "right", "top", "bottom"]:
-		margin.add_theme_constant_override("margin_" + side, 32)
-	add_child(margin)
-	var center := CenterContainer.new()
-	margin.add_child(center)
 	var panel := PanelContainer.new()
 	panel.name = "LobbyPanel"
-	panel.add_theme_stylebox_override("panel", Style.box(Color.TRANSPARENT, 32, 18, Style.PINK))
-	panel.custom_minimum_size.x = 720
-	center.add_child(panel)
-	body = Style.column(24)
-	panel.add_child(body)
+	panel.add_theme_stylebox_override("panel", Style.box(Color.TRANSPARENT, 24, 18, Style.PINK))
+	add_child(panel)
+	var layout := func():
+		var width := minf(744.0, maxf(1.0, size.x - 32.0))
+		var height := maxf(1.0, size.y - 48.0)
+		panel.position = Vector2((size.x - width) * 0.5, 24.0)
+		panel.size = Vector2(width, height)
+	resized.connect(layout)
+	layout.call()
+	var outer := Style.column(12)
+	panel.add_child(outer)
+	var scroll := ScrollContainer.new()
+	scroll.name = "LobbySettingsScroll"
+	scroll.follow_focus = true
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	outer.add_child(scroll)
+	body = Style.column(20)
+	body.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(body)
+	actions = Style.column(8)
+	outer.add_child(actions)
 	Net.lobby_changed.connect(_rebuild)
 	_rebuild()
 	var chat := K12ChatPanel.new()
@@ -29,6 +39,7 @@ func _ready() -> void:
 
 func _rebuild() -> void:
 	Style.clear(body)
+	Style.clear(actions)
 	var data: Dictionary = Net.lobby_view
 	if data.is_empty():
 		return
@@ -39,7 +50,9 @@ func _rebuild() -> void:
 	var names := PackedStringArray()
 	for person: Dictionary in people:
 		names.append(str(person.name))
-	body.add_child(_group("За столом", Style.label(" · ".join(names))))
+	var roster := Style.label(" · ".join(names))
+	roster.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	body.add_child(_group("За столом", roster))
 	if host:
 		var row := Style.row()
 		var humans := people.size() - maxi(0, Net.bots)
@@ -51,9 +64,9 @@ func _rebuild() -> void:
 			row.add_child(count)
 		body.add_child(_group("Мест за столом · свободные займут боты", row))
 	var mode := str(settings.get("pk_mode", "classic"))
-	var mode_row := Style.row()
-	for item: Array in [["classic", "Классика"], ["sport", "Спортивный"]]:
-		var b := _option(item[1], 200)
+	var mode_row := HFlowContainer.new()
+	for item: Array in [["classic", "Классика"], ["sport", "Спортивный"], ["cheat", "Cheat Poker"], ["cheat_experimental", "Cheat Poker (experimental)"]]:
+		var b := _option(item[1], 0)
 		Style.pick(b, mode == item[0])
 		b.disabled = b.disabled or not host
 		b.pressed.connect(func(): Net.set_setting("pk_mode", item[0]))
@@ -64,13 +77,17 @@ func _rebuild() -> void:
 	var chosen := int(settings.get("pk_target", 0))
 	var goal := chosen if chosen > 0 else auto_target
 	var hint := "Раздачи без конца. Проиграли стек — садитесь заново со 100 BB."
-	if mode == "sport":
+	if mode != "classic":
 		hint = "Сессии по %d раздач, очки за места; забрал за сессию все фишки — ещё +1. Победа — %d очков%s." % [
 			PKRules.SESSION_HANDS, goal, " (2 × %d + 1)" % count_now if chosen <= 0 else ""]
+	if mode == "cheat":
+		hint += " После префлопа, флопа и тёрна — по одной жульнической карте."
+	if mode == "cheat_experimental":
+		hint += " Карты можно играть во время торговли, даже в чужой ход. Эффект срабатывает сразу."
 	var hint_label := Style.label(hint, 16, Style.muted())
 	hint_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.add_child(hint_label)
-	if mode == "sport":
+	if mode != "classic":
 		# цель спортивного режима: «Авто» — 2N+1, либо своё число (его же меняет панель хоста в партии)
 		var goal_row := Style.row()
 		var auto := _option("Авто · %d" % auto_target, 140)
@@ -108,17 +125,14 @@ func _rebuild() -> void:
 	body.add_child(SeatShuffle.settings_row(func(t, z): return Style.button(t, z), func(t, z): return Style.label(t, z)))
 	var error := Style.label("", 16, Style.BAD)
 	error.visible = false
-	body.add_child(error)
+	actions.add_child(error)
 	var footer := Style.row(16)
 	var leave := Style.button("К выбору игры")
 	LeaveGuard.hold(leave, app.back_to_hub, "Выйти?")
 	footer.add_child(leave)
-	var spacer := Control.new()
-	spacer.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	footer.add_child(spacer)
 	if host:
 		var start := Style.button("Начать партию")
-		start.custom_minimum_size.x = 240
+		start.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		start.name = "StartGame"
 		start.theme_type_variation = "SelectedButton"
 		start.pressed.connect(func():
@@ -129,7 +143,7 @@ func _rebuild() -> void:
 		var waiting := Style.label("Ждём хоста…", 16, Style.muted())
 		waiting.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		footer.add_child(waiting)
-	body.add_child(footer)
+	actions.add_child(footer)
 
 
 func _group(title: String, content: Control) -> VBoxContainer:

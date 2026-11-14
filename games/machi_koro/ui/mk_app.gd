@@ -54,14 +54,17 @@ func _set_screen(node: Control) -> void:
 	node.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	add_child(node)
 
-func _center() -> VBoxContainer:
+func _center(lobby: bool = false) -> VBoxContainer:
 	var root := Control.new()
 	var bg := preload("res://games/machi_koro/ui/mk_backdrop.gd").new()
 	bg.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	root.add_child(bg)
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
-	root.add_child(center)
+	if lobby:
+		preload("res://hub/lobby_layout.gd").mount(root, center)
+	else:
+		root.add_child(center)
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size.x = 640
 	center.add_child(panel)
@@ -91,7 +94,7 @@ func show_menu(message: String = "") -> void:
 		col.add_child(Style.label(message))
 
 func show_lobby() -> void:
-	var col := _center()
+	var col := _center(true)
 	col.add_child(Style.heading("МАЧИ КОРО · ЛОББИ"))
 	var members: Array = Net.lobby_view.get("members", [])
 	var names := Style.row(16)

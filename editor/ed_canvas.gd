@@ -5,7 +5,18 @@ signal selected(index: int)
 signal changed(index: int, rect: Rect2)
 const Style := preload("res://games/custom/ui/cg_style.gd")
 var items: Array = []
+## Фон стола (layout.background) и его картинка — рисуются под элементами, как в игре.
+var background: Dictionary = {}
+var background_texture: Texture2D
+## Оформление игры (meta.look): холст рисуется в цветах игры, как будет на столе.
+var look: Dictionary = {}
+## Предпросмотр «Игроков: N»: полосы игроков и соперников делятся на места, как на столе (cg_table.gd).
+var preview_players := 4
 var selection := -1
+## Зоны на планшетах (их место на столе не проверяется) — задаёт редактор.
+var board_zones: Dictionary = {}
+## Индексы элементов с конфликтом раскладки — красная обводка (CGDef.layout_conflicts).
+var conflicts: Dictionary = {}
 var perspective := "all"
 var zoom := 1.0
 var pan := Vector2.ZERO
@@ -58,15 +69,22 @@ func _visible(item: Dictionary) -> bool:
 	return values.has("all") or values.has(perspective)
 
 func _draw() -> void:
-	draw_rect(Rect2(Vector2.ZERO, size), Style.panel().darkened(0.1))
+	# Подложка вокруг предпросмотра — цвета оболочки редактора («Неоновый портал»), сам предпросмотр — стиля игры.
+	var shell: GDScript = load("res://editor/ed_style.gd")
+	draw_rect(Rect2(Vector2.ZERO, size), Color(shell.bg(), 0.55))
+	draw_rect(Rect2(Vector2.ZERO, size), Color(shell.accent2(), 0.3), false, 1)
+	# Только на время рисования стола: оболочка редактора остаётся в теме приложения.
+	Style.set_game_look(look)
 	draw_set_transform(_origin(), 0, Vector2.ONE * _factor())
-	draw_rect(Rect2(0, 0, 1280, 720), Style.bg())
+	Style.draw_table_background(self, Rect2(0, 0, 1280, 720), background, background_texture)
 	for x in range(0, 1281, 8):
 		draw_line(Vector2(x, 48), Vector2(x, 720), Color(Style.ink(), 0.035), 1.0)
 	for y in range(48, 721, 8):
 		draw_line(Vector2(0, y), Vector2(1280, y), Color(Style.ink(), 0.035), 1.0)
 	draw_rect(Rect2(0, 0, 1280, 48), Style.panel())
 	draw_string(Style.BODY, Vector2(16, 31), "Верхняя полоса · название, чат, пауза и общие действия", HORIZONTAL_ALIGNMENT_LEFT, 1248, 20, Style.ink())
+	if _drag.is_empty():
+		conflicts = load("res://games/custom/logic/cg_def.gd").layout_conflicts(items, board_zones).bad
 	for index in items.size():
 		var item: Dictionary = items[index]
 		if not _visible(item):
@@ -74,18 +92,35 @@ func _draw() -> void:
 		var rect := _draft if index == selection and _drag in ["move", "resize"] else item_rect(index)
 		var color := Style.panel()
 		if item.get("kind") == "button":
-			color = Style.accent().darkened(0.2)
+			color = Style.accent().darkened(0.2) if not bool(item.get("main", false)) else Style.accent()
 		draw_style_box(Style.box(color, 0), rect)
 		var title := str(item.get("title", item.get("text", item.get("id", "Элемент"))))
 		draw_string(Style.BODY, rect.position + Vector2(16, 28), title, HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 32, 24, Style.ink())
 		if item.get("kind") == "zone" and rect.size.y > 96:
 			var card := Rect2(rect.position + Vector2(24, 48), Vector2(64, minf(96, rect.size.y - 64)))
 			draw_style_box(Style.box(Style.ink().darkened(0.2), 0), card)
+		if item.get("kind") in ["opponents", "players"]:
+			var seats := preview_players - 1 if item.kind == "opponents" else preview_players
+			var columns := mini(4, maxi(1, seats))
+			var rows := ceili(seats / float(columns))
+			var inner := Rect2(rect.position + Vector2(8, 36), rect.size - Vector2(16, 44))
+			var cell := Vector2((inner.size.x - (columns - 1) * 8) / columns, (inner.size.y - (rows - 1) * 8) / maxi(1, rows))
+			for seat in seats:
+				var place := Rect2(inner.position + Vector2((seat % columns) * (cell.x + 8), floori(seat / float(columns)) * (cell.y + 8)), cell)
+				if place.size.x > 8 and place.size.y > 4:
+					draw_style_box(Style.box(Style.panel().lerp(Style.ink(), 0.12), 0), place)
+					draw_string(Style.BODY, place.position + Vector2(6, minf(place.size.y - 2, 16)), "Игрок %d" % (seat + (2 if item.kind == "opponents" else 1)), HORIZONTAL_ALIGNMENT_LEFT, place.size.x - 12, 12, Color(Style.ink(), 0.7))
+		if item.get("kind") == "zone" and board_zones.has(str(item.get("id", ""))):
+			draw_string(Style.BODY, rect.position + Vector2(16, 52), "лежит на планшете", HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 32, 16, Color(Style.ink(), 0.6))
+		if conflicts.has(index):
+			# Толщина постоянная на экране: холст обычно уменьшен.
+			draw_rect(rect.grow(1.5 / _factor()), Color("e5484d"), false, 3.0 / _factor())
 	if selection >= 0 and selection < items.size() and _visible(items[selection]):
 		var rect := _draft if _drag in ["move", "resize"] else item_rect(selection)
 		draw_rect(rect.grow(2), Style.accent(), false, 3)
 		draw_rect(Rect2(rect.end - Vector2(8, 8), Vector2(16, 16)), Style.accent())
 	draw_rect(Rect2(0, 0, 1280, 720), Color(Style.ink(), 0.3), false, 2)
+	Style.set_game_look({})
 	for guide: Dictionary in _guides:
 		var coordinate: float = guide.value
 		if guide.axis == 0:

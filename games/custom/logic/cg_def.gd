@@ -24,6 +24,8 @@ static func validate(def: Dictionary) -> Dictionary:
 		return result
 	if def.layout.has("custom") and not def.layout.custom is bool:
 		result.errors.append("Признак собственного стола должен быть логическим.")
+	if def.layout.has("background"):
+		_check_background(def.layout.background, result)
 	if def.rules.has("dictionary") and def.rules.dictionary not in ["", "shared"]:
 		result.errors.append("Неизвестный словарь игры.")
 	if def.rules.get("turn_mode", "circle") not in Blocks.TURN_MODES:
@@ -47,6 +49,14 @@ static func validate(def: Dictionary) -> Dictionary:
 	for field: String in ["title", "author", "time", "description", "color"]:
 		if def.meta.has(field) and (not def.meta[field] is String or str(def.meta[field]).length() > 4096):
 			result.errors.append("Поле %s должно быть текстом до 4096 символов." % field)
+	if def.meta.has("look"):
+		var look: Variant = def.meta.look
+		if not look is Dictionary or (look.has("main") or look.has("accent") or not look.has("buttons")) and (not Color.html_is_valid(str(look.get("main", ""))) or not Color.html_is_valid(str(look.get("accent", "")))):
+			result.errors.append("Оформление игры: нужны основной цвет и акцент.")
+		elif look.has("buttons") and not _buttons_valid(look.buttons):
+			result.errors.append("Оформление игры: вид кнопок задан неверно.")
+		elif look.has("font") and (not look.font is String or not (str(look.font).is_empty() or str(look.font).begins_with("builtin:")) or str(look.font).length() > 64):
+			result.errors.append("Оформление игры: шрифт — только из встроенного набора.")
 	for field: String in ["phase_titles", "action_titles"]:
 		if def.meta.has(field):
 			if not def.meta[field] is Dictionary:
@@ -82,12 +92,27 @@ static func validate(def: Dictionary) -> Dictionary:
 	if not screens is Array:
 		result.errors.append("Список экранов должен быть массивом.")
 		return result
+	# Экран роли (ТЗ 3.2, после MVP): своя раскладка для роли целиком. Зоны на нём — те же зоны общего
+	# экрана (по id), их владелец и вид задаёт общий экран; здесь только место и подпись.
+	var role_zones := {}
+	var screen_roles := {}
+	var known_roles := {}
+	for role: Variant in def.rules.get("roles", []):
+		if role is Dictionary:
+			known_roles[str(role.get("id", ""))] = true
 	for screen: Variant in screens:
 		if not screen is Dictionary or not screen.get("items", []) is Array:
 			result.errors.append("Неверное описание экрана.")
 			continue
 		if screen.get("items", []).size() > 256:
 			result.errors.append("На одном экране не больше 256 элементов.")
+		var for_role := str(screen.get("role", ""))
+		if screen.has("role"):
+			if not known_roles.has(for_role):
+				result.errors.append("Экран роли «%s»: такой роли нет." % for_role)
+			if screen_roles.has(for_role):
+				result.errors.append("Экран роли «%s»: экран у роли может быть только один." % for_role)
+			screen_roles[for_role] = true
 		for item: Variant in screen.get("items", []):
 			if not item is Dictionary:
 				result.errors.append("Неверный элемент раскладки.")
@@ -110,7 +135,10 @@ static func validate(def: Dictionary) -> Dictionary:
 						if float(rect[2]) <= 0 or float(rect[3]) <= 0:
 							result.errors.append("Размеры элемента должны быть положительными.")
 						if float(rect[0]) < 0 or float(rect[1]) < 48 or float(rect[0]) + float(rect[2]) > 1280 or float(rect[1]) + float(rect[3]) > 720:
-							result.warnings.append("Элемент выходит за стол 1280×720 или перекрывает верхнюю полосу.")
+							result.warnings.append("Интерфейс: «%s» выходит за стол 1280×720 или заходит на верхнюю полосу." % layout_title(item))
+			if item.get("kind") == "zone" and screen.has("role"):
+				role_zones[str(item.get("id", ""))] = for_role
+				continue
 			if item.get("kind") == "zone":
 				var name_value := str(item.get("id", ""))
 				if not item.get("id") is String or not _id(name_value) or zone_ids.has(name_value):
@@ -119,6 +147,16 @@ static func validate(def: Dictionary) -> Dictionary:
 				zone_owners[name_value] = str(item.get("owner", "shared"))
 				if item.get("owner", "shared") not in ["shared", "player", "team"]:
 					result.errors.append("Неизвестный владелец зоны %s." % name_value)
+	for zone_id: String in role_zones:
+		if not zone_ids.has(zone_id):
+			result.errors.append("Экран роли «%s»: зона «%s» есть только на нём — добавьте её на общий экран." % [role_zones[zone_id], zone_id])
+	for screen: Variant in screens:
+		if screen is Dictionary and screen.get("items", []) is Array:
+			var conflicts := layout_conflicts(screen.get("items", []), board_zone_ids(def))
+			for pair: Array in conflicts.pairs:
+				result.warnings.append("Интерфейс: «%s» перекрывает «%s»." % [layout_title(screen.items[pair[0]]), layout_title(screen.items[pair[1]])])
+			if conflicts.mains.size() > 1:
+				result.warnings.append("Интерфейс: главных кнопок %d — по правилам стола главная одна (снизу по центру)." % conflicts.mains.size())
 	var decks: Variant = def.elements.get("decks", [])
 	if not decks is Array:
 		result.errors.append("Колоды должны быть массивом.")
@@ -233,12 +271,18 @@ static func validate(def: Dictionary) -> Dictionary:
 				result.errors.append("Неверное количество компонентов.")
 			if kind == "dice":
 				_check_dice_look(entry, result)
-			if kind == "tokens" and not _number(entry.get("value", 1)):
-				result.errors.append("Номинал жетона должен быть числом.")
+			if kind == "tokens":
+				_check_token_look(entry, result)
 			if kind == "tokens" and _number(count) and count >= 1 and count <= 300:
-				components += int(count)
+				# Жетоны цвета игрока/команды — свой набор у каждого места.
+				components += int(count) * (int(seats[1]) if entry.get("color") in ["player", "team"] and seats is Array and seats.size() == 2 and _number(seats[1]) else 1)
 	if components > MAX_COMPONENTS:
 		result.errors.append("Карты и жетоны вместе не должны превышать 300 компонентов.")
+	_check_boards(def, component_ids, result)
+	_check_track(def, result)
+	var chain_text := str(def.rules.get("chains", []))
+	if (chain_text.contains("move_piece") or chain_text.contains("place_piece") or chain_text.contains("piece_cell") or chain_text.contains("on_tag")) and def.elements.get("track", {}).get("cells", []).is_empty():
+		result.errors.append("Логика: есть блоки фишек, а у игры нет поля с клетками — «Элементы → Поле».")
 	var vars: Variant = def.rules.get("vars", [])
 	if not vars is Array:
 		result.errors.append("Переменные должны быть массивом.")
@@ -258,6 +302,17 @@ static func validate(def: Dictionary) -> Dictionary:
 			var initial: Variant = v.get("init", 0)
 			if type not in ["number", "text", "bool"] or type == "number" and not _number(initial) or type == "text" and not initial is String or type == "bool" and not initial is bool:
 				result.errors.append("Неверный тип или начальное значение переменной %s." % name_value)
+			# Настройка лобби: хост меняет начальное значение (число — в границах «от/до», да/нет — переключатель).
+			if v.has("lobby") and not v.lobby is bool:
+				result.errors.append("Переменная %s: признак «в лобби» — да или нет." % name_value)
+			elif bool(v.get("lobby", false)):
+				if type == "text":
+					result.errors.append("Переменная %s: в лобби можно вынести только число или да/нет." % name_value)
+				elif type == "number":
+					var low: Variant = v.get("lobby_min", initial)
+					var high: Variant = v.get("lobby_max", initial)
+					if not _number(low) or not _number(high) or float(low) > float(high) or _number(initial) and (float(initial) < float(low) or float(initial) > float(high)):
+						result.errors.append("Переменная %s: в лобби границы «от/до» неверны или не включают начальное значение." % name_value)
 	var chains: Variant = def.rules.get("chains", [])
 	if def.rules.has("roles"):
 		if not def.rules.roles is Array or def.rules.roles.is_empty() or def.rules.roles.size() > 16:
@@ -281,6 +336,8 @@ static func validate(def: Dictionary) -> Dictionary:
 	for chain_index in chains.size():
 		var chain: Variant = chains[chain_index]
 		var chain_errors_from: int = result.errors.size()
+		if chain is Dictionary and chain.has("pos") and (not chain.pos is Array or chain.pos.size() != 2 or not chain.pos.all(func(value: Variant): return _number(value) and absf(float(value)) <= 20000)):
+			result.errors.append("Место цепочки на поле задаётся двумя числами.")
 		if chain is Dictionary and chain.has("comment") and (not chain.comment is String or str(chain.comment).length() > 4096):
 			result.errors.append("Комментарий цепочки должен быть текстом до4096символов.")
 		if not chain is Dictionary or not chain.get("blocks", []) is Array:
@@ -304,6 +361,8 @@ static func validate(def: Dictionary) -> Dictionary:
 static func zone_references_valid(def: Dictionary, value: Variant) -> bool:
 	var zones := {}
 	for screen: Dictionary in def.layout.screens:
+		if screen.has("role"):
+			continue
 		for item: Dictionary in screen.get("items", []):
 			if item.get("kind") == "zone":
 				zones[str(item.id)] = str(item.get("owner", "shared"))
@@ -412,6 +471,25 @@ static func _prefix(result: Dictionary, from: int, place: String) -> void:
 		if not text.begins_with(place):
 			result.errors[index] = place + text
 
+## Фон стола: цвет, картинка (ключ ассета), как вписать и затемнение 0–0,9.
+const BACKGROUND_FITS := ["cover", "stretch", "center", "tile"]
+
+static func _check_background(value: Variant, result: Dictionary) -> void:
+	if not value is Dictionary:
+		result.errors.append("Фон стола: неверное описание.")
+		return
+	var color: Variant = value.get("color", "")
+	if not color is String or not str(color).is_empty() and not Color.html_is_valid(str(color)):
+		result.errors.append("Фон стола: неверный цвет.")
+	var image: Variant = value.get("image", "")
+	if not image is String or not str(image).is_empty() and not _hash(image):
+		result.errors.append("Фон стола: картинка задана неверно.")
+	if value.get("fit", "cover") not in BACKGROUND_FITS:
+		result.errors.append("Фон стола: неизвестный способ вписать картинку.")
+	var dim: Variant = value.get("dim", 0)
+	if not _number(dim) or float(dim) < 0 or float(dim) > 0.9:
+		result.errors.append("Фон стола: затемнение — от 0 до 90 %.")
+
 ## Вид набора кубиков: цвета, грани (точки / цифры / свои картинки 1–6).
 static func _check_dice_look(entry: Dictionary, result: Dictionary) -> void:
 	var title := str(entry.get("title", entry.id)).left(64)
@@ -422,9 +500,208 @@ static func _check_dice_look(entry: Dictionary, result: Dictionary) -> void:
 			result.errors.append("Кубики «%s»: неверный цвет %s." % [title, "кубика" if key == "color" else "точек"])
 	if entry.get("faces", "dots") not in ["dots", "numbers", "images"]:
 		result.errors.append("Кубики «%s»: неизвестный вид граней." % title)
+	if entry.has("sides") and entry.sides not in [4, 6, 8, 10, 12, 20]:
+		result.errors.append("Кубики «%s»: граней может быть 4, 6, 8, 10, 12 или 20." % title)
+	if int(entry.get("sides", 6)) != 6 and entry.get("faces", "dots") != "numbers":
+		result.errors.append("Кубики «%s»: у d%d грани только цифрами." % [title, int(entry.sides)])
 	var images: Variant = entry.get("images", [])
 	if not images is Array or images.size() > 6 or not images.all(func(value: Variant): return value is String and (str(value).is_empty() or _hash(value))):
 		result.errors.append("Кубики «%s»: картинки граней заданы неверно." % title)
+
+## Вид кнопок: цвета (пусто — как в сборнике), окантовка 0–6, скругление 0–28, встроенный шрифт, тень.
+static func _buttons_valid(value: Variant) -> bool:
+	if not value is Dictionary:
+		return false
+	for key: String in ["fill", "text", "border"]:
+		var color: Variant = value.get(key, "")
+		if not color is String or not str(color).is_empty() and not Color.html_is_valid(str(color)):
+			return false
+	for pair: Array in [["border_width", 0, 6], ["radius", 0, 28]]:
+		if value.has(pair[0]) and (not _number(value[pair[0]]) or float(value[pair[0]]) < pair[1] or float(value[pair[0]]) > pair[2]):
+			return false
+	if value.has("font") and (not value.font is String or not (str(value.font).is_empty() or str(value.font).begins_with("builtin:"))):
+		return false
+	return not value.has("shadow") or value.shadow is bool
+
+## Имя элемента раскладки для сообщений.
+static func layout_title(item: Variant) -> String:
+	if not item is Dictionary:
+		return "элемент"
+	return str(item.get("title", item.get("text", item.get("id", "элемент")))).left(48)
+
+## Место элемента раскладки в 1280×720; зона без своего места — место по умолчанию, как на холсте редактора.
+## Прочие элементы без места — пустой прямоугольник (у них своё место по умолчанию на столе).
+static func layout_rect(item: Dictionary, index: int) -> Rect2:
+	var raw: Variant = item.get("rect")
+	if raw is Array and raw.size() == 4 and raw.all(func(value: Variant): return _number(value)):
+		return Rect2(float(raw[0]), float(raw[1]), float(raw[2]), float(raw[3]))
+	if item.get("kind") != "zone":
+		return Rect2()
+	if item.get("owner") == "player":
+		return Rect2(288, 400, 704, 192)
+	if item.get("id") == "table":
+		return Rect2(720, 176, 368, 200)
+	return Rect2(176 + (index % 2) * 400, 176 + (index / 2) * 96, 368, 200)
+
+## Зоны, лежащие на планшетах: их собственное место на столе не используется (зона рисуется на планшете).
+static func board_zone_ids(def: Dictionary) -> Dictionary:
+	var out := {}
+	var boards: Variant = def.get("elements", {}).get("boards", [])
+	if boards is Array:
+		for board: Variant in boards:
+			if board is Dictionary and board.get("cells", []) is Array:
+				for cell: Variant in board.get("cells", []):
+					if cell is Dictionary and cell.get("kind") == "zone":
+						out[str(cell.get("ref", ""))] = true
+	return out
+
+## Проверка раскладки: пары перекрывающихся элементов (пересечение больше 8 px по обеим осям; элементы,
+## которые никогда не видны одновременно — разным ролям, — не мешают друг другу), выход за стол и главные кнопки.
+## Возвращает {pairs: [[i, j]], outside: [i], mains: [i], bad: {i: true}} — bad для красной обводки холста.
+static func layout_conflicts(items: Array, skip_zones: Dictionary = {}) -> Dictionary:
+	var rects := {}
+	var out := {"pairs": [], "outside": [], "mains": [], "bad": {}}
+	for index in items.size():
+		var item: Variant = items[index]
+		if not item is Dictionary:
+			continue
+		if item.get("kind") == "zone" and skip_zones.has(str(item.get("id", ""))):
+			continue
+		if item.get("kind") == "button" and bool(item.get("main", false)):
+			out.mains.append(index)
+		var rect := layout_rect(item, index)
+		if rect.size == Vector2.ZERO:
+			continue
+		rects[index] = rect
+		if rect.position.x < 0 or rect.position.y < 48 or rect.end.x > 1280 or rect.end.y > 720:
+			out.outside.append(index)
+			out.bad[index] = true
+	var keys: Array = rects.keys()
+	for a in keys.size():
+		for b in range(a + 1, keys.size()):
+			var first: int = keys[a]
+			var second: int = keys[b]
+			if not _seen_together(items[first], items[second]):
+				continue
+			var cross: Rect2 = rects[first].intersection(rects[second])
+			if cross.size.x > 8 and cross.size.y > 8:
+				out.pairs.append([first, second])
+				out.bad[first] = true
+				out.bad[second] = true
+	if out.mains.size() > 1:
+		for index: int in out.mains:
+			out.bad[index] = true
+	return out
+
+static func _seen_together(first: Dictionary, second: Dictionary) -> bool:
+	var a: Variant = first.get("visible", ["all"])
+	var b: Variant = second.get("visible", ["all"])
+	if not a is Array or not b is Array:
+		return true
+	if a.is_empty() or b.is_empty():
+		return false
+	if a.has("all") or b.has("all"):
+		return true
+	return a.any(func(value: Variant): return b.has(value))
+
+## Планшеты игроков: картинка, рамка цвета игрока, ячейки — личные зоны и счётчики ресурсов игрока
+## (rect — доли картинки). Ячейка-зона ссылается на зону стола, ячейка-счётчик — на переменную.
+static func _check_boards(def: Dictionary, component_ids: Dictionary, result: Dictionary) -> void:
+	var boards: Variant = def.elements.get("boards", [])
+	if not boards is Array:
+		result.errors.append("Планшеты должны быть массивом.")
+		return
+	var zones := {}
+	for screen: Variant in def.layout.get("screens", []):
+		if screen is Dictionary:
+			for item: Variant in screen.get("items", []):
+				if item is Dictionary and item.get("kind") == "zone":
+					zones[str(item.get("id", ""))] = true
+	var vars := {}
+	for v: Variant in def.rules.get("vars", []):
+		if v is Dictionary:
+			vars[str(v.get("id", ""))] = true
+	for board: Variant in boards:
+		if not board is Dictionary or not board.get("id") is String or not _id(str(board.get("id", ""))):
+			result.errors.append("Планшету нужен идентификатор.")
+			continue
+		var title := "Планшет «%s»: " % str(board.get("title", board.id)).left(64)
+		if component_ids.has(board.id):
+			result.errors.append(title + "повтор идентификатора.")
+		component_ids[board.id] = true
+		var image: Variant = board.get("image", "")
+		if not image is String or not str(image).is_empty() and not _hash(image):
+			result.errors.append(title + "картинка задана неверно.")
+		if board.get("frame", "player") not in ["player", "none"]:
+			result.errors.append(title + "неизвестная рамка.")
+		var cells: Variant = board.get("cells", [])
+		if not cells is Array or cells.size() > 32:
+			result.errors.append(title + "ячейки заданы неверно (не больше 32).")
+			continue
+		for cell: Variant in cells:
+			if not cell is Dictionary or cell.get("kind") not in ["zone", "counter"]:
+				result.errors.append(title + "неизвестная ячейка.")
+				continue
+			var rect: Variant = cell.get("rect")
+			if not rect is Array or rect.size() != 4 or not rect.all(func(value: Variant): return _number(value) and float(value) >= 0.0 and float(value) <= 1.0):
+				result.errors.append(title + "место ячейки задаётся долями картинки от 0 до 1.")
+			var ref := str(cell.get("ref", ""))
+			if cell.kind == "zone" and not zones.has(ref):
+				result.errors.append(title + "ячейка ссылается на удалённую зону «%s»." % ref)
+			elif cell.kind == "counter" and not vars.has(ref):
+				result.errors.append(title + "счётчик ссылается на удалённый ресурс «%s»." % ref)
+
+## Поле-ходилка: картинка, клетки (доли картинки, метки), кольцо, стартовая клетка.
+static func _check_track(def: Dictionary, result: Dictionary) -> void:
+	if not def.elements.has("track"):
+		return
+	var track: Variant = def.elements.track
+	if not track is Dictionary:
+		result.errors.append("Поле: неверное описание.")
+		return
+	var image: Variant = track.get("image", "")
+	if not image is String or not str(image).is_empty() and not _hash(image):
+		result.errors.append("Поле: картинка задана неверно.")
+	var cells: Variant = track.get("cells", [])
+	if not cells is Array or cells.size() > 300:
+		result.errors.append("Поле: клеток не больше 300.")
+		return
+	for cell: Variant in cells:
+		var spot: Variant = cell.get("pos") if cell is Dictionary else null
+		if not spot is Array or spot.size() != 2 or not spot.all(func(value: Variant): return _number(value) and float(value) >= 0 and float(value) <= 1):
+			result.errors.append("Поле: место клетки — две доли картинки от 0 до 1.")
+			break
+		if not str(cell.get("tag", "")).length() <= 32:
+			result.errors.append("Поле: метка клетки — до 32 знаков.")
+			break
+	if track.has("loop") and not track.loop is bool:
+		result.errors.append("Поле: «кольцо» — да или нет.")
+	if track.has("start") and (not _number(track.start) or int(track.start) < 0 or cells is Array and not cells.is_empty() and int(track.start) >= cells.size()):
+		result.errors.append("Поле: стартовой клетки нет.")
+
+## Вид жетона: форма (в т.ч. своя картинка), цвет (свой / игрока / команды), лицо и оборот, номиналы.
+const TOKEN_SHAPES := ["circle", "square", "hex", "image"]
+
+static func _check_token_look(entry: Dictionary, result: Dictionary) -> void:
+	var title := "Жетон «%s»: " % str(entry.get("title", entry.id)).left(64)
+	if not _number(entry.get("value", 1)):
+		result.errors.append(title + "номинал должен быть числом.")
+	if entry.has("back_value") and not _number(entry.back_value):
+		result.errors.append(title + "номинал оборота должен быть числом.")
+	if entry.get("shape", "circle") not in TOKEN_SHAPES:
+		result.errors.append(title + "неизвестная форма.")
+	var color: Variant = entry.get("color", "#65cfcc")
+	if not color is String or color not in ["player", "team"] and not Color.html_is_valid(str(color)):
+		result.errors.append(title + "неверный цвет.")
+	for key: String in ["image", "back"]:
+		var image: Variant = entry.get(key, "")
+		if not image is String or not str(image).is_empty() and not _hash(image):
+			result.errors.append(title + ("картинка лица задана неверно." if key == "image" else "картинка оборота задана неверно."))
+	if entry.get("shape") == "image" and str(entry.get("image", "")).is_empty():
+		result.errors.append(title + "для формы «своя картинка» нужна картинка лица.")
+	for key: String in ["two_sided", "unlimited", "show_value"]:
+		if entry.has(key) and not entry[key] is bool:
+			result.errors.append(title + "неверный признак %s." % key)
 
 static func box_valid(box: Dictionary, kinds: Array = ["fill", "text", "image"]) -> bool:
 	var faces: Variant = box.get("faces", {})

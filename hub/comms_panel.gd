@@ -12,8 +12,11 @@ extends "res://hub/float_panel.gd"
 
 const Board := preload("res://hub/minigames/mg_board.gd")
 const REACTIONS := ["Думаю...", "Блефую!", "Кидаю кость!", "Хитро!", "Ой…", "Мне повезёт!", "Удивительно!", "Эй, вы ещё здесь?"]
-const ICONS := {"chess": "♙", "checkers": "◉", "go": "○"}
-const SIDE_NAMES := {"chess": ["белые", "чёрные"], "checkers": ["белые", "чёрные"], "go": ["чёрные", "белые"]}
+const BallsView := preload("res://hub/minigames/mg_balls_view.gd")
+const Confetti := preload("res://hub/confetti.gd")
+const MinesView := preload("res://hub/minigames/mg_mines_view.gd")
+const ICONS := {"chess": "♙", "checkers": "◉", "go": "○", "connect4": "●", "balls": "◎", "stars": "★", "mines": "▦"}
+const SIDE_NAMES := {"chess": ["белые", "чёрные"], "checkers": ["белые", "чёрные"], "go": ["чёрные", "белые"], "connect4": ["красные", "жёлтые"]}
 const EMOTE := Color("ffd479")
 const SYSTEM := Color("b8c7c0")
 const GAMES_TAB := "g:"
@@ -63,6 +66,7 @@ var _game_shown := "?"
 var _pick_game := "chess"
 var _pick_size := 9
 var _resign_armed := false
+var _turn_lock: Control  # «Ваш ход»: поверх мини-игр, пока идёт мой ход в основной игре (хост может разрешить)
 
 
 func _init() -> void:
@@ -74,6 +78,8 @@ func _init() -> void:
 
 
 func _ready() -> void:
+	add_to_group("spectator_public_ui")
+	add_to_group("pause_allowed")
 	key = "comms"
 	title = "Общение"
 	base_size = Vector2(340, 330)
@@ -95,6 +101,7 @@ func _ready() -> void:
 	_chat.notice.connect(_say)
 	_mg.changed.connect(_sync)
 	_mg.notice.connect(_say)
+	_mg.won.connect(_celebrate)
 	Net.lobby_changed.connect(_on_lobby)
 	Net.state_changed.connect(func(_view: Dictionary): _sync())
 	get_tree().root.files_dropped.connect(_on_files_dropped)
@@ -399,6 +406,8 @@ func _build_body() -> void:
 	_game_box = Control.new()
 	_game_box.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	body.add_child(_game_box)
+	_turn_lock = _make_turn_lock()
+	body.add_child(_turn_lock)
 	_notice = Label.new()
 	_notice.add_theme_font_size_override("font_size", px(12))
 	_notice.add_theme_color_override("font_color", Color("ffd479"))
@@ -568,7 +577,13 @@ func _sync() -> void:
 		var session: Dictionary = _mg.sessions[id]
 		if mode == Mode.OPEN and view == "mg" and id == game_current:
 			session.dot = false
-		var rival := "за обоих" if bool(session.local) else str((session.names as Array)[1 - int(session.seat)])
+		var rival := ""
+		if bool(session.get("room", false)) or bool(session.get("solo", false)):
+			rival = _mg.title(str(session.game))  # общая комната и соло — без соперника
+			if str((session.opts as Dictionary).get("mode", "")) == "deep":
+				rival += " ∞"  # бесконечный сапёр отличается от обычного уже на вкладке
+		else:
+			rival = "за обоих" if bool(session.local) else str((session.names as Array)[1 - int(session.seat)])
 		list.append({"id": "g:" + id, "text": "%s %s" % [ICONS.get(session.game, ""), rival], "closable": true, "dot": bool(session.dot),
 			"tip": "%s · %s" % [_mg.title(str(session.game)), rival]})
 	list.append({"id": GAMES_TAB, "text": "♙ Игры", "closable": false, "dot": not (_mg.invites_in as Array).is_empty(),
@@ -1015,6 +1030,9 @@ func _process(delta: float) -> void:
 		return
 	if _notice.visible:
 		_notice.position = Vector2(px(8), body.size.y - _notice.size.y - px(8))
+	_sync_turn_lock()
+	if view == "mg" and str(_mg.current) != "" and _mg.sessions.has(_mg.current) and str(_mg.sessions[_mg.current].game) == "mines":
+		_mines_status(_mg.sessions[_mg.current].state)  # секундомер тикает
 	if view != "chat":
 		return
 	_chat.touch_view()
@@ -1128,6 +1146,85 @@ func _unhandled_key_input(event: InputEvent) -> void:
 
 # --- Мини-игры -----------------------------------------------------------------------------
 
+## Победа в мини-игре: короткий звон и конфетти, падающие сверху по всей панели мини-игр.
+func _celebrate(_id: String) -> void:
+	Sfx.play("mini_win", -6.0, 0.0)
+	if mode != Mode.OPEN or view != "mg" or not is_instance_valid(body):
+		return
+	var conf: CPUParticles2D = Confetti.make(c_accent)
+	conf.position = Vector2(body.size.x * 0.5, -px(4))
+	conf.emission_shape = CPUParticles2D.EMISSION_SHAPE_RECTANGLE
+	conf.emission_rect_extents = Vector2(body.size.x * 0.5, 2.0)
+	conf.direction = Vector2.DOWN
+	conf.spread = 35.0
+	conf.gravity = Vector2(0, 300)
+	conf.initial_velocity_min = 30.0
+	conf.initial_velocity_max = 120.0
+	conf.amount = 70
+	conf.lifetime = 1.6
+	conf.explosiveness = 0.75
+	var clip := Control.new()  # конфетти не вылетают за края панели
+	clip.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	clip.clip_contents = true
+	clip.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	clip.z_index = 30
+	body.add_child(clip)
+	clip.add_child(conf)
+	Confetti.start(conf)
+	clip.create_tween().tween_callback(clip.queue_free).set_delay(conf.lifetime + 1.6)
+
+
+## Заслонка: «Ваш ход», пока идёт мой ход; у обычного сапёра после хода — «Продолжить?» до нажатия.
+func _sync_turn_lock() -> void:
+	if not is_instance_valid(_turn_lock):
+		return
+	var blocked := bool(_mg.blocked_now())
+	var waiting := view == "mg" and bool(_mg.mines_waiting(str(_mg.current)))
+	_turn_lock.visible = view == "mg" and (blocked or waiting)
+	if not _turn_lock.visible:
+		return
+	var big := _turn_lock.find_child("Big", true, false) as Label
+	var small := _turn_lock.find_child("Small", true, false) as Label
+	var text := "Ваш ход" if blocked else "Продолжить?"
+	if big.text != text:
+		big.text = text
+		small.text = "Мини-игры подождут до конца хода" if blocked else "Нажмите в любом месте — сапёр продолжится"
+	_turn_lock.mouse_default_cursor_shape = Control.CURSOR_ARROW if blocked else Control.CURSOR_POINTING_HAND
+
+
+func _on_turn_lock_input(event: InputEvent) -> void:
+	var button := event as InputEventMouseButton
+	if button == null or not button.pressed or button.button_index != MOUSE_BUTTON_LEFT:
+		return
+	_turn_lock.accept_event()
+	if not bool(_mg.blocked_now()):
+		_mg.resume_mines(str(_mg.current))
+
+
+## Заслонка «Ваш ход» над мини-играми: затемняет поле и съедает нажатия.
+func _make_turn_lock() -> Control:
+	var lock := PanelContainer.new()
+	lock.name = "TurnLock"
+	lock.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	lock.mouse_filter = Control.MOUSE_FILTER_STOP
+	lock.add_theme_stylebox_override("panel", flat(Color(0.03, 0.03, 0.06, 0.78), 0, 0))
+	lock.visible = false
+	lock.gui_input.connect(_on_turn_lock_input)
+	var col := VBoxContainer.new()
+	col.alignment = BoxContainer.ALIGNMENT_CENTER
+	col.add_theme_constant_override("separation", px(4))
+	lock.add_child(col)
+	var big := _label("Ваш ход", 24, EMOTE)
+	big.name = "Big"
+	big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(big)
+	var small := _label("Мини-игры подождут до конца хода", 12, c_muted)
+	small.name = "Small"
+	small.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	col.add_child(small)
+	return lock
+
+
 func _clear_game() -> void:
 	for child: Node in _game_box.get_children():
 		_game_box.remove_child(child)
@@ -1161,9 +1258,12 @@ func _toggle_button(text: String, on: bool) -> Button:
 
 
 func _show_lobby() -> void:
+	var previous := _game_box.get_node_or_null("MiniGameLobbyScroll") as ScrollContainer
+	var position_before := previous.scroll_vertical if previous != null else 0
 	_game_shown = ""
 	_clear_game()
 	var scroll := ScrollContainer.new()
+	scroll.name = "MiniGameLobbyScroll"
 	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	scroll.offset_left = px(10)
 	scroll.offset_top = px(8)
@@ -1175,6 +1275,7 @@ func _show_lobby() -> void:
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	col.add_theme_constant_override("separation", px(8))
 	scroll.add_child(col)
+	scroll.set_deferred("scroll_vertical", position_before)
 	for invite: Dictionary in _mg.invites_in:
 		var row := HBoxContainer.new()
 		var id := str(invite.id)
@@ -1240,10 +1341,48 @@ func _show_lobby() -> void:
 	solo.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
 	solo.pressed.connect(func(): _mg.start_local(_pick_game, opts))
 	col.add_child(solo)
+	_lobby_rooms(col)
+
+
+## Лобби мини-игр: общие комнаты (вход в любой момент) и соло.
+func _lobby_rooms(col: VBoxContainer) -> void:
+	col.add_child(_text("ОБЩИЕ КОМНАТЫ — ВСЕ ПРОТИВ ВСЕХ", 11, c_muted))
+	var tips := {"balls": "Толкайте шарики друг друга за край арены. Очки сбрасываются каждые 3 минуты",
+		"stars": "Звёздочка появляется где угодно на экране — кто первым нажал, тому очко"}
+	for game: String in _mg.ROOMS:
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", px(6))
+		var line := _text("%s %s" % [ICONS[game], _mg.title(game)])
+		line.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		line.tooltip_text = tips[game]
+		line.mouse_filter = Control.MOUSE_FILTER_PASS
+		row.add_child(line)
+		var inside: bool = _mg.in_room(game)
+		var enter := _action("Вы здесь" if inside else "Войти", tips[game], not inside)
+		enter.pressed.connect(func(): _mg.join_room(game))
+		row.add_child(enter)
+		col.add_child(row)
+	col.add_child(_text("СОЛО", 11, c_muted))
+	var mines := HFlowContainer.new()
+	mines.add_theme_constant_override("h_separation", px(6))
+	mines.add_theme_constant_override("v_separation", px(6))
+	var classic := _action("%s Сапёр 16×16" % ICONS.mines, "Обычный сапёр: 40 мин, левая кнопка — открыть, правая — флажок")
+	classic.pressed.connect(func(): _mg.start_local("mines", {"mode": "classic"}))
+	mines.add_child(classic)
+	var deep := _action("Сапёр ∞", "Слой под слоем, у каждого свои мины. Счёт — глубина. Лучший: %d" % _mg.best("mines_layers"))
+	deep.pressed.connect(func(): _mg.start_local("mines", {"mode": "deep"}))
+	mines.add_child(deep)
+	col.add_child(mines)
 
 
 func _show_session(id: String) -> void:
 	var session: Dictionary = _mg.sessions[id]
+	if bool(session.get("room", false)):
+		_show_room(id, session)
+		return
+	if bool(session.get("solo", false)):
+		_show_mines(id, session)
+		return
 	if _game_shown != id or _board == null or not is_instance_valid(_board):
 		_game_shown = id
 		_resign_armed = false
@@ -1334,6 +1473,162 @@ func _show_session(id: String) -> void:
 			else:
 				_mg.invite(int((session.peers as Array)[1 - seat]), str(session.game), session.opts))
 		bar.add_child(again)
+
+
+## Колонка вкладки мини-игры: строка состояния сверху, дальше содержимое.
+func _game_column(id: String) -> VBoxContainer:
+	_game_shown = id
+	_clear_game()
+	var col := VBoxContainer.new()
+	col.name = "Col"
+	col.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	col.offset_left = px(8)
+	col.offset_right = -px(8)
+	col.offset_top = px(4)
+	col.offset_bottom = -px(8)
+	col.add_theme_constant_override("separation", px(4))
+	_game_box.add_child(col)
+	var bar := HBoxContainer.new()
+	bar.name = "Bar"
+	bar.add_theme_constant_override("separation", px(4))
+	col.add_child(bar)
+	_status = Label.new()
+	_status.add_theme_font_size_override("font_size", px(12))
+	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_status.clip_text = true
+	_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	_status.mouse_filter = Control.MOUSE_FILTER_PASS
+	bar.add_child(_status)
+	return col
+
+
+## Таблица очков комнаты: строки снимка, лучшие сверху.
+func _score_rows(list: Array, score_at: int) -> Array:
+	var rows := list.duplicate()
+	rows.sort_custom(func(a: Array, b: Array) -> bool: return int(a[score_at]) > int(b[score_at]))
+	return rows
+
+
+## Общая комната: «Шарики» — арена; «Лови звёздочку» — только таблица и «Ищи звезду» (звёзды — поверх экрана).
+func _show_room(id: String, session: Dictionary) -> void:
+	var game := str(session.game)
+	var state: Dictionary = session.state
+	if _game_shown != id or _status == null or not is_instance_valid(_status):
+		var col := _game_column(id)
+		if game == "balls":
+			var view := BallsView.new()
+			view.name = "Field"
+			view.mg = _mg
+			view.id = id
+			view.status = _status  # таймер сброса view обновляет сам каждый кадр
+			view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+			col.add_child(view)
+		else:
+			var title_label := _label("Ищи звезду", 22, EMOTE)
+			title_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			col.add_child(title_label)
+			var hint := _text("Звёздочка появится где угодно на экране, даже поверх игры. Нажми первым!", 12, c_muted)
+			hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			col.add_child(hint)
+			var scroll := ScrollContainer.new()
+			scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+			scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+			col.add_child(scroll)
+			var table := VBoxContainer.new()
+			table.name = "Table"
+			table.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			table.add_theme_constant_override("separation", px(2))
+			scroll.add_child(table)
+		var foot := _text("", 12, c_muted)
+		foot.name = "Foot"
+		col.add_child(foot)
+		var leave := small_button("Выйти", "Выйти из комнаты (вернуться можно в любой момент)")
+		leave.pressed.connect(func(): _mg.close(id))
+		(col.get_node("Bar") as HBoxContainer).add_child(leave)
+	var me: int = _mg.my_peer()
+	var list: Array = state.get("list", [])
+	var foot_label := _game_box.get_node("Col/Foot") as Label
+	if game == "balls":
+		var mine := 0
+		var parts := []
+		for row: Array in _score_rows(list, 6):
+			if int(row[0]) == me:
+				mine = int(row[6])
+			parts.append("%s %d" % [str(row[1]).left(10), int(row[6])])
+		var left := int(ceilf(float(state.get("left", 0.0))))
+		_status.text = ("Очки: %d · сброс через %d:%02d · щелчок — рывок" % [mine, left / 60, left % 60]) if not list.is_empty() else "Входим в комнату…"
+		var feed: Array = state.get("feed", [])
+		foot_label.text = " · ".join(parts) + (("\n" + str(feed[0])) if not feed.is_empty() else "")
+	else:
+		_status.text = ("В комнате: %d" % list.size()) if not list.is_empty() else "Входим в комнату…"
+		var table := _game_box.find_child("Table", true, false) as VBoxContainer
+		for child: Node in table.get_children():
+			table.remove_child(child)
+			child.queue_free()
+		for row: Array in _score_rows(list, 3):
+			var line := HBoxContainer.new()
+			var nick := _label(("★ " if int(row[0]) == me else "") + str(row[1]), 14, Net.color_of(int(row[2])).lightened(0.35))
+			nick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+			line.add_child(nick)
+			line.add_child(_label(str(int(row[3])), 14, c_ink))
+			table.add_child(line)
+		foot_label.text = str(state.get("last", ""))
+	_status.tooltip_text = _status.text
+	_status.add_theme_color_override("font_color", c_ink)
+
+
+## Соло-сапёр: счётчик мин верхнего слоя (с подсказкой), глубина, «Заново».
+func _show_mines(id: String, session: Dictionary) -> void:
+	var state: Dictionary = session.state
+	var deep := str(state.get("mode", "")) == "deep"
+	if _game_shown != id or _status == null or not is_instance_valid(_status):
+		var col := _game_column(id)
+		var view := MinesView.new()
+		view.name = "Field"
+		view.mg = _mg
+		view.id = id
+		view.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		col.add_child(view)
+		var again := small_button("Заново", "Новое поле")
+		again.pressed.connect(func(): _mg.restart_local(id))
+		(col.get_node("Bar") as HBoxContainer).add_child(again)
+	(_game_box.get_node("Col/Field") as Control).queue_redraw()
+	_mines_status(state)
+
+
+## Строка состояния сапёра: мины, глубина или секундомер с рекордом, итог.
+func _mines_status(state: Dictionary) -> void:
+	if _status == null or not is_instance_valid(_status):
+		return
+	var deep := str(state.get("mode", "")) == "deep"
+	var rules: GDScript = _mg.RULES.mines
+	var left: int = rules.mines_left(state)
+	var top: int = rules.top_layer(state)
+	var text := "Мин: %d" % left
+	var color := c_ink
+	if deep:
+		text += " · глубина %d · лучший %d" % [int(state.depth), maxi(int(_mg.best("mines_layers")), int(state.depth))]
+		var top_layer: Dictionary = rules.layer(state, top)
+		_status.tooltip_text = ("Мины верхнего слоя (слой %d): всего %d, любой флажок на нём уменьшает число.\n" +
+			"Флажки ровно на всех минах слоя (без лишних) — слой сбрасывается.\n" +
+			"Нижний слой виден под открытой пустой клеткой или под числом, вокруг которого всё разминировано: соседи без мин открыты, на минах флажки.") % [top + 1, int(top_layer.count)]
+	else:
+		var record: float = _mg.best_time(_mg.BEST_TIME_KEY)
+		text += " · %s" % rules.clock_text(float(state.get("elapsed", 0.0)))
+		if record > 0.0:
+			text += " · рекорд %s" % rules.clock_text(record)
+		if bool(state.get("paused", false)) and rules.clock_running(state):
+			text += " · пауза"
+		_status.tooltip_text = "Сколько мин осталось (всего мин минус флажки), время с первого хода и ваш лучший результат"
+	if bool(state.over):
+		text = str(state.reason)
+		if not deep and int(state.winner) == 0:
+			text += " %s%s" % [rules.clock_text(float(state.elapsed)), " — новый рекорд!" if bool(state.get("record", false)) else ""]
+		color = Color("9be3a0") if int(state.winner) == 0 else Color("f0a3a3")
+	if _status.text == text:
+		return
+	_status.text = text
+	_status.add_theme_color_override("font_color", color)
 
 
 ## Картинка или гифка сообщения: ждёт загрузку, вписывается в отведённое место, гифка играет, пока видна.

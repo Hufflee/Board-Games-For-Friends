@@ -58,6 +58,9 @@ func _ready() -> void:
 			if is_instance_valid(_shelf_hint):
 				_shelf_hint.text = text
 	)
+	_room.arrival_changed.connect(func():  # новая игра: обёртка снята / поставлена — карточка заново
+		if not _selected.is_empty() and is_instance_valid(_room.focused):
+			_show_card(_selected, false))
 	_room.panels.game_selected.connect(_on_box_selected)
 	_room.panels.game_released.connect(_on_box_released)
 	_ui = Control.new()
@@ -178,6 +181,8 @@ func _rebuild() -> void:
 # --- Карточка выбранной игры ------------------------------------------------------------
 
 func _on_box_selected(g: Dictionary) -> void:
+	if is_instance_valid(_room.arrival_box) and _room.arrival_box.game.get("id") != g.get("id"):
+		return  # в руках новая игра — сначала поставить её
 	_selected = g
 	_show_card(g)
 
@@ -189,6 +194,10 @@ func _on_box_released() -> void:
 
 func _show_card(g: Dictionary, animate: bool = true) -> void:
 	HubStyle.clear(_card)
+	var arrival: Dictionary = _room.arrival_info() if is_instance_valid(_room) else {}
+	if not arrival.is_empty():
+		_arrival_card(g, arrival, animate)
+		return
 	var p := HubStyle.panel(HubStyle.PINK)
 	p.custom_minimum_size = Vector2(360, 0)
 	p.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT)
@@ -271,6 +280,45 @@ func _show_card(g: Dictionary, animate: bool = true) -> void:
 
 
 # --- Пати --------------------------------------------------------------------------
+
+## Карточка новой игры (hub/rooms/arrivals.gd): без «Играть» и «Назад» — место выбирают кнопками над коробкой.
+## Подарок в обёртке — без названия и описания, только подсказка, сколько раз нажать.
+func _arrival_card(g: Dictionary, arrival: Dictionary, animate: bool) -> void:
+	var p := HubStyle.panel(HubStyle.PINK)
+	p.custom_minimum_size = Vector2(360, 0)
+	p.set_anchors_and_offsets_preset(Control.PRESET_CENTER_RIGHT)
+	p.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	p.grow_vertical = Control.GROW_DIRECTION_BOTH
+	p.offset_right = -60
+	p.offset_left = -420
+	_card.add_child(p)
+	var v := HubStyle.vbox(10)
+	p.add_child(v)
+	if bool(arrival.wrapped):
+		v.add_child(HubStyle.neon_label("ПОДАРОК", 26, HubStyle.PINK))
+		var left := int(arrival.left)
+		var hint := HubStyle.label("Под ёлкой новая игра! Нажмите на коробку, чтобы развернуть" + ("" if left >= _room.Arrivals.CLICKS else " — ещё %d" % left), 15, HubStyle.TEXT)
+		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		hint.custom_minimum_size.x = 320
+		v.add_child(hint)
+	else:
+		v.add_child(HubStyle.label("НОВАЯ ИГРА", 13, HubStyle.YELLOW, HORIZONTAL_ALIGNMENT_LEFT, "bold"))
+		var t := HubStyle.neon_label(str(g.get("title", "")).to_upper(), 26, HubStyle.PINK)
+		t.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		v.add_child(t)
+		var meta := HubStyle.hbox(14)
+		meta.add_child(HubStyle.label("👥 " + str(g.get("players", "")), 15, HubStyle.CYAN, HORIZONTAL_ALIGNMENT_LEFT, "medium"))
+		meta.add_child(HubStyle.label("⏱ " + str(g.get("time", "")), 15, HubStyle.CYAN, HORIZONTAL_ALIGNMENT_LEFT, "medium"))
+		v.add_child(meta)
+		var d := HubStyle.label(str(g.get("description", "")), 15, HubStyle.TEXT)
+		d.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		d.custom_minimum_size.x = 320
+		v.add_child(d)
+		v.add_child(HubStyle.label("Куда её поставить? Кнопки над коробкой: на полку у стены или в шкаф.", 13, HubStyle.MUTED))
+	if animate:
+		p.modulate.a = 0.0
+		create_tween().tween_property(p, "modulate:a", 1.0, 0.35).set_delay(0.3)
+
 
 func _party_content(panel: PanelContainer, column: VBoxContainer) -> VBoxContainer:
 	var header := HubStyle.hbox(8)

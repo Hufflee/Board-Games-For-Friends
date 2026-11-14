@@ -12,7 +12,7 @@ func _ready() -> void:
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for side in ["left", "right", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, 32)
-	add_child(margin)
+	preload("res://hub/lobby_layout.gd").mount(self, margin)
 	_body = K12UI.vbox(14)
 	margin.add_child(_body)
 	var chat := K12ChatPanel.new()

@@ -9,7 +9,7 @@ func _ready() -> void:
 	margin.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	for side: String in ["left", "right", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, 32)
-	add_child(margin)
+	preload("res://hub/lobby_layout.gd").mount(self, margin)
 	# Лобби по центру экрана на любом разрешении, в бумажной панели стола.
 	var center := CenterContainer.new()
 	margin.add_child(center)

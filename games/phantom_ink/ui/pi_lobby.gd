@@ -11,7 +11,7 @@ func _ready() -> void:
 	margin.offset_top = 32
 	margin.offset_right = -340
 	margin.offset_bottom = -32
-	add_child(margin)
+	preload("res://hub/lobby_layout.gd").mount(self, margin)
 	var panel := PIStyle.panel()
 	margin.add_child(panel)
 	var scroll := ScrollContainer.new()

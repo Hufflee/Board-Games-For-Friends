@@ -34,7 +34,7 @@ func _ready() -> void:
 	margin.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	for edge: String in ["left", "right", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + edge, 24)
-	add_child(margin)
+	preload("res://hub/lobby_layout.gd").mount(self, margin)
 	var columns := HBoxContainer.new()
 	columns.add_theme_constant_override("separation", 24)
 	margin.add_child(columns)

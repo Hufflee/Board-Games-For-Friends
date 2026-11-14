@@ -575,7 +575,7 @@ func _count_vote() -> void:
 			high_vote = vote_total
 		elif vote_total == high_vote:
 			leader = -1
-	_resume_nominations()
+	_open_nominations()
 	nominee = -1
 	nominator = -1
 

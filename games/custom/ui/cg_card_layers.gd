@@ -72,7 +72,9 @@ func setup(data: Dictionary, assets: RefCounted, font: Font) -> void:
 				var text := Label.new()
 				text.text = str(data_layer.get("text", ""))
 				text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-				text.clip_text = true
+				# Обрезает сам слой (clip_contents). clip_text у Label прячет строку целиком, если кегль
+				# больше высоты слоя, — автор видел бы пустую карту.
+				text.clip_text = false
 				text.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER if data_layer.get("align", "left") == "center" else (HORIZONTAL_ALIGNMENT_RIGHT if data_layer.get("align") == "right" else HORIZONTAL_ALIGNMENT_LEFT)
 				var custom: Font = reader.font(str(data_layer.get("font", ""))) if reader != null else null
 				text.add_theme_font_override("font", custom if custom != null else body_font)

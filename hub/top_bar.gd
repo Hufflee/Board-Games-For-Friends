@@ -413,8 +413,9 @@ func _has_modal(node: Node) -> bool:
 
 ## Tab ловим до GUI: иначе его съедает переход фокуса между кнопками (ui_focus_next) и до
 ## _unhandled_input он не доходит. В многострочном поле Tab остаётся полю.
+## Shift+Tab — оверлей Steam: меню на него не открываем и нажатие не забираем (12.11).
 func _input(event: InputEvent) -> void:
-	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_TAB:
+	if event is InputEventKey and event.pressed and not event.echo and event.keycode == KEY_TAB and not event.shift_pressed:
 		if get_viewport().gui_get_focus_owner() is TextEdit or _has_modal(get_tree().current_scene):
 			return
 		toggle_menu()

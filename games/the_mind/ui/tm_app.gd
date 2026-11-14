@@ -51,12 +51,15 @@ func _set_screen(control: Control) -> void:
 	screen.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	add_child(screen)
 
-func _center() -> VBoxContainer:
+func _center(lobby: bool = false) -> VBoxContainer:
 	var root := Control.new()
 	root.add_child(Style.Background.new())
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
-	root.add_child(center)
+	if lobby:
+		preload("res://hub/lobby_layout.gd").mount(root, center)
+	else:
+		root.add_child(center)
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size.x = 592
 	center.add_child(panel)
@@ -84,7 +87,7 @@ func show_menu(_text: String = "") -> void:
 	col.add_child(back)
 
 func show_lobby() -> void:
-	var col := _center()
+	var col := _center(true)
 	col.add_child(Style.heading("UNSPOKEN · КОМАНДА"))
 	var members: Array = Net.lobby_view.get("members", [])
 	var seats := GridContainer.new()

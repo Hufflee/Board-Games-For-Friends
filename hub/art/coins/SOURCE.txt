@@ -8,3 +8,4 @@ wave_* (синяя, мозг / волны) — «Длина волны»; hues_*
 
 variants/codex_2026-10-23/: Hues and Cues (светлая/тёмная, обычная/секретная), секретные Бродилка и Gloom — встроенный image_gen по существующим монетам проекта. Подключены листы с двумя сторонами; области и круглая обрезка заданы в hub/fidget.gd. Gloom использует gloom_secret_awakened_stylized_v4.png. Промпты — coin_prompts.md рядом.
 machi_koro_coin.png, machi_koro_secret_coin.png — монеты «Мачи Коро», нарисованы кодом: tools/coin_machi_koro.py (06.11.2026). Чужого арта нет.
+colt_express[_secret|_dark_secret]_coin.png, first_contact[_secret|_dark_secret]_coin.png, green_team_wins[_secret|_dark_secret]_coin.png, in_broad_strokes[_secret|_dark_secret]_coin.png — обычные светлые и секретные монеты, нарисованы Python + Pillow по палитрам игр: tools/coin_colt_express.py, tools/coin_first_contact.py, tools/coin_green_team_wins.py, tools/coin_in_broad_strokes.py (14.11.2026).

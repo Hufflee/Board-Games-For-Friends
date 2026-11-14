@@ -15,7 +15,7 @@ func _ready() -> void:
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center.offset_right = -300  # справа — чат
-	add_child(center)
+	preload("res://hub/lobby_layout.gd").mount(self, center)
 	var card := HCStyle.panel(26)
 	card.custom_minimum_size = Vector2(720, 0)
 	center.add_child(card)

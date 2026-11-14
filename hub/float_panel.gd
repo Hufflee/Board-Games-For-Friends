@@ -14,7 +14,7 @@ signal mode_changed
 signal rescaled
 
 const SAVE_PATH := "user://float_panels.cfg"
-const K_MIN := 0.7
+const K_MIN := 0.7 / 1.5  # 12.11: минимальный размер окна «Общение» — в полтора раза меньше прежнего (было 0,7)
 const K_MAX := 1.8
 const BLINK := 0.45
 
@@ -584,6 +584,14 @@ func _drag_input(event: InputEvent, tab: String) -> void:
 				tab_selected.emit(tab)
 		return
 	if event is InputEventMouseMotion and _press:
+		# Отпускание могло не дойти (смена окна, оверлей Steam, отпустили над другим окном) — без зажатой
+		# левой кнопки это не перенос. Раньше «залипшее» нажатие уводило кнопку от курсора (12.11).
+		if not ((event as InputEventMouseMotion).button_mask & MOUSE_BUTTON_MASK_LEFT):
+			_press = false
+			if _dragging:
+				_dragging = false
+				_store()
+			return
 		var shift := (event as InputEventMouseMotion).global_position - _press_at
 		if not _dragging and shift.length() > 5.0:
 			_dragging = true
@@ -618,6 +626,12 @@ func _grip_input(event: InputEvent) -> void:
 				_rescale_body()
 				rescaled.emit()
 			_apply()
+		return
+	if event is InputEventMouseMotion and _resizing and not ((event as InputEventMouseMotion).button_mask & MOUSE_BUTTON_MASK_LEFT):
+		var release := InputEventMouseButton.new()  # отпускание не дошло — завершить изменение размера
+		release.button_index = MOUSE_BUTTON_LEFT
+		release.pressed = false
+		_grip_input(release)
 		return
 	if event is InputEventMouseMotion and _resizing:
 		var local := (event as InputEventMouseMotion).global_position - global_position

@@ -155,7 +155,7 @@ func test_coop() -> void:
 	var r := make(true)
 	check(r.coop and r.scores == [0, 0] and r.cards_left == 7, "кооператив: 7 карточек")
 	turn(r, 50.0, "", 50.0)
-	check(r.phase == "reveal" and r.scores[0] == 3 and r.cards_left == 7, "в центр — 3 очка и +1 карточка")
+	check(r.phase == "reveal" and r.scores[0] == 4 and r.cards_left == 7, "в центр — 4 очка и +1 карточка")
 	r.advance()
 	for i in 6:
 		turn(r, 90.0, "", 10.0)

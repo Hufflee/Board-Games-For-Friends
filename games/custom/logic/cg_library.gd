@@ -302,6 +302,48 @@ static func duplicate_game(id: String) -> Dictionary:
 	invalidate()
 	return created
 
+## Экспорт игры файлом .pgame (ТЗ, этап «после MVP»): тот же пакет, что уходит друзьям по сети
+## (game.json + картинки/шрифты/коробка), с теми же проверками. Возвращает {error, size}.
+static func export_game(id: String, path: String) -> Dictionary:
+	if load_game(id).is_empty():
+		return {"error": "Сначала сохраните игру."}
+	if not path.to_lower().ends_with(".pgame"):
+		path += ".pgame"
+	var files := files_for(id)
+	var result := Package.write_zip(path, files)
+	if str(result.error).is_empty():
+		result["path"] = path
+	return result
+
+## Импорт .pgame: пакет проверяется как при загрузке от хоста (размеры, пути, картинки, описание игры)
+## и ставится новой игрой — существующие не перезаписываются. Возвращает {error, id}.
+static func import_game(path: String) -> Dictionary:
+	var package := Package.read_zip(path)
+	if not str(package.error).is_empty():
+		return {"error": str(package.error)}
+	var files: Dictionary = package.files
+	if not files.has("game.json"):
+		return {"error": "В файле нет описания игры."}
+	var parser := JSON.new()
+	if parser.parse(files["game.json"].get_string_from_utf8()) != OK or not parser.data is Dictionary:
+		return {"error": "Описание игры повреждено."}
+	var definition: Dictionary = Package.migrate(parser.data)
+	var report: Dictionary = Definition.validate(definition)
+	if not report.errors.is_empty():
+		return {"error": "Игра из файла с ошибками: %s" % str(report.errors[0])}
+	var created := create(definition)
+	if not str(created.error).is_empty():
+		return created
+	for file_path: String in files:
+		if file_path == "game.json":
+			continue
+		var destination := folder(str(created.id)) + "/" + file_path
+		if DirAccess.make_dir_recursive_absolute(destination.get_base_dir()) != OK or _atomic_write(destination, files[file_path]) != OK:
+			trash_game(str(created.id))
+			return {"error": "Не удалось сохранить файлы игры."}
+	invalidate()
+	return {"error": "", "id": str(created.id)}
+
 static func trash_game(id: String) -> String:
 	var source := folder(id)
 	if source.is_empty() or not DirAccess.dir_exists_absolute(source):

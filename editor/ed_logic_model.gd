@@ -114,9 +114,12 @@ func default_block(op: String) -> Dictionary:
 		"wait": base["seconds"] = 1
 		"log", "hint": base["text"] = "Сообщение"
 		"sound": base["name"] = "click"
+		"move_piece": base.merge({"player": actor, "steps": {"op": "dice_sum", "player": actor}})
+		"place_piece": base.merge({"player": actor, "cell": 0})
 	return base
 
-func add_block(op: String, array_path: Array) -> Array:
+## at — место вставки (−1 — в конец). Одна правка (одна отмена), даже когда блок бросили из палитры в середину.
+func add_block(op: String, array_path: Array, at_index: int = -1) -> Array:
 	if not Blocks.OPS.has(op) or not at(document.data, array_path) is Array:
 		return []
 	var copy: Dictionary = document.data.duplicate(true)
@@ -133,9 +136,10 @@ func add_block(op: String, array_path: Array) -> Array:
 			number += 1
 		copy.rules.vars.append({"id": id, "title": "Очки", "scope": "player", "type": "number", "init": 0})
 		block["var"] = id
-	array.append(block)
+	var place := array.size() if at_index < 0 else clampi(at_index, 0, array.size())
+	array.insert(place, block)
 	document.replace(copy, "Добавить блок «%s»" % Blocks.label(op))
-	return array_path + [array.size() - 1]
+	return array_path + [place]
 
 func remove(path: Array) -> bool:
 	if path.is_empty() or not path.back() is int:
@@ -162,6 +166,36 @@ func move(path: Array, direction: int) -> Array:
 	array[next] = temp
 	document.replace(copy, "Порядок блоков")
 	return array_path + [next]
+
+## Перенести блок (со всем вложенным) в массив to_array на место to_index. Возвращает новый путь или [].
+func relocate(from: Array, to_array: Array, to_index: int) -> Array:
+	if from.size() < 2 or not from.back() is int:
+		return []
+	# Нельзя положить блок внутрь самого себя.
+	if to_array.size() >= from.size() and to_array.slice(0, from.size()) == from:
+		return []
+	var copy: Dictionary = document.data.duplicate(true)
+	var source: Variant = at(copy, from.slice(0, from.size() - 1))
+	var target: Variant = at(copy, to_array)
+	var index := int(from.back())
+	if not source is Array or not target is Array or index < 0 or index >= source.size():
+		return []
+	var block: Variant = source[index]
+	var same := from.slice(0, from.size() - 1) == to_array
+	var place := clampi(to_index, 0, target.size())
+	if same and place > index:
+		place -= 1
+	if same and place == index:
+		return from
+	source.remove_at(index)
+	target.insert(clampi(place, 0, target.size()), block)
+	document.replace(copy, "Перенести блок")
+	# Путь к массиву мог сдвинуться, если блок ушёл из того же массива-предка раньше по порядку.
+	var fixed := to_array.duplicate()
+	var parent := from.slice(0, from.size() - 1)
+	if fixed.size() > parent.size() and fixed.slice(0, parent.size()) == parent and fixed[parent.size()] is int and int(fixed[parent.size()]) > index:
+		fixed[parent.size()] = int(fixed[parent.size()]) - 1
+	return fixed + [clampi(place, 0, target.size() - 1)]
 
 func add_phase(title: String) -> String:
 	if title.strip_edges().is_empty():
@@ -194,10 +228,12 @@ func add_variable(title: String, type: String, scope: String) -> String:
 	return id
 
 func add_role(title: String) -> String:
-	if title.strip_edges().is_empty() or document.data.rules.roles.size() >= 16:
+	if title.strip_edges().is_empty() or document.data.rules.get("roles", []).size() >= 16:
 		return ""
 	var copy: Dictionary = document.data.duplicate(true)
 	var used: Array = []
+	if not copy.rules.has("roles"):
+		copy.rules["roles"] = [{"id": "leader", "name": "Ведущий"}, {"id": "player", "name": "Игрок"}]
 	for entry: Dictionary in copy.rules.roles:
 		used.append(str(entry.id))
 	var number := 1

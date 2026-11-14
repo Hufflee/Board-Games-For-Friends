@@ -8,4 +8,7 @@ func run(t: Check) -> void:
 	_play21(counterfeit, 588)
 	t.equal(counterfeit.g.coins[0], 11, "675 прибавляет1¢ к получению обычных монет")
 	counterfeit.ok(1, "trade", {"target": 0, "amount": 2})
+	t.equal(counterfeit.g.coins[0], 11, "До подтверждения монеты остаются у отправителя")
+	var offer: Dictionary = counterfeit.g.get_view(0).coin_offers[0]
+	counterfeit.ok(0, "answer_trade", {"sender": 1, "id": int(offer.id), "accept": true})
 	t.equal(counterfeit.g.coins[0], 13, "675 не создаёт монету при передаче")

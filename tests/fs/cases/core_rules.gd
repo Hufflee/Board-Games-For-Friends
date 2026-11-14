@@ -2,9 +2,9 @@ extends RefCounted
 ## Базовые правила и известные баги реестра docs/FS_BUGS.md (строки 1–4) в виде кейсов.
 
 const CASES := [
-	{"name": "Защита 7: шестёрка без модификатора промахивается", "card": 344, "setup": {"current": 0, "monsters": {0: [344, {"dc": 7}]}, "hp": {0: 2}},
+	{"name": "Расчётная защита 7 ограничена шестью: шестёрка попадает", "card": 344, "setup": {"current": 0, "monsters": {0: [344, {"dc": 7}]}, "hp": {0: 2}},
 	 "do": [["roll", 6], ["ok", 0, "attack", {"slot": 0}], ["ok", 0, "roll"], ["close"]],
-	 "expect": {"monsters.0.hp": 3, "hp.0": 1}},
+	 "expect": {"monsters.0.hp": 2, "hp.0": 2}},
 	{"name": "Защита 5: шестёрка попадает", "card": 344, "setup": {"current": 0, "monsters": {0: [344, {"dc": 5}]}},
 	 "do": [["roll", 6], ["ok", 0, "attack", {"slot": 0}], ["ok", 0, "roll"], ["close"]],
 	 "expect": {"monsters.0.hp": 2}},

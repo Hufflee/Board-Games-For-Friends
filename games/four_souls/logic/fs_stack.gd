@@ -496,7 +496,7 @@ func _resolve_top() -> void:
 		if battle < 0 or battle >= monsters.size() or dead[current] or hp[current] <= 0:
 			_continue_stack(); return
 		var m: Dictionary = monsters[battle]
-		var hit: bool = PassiveRules.attack_hits(last_roll, _monster_evasion(m), modifiers)
+		var hit: bool = PassiveRules.attack_hits(last_roll, clampi(_monster_evasion(m), 1, 6), modifiers)
 		if int(m.id) == 281:
 			hit = hit and last_roll > int(m.get("last_attack_roll", 0))
 			m["last_attack_roll"] = last_roll
@@ -585,7 +585,12 @@ func _begin_resolving(effect: Dictionary) -> void:
 	phase = "effect"
 func _finish_responses() -> void:
 	var limit := 0
+	var announced_events: Array = stack.filter(func(entry): return str(entry.kind) == "event") if strict_responses28 else []
 	while phase == "priority" and stack.size() > _response_floor() and limit < 500:
+		var top: Dictionary = stack.back()
+		# Новое открытие при дозаполнении слотов получает собственное окно ответов.
+		if strict_responses28 and str(top.kind) == "event" and not announced_events.any(func(entry): return is_same(entry, top)):
+			break
 		_resolve_top(); limit += 1
 	# Ответы на ручной эффект закрыты — возвращаемся к нему, не трогая внешний стек.
 	if phase == "priority" and _response_floor() > 0 and stack.size() <= _resolving_base:

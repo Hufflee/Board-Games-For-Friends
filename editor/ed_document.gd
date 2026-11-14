@@ -201,27 +201,8 @@ func _step(from: Array, to: Array) -> bool:
 func issues() -> Dictionary:
 	if not _audit.is_empty():
 		return _audit.duplicate(true)
+	# Перекрытия, выход за стол и главные кнопки проверяет CGDef.layout_conflicts (предупреждения «Интерфейс: …»).
 	_audit = Definition.validate(data)
-	if not _audit.errors.is_empty():
-		return _audit.duplicate(true)
-	for screen: Dictionary in data.layout.get("screens", []):
-		var items: Array = screen.get("items", [])
-		for first in items.size():
-			if items[first].get("kind") != "zone":
-				continue
-			for second in range(first + 1, items.size()):
-				if items[second].get("kind") != "zone":
-					continue
-				var a: Dictionary = items[first]
-				var b: Dictionary = items[second]
-				var av: Variant = a.get("visible", ["all"])
-				var bv: Variant = b.get("visible", ["all"])
-				if av is Array and bv is Array and not av.has("all") and not bv.has("all") and not av.any(func(value: Variant): return bv.has(value)):
-					continue
-				if layout_rect(a, first).grow(-1).intersects(layout_rect(b, second).grow(-1)):
-					_audit.warnings.append("Зоны «%s» и «%s» перекрываются." % [str(a.get("title", a.id)).left(64), str(b.get("title", b.id)).left(64)])
-					if _audit.warnings.size() >= 20:
-						return _audit.duplicate(true)
 	return _audit.duplicate(true)
 
 static func layout_rect(item: Dictionary, index: int) -> Rect2:

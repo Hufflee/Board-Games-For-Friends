@@ -25,7 +25,9 @@ var _pending := false
 var _clock := 0.0
 var _known: Dictionary = {}  # хост: кому уже разослан полный набор
 var _poster_bytes: Dictionary = {}  # хост: хэш → байты картинок плакатов участников
-var _incoming: Dictionary = {}  # сборка кусков: ключ → {count, parts}
+var _offers: Dictionary = {}  # хост: хэш → передача от владельца плаката {peer, size, count, parts, next, stamp}
+var _downloads: Dictionary = {}  # клиент: хэш → загрузка с хоста
+const WINDOW := 3  # кусков картинки в полёте
 var _wanted: Dictionary = {}  # клиент: уже запрошенные хэши
 var _uploaded: Dictionary = {}  # клиент: какие свои картинки уже отданы хосту в этой пати
 var _textures: Dictionary = {}  # хэш → Texture2D или SpriteFrames
@@ -52,6 +54,8 @@ func reset_party() -> void:
 	_poster_bytes.clear()
 	_waiters.clear()
 	_pulled.clear()
+	_offers.clear()
+	_downloads.clear()
 	_asked.clear()
 	_sent = {}
 	_pending = true
@@ -136,6 +140,18 @@ func _poster_list(slot: int = 0) -> Array:
 	while list.size() < maxi(Stickers.POSTERS, slot + 1):
 		list.append([])
 	return list
+
+
+## Корзина для мяча в своей комнате (hub/room_basket.gd): место на стене или null — снята. Видят друзья.
+func set_basket(at: Variant, key: String = "basket") -> void:
+	var entry: Array = [snappedf(at.x, 0.001), snappedf(at.y, 0.001)] if at is Vector2 else []
+	if (local.get(key, []) as Array) == entry:
+		return
+	if entry.is_empty():
+		local.erase(key)
+	else:
+		local[key] = entry
+	_local_changed()
 
 
 ## Свободный номер для нового плаката: снятый стандартный или пустой добавленный; -1 — плакатов уже максимум.
@@ -371,7 +387,11 @@ static func _sha(bytes: PackedByteArray) -> String:
 	return ctx.finish().hex_encode()
 
 
-## Клиент отдаёт хосту картинку своего плаката (кусками) — хост раздаёт её тем, кто смотрит комнату.
+# Картинка плаката едет кусками «по запросу» (как картинки чата, hub/chat_net.gd): получатель сам просит
+# следующий кусок, когда пришёл предыдущий, в полёте не больше WINDOW кусков. Раньше все куски уходили разом
+# и крупный GIF (600–900 КБ) не помещался в очередь отправки Steam — у друзей плакат оставался стандартным.
+
+## Клиент предлагает хосту картинку своего плаката — хост сам заберёт её по кускам и раздаст смотрящим.
 func _upload(hash: String) -> void:
 	if not _party() or _uploaded.has(hash) or not _joined():
 		return
@@ -382,49 +402,93 @@ func _upload(hash: String) -> void:
 	if _net().is_host():
 		_poster_bytes[hash] = bytes
 		return
-	var count := ceili(float(bytes.size()) / CHUNK)
-	for i in count:
-		_rpc_poster_upload.rpc_id(1, hash, i, count, bytes.slice(i * CHUNK, mini(bytes.size(), (i + 1) * CHUNK)))
+	_rpc_poster_offer.rpc_id(1, hash, bytes.size())
 
 
-func _collect(key: String, index: int, count: int, chunk: PackedByteArray) -> PackedByteArray:
-	if count < 1 or count > ceili(float(Stickers.POSTER_MAX_BYTES) / CHUNK) + 1 or index < 0 or index >= count:
+static func _chunks(size: int) -> int:
+	return ceili(float(size) / CHUNK)
+
+
+static func _slice(bytes: PackedByteArray, index: int) -> PackedByteArray:
+	return bytes.slice(index * CHUNK, mini(bytes.size(), (index + 1) * CHUNK))
+
+
+static func _new_transfer(size: int) -> Dictionary:
+	return {"size": size, "count": _chunks(size), "parts": {}, "next": 0, "stamp": Time.get_ticks_msec()}
+
+
+## Сборка по кускам. Возвращает готовые байты или пусто (ещё не всё / кусок не подходит).
+static func _take_part(transfer: Dictionary, index: int, chunk: PackedByteArray) -> PackedByteArray:
+	var count := int(transfer.count)
+	if index < 0 or index >= count or chunk.size() > CHUNK or chunk.is_empty():
 		return PackedByteArray()
-	var entry: Dictionary = _incoming.get(key, {"count": count, "parts": {}})
-	if int(entry.count) != count:
-		entry = {"count": count, "parts": {}}
-	entry.parts[index] = chunk
-	_incoming[key] = entry
-	if entry.parts.size() < count:
+	transfer.parts[index] = chunk
+	transfer.stamp = Time.get_ticks_msec()
+	if (transfer.parts as Dictionary).size() < count:
 		return PackedByteArray()
-	_incoming.erase(key)
 	var bytes := PackedByteArray()
 	for i in count:
-		bytes.append_array(entry.parts[i])
+		bytes.append_array(transfer.parts[i])
 	return bytes
 
 
+## Передача давно стоит (кусок потерялся / участник ушёл) — забыть её: запрос повторится по обычным таймерам.
+func _drop_stalled() -> void:
+	var now := Time.get_ticks_msec()
+	for list: Dictionary in [_offers, _downloads]:
+		for hash: Variant in list.keys():
+			if now - int(list[hash].stamp) > ASK_EVERY * 2:
+				list.erase(hash)
+
+
+## Хост: владелец плаката предлагает картинку — запросить первые куски.
 @rpc("any_peer", "reliable")
-func _rpc_poster_upload(hash: String, index: int, count: int, chunk: PackedByteArray) -> void:
+func _rpc_poster_offer(hash: String, size: int) -> void:
 	var sender := multiplayer.get_remote_sender_id()
-	if not _net().is_host() or _member(sender).is_empty() or hash.length() != 64:
+	if not _net().is_host() or _member(sender).is_empty() or hash.length() != 64 or size <= 0 or size > Stickers.POSTER_MAX_BYTES:
 		return
-	var bytes := _collect("up:%d:%s" % [sender, hash], index, count, chunk)
-	if bytes.is_empty() or bytes.size() > Stickers.POSTER_MAX_BYTES or _sha(bytes) != hash:
+	if _poster_bytes.has(hash) or _offers.has(hash):
+		return
+	var transfer := _new_transfer(size)
+	transfer["peer"] = sender
+	_offers[hash] = transfer
+	for i in mini(WINDOW, int(transfer.count)):
+		transfer.next = i + 1
+		_rpc_poster_pull.rpc_id(sender, hash, i)
+
+
+## Владелец плаката: хост просит кусок картинки.
+@rpc("authority", "reliable")
+func _rpc_poster_pull(hash: String, index: int) -> void:
+	var bytes := _poster_file(hash)
+	if not bytes.is_empty() and index >= 0 and index < _chunks(bytes.size()):
+		_rpc_poster_part.rpc_id(1, hash, index, _slice(bytes, index))
+
+
+@rpc("any_peer", "reliable")
+func _rpc_poster_part(hash: String, index: int, chunk: PackedByteArray) -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if not _net().is_host() or not _offers.has(hash):
+		return
+	var transfer: Dictionary = _offers[hash]
+	if int(transfer.peer) != sender:
+		return
+	var bytes := _take_part(transfer, index, chunk)
+	if bytes.is_empty():
+		if int(transfer.next) < int(transfer.count):
+			transfer.next = int(transfer.next) + 1
+			_rpc_poster_pull.rpc_id(sender, hash, int(transfer.next) - 1)
+		return
+	_offers.erase(hash)
+	if bytes.size() != int(transfer.size) or _sha(bytes) != hash:
 		return
 	_poster_bytes[hash] = bytes
 	_pulled.erase(hash)
 	for waiter: int in _waiters.get(hash, []):
 		if not _member(waiter).is_empty():
-			_deliver(waiter, hash, bytes)
+			_rpc_poster_ready.rpc_id(waiter, hash, bytes.size())
 	_waiters.erase(hash)
 	poster_ready.emit(hash)
-
-
-func _deliver(peer: int, hash: String, bytes: PackedByteArray) -> void:
-	var count := ceili(float(bytes.size()) / CHUNK)
-	for i in count:
-		_rpc_poster_deliver.rpc_id(peer, hash, i, count, bytes.slice(i * CHUNK, mini(bytes.size(), (i + 1) * CHUNK)))
 
 
 ## Хост просит у владельца его картинку (её у хоста нет, а друзья ждут).
@@ -448,13 +512,45 @@ func _rpc_poster_want(hash: String) -> void:
 		_waiters[hash] = list
 		_pull(hash)
 		return
-	_deliver(sender, hash, bytes)
+	_poster_bytes[hash] = bytes
+	_rpc_poster_ready.rpc_id(sender, hash, bytes.size())
+
+
+## Клиент: у хоста картинка есть — забираем по кускам.
+@rpc("authority", "reliable")
+func _rpc_poster_ready(hash: String, size: int) -> void:
+	if size <= 0 or size > Stickers.POSTER_MAX_BYTES or _downloads.has(hash) or not _poster_file(hash).is_empty():
+		return
+	var transfer := _new_transfer(size)
+	_downloads[hash] = transfer
+	for i in mini(WINDOW, int(transfer.count)):
+		transfer.next = i + 1
+		_rpc_poster_get.rpc_id(1, hash, i)
+
+
+@rpc("any_peer", "reliable")
+func _rpc_poster_get(hash: String, index: int) -> void:
+	var sender := multiplayer.get_remote_sender_id()
+	if not _net().is_host() or _member(sender).is_empty() or not _poster_bytes.has(hash):
+		return
+	var bytes: PackedByteArray = _poster_bytes[hash]
+	if index >= 0 and index < _chunks(bytes.size()):
+		_rpc_poster_chunk.rpc_id(sender, hash, index, _slice(bytes, index))
 
 
 @rpc("authority", "reliable")
-func _rpc_poster_deliver(hash: String, index: int, count: int, chunk: PackedByteArray) -> void:
-	var bytes := _collect("down:" + hash, index, count, chunk)
-	if bytes.is_empty() or bytes.size() > Stickers.POSTER_MAX_BYTES or _sha(bytes) != hash:
+func _rpc_poster_chunk(hash: String, index: int, chunk: PackedByteArray) -> void:
+	if not _downloads.has(hash):
+		return
+	var transfer: Dictionary = _downloads[hash]
+	var bytes := _take_part(transfer, index, chunk)
+	if bytes.is_empty():
+		if int(transfer.next) < int(transfer.count):
+			transfer.next = int(transfer.next) + 1
+			_rpc_poster_get.rpc_id(1, hash, int(transfer.next) - 1)
+		return
+	_downloads.erase(hash)
+	if bytes.size() != int(transfer.size) or _sha(bytes) != hash:
 		return
 	if not _write_poster(hash, bytes):
 		return
@@ -729,9 +825,12 @@ func _process(delta: float) -> void:
 			_poster_bytes.clear()
 			_waiters.clear()
 			_pulled.clear()
+			_offers.clear()
+			_downloads.clear()
 			_sent = {}
 			changed.emit(0)
 		return
+	_drop_stalled()
 	for entry: Variant in local.get("posters", []):
 		if entry is Array and (entry as Array).size() >= 3 and str(entry[2]) != "" and not _uploaded.has(str(entry[2])):
 			_upload(str(entry[2]))

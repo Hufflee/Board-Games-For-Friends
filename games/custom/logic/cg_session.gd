@@ -47,7 +47,7 @@ static func create_definition(parsed: Dictionary, players: Array, options: Dicti
 			leader = seat
 		if int(seats[seat].get("team", -1)) < 0:
 			seats[seat].team = seat % 2
-	var error := rules.new_game(seats, {"seed": randi(), "leader": leader, "turn_time": options.get("turn_time", 0)})
+	var error := rules.new_game(seats, {"seed": randi(), "leader": leader, "turn_time": options.get("turn_time", 0), "vars": options.get("vars", {})})
 	return {"rules": rules, "error": error}
 
 static func view(rules: Object, seat: int, hotseat: bool) -> Dictionary:
@@ -72,6 +72,10 @@ static func view(rules: Object, seat: int, hotseat: bool) -> Dictionary:
 	out["cg_layout"] = rules.definition.layout.duplicate(true)
 	out["cg_vars"] = rules.definition.rules.get("vars", []).duplicate(true)
 	out["cg_dice"] = rules.definition.elements.get("dice", []).duplicate(true)
+	out["cg_boards"] = rules.definition.elements.get("boards", []).duplicate(true)
+	out["cg_track"] = rules.definition.elements.get("track", {}).duplicate(true)
+	out["pieces"] = rules.state.get("pieces", {}).duplicate()
+	out["piece_moved"] = rules.state.get("piece_moved", {}).duplicate()
 	out["cg_card_templates"] = templates
 	out["hotseat"] = hotseat
 	return out

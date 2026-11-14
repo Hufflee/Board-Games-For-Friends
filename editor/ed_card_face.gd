@@ -1,10 +1,14 @@
 extends RefCounted
 ## Шаблон лица колоды: общий холст, привязки к таблице, слои и атомарные жесты.
-const Style := preload("res://games/custom/ui/cg_style.gd")
+const Style := preload("res://editor/ed_style.gd")
+## Стиль игр — для предпросмотров того, что увидят игроки.
+const Game := preload("res://games/custom/ui/cg_style.gd")
+
 const Faces := preload("res://games/custom/logic/cg_faces.gd")
 const Canvas := preload("res://editor/ed_card_canvas.gd")
 const Reader := preload("res://games/custom/ui/cg_assets.gd")
 const Assets := preload("res://editor/ed_assets.gd")
+const Templates := preload("res://editor/ed_templates.gd")
 var app: Control
 var document: RefCounted
 var deck_index := 0
@@ -29,6 +33,11 @@ func setup(owner: Control, tools: VBoxContainer, center: VBoxContainer, right: V
 		app._face_edit = false
 		app._render.call_deferred())
 	tools.add_child(back)
+	var templates := Style.primary("Шаблоны лица…")
+	templates.name = "CardFaceTemplates"
+	templates.tooltip_text = "Готовое лицо: число и масть, название с рисунком, слово, роль, цена, вопрос–ответ."
+	templates.pressed.connect(_templates_dialog)
+	tools.add_child(templates)
 	tools.add_child(Style.heading("СЛОИ"))
 	center.add_child(Style.heading("ШАБЛОН ЛИЦА КАРТЫ"))
 	_reader.configure_document(document.data)
@@ -88,6 +97,71 @@ func setup(owner: Control, tools: VBoxContainer, center: VBoxContainer, right: V
 		app._face_pan = pan)
 	_refresh_canvas()
 	_properties()
+
+## Окно «Шаблоны лица»: схема слоёв в пропорциях карты этой колоды; выбор — одна правка с отменой.
+func _templates_dialog() -> void:
+	var window := Window.new()
+	window.name = "CardFaceTemplatesWindow"
+	window.title = "Шаблоны лица карты"
+	window.size = Vector2i(880, 600)
+	window.theme = Style.theme()
+	Style.window_surface(window)
+	app.add_child(window)
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	scroll.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	scroll.offset_left = 16
+	scroll.offset_top = 16
+	scroll.offset_right = -16
+	scroll.offset_bottom = -16
+	window.add_child(scroll)
+	var column := Style.column(12)
+	column.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	scroll.add_child(column)
+	var note := Style.label("Слои лица заменятся, фон и цвет карт останутся. Нужные свойства (колонки таблицы) добавятся сами — заполните их в таблице карт. Отменить — Ctrl+Z.")
+	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	note.modulate.a = 0.8
+	column.add_child(note)
+	var grid := GridContainer.new()
+	grid.columns = 3
+	grid.add_theme_constant_override("h_separation", 12)
+	grid.add_theme_constant_override("v_separation", 12)
+	column.add_child(grid)
+	var size: Array = Faces.dimensions(_deck())
+	var aspect := float(size[0]) / float(size[1])
+	for template: Dictionary in Templates.FACES:
+		var card := Button.new()
+		card.name = "CardFaceTemplate_" + str(template.id)
+		card.custom_minimum_size = Vector2(256, 300)
+		card.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		card.draw.connect(func():
+			var area := Rect2(Vector2(16, 16), Vector2(card.size.x - 32, card.size.y - 84))
+			var shown := Vector2(area.size.y * aspect, area.size.y)
+			if shown.x > area.size.x:
+				shown = Vector2(area.size.x, area.size.x / aspect)
+			var face := Rect2(area.position + (area.size - shown) * 0.5, shown)
+			card.draw_style_box(Style.box(Color(Faces.paper(_deck())), 0), face)
+			if template.frame:
+				card.draw_rect(face.grow(-6), Color("30263f"), false, 2)
+			for spec: Array in template.layers:
+				var rect := Rect2(face.position + Vector2(spec[2], spec[3]) * face.size, Vector2(spec[4], spec[5]) * face.size)
+				var tone := Color("30263f", 0.18) if spec[0] in ["text", "line"] else (Color("e0b84e") if spec[0] == "badge" else Color("6c8ca8", 0.45))
+				card.draw_rect(rect, tone)
+				if spec[0] == "text" and rect.size.y > 10:
+					card.draw_string(Style.body_font(), rect.position + Vector2(2, minf(rect.size.y - 2, 12)), str(Templates.FACE_COLUMN_TITLES.get(spec[1], spec[1])), HORIZONTAL_ALIGNMENT_CENTER if spec[7] == "center" else HORIZONTAL_ALIGNMENT_LEFT, rect.size.x - 4, 10, Color("30263f"))
+			card.draw_string(Style.head_font(), Vector2(16, card.size.y - 42), str(template.title), HORIZONTAL_ALIGNMENT_LEFT, card.size.x - 32, 18, Style.ink())
+			card.draw_string(Style.body_font(), Vector2(16, card.size.y - 18), str(template.hint), HORIZONTAL_ALIGNMENT_LEFT, card.size.x - 32, 13, Color(Style.ink(), 0.7)))
+		card.pressed.connect(func():
+			var copy: Dictionary = document.data.duplicate(true)
+			copy.elements.decks[deck_index] = Templates.apply_face(copy.elements.decks[deck_index], str(template.id))
+			document.replace(copy, "Шаблон лица: " + str(template.title))
+			app._message = "Лицо «%s». Заполните новые свойства в таблице карт." % template.title
+			app._face_layer = copy.elements.decks[deck_index].face.layers.size() - 1
+			window.queue_free()
+			app._render.call_deferred())
+		grid.add_child(card)
+	window.close_requested.connect(window.queue_free)
+	window.popup_centered()
 
 func _convert() -> void:
 	var copy: Dictionary = document.data.duplicate(true)

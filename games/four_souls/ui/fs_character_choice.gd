@@ -1,5 +1,5 @@
 extends Control
-## Две пары стартовых карт над столом. Выбор подтверждает хост.
+## Пары стартовых карт над столом. Выбор подтверждает хост.
 
 signal chosen(card: int)
 
@@ -81,26 +81,41 @@ func _add_card(parent: Control, id: int) -> void:
 		card.material = ink
 		parent.add_child(card)
 	else:
-		var label := FSStyle.label("Эдем выберет\nвечный предмет\nпосле раздачи", FSStyle.CAP)
+		var slot := Control.new()
+		slot.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		slot.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		parent.add_child(slot)
+		var label := FSStyle.label("Эдем выберет вечный предмет после раздачи", FSStyle.CAP)
 		label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		label.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		parent.add_child(label)
+		slot.add_child(label)
+		label.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 
 
 func _layout() -> void:
-	var card_width := clampf(minf((size.x - 136.0) / 4.0, (size.y - 146.0) / 1.37), 56.0, 192.0)
-	var pair_size := Vector2(card_width * 2.0 + 24.0, card_width * 1.37 + 16.0)
+	var columns := mini(2, maxi(1, _pairs.size()))
+	var rows := maxi(1, ceili(float(_pairs.size()) / columns))
 	var gap := 32.0
+	var available_width := (size.x - 48.0 - gap * (columns - 1)) / columns
+	var available_height := (size.y - 120.0 - gap * (rows - 1)) / rows
+	var card_width := clampf(minf((available_width - 24.0) * 0.5, (available_height - 16.0) / 1.37), 56.0, 192.0)
+	var pair_size := Vector2(card_width * 2.0 + 24.0, card_width * 1.37 + 16.0)
 	var center := size * 0.5
-	_title.position = Vector2(0, center.y - pair_size.y * 0.5 - 64.0) if not _pairs.is_empty() else Vector2(0, center.y - 20.0)
+	var grid_height := pair_size.y * rows + gap * (rows - 1)
+	var top := center.y - grid_height * 0.5 + 16.0
+	_title.position = Vector2(0, top - 58.0) if not _pairs.is_empty() else Vector2(0, center.y - 20.0)
 	_title.size = Vector2(size.x, 40.0)
 	for index in _pairs.size():
 		var pair := _pairs[index]
+		@warning_ignore("integer_division")
+		var row := index / columns
+		var row_count := mini(columns, _pairs.size() - row * columns)
+		var column := index % columns
 		pair.size = pair_size
-		pair.position = center - pair_size * 0.5 + Vector2((index - 0.5) * (pair_size.x + gap), 0)
+		pair.position = Vector2(center.x - pair_size.x * 0.5 + (column - (row_count - 1) * 0.5) * (pair_size.x + gap),
+			top + row * (pair_size.y + gap))
 		var face := pair.get_node("Cards") as Control
 		face.size = pair_size
 		face.pivot_offset = pair_size * 0.5

@@ -1,22 +1,38 @@
 extends Node
-## Мини-игры один на один внутри пати (узел /root/Net/MiniGames, создаёт Net): шахматы, шашки, го.
+## Мини-игры внутри пати (узел /root/Net/MiniGames, создаёт Net).
 ##
-## Приглашение → согласие → партия. Партии живут на хосте пати: он проверяет ходы правилами
-## (hub/minigames/logic) и рассылает обоим игрокам снимок. Времени на ход нет. Партий может быть несколько;
-## они не зависят от основной игры и переживают смену экрана. Окно — общее «Общение» (hub/comms_panel.gd),
-## поле — hub/minigames/mg_board.gd. Без пати доступна только партия «за обоих» на этом компьютере.
+## Один на один (шахматы, шашки, го, 4 в ряд): приглашение → согласие → партия. Партии живут на хосте пати:
+## он проверяет ходы правилами (hub/minigames/logic) и рассылает обоим игрокам снимок. Времени на ход нет.
+## Партий может быть несколько; они не зависят от основной игры и переживают смену экрана. Окно — общее
+## «Общение» (hub/comms_panel.gd), поле — hub/minigames/mg_board.gd. Без пати — партия «за обоих» на этом компьютере.
 ## После смены хоста игроки сами возвращают свои партии новому хосту (по никам).
+##
+## Общие комнаты (шарики, звёздочки): одна на пати, входят и выходят в любой момент (вкладка = «я в комнате»).
+## Считает хост, участникам — снимки; без пати комната работает здесь же, вы в ней одни.
+## Соло (сапёр): только на этом компьютере, без сети.
 
 signal changed  # партии, приглашения, выбранная вкладка
 signal notice(text: String)
+signal won(id: String)  # я победил в партии — окно сыплет конфетти и звенит
 
-const GAMES := ["chess", "checkers", "go"]
-const TITLES := {"chess": "Шахматы", "checkers": "Шашки", "go": "Го"}
+const GAMES := ["chess", "checkers", "go", "connect4"]  # один на один, по приглашению
+const ROOMS := ["balls", "stars"]  # общие комнаты
+const SOLO := ["mines"]
+const TITLES := {"chess": "Шахматы", "checkers": "Шашки", "go": "Го", "connect4": "4 в ряд",
+	"balls": "Сумо", "stars": "Лови звёздочку", "mines": "Сапёр"}
 const RULES := {
 	"chess": preload("res://hub/minigames/logic/mg_chess.gd"),
 	"checkers": preload("res://hub/minigames/logic/mg_checkers.gd"),
 	"go": preload("res://hub/minigames/logic/mg_go.gd"),
+	"connect4": preload("res://hub/minigames/logic/mg_connect4.gd"),
+	"mines": preload("res://hub/minigames/logic/mg_mines.gd"),
 }
+const Balls := preload("res://hub/minigames/logic/mg_balls.gd")
+const Stars := preload("res://hub/minigames/logic/mg_stars.gd")
+const StarOverlay := preload("res://hub/minigames/mg_star_overlay.gd")
+const ROOM_STEP := 1.0 / 30.0  # шаг физики комнаты на хосте
+const ROOM_TICK := 1.0 / 15.0  # как часто хост рассылает положение шариков
+const BEST_PATH := "user://minigames.cfg"
 const MAX_SESSIONS := 8  # партий у одного игрока
 
 var sessions: Dictionary = {}  # id → {id, game, opts, peers, names, state, seat, dot, gone, local, orphan}
@@ -32,6 +48,11 @@ var _next := 1
 var _salt := randi() % 100000  # номера партий разных хостов не совпадают (после смены хоста старые ещё живы у игроков)
 var _local_next := 1
 var _clock := 0.0
+# общие комнаты
+var _rooms: Dictionary = {}  # хост (или без пати — здесь): игра → {state, members: {peer: true}, acc, tick, seq}
+var _room_rng := RandomNumberGenerator.new()
+var _overlay: CanvasLayer  # звёздочки поверх всего экрана
+var _steer_sent := 0.0
 
 
 func _ready() -> void:
@@ -110,6 +131,8 @@ static func _clean_opts(game: String, opts: Dictionary) -> Dictionary:
 	if game == "go":
 		var size := int(opts.get("size", 9))
 		return {"size": size if size in [9, 13, 19] else 9}
+	if game == "mines":
+		return {"mode": "deep" if str(opts.get("mode", "")) == "deep" else "classic"}
 	return {}
 
 
@@ -137,13 +160,14 @@ func _member_view(peer: int) -> Dictionary:
 
 ## Партия «за обоих» на этом компьютере — без сети.
 func start_local(game: String, opts: Dictionary = {}) -> void:
-	if game not in GAMES or sessions.size() >= MAX_SESSIONS:
+	if (game not in GAMES and game not in SOLO) or sessions.size() >= MAX_SESSIONS:
 		return
 	var id := "local%d" % _local_next
 	_local_next += 1
 	var clean := _clean_opts(game, opts)
 	sessions[id] = {"id": id, "game": game, "opts": clean, "peers": [0, 0], "names": ["Вы", "Вы"],
-		"state": RULES[game].new_state(clean), "seat": 0, "dot": false, "gone": false, "local": true, "orphan": false}
+		"state": RULES[game].new_state(clean), "seat": 0, "dot": false, "gone": false, "local": true, "orphan": false,
+		"solo": game in SOLO}
 	order.push_front(id)
 	current = id
 	changed.emit()
@@ -341,6 +365,8 @@ func _rpc_session(id: String, data: Dictionary) -> void:
 			Sfx.play("chip", -8.0)
 		_ensure_panel().call("attention")
 	changed.emit()
+	if ended and int(state.get("winner", -1)) == seat:
+		won.emit(id)
 
 
 ## Ход в партии: словарь хода правил игры или {"resign": true}.
@@ -349,12 +375,26 @@ func move(id: String, action: Dictionary) -> void:
 		return
 	var session: Dictionary = sessions[id]
 	if bool(session.local):
+		var view: Dictionary = _net().view
+		if (_net().is_host() and _net().minigames_locked_now(my_peer())) or bool(view.get("minigames_blocked", false)):
+			notice.emit("Мини-игры приостановлены до конца вашего хода")
+			return
 		var state: Dictionary = session.state
 		var error := _apply(str(session.game), state, int(state.turn), action)
 		if error != "":
-			notice.emit(error)
+			if str(session.game) != "mines" or not (error.begins_with("Флажков вокруг") or error in ["Клетка уже открыта", "Вокруг всё открыто"]):
+				notice.emit(error)
 		else:
 			Sfx.play("chip", -8.0)
+			if bool(state.get("over", false)) and int(state.get("winner", -1)) in [0, 1]:
+				won.emit(id)  # за обоих — любая победа; в сапёре winner 0 — поле разминировано
+			if str(session.game) == "mines" and str(state.mode) == "deep":
+				_save_best("mines_layers", int(state.depth))
+			elif str(session.game) == "mines" and bool(state.over) and int(state.winner) == 0:
+				var record := best_time(BEST_TIME_KEY)
+				state.record = record <= 0.0 or float(state.elapsed) < record
+				if bool(state.record):
+					_save_best_time(BEST_TIME_KEY, float(state.elapsed))
 		changed.emit()
 		return
 	if bool(session.orphan):
@@ -385,6 +425,9 @@ func _rpc_move_up(id: String, action: Dictionary) -> void:
 
 
 func _host_move(sender: int, id: String, action: Dictionary) -> void:
+	if not bool(action.get("resign", false)) and _net().minigames_locked_now(sender):
+		_tell(sender, "Мини-игры приостановлены до конца вашего хода")
+		return
 	if not _host_sessions.has(id):
 		return
 	var session: Dictionary = _host_sessions[id]
@@ -408,6 +451,9 @@ func close(id: String) -> void:
 	if current == id:
 		current = order[0] if not order.is_empty() else ""
 	changed.emit()
+	if bool(session.get("room", false)):
+		_leave_room(str(session.game))
+		return
 	if bool(session.local) or bool(session.orphan):
 		return
 	if _net().is_host():
@@ -447,6 +493,8 @@ func _on_peer_gone(peer: int) -> void:
 	for id: String in _host_sessions.keys():
 		if (_host_sessions[id].peers as Array).has(peer):
 			_host_leave(peer, id)
+	for game: String in _rooms.keys():
+		_host_room_leave(peer, game)
 
 
 # --- Смена хоста и выход из пати -----------------------------------------------------------
@@ -458,6 +506,7 @@ func reset_party() -> void:
 	_restored.clear()
 	invites_in.clear()
 	invites_out.clear()
+	_rooms.clear()
 	for id: String in sessions:
 		if not bool(sessions[id].local):
 			sessions[id].orphan = true
@@ -465,6 +514,8 @@ func reset_party() -> void:
 
 
 func _process(delta: float) -> void:
+	_rooms_process(delta)
+	_mines_clock(delta)
 	_clock += delta
 	if _clock < 1.0:
 		return
@@ -473,7 +524,7 @@ func _process(delta: float) -> void:
 		# вышли из пати: сетевые партии закрыть, локальные оставить
 		var dropped := false
 		for id: String in sessions.keys():
-			if not bool(sessions[id].local):
+			if not bool(sessions[id].local) and not _offline_room(id):
 				sessions.erase(id)
 				order.erase(id)
 				dropped = true
@@ -488,11 +539,19 @@ func _process(delta: float) -> void:
 		return
 	if targets().is_empty() and not _net().is_host():
 		return  # список пати ещё не пришёл
-	for id: String in sessions:
+	for id: String in sessions.keys():
 		var session: Dictionary = sessions[id]
+		if bool(session.get("room", false)) and not bool(session.get("online", false)):
+			# комната без пати, а мы уже в пати: входим в общую комнату хоста
+			session.online = true
+			session.orphan = true
+			_rooms.erase(str(session.game))
 		if not bool(session.orphan):
 			continue
-		var data := {"game": session.game, "opts": session.opts, "names": session.names, "state": session.state}
+		if bool(session.get("room", false)):
+			_join_up(str(session.game))
+			continue
+		var data :={"game": session.game, "opts": session.opts, "names": session.names, "state": session.state}
 		if _net().is_host():
 			_host_restore(my_peer(), id, data)
 		else:
@@ -535,3 +594,352 @@ func _host_restore(sender: int, token: String, data: Dictionary) -> void:
 		state["reps"] = {}
 	_host_sessions[session_id] = {"game": game, "opts": _clean_opts(game, data.get("opts", {})), "peers": peers, "names": names, "state": state, "left": []}
 	_push(session_id, false, [token])
+
+
+# --- Общие комнаты (шарики, звёздочки) -----------------------------------------------------
+
+static func room_id(game: String) -> String:
+	return "room_" + game
+
+
+func in_room(game: String) -> bool:
+	return sessions.has(room_id(game))
+
+
+func _offline_room(id: String) -> bool:
+	var session: Dictionary = sessions.get(id, {})
+	return bool(session.get("room", false)) and not bool(session.get("online", false))
+
+
+## Комнату считает этот компьютер: хост пати или игра без пати.
+func _room_host() -> bool:
+	return not _online() or _net().is_host()
+
+
+## Войти в общую комнату (вкладка появляется сразу, снимок приходит от хоста).
+func join_room(game: String) -> void:
+	if game not in ROOMS:
+		return
+	var id := room_id(game)
+	if not sessions.has(id):
+		sessions[id] = {"id": id, "game": game, "opts": {}, "peers": [], "names": [], "state": {}, "seat": 0, "dot": false,
+			"gone": false, "local": false, "orphan": false, "room": true, "online": _online()}
+		order.push_front(id)
+	current = id
+	_join_up(game)
+	changed.emit()
+	show_panel()
+
+
+func _join_up(game: String) -> void:
+	if _room_host():
+		_host_room_join(my_peer(), game)
+	else:
+		_rpc_room_join_up.rpc_id(1, game)
+
+
+func _leave_room(game: String) -> void:
+	if _room_host():
+		_host_room_leave(my_peer(), game)
+	elif _online():
+		_rpc_room_leave_up.rpc_id(1, game)
+	_sync_overlay()
+
+
+@rpc("any_peer", "reliable")
+func _rpc_room_join_up(game: String) -> void:
+	if _net().is_host():
+		_host_room_join(multiplayer.get_remote_sender_id(), game)
+
+
+@rpc("any_peer", "reliable")
+func _rpc_room_leave_up(game: String) -> void:
+	if _net().is_host():
+		_host_room_leave(multiplayer.get_remote_sender_id(), game)
+
+
+func _room_name(peer: int) -> String:
+	return _name_of(peer) if _online() else str(_net().my_name)
+
+
+func _host_room_join(peer: int, game: String) -> void:
+	if game not in ROOMS or (_online() and _member(peer).is_empty()):
+		return
+	if not _rooms.has(game):
+		_rooms[game] = {"state": Balls.new_state() if game == "balls" else Stars.new_state(), "acc": 0.0, "tick": 0.0}
+	var room: Dictionary = _rooms[game]
+	var color := int(_member(peer).get("color", 0))
+	if game == "balls":
+		Balls.join(room.state, peer, _room_name(peer), color, _room_rng)
+	else:
+		Stars.join(room.state, peer, _room_name(peer), color)
+	_room_push(game)
+
+
+func _host_room_leave(peer: int, game: String) -> void:
+	if not _rooms.has(game):
+		return
+	var room: Dictionary = _rooms[game]
+	if game == "balls":
+		Balls.leave(room.state, peer)
+	else:
+		Stars.leave(room.state, peer)
+	if _room_peers(game).is_empty():
+		_rooms.erase(game)  # комната опустела — очки и звёзды забываются
+		return
+	_room_push(game)
+
+
+func _room_peers(game: String) -> Array:
+	if not _rooms.has(game):
+		return []
+	var state: Dictionary = _rooms[game].state
+	return (state.balls if game == "balls" else state.players).keys()
+
+
+func _room_snapshot(game: String) -> Dictionary:
+	var state: Dictionary = _rooms[game].state
+	return Balls.snapshot(state) if game == "balls" else Stars.snapshot(state)
+
+
+## Хост: надёжно разослать снимок комнаты всем участникам.
+func _room_push(game: String) -> void:
+	if not _rooms.has(game):
+		return
+	var snap := _room_snapshot(game)
+	for peer: Variant in _room_peers(game):
+		_send(int(peer), "_rpc_room", [game, snap])
+
+
+@rpc("authority", "reliable")
+func _rpc_room(game: String, snap: Dictionary) -> void:
+	_take_room(game, snap)
+
+
+@rpc("authority", "unreliable_ordered")
+func _rpc_room_tick(game: String, snap: Dictionary) -> void:
+	_take_room(game, snap)
+
+
+func _take_room(game: String, snap: Dictionary) -> void:
+	var id := room_id(game)
+	if not sessions.has(id):
+		return
+	var session: Dictionary = sessions[id]
+	var old_seq := int((session.state as Dictionary).get("seq", -1))
+	session.state = snap
+	session.orphan = false
+	if game == "stars":
+		_sync_overlay()
+	if int(snap.get("seq", 0)) != old_seq:
+		changed.emit()  # состав, очки, звезда — перерисовать окно; простой сдвиг шариков рисует само поле
+
+
+## Ввод в комнате: шарики — {"aim": Vector2, "on": bool} (часто, без гарантии доставки), {"dash": true};
+## звёздочки — {"catch": id звезды}.
+func room_act(game: String, action: Dictionary) -> void:
+	if not in_room(game):
+		return
+	if _room_host():
+		_host_room_act(my_peer(), game, action)
+	elif action.has("aim"):
+		_rpc_room_aim_up.rpc_id(1, action.aim, bool(action.get("on", false)))
+	else:
+		_rpc_room_act_up.rpc_id(1, game, action)
+
+
+@rpc("any_peer", "unreliable_ordered")
+func _rpc_room_aim_up(aim: Vector2, on: bool) -> void:
+	if _net().is_host():
+		_host_room_act(multiplayer.get_remote_sender_id(), "balls", {"aim": aim, "on": on})
+
+
+@rpc("any_peer", "reliable")
+func _rpc_room_act_up(game: String, action: Dictionary) -> void:
+	if _net().is_host():
+		_host_room_act(multiplayer.get_remote_sender_id(), game, action)
+
+
+func _host_room_act(peer: int, game: String, action: Dictionary) -> void:
+	if not _rooms.has(game):
+		return
+	var room: Dictionary = _rooms[game]
+	if _net().minigames_locked_now(peer):
+		if game == "balls":
+			Balls.force_ghost(room.state, peer)
+		else:
+			_tell(peer, "Мини-игры приостановлены до конца вашего хода")
+		return
+	if game == "balls":
+		if action.has("aim") and action.aim is Vector2:
+			Balls.steer(room.state, peer, action.aim, bool(action.get("on", false)))
+		elif bool(action.get("dash", false)):
+			Balls.dash(room.state, peer)
+	elif game == "stars" and action.has("catch"):
+		if Stars.catch_star(room.state, peer, int(action.catch), _room_rng):
+			_send(peer, "_rpc_star_caught", [1])
+			_room_push(game)
+
+
+@rpc("authority", "reliable")
+func _rpc_star_caught(_points: int) -> void:
+	Sfx.play("hufflesoft", -6.0)
+
+
+## Мини-игры у меня сейчас заблокированы: идёт мой ход в основной игре, и хост не разрешил.
+var probe_blocked := false  # только для служебных проб (tools/_mg_probe): изобразить «мой ход»
+
+
+func blocked_now() -> bool:
+	if probe_blocked:
+		return true
+	if not _net().in_session():
+		return false
+	if _net().is_host():
+		return bool(_net().minigames_locked_now(my_peer()))
+	return bool((_net().view as Dictionary).get("minigames_blocked", false))
+
+
+var _lock_clock := 0.0
+
+
+## Хост: у кого начался ход — шарик сразу призрак (проверка 10 раз в секунду: вид места считать недёшево).
+func _host_turn_locks(delta: float) -> void:
+	_lock_clock += delta
+	if _lock_clock < 0.1 or not _rooms.has("balls") or not _net().is_host():
+		return
+	_lock_clock = 0.0
+	var state: Dictionary = _rooms.balls.state
+	for peer: int in state.balls:
+		if _net().minigames_locked_now(peer):
+			var ball: Dictionary = state.balls[peer]
+			if bool(ball.steer) or Balls.opacity(ball, float(state.time)) > Balls.GHOST_ALPHA:
+				Balls.force_ghost(state, peer)
+
+
+## Каждый кадр: хост двигает комнаты и рассылает положение шариков.
+func _rooms_process(delta: float) -> void:
+	_host_turn_locks(delta)
+	if not _online():
+		# без пати комнаты живут, только пока открыта их вкладка
+		for game: String in _rooms.keys():
+			if not _offline_room(room_id(game)):
+				_rooms.erase(game)
+	elif not _net().is_host():
+		_rooms.clear()
+	for game: String in _rooms.keys():
+		var room: Dictionary = _rooms[game]
+		room.acc = minf(float(room.acc) + delta, 0.25)
+		var dirty := false
+		while float(room.acc) >= ROOM_STEP:
+			room.acc = float(room.acc) - ROOM_STEP
+			if game == "balls":
+				dirty = not Balls.step(room.state, ROOM_STEP, _room_rng).is_empty() or dirty
+			else:
+				dirty = Stars.step(room.state, ROOM_STEP, _room_rng) or dirty
+		if dirty:
+			_room_push(game)
+		elif game == "balls":
+			room.tick = float(room.tick) + delta
+			if float(room.tick) >= ROOM_TICK:
+				room.tick = 0.0
+				var snap := _room_snapshot(game)
+				for peer: Variant in _room_peers(game):
+					if int(peer) == my_peer():
+						_take_room(game, snap)
+					elif not _member(int(peer)).is_empty():
+						_rpc_room_tick.rpc_id(int(peer), game, snap)
+
+
+## Звёздочка поверх всего интерфейса — только у тех, кто в комнате «Лови звёздочку».
+func _sync_overlay() -> void:
+	var session: Dictionary = sessions.get(room_id("stars"), {})
+	var state: Dictionary = session.get("state", {})
+	var star: Dictionary = state.get("star", {})
+	if star.is_empty() and not is_instance_valid(_overlay):
+		return
+	if not is_instance_valid(_overlay):
+		_overlay = StarOverlay.new()
+		_overlay.blocked = blocked_now  # в свой ход звезда не видна и не ловится
+		_overlay.caught.connect(func(id: int): room_act("stars", {"catch": id}))
+		get_tree().root.add_child.call_deferred(_overlay)
+	_overlay.call("show_star", star)
+
+
+## Лучший результат соло-игры на этом компьютере.
+static func best(key: String) -> int:
+	var cfg := ConfigFile.new()
+	if cfg.load(BEST_PATH) != OK:
+		return 0
+	return int(cfg.get_value("best", key, 0))
+
+
+static func _save_best(key: String, value: int) -> void:
+	if value <= best(key):
+		return
+	var cfg := ConfigFile.new()
+	cfg.load(BEST_PATH)
+	cfg.set_value("best", key, value)
+	cfg.save(BEST_PATH)
+
+
+const BEST_TIME_KEY := "mines_classic_time"
+
+
+## Секундомер обычного сапёра: идёт и на других вкладках, в мой ход в основной игре — пауза;
+## после хода ждёт «Продолжить?» (resume_mines), а не продолжает сам.
+func _mines_clock(delta: float) -> void:
+	var blocked := false
+	var checked := false
+	for id: String in sessions:
+		var session: Dictionary = sessions[id]
+		if str(session.game) != "mines" or not bool(session.local):
+			continue
+		var state: Dictionary = session.state
+		if not RULES.mines.clock_running(state):
+			continue
+		if not checked:
+			blocked = blocked_now()
+			checked = true
+		if blocked:
+			state.paused = true
+		elif not bool(state.paused):
+			state.elapsed = float(state.elapsed) + delta
+
+
+## Сапёр стоит на паузе после моего хода и ждёт «Продолжить?».
+func mines_waiting(id: String) -> bool:
+	if not sessions.has(id) or str(sessions[id].game) != "mines":
+		return false
+	var state: Dictionary = sessions[id].state
+	return bool(state.get("paused", false)) and RULES.mines.clock_running(state)
+
+
+func resume_mines(id: String) -> void:
+	if mines_waiting(id) and not blocked_now():
+		sessions[id].state.paused = false
+		changed.emit()
+
+
+## Лучшее время (секунды, 0 — ещё нет) на этом компьютере; меньше — лучше.
+static func best_time(key: String) -> float:
+	var cfg := ConfigFile.new()
+	if cfg.load(BEST_PATH) != OK:
+		return 0.0
+	return float(cfg.get_value("best_time", key, 0.0))
+
+
+static func _save_best_time(key: String, seconds: float) -> void:
+	var cfg := ConfigFile.new()
+	cfg.load(BEST_PATH)
+	cfg.set_value("best_time", key, seconds)
+	cfg.save(BEST_PATH)
+
+
+## Соло: начать заново в той же вкладке.
+func restart_local(id: String) -> void:
+	if not sessions.has(id) or not bool(sessions[id].local):
+		return
+	var session: Dictionary = sessions[id]
+	session.state = RULES[str(session.game)].new_state(session.opts)
+	changed.emit()

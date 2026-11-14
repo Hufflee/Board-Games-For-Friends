@@ -7,6 +7,16 @@ func _room20(s: RefCounted, owner: int = 0, index: int = 1) -> void:
 	s.choose(0, "make_room20", {"target": owner, "item": index})
 
 func run(t: Check) -> void:
+	var purchase := Scenario.new(t).dlc().current(0).coins(0, 15).hand(1, [468]).shop(1, 143).build()
+	purchase.ok(0, "buy", {"slot": 1})
+	purchase.ok(1, "loot", {"card": 468})
+	purchase.close()
+	purchase.choose(1, "make_room20", {"item": 1, "shop": true})
+	purchase.close()
+	t.equal(purchase.g.coins[0], 15, "Замена выбранного предмета не списывает монеты")
+	t.equal(int(purchase.g._extra_rooms20[0].id), 143, "Выбранный предмет стал комнатой")
+	t.check(int(purchase.g.shop[1]) >= 0 and int(purchase.g.shop[1]) != 143, "Подмена остаётся в магазине")
+
 	var spoon = _game(t, 143)
 	var bonus: int = int(spoon.g.attack[0])
 	_room20(spoon)

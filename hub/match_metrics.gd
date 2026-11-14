@@ -8,6 +8,50 @@ var _seen: Dictionary = {}
 var _owners: Array = []
 var _enabled: Array = []
 var _bindings: Array = []
+var _titles := {}
+var _gift_runs := {}
+var _rings_errors := {}
+
+const TITLES := {
+	"bluff": ["Убедительный блеф", "Больше всего принятых подарков под неверным названием — %d."],
+	"caught": ["Память на подарки", "Больше всего правильных вызовов на проверку — %d."],
+	"gifts": ["Без единой ошибки", "Больше всего передач с верным названием подряд — %d."],
+	"rings_run": ["Без промаха", "Больше всего верно размещённых карт подряд — %d."],
+	"rings_cross": ["Угадал пересечение", "Больше всего верных попаданий в пересечения — %d."],
+	"rings_recovery": ["Второе дыхание", "Больше всего верных размещений подряд после ошибки — %d."],
+	"calza": ["Кость в кость", "Больше всего точных «Кальса» — %d."],
+	"dudo": ["Поймал на слове", "Больше всего успешных оспариваний — %d."],
+	"answer_run": ["Серия без осечки", "Больше всего правильных ответов подряд — %d."],
+	"answers": ["Знаток", "Больше всего правильных ответов — %d."]
+}
+
+
+func _title_point(key: String, seat: int, record: int = 0) -> void:
+	if key.is_empty() or seat < 0 or seat >= _enabled.size() or not _enabled[seat]:
+		return
+	if not _titles.has(key):
+		_titles[key] = {}
+	var scores: Dictionary = _titles[key]
+	scores[seat] = maxi(record, int(scores.get(seat, 0))) if record > 0 else int(scores.get(seat, 0)) + 1
+
+
+func award() -> Dictionary:
+	for key in TITLES:
+		var scores: Dictionary = _titles.get(key, {})
+		var seat := -1
+		var best := 1
+		for candidate: int in scores:
+			if candidate >= _enabled.size() or not _enabled[candidate]:
+				continue
+			var value: int = scores[candidate]
+			if value > best:
+				best = value
+				seat = candidate
+			elif value == best:
+				seat = -1
+		if seat >= 0:
+			return {"seat": seat, "title": TITLES[key][0], "description": TITLES[key][1] % best}
+	return {}
 
 
 static func empty_row() -> Dictionary:
@@ -63,6 +107,9 @@ func observe(session: String, game: String, logic: Object, peers: Array = []) ->
 		_owners = []
 		_enabled = []
 		_bindings = []
+		_titles.clear()
+		_gift_runs.clear()
+		_rings_errors.clear()
 	if logic == null:
 		return
 	var players: Array = logic.get("players")
@@ -75,6 +122,10 @@ func observe(session: String, game: String, logic: Object, peers: Array = []) ->
 			_enabled.append(false)
 		elif int(_owners[seat]) != owner:
 			rows[seat] = empty_row()
+			for scores: Dictionary in _titles.values():
+				scores.erase(seat)
+			_gift_runs.erase(seat)
+			_rings_errors.erase(seat)
 			_owners[seat] = owner
 			_bindings[seat] = int(_bindings[seat]) + 1
 		_enabled[seat] = owner != 0 and not bool(players[seat].get("bot", false))
@@ -87,7 +138,34 @@ func observe(session: String, game: String, logic: Object, peers: Array = []) ->
 	if risks is Array:
 		for i in risks.size():
 			if _once("risk/%d" % i):
-				_risk(int(risks[i].seat), bool(risks[i].error))
+				var event: Dictionary = risks[i]
+				var seat := int(event.seat)
+				if not bool(event.get("award_only", false)):
+					_risk(seat, bool(event.error))
+				_title_point(str(event.get("award", "")), seat)
+				if event.has("truthful_gift"):
+					var run := int(_gift_runs.get(seat, 0)) + 1 if event.truthful_gift else 0
+					_gift_runs[seat] = run
+					if run > 0:
+						_title_point("gifts", seat, run)
+	if game == "things_in_rings":
+		for i in logic.board.size():
+			var placement: Dictionary = logic.board[i]
+			if not placement.has("correct") or not _once("rings/%d" % i):
+				continue
+			var finder := int(placement.by)
+			if not placement.correct:
+				_rings_errors[finder] = true
+				_gift_runs[finder] = 0
+				continue
+			var run := int(_gift_runs.get(finder, 0)) + 1
+			_gift_runs[finder] = run
+			_title_point("rings_run", finder, run)
+			if _rings_errors.has(finder):
+				_title_point("rings_recovery", finder, run)
+			var mask := int(placement.mask)
+			if (mask & (mask - 1)) != 0:
+				_title_point("rings_cross", finder)
 	if game == "perudo":
 		for seat in players.size():
 			if logic.shaken[seat] and _once("shake/%d/%d" % [logic.round_no, seat]):
@@ -98,6 +176,8 @@ func observe(session: String, game: String, logic: Object, peers: Array = []) ->
 			var challenger: int = int(event.challenger)
 			var loser: int = int(event.loser)
 			_risk(challenger, loser == challenger)
+			if loser != challenger:
+				_title_point("calza" if event.calza else "dudo", challenger)
 			if not event.calza:
 				_risk(int(event.bid.seat), loser == int(event.bid.seat))
 	if game == "tip_top":
@@ -109,6 +189,14 @@ func observe(session: String, game: String, logic: Object, peers: Array = []) ->
 		var event: Dictionary = logic.last
 		if str(event.get("kind", "")) in ["ok", "boom"] and _once("stillion/%d" % int(event.no)):
 			_risk(int(event.seat), event.kind == "boom")
+			var seat := int(event.seat)
+			if event.kind == "ok":
+				_title_point("answers", seat)
+				var run := int(_gift_runs.get(seat, 0)) + 1
+				_gift_runs[seat] = run
+				_title_point("answer_run", seat, run)
+			else:
+				_gift_runs.erase(seat)
 	if str(logic.get("phase")) == "game_over":
 		var view: Dictionary = logic.call("get_view", 0)
 		for seat in players.size():

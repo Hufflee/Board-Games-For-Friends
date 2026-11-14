@@ -12,7 +12,7 @@ func _ready() -> void:
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	center.offset_right = -300  # справа — чат
-	add_child(center)
+	preload("res://hub/lobby_layout.gd").mount(self, center)
 	var card := RSBStyle.panel()
 	card.custom_minimum_size = Vector2(680, 0)
 	center.add_child(card)

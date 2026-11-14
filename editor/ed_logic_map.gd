@@ -2,7 +2,10 @@ extends Control
 ## Обзор цепочек логики: реальные размеры блоков, видимая область и прокрутка кликом/перетаскиванием.
 ## Модель документа не меняется; координаты берутся с уже построенного холста.
 
-const Style := preload("res://games/custom/ui/cg_style.gd")
+const Style := preload("res://editor/ed_style.gd")
+## Стиль игр — для предпросмотров того, что увидят игроки.
+const Game := preload("res://games/custom/ui/cg_style.gd")
+
 var scroll: ScrollContainer
 var content: Control
 var entries: Array[Control] = []

@@ -1,10 +1,10 @@
 extends Control
 ## Масштаб логических цепочек: контейнер прокрутки получает реальный размер увеличенного содержимого.
-var content: VBoxContainer
+var content: Control
 var zoom := 1.0
 var _scheduled := false
 
-func setup(chains: VBoxContainer, scale_value: float) -> void:
+func setup(chains: Control, scale_value: float) -> void:
 	name = "LogicZoomCanvas"
 	size_flags_horizontal = SIZE_EXPAND_FILL
 	content = chains

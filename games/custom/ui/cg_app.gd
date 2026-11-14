@@ -36,12 +36,15 @@ func _replace(control: Control) -> void:
 	_screen.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	add_child(_screen)
 
-func _center() -> VBoxContainer:
+func _center(lobby: bool = false) -> VBoxContainer:
 	var root := ColorRect.new()
 	root.color = Style.bg()
 	var center := CenterContainer.new()
 	center.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
-	root.add_child(center)
+	if lobby:
+		preload("res://hub/lobby_layout.gd").mount(root, center)
+	else:
+		root.add_child(center)
 	var panel := PanelContainer.new()
 	panel.custom_minimum_size.x = 640
 	panel.add_theme_stylebox_override("panel", Style.box(Style.panel(), 24))
@@ -69,7 +72,7 @@ func show_menu(_reason: String = "") -> void:
 	col.add_child(back)
 
 func show_lobby() -> void:
-	var col := _center()
+	var col := _center(true)
 	var custom: bool = Net.party_game.begins_with("custom:")
 	col.add_child(Style.heading(str(Net.cg_transfer.manifest.get("title", "Пользовательская игра")) if custom else "ПОЛЬЗОВАТЕЛЬСКАЯ ИГРА"))
 	var choice := OptionButton.new()
@@ -128,6 +131,46 @@ func show_lobby() -> void:
 			Net.set_setting("cg_roles", next_roles))
 		row.add_child(role)
 		names.add_child(row)
+	# Без друзей рядом: свободные места занимают боты (случайный допустимый ход), а не местные игроки.
+	var bots_toggle := CheckBox.new()
+	bots_toggle.name = "CustomBots"
+	bots_toggle.text = "Боты вместо игроков за этим компьютером"
+	bots_toggle.button_pressed = bool(options.get("cg_bots", false))
+	bots_toggle.disabled = not Net.is_host()
+	bots_toggle.toggled.connect(func(on: bool): Net.set_setting("cg_bots", on))
+	col.add_child(bots_toggle)
+	# Настройки автора игры (переменные «в лобби»): хост меняет, остальные видят.
+	var lobby_options: Array = Net.cg_transfer.manifest.get("options", []) if custom else []
+	if not lobby_options.is_empty():
+		col.add_child(Style.heading("НАСТРОЙКИ ИГРЫ"))
+		var chosen: Dictionary = options.get("cg_lobby", {}).get(Net.party_game, {})
+		for option: Dictionary in lobby_options:
+			var line := Style.row()
+			line.name = "LobbyOption_" + str(option.id)
+			var caption := Style.label(str(option.title))
+			caption.size_flags_horizontal = SIZE_EXPAND_FILL
+			line.add_child(caption)
+			var put := func(value: Variant):
+				var all: Dictionary = Net.settings.get("cg_lobby", {}).duplicate(true)
+				var mine: Dictionary = all.get(Net.party_game, {})
+				mine[str(option.id)] = value
+				all[Net.party_game] = mine
+				Net.set_setting("cg_lobby", all)
+			if option.type == "bool":
+				var toggle := CheckBox.new()
+				toggle.button_pressed = bool(chosen.get(str(option.id), option.init))
+				toggle.disabled = not Net.is_host()
+				toggle.toggled.connect(put)
+				line.add_child(toggle)
+			else:
+				var number := SpinBox.new()
+				number.min_value = float(option.min)
+				number.max_value = float(option.max)
+				number.value = float(chosen.get(str(option.id), option.init))
+				number.editable = Net.is_host()
+				number.value_changed.connect(func(value: float): put.call(int(value) if is_equal_approx(value, roundf(value)) else value))
+				line.add_child(number)
+			col.add_child(line)
 	var timer_row := Style.row()
 	timer_row.add_child(Style.label("Время хода"))
 	var timer := OptionButton.new()

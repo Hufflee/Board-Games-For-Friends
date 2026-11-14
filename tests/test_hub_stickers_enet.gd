@@ -55,7 +55,7 @@ func _run() -> void:
 	net.my_steam_id = 0
 	net.my_name = "Хост" if role == "host" else "Клиент"
 	if role == "host":
-		for name in ["joined", "client_box_seen", "client_added", "client_removed", "forged", "board_moved", "client_pos_ok", "poster_hash", "client_poster", "early_poster", "done"]:
+		for name in ["joined", "client_box_seen", "client_added", "client_removed", "forged", "board_moved", "client_pos_ok", "poster_hash", "client_poster", "early_poster", "gif_poster", "done"]:
 			DirAccess.remove_absolute(ProjectSettings.globalize_path(FOLDER + name + ".txt"))
 		await _host()
 	else:
@@ -134,6 +134,16 @@ func _host() -> void:
 		early = st.poster_texture(early_hash)
 		await create_timer(0.1).timeout
 	check(early != null and early.get_width() == 640, "картинка, поставленная до входа в пати, тоже дошла до хоста")
+	# GIF на добавленном плакате (12.11: крупные GIF не доходили — все куски уходили разом). Файл — env GIF.
+	if FileAccess.file_exists(FOLDER + "gif_poster.txt"):
+		var gif_hash := FileAccess.get_file_as_string(FOLDER + "gif_poster.txt")
+		var gif: Resource = null
+		since = Time.get_ticks_msec()
+		while gif == null and Time.get_ticks_msec() - since < 20000:
+			gif = st.poster_texture(gif_hash)
+			await create_timer(0.2).timeout
+		check(gif is SpriteFrames, "GIF плаката клиента дошёл до хоста и анимирован")
+		print("GIF у хоста: ", gif, " за ", Time.get_ticks_msec() - since, " мс")
 	marker("done")
 
 
@@ -189,5 +199,13 @@ func _client() -> void:
 	f.store_string(client_hash)
 	f.close()
 	DirAccess.rename_absolute(ProjectSettings.globalize_path(FOLDER + "client_poster.tmp"), ProjectSettings.globalize_path(FOLDER + "client_poster.txt"))
+	var gif_path := OS.get_environment("GIF")
+	if gif_path != "" and FileAccess.file_exists(gif_path):
+		var gif_hash: String = st.set_poster_gif(3, FileAccess.get_file_as_bytes(gif_path), Vector2(0.5, 1.2))
+		check(gif_hash != "", "клиент поставил GIF на добавленный плакат")
+		var g := FileAccess.open(FOLDER + "gif_poster.tmp", FileAccess.WRITE)
+		g.store_string(gif_hash)
+		g.close()
+		DirAccess.rename_absolute(ProjectSettings.globalize_path(FOLDER + "gif_poster.tmp"), ProjectSettings.globalize_path(FOLDER + "gif_poster.txt"))
 	marker("client_pos_ok")
-	await until(func(): return seen("done"), "хост завершил проверки", 15.0)
+	await until(func(): return seen("done"), "хост завершил проверки", 40.0)

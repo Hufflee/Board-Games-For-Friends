@@ -49,7 +49,7 @@ func _set_screen(next: Control) -> void:
 	screen.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(screen)
 
-func _centered() -> VBoxContainer:
+func _centered(lobby: bool = false) -> VBoxContainer:
 	var root_control := Control.new()
 	root_control.add_child(TGStyle.Background.new())
 	# Панель слева от кольца сейфа и правее угловых вееров: декор фона не перекрывается.
@@ -57,7 +57,10 @@ func _centered() -> VBoxContainer:
 	center.set_anchors_and_offsets_preset(Control.PRESET_LEFT_WIDE)
 	center.offset_left = 112
 	center.offset_right = 112 + 576
-	root_control.add_child(center)
+	if lobby:
+		preload("res://hub/lobby_layout.gd").mount(root_control, center)
+	else:
+		root_control.add_child(center)
 	var panel := PanelContainer.new()
 	panel.name = "LobbyPanel"
 	panel.custom_minimum_size.x = 576
@@ -101,7 +104,7 @@ func show_menu(message: String = "") -> void:
 		col.add_child(TGStyle.label(message, 16, TGStyle.GOLD))
 
 func show_lobby() -> void:
-	_lobby_body = _centered()
+	_lobby_body = _centered(true)
 	_rebuild_lobby()
 
 func _on_lobby() -> void:

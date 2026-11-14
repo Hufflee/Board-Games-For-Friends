@@ -54,6 +54,36 @@ func _run() -> void:
 	report = Definition.validate(broken).errors
 	check(report.any(func(text: String): return text.contains("«gone»") and text.contains("цепочка №1")), "Блок броска с удалённым набором — ошибка с местом: %s" % str(report))
 
+	# d4–d20: бросок набора даёт числа до числа граней; у d20 грани только цифрами.
+	var poly := example()
+	poly.rules.chains = []
+	poly.elements.decks = []
+	poly.elements.dice = [{"id": "big", "title": "d20", "count": 6, "free": true, "sides": 20, "faces": "numbers"}, {"id": "small", "title": "d4", "count": 6, "free": true, "sides": 4, "faces": "numbers"}]
+	for item: Dictionary in poly.layout.screens[0].items:
+		if item.kind == "zone":
+			item.free = true
+	check(Definition.validate(poly).errors.is_empty(), "d20 и d4 допустимы: %s" % str(Definition.validate(poly).errors))
+	var seen_big := 0
+	var seen_small := 0
+	for attempt in 6:
+		var pr := Rules.new()
+		pr.load_definition(poly)
+		pr.new_game([{"name": "А", "team": 0}, {"name": "Б", "team": 1}], {"seed": 10 + attempt})
+		pr.act(0, "manual_roll", {"id": "big", "revision": pr.state.revision})
+		pr.act(0, "answer", {"value": [], "revision": pr.state.revision})
+		for value: int in pr.state.dice["0"].values:
+			seen_big = maxi(seen_big, value)
+			check(value >= 1 and value <= 20, "d20 в границах: %d" % value)
+		pr.act(0, "manual_roll", {"id": "small", "revision": pr.state.revision})
+		pr.act(0, "answer", {"value": [], "revision": pr.state.revision})
+		for value: int in pr.state.dice["0"].values:
+			seen_small = maxi(seen_small, value)
+	check(seen_big > 6, "d20 выбрасывает больше 6 (максимум %d)" % seen_big)
+	check(seen_small <= 4, "d4 не больше 4 (максимум %d)" % seen_small)
+	poly.elements.dice = [{"id": "x", "title": "Кривой", "count": 1, "sides": 7}, {"id": "y", "title": "Точечный", "count": 1, "sides": 12, "faces": "dots"}]
+	var poly_report: Array = Definition.validate(poly).errors
+	check(poly_report.any(func(text: String): return text.contains("«Кривой»") and text.contains("4, 6, 8, 10, 12 или 20")), "7 граней — ошибка")
+	check(poly_report.any(func(text: String): return text.contains("«Точечный»") and text.contains("только цифрами")), "d12 точками — ошибка")
 	# UI-стиль зависит от автозагрузок: грузим после запуска дерева (rulebook).
 	var style: GDScript = load("res://games/custom/ui/cg_style.gd")
 	var die: Control = load("res://games/perudo/ui/d6_view.gd").new(3, 64)

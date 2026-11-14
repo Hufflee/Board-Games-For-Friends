@@ -28,6 +28,8 @@ const BOARD_PER_AUTHOR := 6  # стикеров одного человека н
 const BOARD_DEFAULT := Vector2(1.13, 1.02)
 const WALL_X := 2.62  # |x| центра доски
 const WALL_Y := Vector2(0.38, 2.48)  # высота центра доски
+## Левая стена — продолжение задней за углом (NeonRoom.wall_xform): x от −7,18 до −3.
+const LEFT_END := -7.18
 
 ## Порядок — как в панели. kind: emoji — из обычных эмодзи, own — нарисованы для игры.
 const CATALOG := [
@@ -42,7 +44,43 @@ const CATALOG := [
 	{"id": "neon_star", "title": "Звезда", "kind": "own"},
 	{"id": "pixel_heart", "title": "Сердечко", "kind": "own"},
 	{"id": "six_seven", "title": "6 7", "kind": "own"},
+	{"id": "xmas_tree", "title": "Ёлка", "kind": "own", "season": "xmas"},
+	{"id": "xmas_santa", "title": "Дед Мороз", "kind": "own", "season": "xmas"},
+	{"id": "xmas_gift", "title": "Подарок", "kind": "own", "season": "xmas"},
+	{"id": "xmas_snowman", "title": "Снеговик", "kind": "own", "season": "xmas"},
+	{"id": "xmas_snowflake", "title": "Снежинка", "kind": "own", "season": "xmas"},
+	{"id": "xmas_bell", "title": "Колокольчик", "kind": "own", "season": "xmas"},
+	{"id": "xmas_deer", "title": "Олень", "kind": "own", "season": "xmas"},
+	{"id": "xmas_sock", "title": "Носки", "kind": "own", "season": "xmas"},
+	{"id": "xmas_candy", "title": "Карамелька", "kind": "own", "season": "xmas"},
+	{"id": "xmas_bauble", "title": "Шарик", "kind": "own", "season": "xmas"},
 ]
+
+## Сезонные стикеры (поле season в CATALOG): в панели выбора — только в свой сезон, каждый год.
+## Уже наклеенные остаются навсегда и видны всем (valid_id их знает всегда). Арт — tools/hub_stickers_xmas.py.
+## from / to — [месяц, день] включительно; сезон может переходить через Новый год.
+const SEASONS := {
+	"xmas": {"from": [11, 13], "to": [2, 20]},  # открываются 13 ноября, пропадают из выбора после 20 февраля (владелец, 14.11.2026)
+}
+
+
+## Сезон открыт в эту дату (по умолчанию — сегодня по часам компьютера).
+static func season_open(season: String, date: Dictionary = {}) -> bool:
+	if not SEASONS.has(season):
+		return true
+	if date.is_empty():
+		date = Time.get_date_dict_from_system()
+	var day := int(date.month) * 100 + int(date.day)
+	var range_from: Array = SEASONS[season].from
+	var range_to: Array = SEASONS[season].to
+	var start := int(range_from[0]) * 100 + int(range_from[1])
+	var finish := int(range_to[0]) * 100 + int(range_to[1])
+	return day >= start and day <= finish if start <= finish else day >= start or day <= finish
+
+
+## Стикеры, которые сейчас можно выбрать в панели (сезонные — только в свой сезон).
+static func available() -> Array:
+	return CATALOG.filter(func(entry: Dictionary) -> bool: return season_open(str(entry.get("season", ""))))
 
 static var _textures := {}
 
@@ -142,6 +180,8 @@ static func _text(value: Variant, limit: int) -> String:
 
 ## Место доски на стене в пределах стены.
 static func clamp_board_pos(pos: Vector2) -> Vector2:
+	if pos.x < -3.0:  # левая стена
+		return Vector2(clampf(pos.x, LEFT_END + 0.33, -3.0 - 0.33), clampf(pos.y, WALL_Y.x, WALL_Y.y))
 	return Vector2(clampf(pos.x, -WALL_X, WALL_X), clampf(pos.y, WALL_Y.x, WALL_Y.y))
 
 
@@ -168,10 +208,11 @@ static func clean_public(value: Variant) -> Dictionary:
 				out.boxes[game] = stickers
 	var pos: Variant = value.get("pos", [])
 	if pos is Array and pos.size() == 2:
-		var x := _number(pos[0], -WALL_X, WALL_X)
+		var x := _number(pos[0], LEFT_END, WALL_X)
 		var y := _number(pos[1], WALL_Y.x, WALL_Y.y)
 		if not is_nan(x) and not is_nan(y):
-			out["pos"] = [x, y]
+			var fitted := clamp_board_pos(Vector2(x, y))
+			out["pos"] = [fitted.x, fitted.y]
 	# Плакаты комнаты: [[x, y, хэш своей картинки ("" — стандартная), размер 1..2] или [] — на стандартном месте], до POSTERS_MAX.
 	# Номера с POSTERS и дальше — добавленные игроком: пустая запись там значит «плаката нет».
 	var posters: Variant = value.get("posters", [])
@@ -181,7 +222,7 @@ static func clean_public(value: Variant) -> Dictionary:
 			var entry: Variant = posters[i]
 			var clean: Array = []
 			if entry is Array and entry.size() in [3, 4]:
-				var px := _number(entry[0], -3.0, 3.0)
+				var px := _number(entry[0], LEFT_END, 3.0)
 				var py := _number(entry[1], 0.0, 2.8)
 				var hash := _text(entry[2], 64)
 				var big := _number(entry[3], 1.0, POSTER_SCALE_MAX) if entry.size() == 4 else 1.0
@@ -197,6 +238,15 @@ static func clean_public(value: Variant) -> Dictionary:
 			if (slot is int or slot is float) and int(slot) >= 0 and int(slot) < POSTERS_MAX and not layers.has(int(slot)):
 				layers.append(int(slot))
 		out["poster_order"] = layers
+	# Корзина для мяча на стене (центр, м) — видна друзьям в режиме наблюдения; нет поля — корзину сняли.
+	# вторая корзина — на левой стене (basket_left), x левее −3
+	for key: String in ["basket", "basket_left"]:
+		var basket: Variant = value.get(key, [])
+		if basket is Array and basket.size() == 2:
+			var bx := _number(basket[0], LEFT_END, 3.0)
+			var by := _number(basket[1], 0.0, 2.8)
+			if not is_nan(bx) and not is_nan(by):
+				out[key] = [bx, by]
 	# Снятые стандартные плакаты (номера 0..POSTERS-1).
 	var gone: Variant = value.get("poster_gone", [])
 	if gone is Array and not gone.is_empty():
@@ -221,12 +271,13 @@ static func clean_public(value: Variant) -> Dictionary:
 			var at: Variant = entry.get("pos", [])
 			if not (id is int or id is float) or int(id) < 1 or int(id) > 999 or ids.has(int(id)) or not (at is Array and at.size() == 2):
 				continue
-			var x := _number(at[0], -WALL_X, WALL_X)
+			var x := _number(at[0], LEFT_END, WALL_X)
 			var y := _number(at[1], WALL_Y.x, WALL_Y.y)
 			if is_nan(x) or is_nan(y):
 				continue
 			ids.append(int(id))
-			list.append({"id": int(id), "pos": [x, y], "board": _clean_board_list(entry.get("board", []))})
+			var fitted := clamp_board_pos(Vector2(x, y))
+			list.append({"id": int(id), "pos": [fitted.x, fitted.y], "board": _clean_board_list(entry.get("board", []))})
 		if not list.is_empty():
 			out["boards"] = list
 	return out

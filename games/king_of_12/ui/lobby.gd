@@ -18,7 +18,7 @@ func _ready() -> void:
 	for side in ["left", "top", "bottom"]:
 		margin.add_theme_constant_override("margin_" + side, 40)
 	margin.add_theme_constant_override("margin_right", 480)  # справа — чат
-	add_child(margin)
+	preload("res://hub/lobby_layout.gd").mount(self, margin)
 	var outer := K12UI.vbox(14)
 	margin.add_child(outer)
 	var scroll := ScrollContainer.new()

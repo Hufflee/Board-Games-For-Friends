@@ -6,6 +6,64 @@ func run(t: Check) -> void:
 	_clock_and_responses(t)
 	_start_and_remove(t)
 	_coop_cancel_keeps_monster(t)
+	_lobby_options_and_gifts(t)
+	_bomb_during_refill(t)
+	var boosted := Scenario.new(t).dlc().current(0).monster(0, 423, {"dc": 6, "hp": 3}).monster(1, 400).build()
+	t.check(boosted.g._monster_evasion(boosted.g.monsters[0]) > 6, "Аура повышает исходное уклонение")
+	t.equal(int(boosted.g.get_view(0).monsters[0].dc), 6, "Эффективное уклонение не выше шести")
+	_attack_roll17(boosted, 6)
+	t.equal(int(boosted.g.monsters[0].hp), 2, "Шестёрка попадает после усиления уклонения")
+
+
+func _lobby_options_and_gifts(t: Check) -> void:
+	var g := FSRules.new()
+	g.character_offer_count = 4
+	g.random_bonus_souls = true
+	var members: Array = []
+	for seat in 8:
+		members.append({"name": str(seat)})
+	g.new_game(members, false, 21)
+	var seen := {}
+	for seat in 8:
+		var offers: Array = g.get_view(seat).character_offers
+		t.equal(offers.size(), 4, "Четыре личных варианта в партии на восемь мест")
+		for offer: Dictionary in offers:
+			t.check(not seen.has(offer.card), "Персонаж предлагается только одному месту")
+			seen[offer.card] = true
+	t.equal(g.bonuses.size(), 3, "Случайный набор содержит три души")
+	t.check(g.bonuses.any(func(id): return id >= 692), "Случайный набор берёт души DLC при выключенных комнатах")
+	g.random_bonus_souls = false
+	g.new_game(members, true, 21)
+	t.equal(g.bonuses, [689, 690, 691], "Стандартные души доступны при включённом DLC")
+	var s := Scenario.new(t).players(3).current(0).build()
+	var before: Array = s.g.coins.duplicate()
+	s.ok(0, "trade", {"target": 1, "amount": 1})
+	var offer: Dictionary = s.g.get_view(1).coin_offers[0]
+	t.check(s.g.get_view(2).coin_offers.is_empty(), "Чужое предложение скрыто")
+	s.no(2, "answer_trade", {"sender": 0, "id": int(offer.id), "accept": true})
+	s.ok(1, "answer_trade", {"sender": 0, "id": int(offer.id), "accept": false})
+	t.equal(s.g.coins, before, "Отказ сохраняет балансы")
+	s.no(1, "answer_trade", {"sender": 0, "id": int(offer.id), "accept": true})
+	s.g._spider_tokens15[1] = 2
+	t.equal(s.g.get_view(2).players[1].spider_tokens15, 2, "Пауки Вдовы видны другим игрокам")
+
+
+func _bomb_during_refill(t: Check) -> void:
+	var s := Scenario.new(t).dlc().current(0).hand(0, [588]).item(0, 824).deck_top("monster", [423, 712, 422, 421, 420]).build()
+	var g := s.g
+	g.strict_responses28 = true
+	g.monster_slots = g.monsters.size() + 4
+	s.ok(0, "loot", {"card": 588})
+	g._after_stack = "refill"
+	g.tick(0.0)
+	g.tick(g.RESPONSE_WINDOW + 0.01)
+	t.check(not g.stack.is_empty() and int(g.stack.back().card) == 712, "Новая Мегатролль-бомба ждёт отдельное окно ответов")
+	var before: int = g.hp[0]
+	s.ok(0, "activate", {"item": g.items[0].size() - 1})
+	s.close()
+	s.choose(0, "shield_event21", {"zone": "player", "target": 0})
+	s.close()
+	t.equal(g.hp[0], before, "Ням-сердце предотвращает урон Мегатролль-бомбы")
 
 
 func _pill_and_keeper(t: Check) -> void:

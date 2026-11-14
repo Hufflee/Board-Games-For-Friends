@@ -189,8 +189,7 @@ func _score() -> void:
 	var other_pts := 0
 	if coop:
 		if pts == 4:
-			pts = 3
-			cards_left += 1  # попадание в центр — ещё одна карточка
+			cards_left += 1  # попадание в центр — 4 очка (решение владельца 12.11) и ещё одна карточка
 		scores[0] += pts
 		cards_left -= 1
 	else:

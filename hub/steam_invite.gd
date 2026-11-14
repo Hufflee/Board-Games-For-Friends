@@ -212,9 +212,11 @@ func _on_steam_lobbies_changed() -> void:
 func _build_toast(from_name: String, lobby: int) -> void:
 	var p := PanelContainer.new()
 	p.add_theme_stylebox_override("panel", _box(Color(0.1, 0.11, 0.14, 0.96)))
-	p.set_anchors_preset(Control.PRESET_CENTER_TOP)
-	p.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	p.offset_top = 16
+	p.set_anchors_preset(Control.PRESET_BOTTOM_RIGHT)
+	p.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	p.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	p.offset_right = -16
+	p.offset_bottom = -16
 	add_child(p)
 	var col := VBoxContainer.new()
 	col.add_theme_constant_override("separation", 8)

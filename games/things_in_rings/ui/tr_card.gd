@@ -1,6 +1,7 @@
 extends TextureRect
 ## Открытая карта: перенос Godot, крупный просмотр и перевод через стол.
 const Data := preload("res://games/things_in_rings/logic/tr_data.gd")
+const Title := preload("res://games/things_in_rings/ui/tr_card_title.gd")
 const Corners := preload("res://hub/card_corners.gdshader")
 var table: Control
 var card := -1
@@ -16,6 +17,7 @@ func _ready() -> void:
 	expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	load("res://games/things_in_rings/ui/tr_style.gd").outline(self)
+	Title.put(self, card)
 	mouse_entered.connect(func(): table.preview_card(card))
 	mouse_exited.connect(func(): table.clear_preview())
 	gui_input.connect(_clicked)
@@ -37,6 +39,8 @@ func _get_drag_data(_at: Vector2) -> Variant:
 	picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	picture.custom_minimum_size = Vector2(88, 136)
+	picture.size = picture.custom_minimum_size
+	Title.put(picture, card)
 	set_drag_preview(picture)
 	if blind_drag:
 		return {"tr_blind": blind_owner, "revision": table.view.revision, "seat": table.view.you}

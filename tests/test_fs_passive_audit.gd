@@ -47,8 +47,9 @@ func combat(id: int, face: int, hit: bool = false) -> FSRules:
 	g.items[0].append(entry(id))
 	g.hp = [5, 5]
 	g.max_hp = [5, 5]
-	# Защита 7 достижима модификаторами; шестёрка здесь тоже объявленный промах.
-	g.monsters = [{"id": 450, "hp": 5, "dc": 1 if hit else 7, "at": 1}]
+	g.monsters = [{"id": 450, "hp": 5, "dc": 1 if hit else 6, "at": 1}]
+	if not hit and face == 6:
+		g.items[0].append(entry(34))
 	g.battle = 0
 	g.phase = "priority"
 	g.stack = [{"kind": "roll", "owner": 0, "value": face}]

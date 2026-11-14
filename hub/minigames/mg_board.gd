@@ -1,5 +1,5 @@
 extends Control
-## Поле мини-игры (шахматы, шашки, го): простые фигуры, рисуется только при изменениях.
+## Поле мини-игры (шахматы, шашки, го, 4 в ряд): простые фигуры, рисуется только при изменениях.
 ## Правила — hub/minigames/logic; ход уходит сигналом moved, окно — hub/comms_panel.gd.
 
 signal moved(action: Dictionary)
@@ -7,6 +7,11 @@ signal moved(action: Dictionary)
 const Chess := preload("res://hub/minigames/logic/mg_chess.gd")
 const Checkers := preload("res://hub/minigames/logic/mg_checkers.gd")
 const Go := preload("res://hub/minigames/logic/mg_go.gd")
+const Connect4 := preload("res://hub/minigames/logic/mg_connect4.gd")
+const C4_FRAME := Color("2b4f9e")
+const C4_HOLE := Color("16203a")
+const C4_DISCS := [Color("e2504c"), Color("f2c641")]
+const C4_DROP := 0.32  # секунды падения шарика
 const LIGHT_PIECE := Color("f1ede4")
 const DARK_PIECE := Color("2c3140")
 const SHAPES := {
@@ -35,6 +40,7 @@ var _selected := -1
 var _targets: Array[int] = []
 var _hover := -1
 var _promo := []  # [from, to] — ждём выбора фигуры превращения
+var _drop := 1.0  # 4 в ряд: доля пройденного пути последнего шарика (1 — упал)
 
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
@@ -44,7 +50,8 @@ func _ready() -> void:
 		queue_redraw())
 
 func set_session(session: Dictionary) -> void:
-	var fresh := str(session.id) != str(_session.get("id", "")) or int((session.state as Dictionary).get("moves", 0)) != int(_state.get("moves", -1))
+	var same := str(session.id) == str(_session.get("id", ""))
+	var fresh := not same or int((session.state as Dictionary).get("moves", 0)) != int(_state.get("moves", -1))
 	_session = session
 	_game = str(session.game)
 	_state = session.state
@@ -54,6 +61,9 @@ func set_session(session: Dictionary) -> void:
 		_selected = -1
 		_targets = []
 		_promo = []
+		_drop = 1.0
+		if _game == "connect4" and same and not (_state.get("last", []) as Array).is_empty():
+			_drop = 0.0  # шарик только что брошен — пусть упадёт
 	if _game == "checkers" and int(_state.get("chain", -1)) >= 0 and _my_turn():
 		_selected = int(_state.chain)
 		_targets = Checkers.moves_from(_state, _selected)
@@ -84,6 +94,23 @@ func _cell_rect(sq: int) -> Rect2:
 		c = n - 1 - c
 	return Rect2(area.position + Vector2(c * cell, r * cell), Vector2(cell, cell))
 
+## 4 в ряд: прямоугольник поля 7×6 и столбец под точкой.
+func _c4_rect() -> Rect2:
+	var cell := floorf(minf(size.x / Connect4.COLS, size.y / Connect4.ROWS))
+	var area := Vector2(cell * Connect4.COLS, cell * Connect4.ROWS)
+	return Rect2(((size - area) * 0.5).floor(), area)
+
+func _c4_col(point: Vector2) -> int:
+	var area := _c4_rect()
+	if point.x < area.position.x or point.x >= area.end.x:
+		return -1
+	return clampi(int((point.x - area.position.x) / (area.size.x / Connect4.COLS)), 0, Connect4.COLS - 1)
+
+func _process(delta: float) -> void:
+	if _drop < 1.0:
+		_drop = minf(1.0, _drop + delta / C4_DROP)
+		queue_redraw()
+
 func _cell_at(point: Vector2) -> int:
 	var n := _n()
 	var area := _rect()
@@ -99,10 +126,11 @@ func _cell_at(point: Vector2) -> int:
 
 func _gui_input(event: InputEvent) -> void:
 	if event is InputEventMouseMotion:
-		var at := _cell_at((event as InputEventMouseMotion).position)
+		var point := (event as InputEventMouseMotion).position
+		var at := _c4_col(point) if _game == "connect4" else _cell_at(point)
 		if at != _hover:
 			_hover = at
-			if _game == "go":
+			if _game == "go" or _game == "connect4":
 				queue_redraw()
 		return
 	var button := event as InputEventMouseButton
@@ -113,6 +141,11 @@ func _gui_input(event: InputEvent) -> void:
 		return
 	if not _promo.is_empty():
 		_pick_promotion(button.position)
+		return
+	if _game == "connect4":
+		var col := _c4_col(button.position)
+		if Connect4.can_drop(_state, col):
+			moved.emit({"col": col})
 		return
 	var sq := _cell_at(button.position)
 	if sq < 0:
@@ -167,6 +200,8 @@ func _draw() -> void:
 	match _game:
 		"go":
 			_draw_go()
+		"connect4":
+			_draw_connect4()
 		_:
 			_draw_squares()
 
@@ -294,3 +329,41 @@ func _draw_go() -> void:
 	if _hover >= 0 and _my_turn() and int(board[_hover]) == 0 and Go.can_place(_state, _hover):
 		var center := first + Vector2((_hover % n) * cell, (_hover / n) * cell)
 		draw_circle(center, cell * 0.44, Color(Color("23262e") if int(_state.turn) == 0 else Color("f4f1ea"), 0.5))
+
+func _draw_connect4() -> void:
+	var area := _c4_rect()
+	var cell := area.size.x / Connect4.COLS
+	var board: Array = _state.board
+	var last: Array = _state.get("last", [])
+	var line: Array = _state.get("line", [])
+	var radius := cell * 0.4
+	draw_rect(Rect2(area.position + Vector2(0, cell * 0.06), area.size), Color(0, 0, 0, 0.3))
+	draw_rect(area, C4_FRAME)
+	if _hover >= 0 and _my_turn() and Connect4.can_drop(_state, _hover):
+		draw_rect(Rect2(area.position + Vector2(_hover * cell, 0), Vector2(cell, area.size.y)), Color(1, 1, 1, 0.08))
+	for at in board.size():
+		var center := area.position + Vector2((at % Connect4.COLS + 0.5) * cell, (at / Connect4.COLS + 0.5) * cell)
+		draw_circle(center, radius, C4_HOLE)
+		var value := int(board[at])
+		if value == 0:
+			continue
+		if last.has(at) and _drop < 1.0:
+			# шарик ещё падает: рисуем его выше, с ускорением
+			var top := area.position.y - cell * 0.5
+			var t := _drop * _drop
+			center.y = lerpf(top, center.y, t)
+		_draw_disc(center, radius, value - 1)
+		if line.has(at) and _drop >= 1.0:
+			draw_arc(center, radius * 0.62, 0.0, TAU, 28, Color(1, 1, 1, 0.85), maxf(2.0, cell * 0.06), true)
+	# подсказка: куда упадёт мой шарик
+	if _hover >= 0 and _my_turn():
+		var row := Connect4.drop_row(board, _hover)
+		if row >= 0:
+			var center := area.position + Vector2((_hover + 0.5) * cell, (row + 0.5) * cell)
+			draw_circle(center, radius, Color(C4_DISCS[int(_state.turn)], 0.35))
+
+func _draw_disc(center: Vector2, radius: float, seat: int) -> void:
+	var fill: Color = C4_DISCS[seat]
+	draw_circle(center, radius, fill.darkened(0.25))
+	draw_circle(center - Vector2(radius, radius) * 0.06, radius * 0.9, fill)
+	draw_circle(center - Vector2(radius, radius) * 0.32, radius * 0.22, Color(1, 1, 1, 0.35))

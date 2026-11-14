@@ -229,7 +229,8 @@ func _apply(_force: bool) -> void:
 
 func _place_smiley() -> void:
 	var box := _room.focused
-	var show := box != null and _own_room() and not box.is_cups() and not box.is_figurine() and not _room._editor_on
+	# новая игра в руках (hub/rooms/arrivals.gd) — над ней кнопки «на полку» / «в шкаф», смайлик не нужен
+	var show := box != null and _own_room() and not box.is_cups() and not box.is_figurine() and not _room._editor_on and _room.arrival_box == null
 	_smiley.visible = show
 	if not show:
 		if _panel_kind == "box":
@@ -396,7 +397,7 @@ func _sticker_grid(parent: Control, on_pick: Callable) -> void:
 	grid.add_theme_constant_override("h_separation", 8)
 	grid.add_theme_constant_override("v_separation", 8)
 	parent.add_child(grid)
-	for entry: Dictionary in Stickers.CATALOG:
+	for entry: Dictionary in Stickers.available():  # сезонные (рождественские) — только в свой сезон
 		var id := str(entry.id)
 		var tile := _sticker_button(id, Stickers.title(id))
 		tile.name = "Sticker_" + id

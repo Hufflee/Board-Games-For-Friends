@@ -241,6 +241,13 @@ func _game_rows(info: Dictionary) -> Array:
 func _player_rows(p: Dictionary, info: Dictionary) -> Array:
 	var rows: Array = []
 	var seat: int = p.seat
+	if seat >= 0 and seat < Net.seat_peers.size() and int(Net.seat_peers[seat]) > 0:
+		var lock := CheckButton.new()
+		lock.text = "Разблокировать мини-игры в его ход"
+		lock.tooltip_text = "По умолчанию в свой ход игрок не может играть в мини-игры"
+		lock.button_pressed = Net.minigame_turn_unlocks.has(Net.seat_peers[seat])
+		lock.toggled.connect(func(on: bool): Net.set_minigame_turn_unlock(seat, on))
+		rows.append(lock)
 	for st: Dictionary in p.stats:
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 8)
@@ -273,6 +280,9 @@ func _player_rows(p: Dictionary, info: Dictionary) -> Array:
 		remove.tooltip_text = "Удерживайте, чтобы убрать персонажа из партии и сбросить его карты"
 		remove.add_theme_color_override("font_color", Color("ff8a8a"))
 		LeaveGuard.hold(remove, func(): Net.host_tools.remove_four_souls_player(seat), "Убрать персонажа?")
+		remove.disabled = not bool(p.get("can_remove_character", false))
+		if remove.disabled:
+			remove.tooltip_text = "Можно исключить после завершения боя и разрешения стека"
 		rows.append(remove)
 	if bool(p.remote):
 		if bool(info.spectate):

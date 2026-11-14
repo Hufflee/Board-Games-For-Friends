@@ -78,7 +78,7 @@ static func resolve(game: String, view: Dictionary) -> Dictionary:
 			var profits: Array = view.get("profits", [])
 			# Неполный view не должен ронять sync() финала каждый кадр: без данных — без подписи.
 			var best := int(winners[0]) if not winners.is_empty() else -1
-			if str(view.get("mode", "classic")) == "sport" and best >= 0 and best < scores.size():
+			if str(view.get("mode", "classic")) in ["sport", "cheat", "cheat_experimental"] and best >= 0 and best < scores.size():
 				result.summary = "Победные очки: %d из %d" % [int(scores[best]), int(view.get("target", 0))]
 			elif best >= 0 and best < profits.size():
 				result.summary = "Итог: %+d фишек" % int(profits[best])

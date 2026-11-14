@@ -1,20 +1,21 @@
 class_name TGPoker
 extends RefCounted
-## Чистая оценка лучшей пятёрки из 5–7 уникальных карт. ID: масть=id/13, значение=id%13+2.
+## Оценка лучшей пятёрки. По умолчанию — обычный покер и 5–7 уникальных карт. ID: масть=id/13, значение=id%13+2.
 ## Проверка: --headless --audio-driver Dummy --script res://tests/test_the_gang.gd.
 
 const NAMES: Array[String] = [
 	"Старшая карта", "Пара", "Две пары", "Тройка", "Стрит",
-	"Флеш", "Фулл-хаус", "Каре", "Стрит-флеш"
+	"Флеш", "Фулл-хаус", "Каре", "Стрит-флеш", "Пять одного номинала"
 ]
 
 ## Младшие наборы и некорректные входы не оцениваются; чужое состояние не изменяется.
-static func evaluate(cards: Array) -> Dictionary:
-	if cards.size() < 5 or cards.size() > 7:
+static func evaluate(cards: Array, reverse: bool = false, max_cards: int = 7, allow_duplicates: bool = false,
+		gapped_straight: bool = false, color_flush: bool = false) -> Dictionary:
+	if cards.size() < 5 or cards.size() > max_cards:
 		return {}
 	var seen: Dictionary = {}
 	for card: Variant in cards:
-		if not card is int or int(card) < 0 or int(card) >= 52 or seen.has(card):
+		if not card is int or int(card) < 0 or int(card) >= 52 or (not allow_duplicates and seen.has(card)):
 			return {}
 		seen[card] = true
 	var best: Dictionary = {}
@@ -24,8 +25,8 @@ static func evaluate(cards: Array) -> Dictionary:
 				for d: int in range(c + 1, cards.size() - 1):
 					for e: int in range(d + 1, cards.size()):
 						var five: Array[int] = [cards[a], cards[b], cards[c], cards[d], cards[e]]
-						var candidate: Dictionary = _five(five)
-						if best.is_empty() or compare(candidate, best) > 0:
+						var candidate: Dictionary = _five(five, gapped_straight, color_flush)
+						if best.is_empty() or compare(candidate, best) * (-1 if reverse else 1) > 0:
 							best = candidate
 	return best
 
@@ -38,18 +39,21 @@ static func compare(a: Dictionary, b: Dictionary) -> int:
 			return 1 if int(left[index]) > int(right[index]) else -1
 	return signi(left.size() - right.size())
 
-static func _five(cards: Array[int]) -> Dictionary:
+static func _five(cards: Array[int], gapped_straight: bool, color_flush: bool) -> Dictionary:
 	var counts: Array[int] = []
 	counts.resize(15)
 	counts.fill(0)
 	var ranks: Array[int] = []
-	var flush: bool = true
+	var same_suit := true
+	var same_color := color_flush
 	var suit: int = int(cards[0] / 13)
+	var red := cards[0] >= 26
 	for card: int in cards:
 		var rank: int = card % 13 + 2
 		ranks.append(rank)
 		counts[rank] += 1
-		flush = flush and int(card / 13) == suit
+		same_suit = same_suit and int(card / 13) == suit
+		same_color = same_color and (card >= 26) == red
 	ranks.sort()
 	ranks.reverse()
 	var singles: Array[int] = []
@@ -62,12 +66,18 @@ static func _five(cards: Array[int]) -> Dictionary:
 			2: pairs.append(rank)
 			3: triples.append(rank)
 			4: fours.append(rank)
+	# В Cheat Poker замена колоды может дать пятую карту того же номинала.
+	if counts[ranks[0]] == 5:
+		return {"category": 9, "key": [9, ranks[0]], "name": NAMES[9], "best": cards.duplicate()}
 	var straight: int = 0
 	if singles.size() == 5:
-		if ranks[0] - ranks[4] == 4:
+		if gapped_straight:
+			straight = _gapped_high(ranks)
+		elif ranks[0] - ranks[4] == 4:
 			straight = ranks[0]
 		elif ranks == [14, 5, 4, 3, 2]:
 			straight = 5
+	var flush := same_suit or same_color
 	var key: Array[int] = []
 	if flush and straight > 0:
 		key = [8, straight]
@@ -92,5 +102,18 @@ static func _five(cards: Array[int]) -> Dictionary:
 		key = [0]
 		key.append_array(ranks)
 	var category: int = key[0]
-	var title: String = "Роял-флеш" if category == 8 and straight == 14 else NAMES[category]
+	var royal := category == 8 and same_suit and ranks[0] == 14 and ranks[4] == 10
+	var title: String = "Роял-флеш" if royal else NAMES[category]
 	return {"category": category, "key": key, "name": title, "best": cards.duplicate()}
+
+
+## Ранги уже отсортированы по убыванию и попарно различны. Туз может идти за двойкой.
+static func _gapped_high(ranks: Array[int]) -> int:
+	for index: int in range(1, ranks.size() - 1):
+		if ranks[index] - ranks[index + 1] > 2:
+			return 0
+	if ranks[0] - ranks[1] <= 2:
+		return ranks[0]
+	if ranks[0] == 14 and ranks[-1] <= 3:
+		return ranks[1]
+	return 0

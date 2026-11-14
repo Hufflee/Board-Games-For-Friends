@@ -26,6 +26,15 @@ var _debug_window: Window
 var _debug_text: TextEdit
 var _debug_back: Button
 var _sound_id := -1
+## Фон стола из «Интерфейс → Фон стола»; перерисовывается, когда меняется описание фона.
+var _backdrop: Control
+var _backdrop_key := ""
+## Подложка стола, кнопка «Тема» и ключ оформления игры (meta.look) — для смены цветов.
+var _base_bg: ColorRect
+var _theme_button: Button
+var _look_key := "{}"
+## Кнопка «Показать мою руку» уже стоит на этом экране.
+var _show_button_placed := false
 
 func _ready() -> void:
 	var background := ColorRect.new()
@@ -33,11 +42,22 @@ func _ready() -> void:
 	background.mouse_filter = MOUSE_FILTER_IGNORE
 	background.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	add_child(background)
+	_base_bg = background
+	_backdrop = Control.new()
+	_backdrop.name = "TableBackground"
+	_backdrop.mouse_filter = MOUSE_FILTER_IGNORE
+	_backdrop.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
+	_backdrop.draw.connect(func():
+		var look: Dictionary = _view.get("cg_layout", {}).get("background", {})
+		if not look.is_empty():
+			Style.draw_table_background(_backdrop, Rect2(Vector2.ZERO, _backdrop.size), look, _assets.image(str(look.get("image", "")))))
+	background.add_child(_backdrop)
 	preload("res://hub/cursor_parallax.gd").add_light(background, Style.ink())
 	_top = TopBar.make(self, "Пользовательская игра", Style.button, null, Style.ink(), Style.HEAD)
 	var theme_button := Style.button("Тема", 16)
 	theme_button.pressed.connect(func(): Prefs.set_value("theme_mode", "light" if Style.dark() else "dark"))
 	_top.actions.add_child(theme_button)
+	_theme_button = theme_button
 	if _author_test():
 		_debug = load("res://editor/ed_debug.gd").new()
 		var debug_button := Style.button("Отладка", 16)
@@ -52,6 +72,7 @@ func _ready() -> void:
 	add_child(_field)
 	resized.connect(_fit)
 	Net.state_changed.connect(_state)
+	_apply_look(Net.view.get("cg_meta", {}).get("look", {}))
 	_fit()
 	if not Net.view.is_empty():
 		_state(Net.view)
@@ -90,6 +111,13 @@ func _state(view: Dictionary) -> void:
 			_sound_id = -1
 	_seat = int(view.get("seat", -1))
 	_view = view
+	if str(view.get("cg_meta", {}).get("look", {})) != _look_key:
+		_apply_look(view.get("cg_meta", {}).get("look", {}))
+	var backdrop_key := str(view.get("cg_layout", {}).get("background", {}))
+	if backdrop_key != _backdrop_key and is_instance_valid(_backdrop):
+		_backdrop_key = backdrop_key
+		_backdrop.queue_redraw()
+		_top_backing(not view.get("cg_layout", {}).get("background", {}).is_empty())
 	_fit()
 	var sound_event: Dictionary = view.get("sound_event", {})
 	if int(sound_event.get("id", -1)) != _sound_id:
@@ -206,6 +234,7 @@ func _rebuild() -> void:
 			_field.remove_child(child)
 			child.queue_free()
 	_zones.clear()
+	_show_button_placed = false
 	_cards.clear()
 	_preview = null
 	_top.title.text = str(_view.get("cg_meta", {}).get("title", "Пользовательская игра")).to_upper()
@@ -243,9 +272,19 @@ func _rebuild() -> void:
 	if custom:
 		_top.info.text = _phase_caption()
 	var shared := 0
-	for screen: Dictionary in _view.get("cg_layout", {}).get("screens", []):
-		for item: Dictionary in screen.get("items", []):
-			if not _item_visible(item):
+	var on_boards := _board_zones() if _seat >= 0 else {}
+	for screen: Dictionary in _screens():
+		for raw: Dictionary in screen.get("items", []):
+			if not _item_visible(raw):
+				continue
+			# Зона на экране роли: владелец и вид — с общего экрана, место и подпись — свои.
+			var item := raw
+			if screen.has("role") and raw.get("kind") == "zone" and not _zone_spec(str(raw.get("id", ""))).is_empty():
+				item = _zone_spec(str(raw.id)).duplicate()
+				for key: String in ["rect", "title", "anchors", "visible"]:
+					if raw.has(key):
+						item[key] = raw[key]
+			if item.get("kind") == "zone" and on_boards.has(str(item.id)):
 				continue
 			if item.get("kind") == "zone":
 				var key := str(item.id)
@@ -263,10 +302,10 @@ func _rebuild() -> void:
 				if not own:
 					shared += 1
 			elif item.get("kind") == "text":
-				_at(Style.label(str(item.get("text", ""))), _rect(item, Rect2(32, 112, 360, 32)))
+				_at(_backed(Style.label(str(item.get("text", "")))), _rect(item, Rect2(32, 112, 360, 32)))
 			elif item.get("kind") == "counter":
 				var variable := str(item.get("var", ""))
-				_at(Style.heading("%s: %s" % [item.get("title", item.get("text", variable)), _variable(variable)]), _rect(item, Rect2(32, 112, 360, 40)))
+				_at(_backed(Style.heading("%s: %s" % [item.get("title", item.get("text", variable)), _variable(variable)])), _rect(item, Rect2(32, 112, 360, 40)))
 			elif item.get("kind") == "button":
 				_layout_button(item)
 			elif item.get("kind") == "image":
@@ -277,13 +316,18 @@ func _rebuild() -> void:
 				image.mouse_filter = MOUSE_FILTER_IGNORE
 				_at(image, _rect(item, Rect2(32, 112, 160, 160)))
 			elif item.get("kind") == "phase":
-				_at(Style.heading(str(phases.get(str(_view.phase), str(_view.phase)))), _rect(item, Rect2(32, 72, 320, 40)))
+				_at(_backed(Style.heading(str(phases.get(str(_view.phase), str(_view.phase))))), _rect(item, Rect2(32, 72, 320, 40)))
 			elif item.get("kind") == "journal":
 				var label := Style.label("\n".join((_view.get("log", []) as Array).slice(-6)))
 				label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-				_at(label, _rect(item, Rect2(32, 440, 320, 160)))
+				_at(_backed(label), _rect(item, Rect2(32, 440, 320, 160)))
 			elif item.get("kind") == "players":
 				_layout_players(_rect(item, Rect2(24, 8, 1232, 96)))
+			elif item.get("kind") == "track":
+				_track(_rect(item, Rect2(24, 16, 952, 560)))
+			elif item.get("kind") == "board":
+				if _seat >= 0:
+					_board(item, _rect(item, Rect2(32, 376, 480, 240)))
 			elif item.get("kind") == "self_panel":
 				if _seat >= 0:
 					_player_panel(_seat, _rect(item, Rect2(32, 376, 240, 160)))
@@ -314,7 +358,7 @@ func _present_cards() -> void:
 	if found.is_empty():
 		return
 	var fields: Dictionary = Session.face_fields(_view, found)
-	var preview: Control = Style.TokenFace.new(fields) if fields.get("kind") == "token" else Style.CardFace.new(fields)
+	var preview: Control = _token_face(fields) if fields.get("kind") == "token" else Style.CardFace.new(fields)
 	if preview is Style.CardFace:
 		preview.layer_reader = _assets
 		preview.art_texture = _assets.image(str(fields.get("art", "")))
@@ -339,7 +383,7 @@ func _item_visible(item: Dictionary) -> bool:
 	return role != "leader" and visible.has("role:" + role) or visible.has("role:leader") and _seat == int(_view.leader)
 
 func _layout_button(item: Dictionary) -> void:
-	var button := Style.button(str(item.get("title", "Действие")))
+	var button := Style.primary(str(item.get("title", "Действие"))) if bool(item.get("main", false)) else Style.button(str(item.get("title", "Действие")))
 	button.disabled = true
 	for action: Dictionary in _view.get("legal", []):
 		if action.kind == "button" and str(action.id) == str(item.get("action", item.get("id", ""))):
@@ -402,6 +446,198 @@ func _player_panel(seat: int, rect: Rect2, compact: bool = false) -> void:
 	text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	panel.add_child(text)
 
+## Поле-ходилка: картинка поля, дорожка клеток и фишки игроков (цвет игрока, первая буква имени).
+## Сдвинутая фишка идёт по клеткам шагами (TrackView), несколько фишек на клетке — рядом.
+var _track_view: Control
+
+func _track(rect: Rect2) -> void:
+	var track: Dictionary = _view.get("cg_track", {})
+	if track.get("cells", []).is_empty():
+		return
+	var view := TrackView.new()
+	view.name = "TrackView"
+	view.track = track
+	view.texture = _assets.image(str(track.get("image", "")))
+	var colors: Array = []
+	var initials: Array = []
+	for seat in _view.get("players", []).size():
+		colors.append(Net.color_of(int(_view.players[seat].get("color", seat))))
+		initials.append(str(_view.players[seat].get("name", "?")).left(1).to_upper())
+	view.colors = colors
+	view.initials = initials
+	# Позиции с прошлой отрисовки — чтобы фишка дошла по клеткам, а не прыгнула.
+	if is_instance_valid(_track_view):
+		view.shown = _track_view.shown.duplicate()
+	view.targets = _view.get("pieces", {}).duplicate()
+	view.current = int(_view.get("current", -1))
+	_track_view = view
+	_at(view, rect)
+
+class TrackView extends Control:
+	var track: Dictionary
+	var texture: Texture2D
+	var colors: Array = []
+	var initials: Array = []
+	var targets: Dictionary = {}
+	var shown: Dictionary = {}
+	var current := -1
+	var _clock := 0.0
+	var _bob := 0.0
+	func _ready() -> void:
+		mouse_filter = MOUSE_FILTER_IGNORE
+		for key: String in targets:
+			if not shown.has(key):
+				shown[key] = int(targets[key])
+	func area() -> Rect2:
+		var box := Rect2(Vector2.ZERO, size)
+		if texture == null or texture.get_width() <= 0:
+			return box
+		var fit := minf(box.size.x / texture.get_width(), box.size.y / texture.get_height())
+		var shown_size := Vector2(texture.get_size()) * fit
+		return Rect2((box.size - shown_size) * 0.5, shown_size)
+	func point(index: int) -> Vector2:
+		var cells: Array = track.get("cells", [])
+		var cell: Dictionary = cells[clampi(index, 0, cells.size() - 1)]
+		var whole := area()
+		return whole.position + Vector2(float(cell.pos[0]), float(cell.pos[1])) * whole.size
+	func _process(delta: float) -> void:
+		_bob += delta
+		_clock += delta
+		if _clock >= 0.2:
+			_clock = 0.0
+			var count: int = track.get("cells", []).size()
+			for key: String in targets:
+				var at := int(shown.get(key, targets[key]))
+				var goal := int(targets[key])
+				if at != goal and count > 0:
+					# Вперёд по кольцу — коротким путём; иначе — на клетку ближе к цели.
+					var forward := posmod(goal - at, count)
+					var step := 1 if not bool(track.get("loop", false)) and goal > at or bool(track.get("loop", false)) and forward <= count / 2 else -1
+					shown[key] = posmod(at + step, count) if bool(track.get("loop", false)) else at + step
+		queue_redraw()
+	func _draw() -> void:
+		var whole := area()
+		if texture != null:
+			draw_texture_rect(texture, whole, false)
+		var cells: Array = track.get("cells", [])
+		for index in cells.size():
+			draw_circle(point(index), 6, Color(1, 1, 1, 0.25))
+		var stacks := {}
+		for key: String in shown:
+			var cell := int(shown[key])
+			var order: int = stacks.get(cell, 0)
+			stacks[cell] = order + 1
+			var seat := int(key)
+			var at := point(cell) + Vector2(order * 14 - 7, -order * 4)
+			if seat == current:
+				at.y -= absf(sin(_bob * 4.0)) * 6
+			var tone: Color = colors[seat] if seat < colors.size() else Color.WHITE
+			draw_circle(at + Vector2(0, 4), 13, Color(0, 0, 0, 0.35))
+			draw_circle(at, 13, tone)
+			draw_arc(at, 13, 0, TAU, 24, tone.lightened(0.5), 2, true)
+			var letter: String = initials[seat] if seat < initials.size() else "?"
+			draw_string(ThemeDB.fallback_font, at + Vector2(-13, 5), letter, HORIZONTAL_ALIGNMENT_CENTER, 26, 14, Color("140c24") if tone.get_luminance() > 0.5 else Color.WHITE)
+
+## Планшет игрока: картинка, рамка его цвета, ячейки — его личные зоны (карты кладутся прямо на планшет)
+## и счётчики его ресурсов. Зоны с планшета не рисуются отдельно (см. _board_zones).
+func _board(item: Dictionary, rect: Rect2) -> void:
+	var board := _board_def(str(item.get("board", "")))
+	if board.is_empty():
+		return
+	var texture := _assets.image(str(board.get("image", "")))
+	if texture != null and texture.get_width() > 0 and texture.get_height() > 0:
+		# Картинка вписывается с сохранением пропорций — как в просмотре редактора, чтобы ячейки совпали.
+		var inside := rect.size - Vector2(8, 8)
+		var fit := minf(inside.x / texture.get_width(), inside.y / texture.get_height())
+		var shown := Vector2(texture.get_size()) * fit + Vector2(8, 8)
+		rect = Rect2(rect.position + (rect.size - shown) * 0.5, shown)
+	var holder := Panel.new()
+	holder.name = "PlayerBoard_" + str(board.id)
+	holder.mouse_filter = MOUSE_FILTER_IGNORE
+	var look := StyleBoxFlat.new()
+	look.bg_color = Style.panel()
+	look.set_corner_radius_all(8)
+	if board.get("frame", "player") == "player":
+		look.border_color = _owner_tint({"color": "player"}, _seat)
+		look.set_border_width_all(4)
+	holder.add_theme_stylebox_override("panel", look)
+	_at(holder, rect)
+	if texture != null:
+		var picture := TextureRect.new()
+		picture.texture = texture
+		picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		picture.stretch_mode = TextureRect.STRETCH_SCALE
+		picture.mouse_filter = MOUSE_FILTER_IGNORE
+		picture.position = Vector2(4, 4)
+		picture.size = rect.size - Vector2(8, 8)
+		holder.add_child(picture)
+	for cell: Dictionary in board.get("cells", []):
+		var part: Array = cell.get("rect", [0, 0, 1, 1])
+		var inner := Rect2(rect.position + Vector2(4, 4), rect.size - Vector2(8, 8))
+		var place := Rect2(inner.position + Vector2(float(part[0]), float(part[1])) * inner.size, Vector2(float(part[2]), float(part[3])) * inner.size)
+		if cell.get("kind") == "counter":
+			var badge := PanelContainer.new()
+			badge.add_theme_stylebox_override("panel", Style.box(Color(Style.panel(), 0.85), 8))
+			badge.mouse_filter = MOUSE_FILTER_IGNORE
+			var value := Style.heading("%s %s" % [str(cell.get("title", "")), _variable(str(cell.get("ref", "")))])
+			value.name = "BoardCounter_" + str(cell.get("ref", ""))
+			value.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+			value.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+			badge.add_child(value)
+			_at(badge, place)
+			continue
+		var spec := _zone_spec(str(cell.get("ref", "")))
+		if spec.is_empty():
+			continue
+		var key := str(spec.id)
+		var own: bool = spec.get("owner", "shared") != "shared"
+		if spec.get("owner", "shared") == "player":
+			key += "@%d" % _seat
+		elif spec.get("owner", "shared") == "team":
+			key += "#%s" % str(_view.players[_seat].get("team", 0))
+		var shown := spec.duplicate()
+		if cell.has("title"):
+			shown["title"] = cell.title
+		_zone(key, shown, place, own)
+
+func _board_def(id: String) -> Dictionary:
+	for board: Dictionary in _view.get("cg_boards", []):
+		if str(board.get("id", "")) == id:
+			return board
+	return {}
+
+func _zone_spec(id: String) -> Dictionary:
+	for screen: Dictionary in _view.get("cg_layout", {}).get("screens", []):
+		if screen.has("role"):
+			continue
+		for item: Dictionary in screen.get("items", []):
+			if item.get("kind") == "zone" and str(item.get("id", "")) == id:
+				return item
+	return {}
+
+## Экран, который видит это место: экран его роли (ведущий — «leader»), иначе общий. Зритель — общий.
+func _screens() -> Array:
+	var screens: Array = _view.get("cg_layout", {}).get("screens", [])
+	var common: Array = screens.filter(func(screen: Dictionary): return not screen.has("role"))
+	if _seat < 0 or _seat >= _view.get("players", []).size():
+		return common
+	var role := "leader" if _seat == int(_view.get("leader", -1)) and screens.any(func(screen: Dictionary): return screen.get("role") == "leader") else str(_view.players[_seat].get("role", "player"))
+	for screen: Dictionary in screens:
+		if str(screen.get("role", "")) == role and screen.has("role"):
+			return [screen]
+	return common
+
+## Зоны, лежащие на планшетах, которые стоят на столе: отдельно их не рисуем.
+func _board_zones() -> Dictionary:
+	var out := {}
+	for screen: Dictionary in _screens():
+		for item: Dictionary in screen.get("items", []):
+			if item.get("kind") == "board":
+				for cell: Dictionary in _board_def(str(item.get("board", ""))).get("cells", []):
+					if cell.get("kind") == "zone":
+						out[str(cell.get("ref", ""))] = true
+	return out
+
 func _opponents(rect: Rect2) -> void:
 	var seats: Array = []
 	for seat in _view.players.size():
@@ -445,7 +681,7 @@ func _teams(rect: Rect2) -> void:
 	scroll.add_child(text)
 
 func _has_layout_action(id: String) -> bool:
-	for screen: Dictionary in _view.get("cg_layout", {}).get("screens", []):
+	for screen: Dictionary in _screens():
 		for item: Dictionary in screen.get("items", []):
 			if item.get("kind") == "button" and str(item.get("action", item.get("id", ""))) == id:
 				return true
@@ -483,8 +719,13 @@ func _zone(key: String, spec: Dictionary, rect: Rect2, own: bool) -> void:
 	title.position = Vector2(16, 8)
 	panel.add_child(title)
 	if own and not _shown:
+		# Одна кнопка на экран (личных зон может быть несколько — рука, зоны планшета); ставим в первую нарисованную (обычно рука).
+		if _show_button_placed:
+			return
+		_show_button_placed = true
 		var show_button := Style.primary("Показать мою руку")
-		show_button.position = rect.position + Vector2(24, 80)
+		show_button.name = "ShowMyHand"
+		show_button.position = rect.position + Vector2(24, minf(80, maxf(40, rect.size.y - 56)))
 		show_button.pressed.connect(func():
 			_shown = true
 			_rebuild())
@@ -513,7 +754,7 @@ func _zone(key: String, spec: Dictionary, rect: Rect2, own: bool) -> void:
 		var data: Dictionary = cards[index]
 		var fields: Dictionary = Session.face_fields(_view, data)
 		var token: bool = fields.get("kind") == "token"
-		var face: Control = Style.TokenFace.new(fields) if token else Style.CardFace.new(fields)
+		var face: Control = _token_face(fields) if token else Style.CardFace.new(fields)
 		if not token:
 			face.layer_reader = _assets
 			face.art_texture = _assets.image(str(fields.get("art", "")))
@@ -646,7 +887,7 @@ func _hover(data: Dictionary, card: Control, on: bool) -> void:
 		return
 	var fields: Dictionary = Session.face_fields(_view, data)
 	if fields.get("kind") == "token":
-		_preview = Style.TokenFace.new(fields)
+		_preview = _token_face(fields)
 		_preview.size = Vector2(192, 192)
 	else:
 		_preview = Style.CardFace.new(fields)
@@ -718,7 +959,7 @@ func _dice() -> void:
 	var rolling: bool = pending.get("kind") == "roll"
 	var tray := Rect2(24, 112, 1232, 432)
 	var has_tray := false
-	for screen: Dictionary in _view.get("cg_layout", {}).get("screens", []):
+	for screen: Dictionary in _screens():
 		for item: Dictionary in screen.get("items", []):
 			if item.get("kind") == "dice_tray" and _item_visible(item):
 				tray = _rect(item, tray)
@@ -832,7 +1073,64 @@ func _dice_look(set_id: String) -> Dictionary:
 	return sets[0] if not sets.is_empty() else {}
 
 func _style_die(die: TossDie, look: Dictionary, seat: int) -> void:
+	die.allow_polyhedral = true
+	die.max_face = int(look.get("sides", 6))
 	Style.style_die(die._die, look, _assets, _owner_tint(look, seat))
+
+## Оформление игры: цвета автора вместо темы приложения (кнопка «Тема» тогда не нужна).
+func _apply_look(look: Variant) -> void:
+	_look_key = str(look)
+	Style.set_game_look(look)
+	theme = Style.theme()
+	if is_instance_valid(_base_bg):
+		_base_bg.color = Style.bg()
+	if is_instance_valid(_theme_button):
+		_theme_button.visible = not Style.game_look_active()
+	if _top != null:
+		_top._table_text = Style.ink()
+		_top.title.add_theme_color_override("font_color", Color(Style.ink(), 0.8))
+		_top.info.add_theme_color_override("font_color", Style.ink())
+		_top._esc_btn.set_ink(Style.ink())
+	if is_instance_valid(_backdrop):
+		_backdrop.queue_redraw()
+	# Кнопки верхней полосы созданы раньше — перекрашиваем их (только вид; особые кнопки со своим рисованием не трогаем).
+	if _top != null:
+		for found: Node in _top.find_children("*", "Button", true, false):
+			if found.get_script() == null:
+				Style.style_button(found as Button)
+
+func _exit_tree() -> void:
+	# Оболочка и другие экраны снова в теме приложения.
+	Style.set_game_look({})
+
+## Свой фон стола: верхняя полоса получает полупрозрачную подложку цвета панели — название и ход читаются
+## на любой картинке. Без своего фона полоса прозрачная (фон игры), как во всех играх.
+func _top_backing(on: bool) -> void:
+	if _top == null:
+		return
+	var bar := StyleBoxFlat.new()
+	bar.bg_color = Color(Style.panel(), 0.88) if on else Color(0, 0, 0, 0)
+	bar.content_margin_left = 16
+	bar.content_margin_right = 12
+	bar.content_margin_top = 6
+	bar.content_margin_bottom = 6
+	_top._table_panel = bar
+	_top.add_theme_stylebox_override("panel", bar)
+
+## Надпись прямо на столе: при своём фоне (цвет/картинка) — на подложке, чтобы читалась на любом фоне.
+func _backed(label: Label) -> Control:
+	if _view.get("cg_layout", {}).get("background", {}).is_empty():
+		return label
+	var holder := PanelContainer.new()
+	holder.mouse_filter = MOUSE_FILTER_IGNORE
+	var look := Style.box(Color(Style.panel(), 0.88), 12)
+	holder.add_theme_stylebox_override("panel", look)
+	holder.add_child(label)
+	return holder
+
+## Жетон с картинками игры и цветом своего места (если жетон «цвета игрока/команды»).
+func _token_face(fields: Dictionary) -> Control:
+	return Style.TokenFace.new(fields, _assets, _owner_tint(fields, int(fields.get("seat", -1))))
 
 ## Цвет игрока (палитра пати) или команды — цвет её первого по порядку игрока.
 func _owner_tint(look: Dictionary, seat: int) -> Color:

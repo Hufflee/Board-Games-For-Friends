@@ -2,7 +2,10 @@ extends VBoxContainer
 ## Типизированное гнездо блока. Значения собираются контролами, JSON/код пользователю вводить не нужно.
 
 signal edited(value: Variant)
-const Style := preload("res://games/custom/ui/cg_style.gd")
+const Style := preload("res://editor/ed_style.gd")
+## Стиль игр — для предпросмотров того, что увидят игроки.
+const Game := preload("res://games/custom/ui/cg_style.gd")
+
 var definition: Dictionary
 var kind := "number"
 var value: Variant
@@ -174,8 +177,8 @@ func _entity() -> void:
 
 func _number() -> void:
 	var op := str(value.get("op", "constant")) if value is Dictionary else "constant"
-	var names := ["Число", "Ресурс", "Свойство карты", "Карт в зоне", "Сумма кубиков", "Число выпавших граней", "Игроков", "Номер раунда", "Номер хода", "Ответ", "+", "−", "×", "÷", "Случайное число"]
-	var modes := ["constant", "var", "property", "count", "dice_sum", "dice_count", "players_count", "round", "turn", "answer", "add", "sub", "mul", "div", "random"]
+	var names := ["Число", "Ресурс", "Свойство карты", "Карт в зоне", "Сумма кубиков", "Число выпавших граней", "Игроков", "Номер раунда", "Номер хода", "Ответ", "+", "−", "×", "÷", "Случайное число", "Клетка фишки"]
+	var modes := ["constant", "var", "property", "count", "dice_sum", "dice_count", "players_count", "round", "turn", "answer", "add", "sub", "mul", "div", "random", "piece_cell"]
 	_select(names, modes, op, func(next: String):
 		if next == "constant":
 			_emit(0, true)
@@ -192,6 +195,8 @@ func _number() -> void:
 				expression.merge({"id": str(vars[0].id) if not vars.is_empty() else "", "player": {"op": "actor"}})
 			elif next == "dice_count":
 				expression["face"] = 1
+			elif next == "piece_cell":
+				expression["player"] = {"op": "actor"}
 			_emit(expression, true))
 	match op:
 		"constant":
@@ -214,6 +219,7 @@ func _number() -> void:
 			_nested("card", "card", {"op": "card"})
 		"count": _nested("zone", "zone", _first_zone())
 		"dice_count": _nested("number", "face", 1)
+		"piece_cell": _nested("player", "player", {"op": "actor"})
 		"add", "sub", "mul", "div", "random":
 			add_child(Style.label("Первое значение"))
 			_nested("number", "a", 0)
@@ -222,16 +228,25 @@ func _number() -> void:
 
 func _boolean() -> void:
 	var op := str(value.get("op", "eq")) if value is Dictionary else ("true" if bool(value) else "false")
-	_select(["Да", "Нет", "Флаг из переменной", "Равно", "Не равно", "Меньше", "Не больше", "Больше", "Не меньше", "И", "ИЛИ", "НЕ"], ["true", "false", "var", "eq", "ne", "lt", "le", "gt", "ge", "and", "or", "not"], op, func(next: String):
+	_select(["Да", "Нет", "Флаг из переменной", "Равно", "Не равно", "Меньше", "Не больше", "Больше", "Не меньше", "И", "ИЛИ", "НЕ", "Фишка на клетке с меткой"], ["true", "false", "var", "eq", "ne", "lt", "le", "gt", "ge", "and", "or", "not", "on_tag"], op, func(next: String):
 		if next in ["true", "false"]:
 			_emit(next == "true", true)
 		elif next == "var":
 			_emit({"op": "var", "id": "", "player": {"op": "actor"}}, true)
+		elif next == "on_tag":
+			_emit({"op": "on_tag", "player": {"op": "actor"}, "tag": "финиш"}, true)
 		else:
 			_emit({"op": next, "a": true if next in ["and", "or", "not"] else 0, "b": true if next in ["and", "or"] else 0}, true))
 	if op == "var":
 		_nested("variable_bool", "id", "")
 		_nested("player", "player", {"op": "actor"})
+	elif op == "on_tag":
+		_nested("player", "player", {"op": "actor"})
+		var tag := LineEdit.new()
+		tag.placeholder_text = "Метка клетки, например «финиш»"
+		tag.text = str(value.get("tag", ""))
+		tag.text_changed.connect(func(text: String): _put("tag", text))
+		add_child(tag)
 	elif op not in ["true", "false"]:
 		var type := "bool" if op in ["and", "or", "not"] else ("value" if op in ["eq", "ne"] else "number")
 		_nested(type, "a", true if type == "bool" else 0)

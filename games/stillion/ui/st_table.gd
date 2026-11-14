@@ -1,6 +1,6 @@
 extends Control
 ## Стол «Стиллиона»: игроки по кругу, в центре пушка (STCannon), сверху тема раунда, справа клавиатура
-## из 24 букв (погасшие — уже названы) и «Оспорить», снизу поле ответа (в устном режиме — только подсказка,
+## из 24 основных и 6 дополнительных букв (погасшие — уже названы) и «Оспорить», снизу поле ответа (в устном режиме — только подсказка,
 ## отвечают нажатием буквы). Состояние приходит с хоста (Net.state_changed); фитиль между
 ## обновлениями досчитывается локально, чтобы пушка надувалась плавно.
 
@@ -40,6 +40,8 @@ var _send: Button
 var _who: Label
 var _keys: Dictionary = {}  # буква → Button
 var _keys_left: Label
+var _key_fades: Dictionary = {}
+const KEY_FADE_TIME := 2.5
 var _prev_label: Label
 var _prev_hint: Label
 var _challenge: Button
@@ -217,16 +219,24 @@ func _build_keyboard() -> void:
 	grid.add_theme_constant_override("v_separation", 8)
 	grid.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 	col.add_child(grid)
+	var optional := GridContainer.new()
+	optional.columns = 6
+	optional.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
+	optional.add_theme_constant_override("h_separation", 6)
+	col.add_child(optional)
 	for letter: String in STRules.LETTERS:
+		var extra := STRules.OPTIONAL_LETTERS.has(letter)
 		var b := Button.new()
 		b.text = letter.to_upper()
-		b.custom_minimum_size = KEY_SIZE
+		b.custom_minimum_size = Vector2(36, 32) if extra else KEY_SIZE
+		if extra:
+			b.modulate = Color(0.86, 0.86, 0.86, 0.78)
 		b.focus_mode = Control.FOCUS_NONE
 		b.add_theme_font_override("font", STStyle.font("title"))
-		b.add_theme_font_size_override("font_size", 28)
+		b.add_theme_font_size_override("font_size", 19 if extra else 28)
 		b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		b.pressed.connect(_on_key.bind(letter))
-		grid.add_child(b)
+		(optional if extra else grid).add_child(b)
 		_keys[letter] = b
 	var gap := Control.new()
 	gap.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -249,6 +259,18 @@ func _on_state(v: Dictionary) -> void:
 	if v.is_empty() or v.get("game", "") != "stillion":
 		return
 	var first := _v.is_empty()
+	var previous_letters := {}
+	for answer: Dictionary in _v.get("used", []):
+		previous_letters[str(answer.letter)] = true
+	var current_letters := {}
+	for answer: Dictionary in v.get("used", []):
+		var letter := str(answer.letter)
+		current_letters[letter] = true
+		if not first and not previous_letters.has(letter):
+			_key_fades[letter] = KEY_FADE_TIME
+	for letter: String in _key_fades.keys():
+		if not current_letters.has(letter):
+			_key_fades.erase(letter)
 	_v = v
 	_fuse_t0 = float(v.fuse_t)
 	_since_state = 0.0
@@ -276,6 +298,12 @@ func _on_state(v: Dictionary) -> void:
 func _process(delta: float) -> void:
 	if _v.is_empty():
 		return
+	for letter: String in _key_fades.keys():
+		var remaining := maxf(0.0, float(_key_fades[letter]) - delta)
+		_key_fades[letter] = remaining
+		_style_used_key(_keys[letter], remaining)
+		if remaining <= 0.0:
+			_key_fades.erase(letter)
 	var phase: String = _v.phase
 	var burning := phase == "fuse" and not _game_paused()  # на паузе хоста время стоит и у нас
 	if burning:
@@ -443,7 +471,6 @@ func _update_keys() -> void:
 	var used := {}
 	for u: Dictionary in _v.get("used", []):
 		used[str(u.letter)] = u
-	var prev: Dictionary = _v.get("prev", {})
 	var press := _oral() and _can_answer()
 	for letter: String in _keys:
 		var b: Button = _keys[letter]
@@ -451,15 +478,25 @@ func _update_keys() -> void:
 		if not u.is_empty():
 			var who := str(_v.players[int(u.seat)].name)
 			b.tooltip_text = ("«%s» — %s" % [str(u.name), who]) if str(u.name) != "" else "%s (устно)" % who
-			var last := str(prev.get("letter", "")) == letter
-			_key_style(b, STStyle.RED if last else Color(STStyle.ink(), 0.12), STStyle.PAPER if last else Color(STStyle.ink(), 0.3))
+			_style_used_key(b, float(_key_fades.get(letter, 0.0)))
 			b.disabled = true
 		else:
 			b.tooltip_text = "Нажмите — ответ на эту букву (скажите его вслух)" if press else ""
 			_key_style(b, STStyle.MUSTARD if press else STStyle.paper(), STStyle.INK if press else STStyle.ink())
 			b.disabled = _v.phase == "game_over" or not (press or (not _oral() and _answer != null and _answer.editable))
-	var left := STRules.LETTERS.size() - used.size()
-	_keys_left.text = "свободно: %d" % left
+	var left := STRules.MAIN_LETTERS.size()
+	for letter: String in STRules.MAIN_LETTERS:
+		if used.has(letter):
+			left -= 1
+	_keys_left.text = "основных: %d" % left
+
+
+func _style_used_key(button: Button, remaining: float) -> void:
+	var weight := clampf(remaining / KEY_FADE_TIME, 0.0, 1.0)
+	var fill := Color(STStyle.ink(), 0.12).lerp(STStyle.RED, weight)
+	var font := Color(STStyle.ink(), 0.3).lerp(STStyle.PAPER, weight)
+	button.add_theme_stylebox_override("disabled", STStyle.box(fill, 10, 3 if fill.a > 0.5 else 2, 3 if fill.a > 0.5 else 0, 2))
+	button.add_theme_color_override("font_disabled_color", font)
 
 
 func _key_style(b: Button, fill: Color, font: Color) -> void:

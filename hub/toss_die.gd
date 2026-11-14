@@ -20,7 +20,13 @@ const BOUNCE := 0.55
 const MAX_SPEED := 2600.0
 const Reel := preload("res://hub/dice_reel.gd")
 
-var home := Vector2.ZERO  # центр места кубика
+var home := Vector2.ZERO:  # центр места кубика
+	set(value):
+		if home == value:
+			return
+		home = value
+		if state in ["idle", "waiting"]:
+			_set_center(home)
 var area := Rect2(0, 0, 1280, 720)  # где летает (поле)
 var draggable := false:
 	set(v):
@@ -33,9 +39,11 @@ var use_player_style := true
 var _reel: Reel
 var _reel_required := false
 var _reel_offset := 0.0
+## Многогранники d4–d20 (игры из редактора) — только когда включено; другие игры по-прежнему d6/d8.
+var allow_polyhedral := false
 var max_face := 6:
 	set(v):
-		max_face = 8 if v == 8 else 6
+		max_face = v if allow_polyhedral and v in [4, 6, 8, 10, 12, 20] else (8 if v == 8 else 6)
 		if is_instance_valid(_die):
 			_die.sides = max_face
 			_die.value = clampi(_die.value, 1, max_face)
@@ -316,6 +324,7 @@ func _settle() -> void:
 
 
 func _back_home() -> void:
+	_set_center(home)
 	state = "idle"
 	_anim = null
 	if _reel != null:

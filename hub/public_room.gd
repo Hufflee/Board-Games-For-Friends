@@ -1,14 +1,41 @@
 extends RefCounted
-## Только публичные данные шкафа. Сетевые поля не становятся путями ресурсов или настройками игрока.
-const MAX_BYTES := 16384
+## Только публичные данные шкафа (режим наблюдения за комнатой друга). Сетевые поля не становятся путями
+## ресурсов или настройками игрока.
+##
+## СОВМЕСТИМОСТЬ ВЕРСИЙ (14.11, после многих «наблюдение сломалось после обновления»): снимок проверяют
+## отправитель, хост-ретранслятор и каждый зритель — каждый своей версией игры. Поэтому:
+##   • незнакомые поля (верхнего уровня и в config) молча пропускаются;
+##   • битая или незнакомая запись необязательного поля (поза, место фигурки, своя игра, поверхность…)
+##     пропускается по одной, а не отбрасывает всю комнату;
+##   • комната отбрасывается целиком только если сломан каркас: ряды/столбцы/ячейки/размеры/раскладка
+##     или снимок небезопасен (объекты, глубина, объём).
+## Новое поле в снимке — только необязательное, со значением по умолчанию у старых версий.
+## Проверка: tests/test_public_room_compat.gd.
+const MAX_BYTES := 65536
+const MAX_ITEMS := 160  # предметов в шкафу: игры + свои игры + фигурки (раньше 48 — уже впритык)
+const MAX_ROWS := 12
+const MAX_COLS := 10
 ## Фигурки шкафа — общий список (раньше тут были только две старые, и комнаты с новыми фигурками
 ## отбрасывались целиком: в 0.9.0.2 «глазик» наблюдения перестал включаться).
 const Shelf := preload("res://hub/shelf_config.gd")
 const FIGURINES: Array = Shelf.FIGURINES
-## Друг может быть на другой версии: незнакомые игры и фигурки пропускаем, а не отбрасываем всю комнату.
+const SURFACES := ["tv", "stand_left", "stand_right", "cabinet", "wall_lower", "wall_upper"]
+const WALL_SURFACES := ["wall_lower", "wall_upper"]
+
+
+static func _number(value: Variant, low: float, high: float) -> float:
+	if not (value is float or value is int) or not is_finite(float(value)):
+		return NAN
+	var number := float(value)
+	return number if number >= low - 0.0001 and number <= high + 0.0001 else NAN
+
+
+static func _hex6(value: Variant) -> bool:
+	return value is String and (value as String).length() == 6 and (value as String).is_valid_hex_number()
+
 
 static func clean(value: Variant) -> Dictionary:
-	if not value is Dictionary or value.size() > 8:
+	if not value is Dictionary:
 		return {}
 	# Сначала ограничиваем вложенность и объём; сериализация объектов запрещена.
 	if not _bounded(value, 0) or var_to_bytes(value).size() > MAX_BYTES:
@@ -17,11 +44,12 @@ static func clean(value: Variant) -> Dictionary:
 		return {}
 	var source: Dictionary = value.config
 	var config: Dictionary = {}
+	# --- каркас шкафа: без него комнату не построить ---
 	for key in ["rows", "cols", "cups"]:
 		if not source.get(key) is int:
 			return {}
 		config[key] = source[key]
-	if config.rows < 1 or config.rows > 8 or config.cols < 1 or config.cols > 6:
+	if config.rows < 1 or config.rows > MAX_ROWS or config.cols < 1 or config.cols > MAX_COLS:
 		return {}
 	# свои ячейки (09.11): перегородки по рядам, объединённые ячейки
 	var cell_list: Variant = source.get("cells", null)
@@ -33,101 +61,96 @@ static func clean(value: Variant) -> Dictionary:
 	if config.cups < 0 or config.cups >= cell_total:
 		return {}
 	for key in ["width", "height"]:
-		if not (source.get(key) is float or source.get(key) is int):
-			return {}
-		var number := float(source[key])
-		if not is_finite(number) or number < (0.2 if key == "width" else 0.14) or number > (1.8 if key == "width" else 0.7):
+		var number := _number(source.get(key), 0.2 if key == "width" else 0.14, Shelf.MAX_WIDTH if key == "width" else 0.7)
+		if is_nan(number):
 			return {}
 		config[key] = number
-	if (not config.has("cells") and config.cols * config.width + (config.cols + 1) * 0.03 > 1.801) or config.rows * config.height + (config.rows + 1) * 0.03 > 2.401:
+	if (not config.has("cells") and config.cols * config.width + (config.cols + 1) * 0.03 > Shelf.MAX_WIDTH + 0.001) \
+			or config.rows * config.height + (config.rows + 1) * 0.03 > Shelf.MAX_HEIGHT + 0.001:
 		return {}
-	# свои размеры колонок / полок (08.11): списки чисел по числу колонок / рядов
+	# свои размеры колонок / полок (08.11): списки чисел по числу колонок / рядов; битый список — без него
 	for pair in [["col_widths", "cols", 0.2, 0.9], ["row_heights", "rows", 0.14, 0.7]]:
 		var list: Variant = source.get(pair[0], null)
-		if list == null:
-			continue
 		if not list is Array or (list as Array).size() != int(config[pair[1]]):
-			return {}
+			continue
 		var clean_list: Array = []
 		for item: Variant in list:
-			if not (item is float or item is int) or not is_finite(float(item)) or float(item) < float(pair[2]) - 0.0001 or float(item) > float(pair[3]) + 0.0001:
-				return {}
-			clean_list.append(float(item))
-		config[pair[0]] = clean_list
-	if not source.get("neighbor_order", false) is bool:
-		return {}
-	config.neighbor_order = source.get("neighbor_order", false)
+			var number := _number(item, float(pair[2]), float(pair[3]))
+			if is_nan(number):
+				clean_list = []
+				break
+			clean_list.append(number)
+		if not clean_list.is_empty():
+			config[pair[0]] = clean_list
+	# --- необязательное: битое пропускаем ---
+	config.neighbor_order = source.get("neighbor_order", false) == true
+	# цвет шкафа хозяина (hex без #) — друзья видят шкаф его цвета
+	if _hex6(source.get("wood", "")):
+		config.wood = source.wood
+	if _hex6(source.get("shelves", "")):  # цвет полок на левой стене
+		config.shelves = source.shelves
+	# режимы гирлянд зимней комнаты [ёлка, стены], 0..2
+	var lights: Variant = source.get("lights", [])
+	if lights is Array and (lights as Array).size() == 2 and (lights as Array).all(func(m): return m is int and m >= 0 and m <= 2):
+		config.lights = (lights as Array).duplicate()
 	# Свободное место фигурок в ячейке (доля ширины) — друзья видят их там же.
 	var free: Variant = source.get("figure_cells", {})
-	if not free is Dictionary or free.size() > 16:
-		return {}
-	if not free.is_empty():
+	if free is Dictionary and not free.is_empty():
 		config.figure_cells = {}
-		for id in free:
-			var share: Variant = free[id]
-			if not Shelf.is_figure(id):
-				continue
-			if not (share is float or share is int) or not is_finite(float(share)) or float(share) < 0 or float(share) > 1:
-				return {}
-			config.figure_cells[id] = float(share)
+		for id: Variant in free:
+			var share := _number(free[id], 0.0, 1.0)
+			if Shelf.is_figure(id) and not is_nan(share) and config.figure_cells.size() < 64:
+				config.figure_cells[id] = share
 	var positions: Variant = source.get("figure_positions", {})
-	if not positions is Dictionary:
-		return {}
 	config.figure_positions = {}
 	for id in FIGURINES:
-		var number: Variant = positions.get(id, source.get("figure_x", 1.0))
-		if not (number is float or number is int) or not is_finite(float(number)) or float(number) < 0 or float(number) > 1:
-			return {}
-		config.figure_positions[id] = float(number)
+		var number := _number(positions.get(id, source.get("figure_x", 1.0)) if positions is Dictionary else source.get("figure_x", 1.0), 0.0, 1.0)
+		config.figure_positions[id] = 1.0 if is_nan(number) else number
 	var box_positions: Variant = source.get("box_positions", {})
-	if not box_positions is Dictionary or box_positions.size() > 128:
-		return {}
-	if not box_positions.is_empty():
+	if box_positions is Dictionary and not box_positions.is_empty():
 		config.box_positions = {}
-		for id in box_positions:
-			var share: Variant = box_positions[id]
-			if not id is String or id.length() > 80 or not (share is float or share is int) or not is_finite(float(share)) or float(share) < 0.0 or float(share) > 1.0:
-				return {}
-			config.box_positions[id] = float(share)
+		for id: Variant in box_positions:
+			var share := _number(box_positions[id], 0.0, 1.0)
+			if id is String and (id as String).length() <= 80 and not is_nan(share) and config.box_positions.size() < MAX_ITEMS:
+				config.box_positions[id] = share
 	for field in ["figure_yaw", "figure_surfaces"]:
 		var entries: Variant = source.get(field, {})
-		if not entries is Dictionary or entries.size() > (128 if field == "figure_surfaces" else 16):
-			return {}
-		if not source.has(field):
+		if not entries is Dictionary or not source.has(field):
 			continue
 		config[field] = {}
-		for id in entries:
+		for id: Variant in entries:
 			var entry: Variant = entries[id]
-			var wall_item: bool = field == "figure_surfaces" and entry is Dictionary and entry.get("surface", "") in ["wall_lower", "wall_upper"]
-			if not Shelf.is_figure(id) and not (wall_item and id is String and id.length() <= 80):
+			if not id is String or (id as String).length() > 80 or (config[field] as Dictionary).size() >= MAX_ITEMS:
+				continue
+			var wall_item: bool = field == "figure_surfaces" and entry is Dictionary and entry.get("surface", "") in WALL_SURFACES
+			if not Shelf.is_figure(id) and not wall_item:
 				continue
 			if field == "figure_yaw":
-				if not (entry is float or entry is int) or not is_finite(float(entry)) or absf(float(entry)) > PI + 0.0001:
-					return {}
-				config[field][id] = float(entry)
-			else:
-				if not entry is Dictionary or entry.size() != 2 or not entry.get("surface", "") in ["tv", "stand_left", "stand_right", "cabinet", "wall_lower", "wall_upper"]:
-					return {}
-				var fraction: Variant = entry.get("x")
-				if not (fraction is float or fraction is int) or not is_finite(float(fraction)) or float(fraction) < 0 or float(fraction) > 1:
-					return {}
-				config[field][id] = {"surface": entry.surface, "x": float(fraction)}
+				var yaw := _number(entry, -PI, PI)
+				if not is_nan(yaw):
+					config[field][id] = yaw
+			elif entry is Dictionary and entry.get("surface", "") in SURFACES:
+				var fraction := _number(entry.get("x"), 0.0, 1.0)
+				if not is_nan(fraction):
+					config[field][id] = {"surface": entry.surface, "x": fraction}
+			# незнакомая поверхность (из новой версии) — предмет у нас стоит в шкафу, комната не пропадает
+	# --- предметы шкафа ---
 	var allowed: Array = FIGURINES.duplicate()
 	var custom: Dictionary = {}
 	var entries: Variant = value.get("custom", {})
-	if not entries is Dictionary or entries.size() > 24:
-		return {}
-	for id: String in entries:
-		if not id.begins_with("custom:") or not preload("res://games/custom/logic/cg_library.gd").uuid_valid(id.trim_prefix("custom:")):
-			return {}
-		var entry: Variant = entries[id]
-		if not entry is Dictionary or not entry.get("title") is String or entry.title.length() > 64 or not entry.get("size") is Array or entry.size.size() != 3:
-			return {}
-		for extent: Variant in entry.size:
-			if not (extent is int or extent is float) or not is_finite(float(extent)) or float(extent) < 0.02 or float(extent) > 0.6:
-				return {}
-		custom[id] = {"title": entry.title, "size": entry.size.duplicate()}
-		allowed.append(id)
+	if entries is Dictionary:
+		for id: Variant in entries:
+			if custom.size() >= 32 or not id is String or not (id as String).begins_with("custom:"):
+				continue
+			if not preload("res://games/custom/logic/cg_library.gd").uuid_valid((id as String).trim_prefix("custom:")):
+				continue
+			var entry: Variant = entries[id]
+			if not entry is Dictionary or not entry.get("title") is String or not entry.get("size") is Array or entry.size.size() != 3:
+				continue
+			if not (entry.size as Array).all(func(extent): return not is_nan(_number(extent, 0.02, 0.6))):
+				continue
+			custom[id] = {"title": (entry.title as String).left(64), "size": (entry.size as Array).duplicate()}
+			allowed.append(id)
 	for game in preload("res://hub/games.gd").LIST:
 		allowed.append(str(game.id))
 	var placements: Array = value.placements
@@ -135,36 +158,38 @@ static func clean(value: Variant) -> Dictionary:
 		return {}
 	var seen: Dictionary = {}
 	var rows: Array = []
-	for row in placements:
-		if not row is Array or row.size() > 48:
+	for row: Variant in placements:
+		if not row is Array:
 			return {}
 		var kept: Array = []
-		for id in row:
-			if not id is String or seen.has(id):
-				return {}
+		for id: Variant in row:
+			if not id is String or seen.has(id) or seen.size() >= MAX_ITEMS:
+				continue  # повтор или лишнее — пропускаем предмет, а не комнату
 			if not allowed.has(id) and not Shelf.is_figure(id):
 				continue  # игра из более новой версии — у нас её нет
 			seen[id] = true
 			kept.append(id)
 		rows.append(kept)
 	placements = rows
-	if seen.is_empty() or seen.size() > 48:
+	if seen.is_empty():
 		return {}
 	for id: String in custom.keys():
-		if not seen.has(id): custom.erase(id)
+		if not seen.has(id):
+			custom.erase(id)
 	var poses: Dictionary = {}
-	for id in value.poses:
-		if not value.poses[id] is int or value.poses[id] < 0 or value.poses[id] > 3:
-			return {}
-		if seen.has(id):
-			poses[id] = value.poses[id]
+	for id: Variant in value.poses:
+		var pose: Variant = value.poses[id]
+		if seen.has(id) and pose is int and pose >= 0 and pose <= 3:
+			poses[id] = pose
 	var selected: Variant = value.get("selected", "")
-	if not selected is String or not value.get("editor", false) is bool:
-		return {}
-	if selected != "" and (not allowed.has(selected) or Shelf.is_figure(selected)):
+	if not selected is String or (selected != "" and (not allowed.has(selected) or Shelf.is_figure(selected))):
 		selected = ""
 	var clean_room := {"config": config, "placements": placements.duplicate(true), "poses": poses,
-		"selected": selected, "editor": value.get("editor", false), "custom": custom}
+		"selected": selected, "editor": value.get("editor", false) == true, "custom": custom}
+	# комната хозяина (HubRooms): только короткий id; неизвестный зритель заменит своей
+	var room: Variant = value.get("room", "")
+	if preload("res://hub/rooms/hub_rooms.gd").valid_id(room):
+		clean_room["room"] = room
 	var camera := _clean_camera(value.get("camera", {}))
 	if not camera.is_empty():
 		clean_room["camera"] = camera
@@ -174,38 +199,41 @@ static func clean(value: Variant) -> Dictionary:
 static func _clean_camera(value: Variant) -> Dictionary:
 	if not value is Dictionary or not value.get("frame") is Array or value.frame.size() != 7:
 		return {}
-	var zoom: Variant = value.get("zoom")
-	if not (zoom is int or zoom is float) or not is_finite(float(zoom)) or float(zoom) < 0.75 or float(zoom) > 1.6:
+	var zoom := _number(value.get("zoom"), 0.75, 1.6)
+	if is_nan(zoom):
 		return {}
 	var frame: Array = value.frame
 	for number: Variant in frame:
-		if not (number is int or number is float) or not is_finite(float(number)) or absf(float(number)) > 12.0:
+		if is_nan(_number(number, -12.0, 12.0)):
 			return {}
 	var rotation := Quaternion(frame[3], frame[4], frame[5], frame[6])
 	if absf(rotation.length_squared() - 1.0) > 0.001:
 		return {}
-	return {"zoom": float(zoom), "frame": frame.duplicate()}
+	return {"zoom": zoom, "frame": frame.duplicate()}
 
-static func _bounded(value: Variant, depth: int, budget: Array = [512]) -> bool:
+
+## Безопасная оболочка: только словари/массивы/строки/числа/bool, глубина ≤ 6, не больше 4096 узлов.
+## Запас большой: шкаф растёт (игры, свои игры, фигурки, места коробок), а превышение отбрасывает комнату.
+static func _bounded(value: Variant, depth: int, budget: Array = [4096]) -> bool:
 	if depth == 0:
-		budget = [512]
+		budget = [4096]
 	budget[0] -= 1
-	if depth > 5 or budget[0] < 0:
+	if depth > 6 or budget[0] < 0:
 		return false
 	if value is Dictionary:
-		if value.size() > 64:
+		if value.size() > 256:
 			return false
 		for key in value:
-			if not (key is String or key is StringName) or str(key).length() > 64 or not _bounded(value[key], depth + 1, budget):
+			if not (key is String or key is StringName) or str(key).length() > 96 or not _bounded(value[key], depth + 1, budget):
 				return false
 	elif value is Array:
-		if value.size() > 64:
+		if value.size() > 256:
 			return false
 		for item in value:
 			if not _bounded(item, depth + 1, budget):
 				return false
 	elif value is String:
-		return value.length() <= 64
+		return value.length() <= 128
 	elif not (value is int or value is float or value is bool):
 		return false
 	return true

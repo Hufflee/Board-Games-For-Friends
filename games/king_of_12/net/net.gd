@@ -53,7 +53,7 @@ const AUTO_PICK := 60.0  # победитель раунда долго не в�
 ## Цвета игроков: каждому случайный, клик по своему нику — сменить. По цвету видно, кто что сделал.
 const PLAYER_COLORS := ["e6194b", "3cb44b", "f2c318", "4363d8", "f58231", "911eb4", "2ec4d6", "f032e6", "8fcf2b", "f59ac0", "2a9d8f", "9a6324", "34408f", "6fd6a8", "c47cba", "94a863"]
 const CGSessionBridge := preload("res://games/custom/logic/cg_session.gd")
-const LOCAL_GAMES := ["blood_on_the_clocktower", "machi_koro", "cg", "wavelength", "dangerous_words", "hues_and_cues", "ready_set_bet", "word_slam", "tip_top", "tip_top_18", "not_a_hat", "gloom", "brodilka", "phantom_ink", "four_souls", "stillion", "the_gang", "things_in_rings", "khorom", "the_mind"]  # офлайн — местные игроки, а не боты
+const LOCAL_GAMES := ["first_contact", "in_broad_strokes", "green_team_wins", "colt_express", "blood_on_the_clocktower", "machi_koro", "cg", "wavelength", "dangerous_words", "hues_and_cues", "ready_set_bet", "word_slam", "tip_top", "tip_top_18", "not_a_hat", "gloom", "brodilka", "phantom_ink", "four_souls", "stillion", "the_gang", "things_in_rings", "khorom", "the_mind"]  # офлайн — местные игроки, а не боты
 const BOT_NAMES := ["Бот Аркадий", "Бот Варвара", "Бот Геннадий", "Бот Дарья", "Бот Евсей", "Бот Жанна", "Бот Захар"]
 
 var auto_advance_time := 45.0  # через сколько секунд итог закрывается сам
@@ -70,7 +70,7 @@ var lobby_id := 0
 var members := {}  # peer_id -> {name}
 var join_order: Array[int] = []
 var bots := 0
-var settings := {"bc_edition": "tb", "bc_storyteller": 0, "mk_plus": false, "mk_sharp": false, "mk_limited": false, "cg_example": "card_race", "pk_mode": "classic", "pk_target": 0, "pk_open": false, "kh_rounds": 6, "kh_timer": 90, "tr_rings": ["Attribute", "Word", "Context"], "tr_knower": 0, "tr_coop": false, "tr_mode": "classic", "tr_timer": 0, "tr_want": [], "deck_mode": "first", "manual": [], "promo": "", "tournament": true, "reveal_speed": "normal", "perudo_dice": 5, "perudo_maputo": true, "wl_mode": "teams", "wl_local_teams": [], "dw_rooms": "3-7", "dw_monster": "random", "dw_hard": false, "dw_curses": true, "dw_time": 60, "hc_laps": 0, "hc_free": false, "hc_mode": "classic", "rsb_speed": "normal", "ws_mode": "teams", "ws_catalog": "basic", "ws_cards": "standard", "ws_names": true, "ws_time": 120, "turn_time": 60, "tt_expert": false, "pi_roles": [], "fs_dlc": false, "fs_timer": 0, "fs_character_choice": false, "st_bots": false, "st_lives": 2, "st_time": 10, "st_oral": false, "shuffle_seats": false}
+var settings := {"ibs_words": "simple", "fc_hard": false, "fc_opening": false, "ce_teams": false, "ce_cursed": false, "ce_marshal": false, "ce_prison": false, "ce_coach": false, "ce_time_car": false, "ce_horses": false, "ce_whiskey": false, "ce_sprites": false, "bc_edition": "tb", "bc_storyteller": 0, "mk_plus": false, "mk_sharp": false, "mk_limited": false, "cg_example": "card_race", "pk_mode": "classic", "pk_target": 0, "pk_open": false, "kh_rounds": 6, "kh_timer": 90, "tr_rings": ["Attribute", "Word", "Context"], "tr_knower": 0, "tr_coop": false, "tr_mode": "classic", "tr_timer": 0, "tr_want": [], "deck_mode": "first", "manual": [], "promo": "", "tournament": true, "reveal_speed": "normal", "perudo_dice": 5, "perudo_maputo": true, "wl_mode": "teams", "wl_local_teams": [], "dw_rooms": "3-7", "dw_monster": "random", "dw_hard": false, "dw_curses": true, "dw_time": 60, "hc_laps": 0, "hc_free": false, "hc_mode": "classic", "rsb_speed": "normal", "ws_mode": "teams", "ws_catalog": "basic", "ws_cards": "standard", "ws_names": true, "ws_time": 120, "turn_time": 60, "tt_expert": false, "pi_roles": [], "fs_dlc": false, "fs_timer": 0, "fs_character_choice": false, "st_bots": false, "st_lives": 2, "st_time": 10, "st_oral": false, "shuffle_seats": false, "cg_bots": false, "cg_lobby": {}}
 var disconnected := {}  # место -> имя вылетевшего игрока (может вернуться)
 var chat_log: Array = []
 var last_join := {}  # куда подключались в последний раз — для «Вернуться в партию»
@@ -105,6 +105,14 @@ var mind = null  # The Mind: без ботов и таймера.
 var tm_view_seat := 0
 var gang = null  # TGRules: кооперативный покер, до10 игроков.
 var tg_view_seat := 0
+var colt = null  # Правила «Кольт Экспресс».
+var ce_view_seat := -1
+var first_contact = null
+var fc_seat := -1
+var strokes_game = null
+var ibs_seat := -1
+var green_team = null
+var gtw_seat := -1
 var tir = null  # Смысл предметов оценивает человек; семантических ботов нет.
 var tr_view_seat := 0
 var khr = null  # «Хором!»: совпадения оценивают люди, ботов нет.
@@ -129,6 +137,8 @@ var ready_peers := {}
 var in_game := false
 var paused := false  # хост поставил партию на паузу: часы и ходы стоят
 var _bot_wait := 0.0
+const CG_BOT := preload("res://games/custom/logic/cg_bot.gd")
+var _cg_bot_rng := RandomNumberGenerator.new()
 var _phase_time := 0.0
 var _stamp_turn := false  # после смены фазы — разослать состояние с новым временем хода
 var _last_phase := ""
@@ -166,6 +176,7 @@ var _join_generation := 0
 var _joining := false
 var _join_transport_ready := false
 var _connection_notice: AcceptDialog
+var minigame_turn_unlocks := {}  # peer → true: хост разрешил мини-игры в его ход (по умолчанию в свой ход они заблокированы)
 
 
 func _ready() -> void:
@@ -214,6 +225,11 @@ func _init_steam() -> void:
 		return
 	_steam_initialized = true
 	steam_error = ""
+	# Уведомления Steam (друг в сети, приглашение) — в правом нижнем углу, от самого края (12.11).
+	if steam.has_method("setOverlayNotificationPosition"):
+		steam.setOverlayNotificationPosition(3)  # k_EPositionBottomRight
+	if steam.has_method("setOverlayNotificationInset"):
+		steam.setOverlayNotificationInset(0, 0)
 	# Дать нестабильному каналу восстановиться до разрыва самого транспорта.
 	if steam.has_method("setGlobalConfigValueInt32"):
 		steam.setGlobalConfigValueInt32(24, 30000) # NETWORKING_CONFIG_TIMEOUT_INITIAL
@@ -274,6 +290,26 @@ func is_custom_game(id: String) -> bool:
 
 func is_local_game(id: String) -> bool:
 	return id in LOCAL_GAMES or id.begins_with("custom:")
+
+## Ход ботов пользовательской игры: раз в bot_delay — один случайный допустимый ход первого бота, которому есть чем ходить.
+func _cg_bots_step(delta: float) -> void:
+	_bot_wait += delta
+	if _bot_wait < bot_delay or cg.phase == "game_over":
+		return
+	_bot_wait = 0.0
+	for seat in cg.players.size():
+		if not bool(cg.players[seat].get("bot", false)):
+			continue
+		var choice: Dictionary = CG_BOT.choose(cg, seat, _cg_bot_rng)
+		if choice.is_empty():
+			continue
+		if cg.act(seat, str(choice.kind), choice.data):
+			_push_state()
+		return
+
+## Пользовательская игра с ботами вместо местных игроков (настройка лобби «Боты»).
+func _custom_bots() -> bool:
+	return is_custom_game(party_game) and bool(settings.get("cg_bots", false))
 
 func in_session() -> bool:
 	return mode != ""
@@ -509,6 +545,7 @@ func leave(reason: String = "Добровольный выход или смен
 		return
 	_hand_over_host()
 	_leaving = true
+	minigame_turn_unlocks.clear()
 	_stop_join()
 	Sfx.stop_victory()
 	if not mode.is_empty():
@@ -532,6 +569,14 @@ func leave(reason: String = "Добровольный выход или смен
 	_client_start_pending = false
 	_client_expected_match = ""
 	gang = null
+	colt = null
+	first_contact = null
+	fc_seat = -1
+	strokes_game = null
+	ibs_seat = -1
+	green_team = null
+	gtw_seat = -1
+	ce_view_seat = -1
 	mind = null
 	mk = null
 	bc = null
@@ -605,6 +650,14 @@ func _reset_host() -> void:
 	bc_bridge.reset_lobby()
 	cg_transfer.reset()
 	gang = null
+	colt = null
+	first_contact = null
+	fc_seat = -1
+	strokes_game = null
+	ibs_seat = -1
+	green_team = null
+	gtw_seat = -1
+	ce_view_seat = -1
 	mind = null
 	mk = null
 	bc = null
@@ -1046,6 +1099,7 @@ func _configure_enet_timeout(id: int) -> void:
 
 
 func _on_peer_disconnected(id: int) -> void:
+	minigame_turn_unlocks.erase(id)
 	if not mode.is_empty() and not _leaving:
 		Diag.mark("Участник отключён транспортом", {"peer": id, "транспорт": _steam_transport_events.duplicate(true)})
 	if not is_host() or not members.has(id):
@@ -1073,7 +1127,7 @@ func _on_peer_disconnected(id: int) -> void:
 func _seat_left(seat: int, pname: String, was_host: bool = false) -> void:
 	seat_peers[seat] = 0
 	disconnected[seat] = pname
-	var no_bots := phantom != null or fours != null or mind != null or mk != null or bc != null or cg != null or tir != null or khr != null
+	var no_bots := first_contact != null or strokes_game != null or green_team != null or colt != null or phantom != null or fours != null or mind != null or mk != null or bc != null or cg != null or tir != null or khr != null
 	if not no_bots and gang == null:
 		_gp()[seat]["bot"] = true
 		_gp()[seat]["name"] = pname + " (бот)"
@@ -1151,7 +1205,7 @@ func _rpc_kicked(reason: String) -> void:
 func set_bots(n: int) -> void:
 	if not is_host() or in_game:
 		return
-	var maximum: int = CLOCKTOWER_MAX if party_game == "blood_on_the_clocktower" else (GANG_MAX if party_game == "the_gang" else MAX_PLAYERS)
+	var maximum: int = 12 if party_game == "green_team_wins" else CLOCKTOWER_MAX if party_game == "blood_on_the_clocktower" else (GANG_MAX if party_game == "the_gang" else MAX_PLAYERS)
 	bots = clampi(n, 0, maxi(0, maximum - members.size()))
 	_broadcast_lobby()
 
@@ -1207,7 +1261,7 @@ func _broadcast_lobby() -> void:
 	for id in join_order:
 		list.append({"name": members[id]["name"], "kind": "host" if id == 1 else "player", "team": members[id].get("team", -1), "peer": id, "color": int(members[id].get("color", 0)), "suggest": members[id].get("suggest", "")})
 	for i in bots:
-		if is_local_game(party_game):
+		if is_local_game(party_game) and not _custom_bots():
 			list.append({"name": "Игрок %d" % (i + 2), "kind": "local", "team": _local_team(i), "color": _local_color(i)})
 		else:
 			list.append({"name": BOT_NAMES[i % BOT_NAMES.size()], "kind": "bot", "color": _local_color(i)})
@@ -1331,8 +1385,8 @@ func start_game() -> String:
 	# Старое/неверное отрицательное значение добавочных мест не скрывает реальных участников.
 	var added_players: int = maxi(0, bots)
 	var total: int = members.size() + added_players
-	var maximum := GANG_MAX if party_game == "the_gang" else (5 if party_game == "machi_koro" else (6 if party_game == "things_in_rings" else MAX_PLAYERS))
-	var minimum := 3 if party_game in ["the_gang", "khorom"] else 2
+	var maximum := 7 if party_game == "first_contact" else 12 if party_game == "green_team_wins" else 6 if party_game == "colt_express" else GANG_MAX if party_game == "the_gang" else (5 if party_game == "machi_koro" else (6 if party_game == "things_in_rings" else MAX_PLAYERS))
+	var minimum := 3 if party_game in ["the_gang", "khorom", "green_team_wins"] else 2
 	if party_game == "blood_on_the_clocktower":
 		maximum = CLOCKTOWER_MAX
 		minimum = int(bc_bridge.Data.EDITIONS.get(str(settings.get("bc_edition", "tb")), {"minimum": 5}).minimum) + 1
@@ -1341,7 +1395,7 @@ func start_game() -> String:
 	if party_game.begins_with("custom:") and not cg_transfer.can_start():
 		return cg_transfer.error if not cg_transfer.error.is_empty() else "Дождитесь загрузки игры у всех участников."
 	var deck: Array[String] = []
-	if not party_game.begins_with("custom:") and not party_game in ["blood_on_the_clocktower", "machi_koro", "cg", "perudo", "wavelength", "dangerous_words", "hues_and_cues", "ready_set_bet", "word_slam", "tip_top", "tip_top_18", "not_a_hat", "gloom", "brodilka", "phantom_ink", "four_souls", "stillion", "the_gang", "things_in_rings", "khorom", "poker", "the_mind"]:
+	if not party_game.begins_with("custom:") and not party_game in ["first_contact", "in_broad_strokes", "green_team_wins", "colt_express", "blood_on_the_clocktower", "machi_koro", "cg", "perudo", "wavelength", "dangerous_words", "hues_and_cues", "ready_set_bet", "word_slam", "tip_top", "tip_top_18", "not_a_hat", "gloom", "brodilka", "phantom_ink", "four_souls", "stillion", "the_gang", "things_in_rings", "khorom", "poker", "the_mind"]:
 		deck = build_deck()
 		if deck.is_empty():
 			return "Вручную нужно отметить ровно %d карт." % K12Cards.DECK_SIZE
@@ -1351,7 +1405,7 @@ func start_game() -> String:
 		players.append({"name": members[id]["name"], "bot": false, "steam_id": members[id].get("steam_id", 0), "team": members[id].get("team", -1), "color": int(members[id].get("color", 0))})
 		seat_peers.append(id)
 	for i in added_players:
-		if is_local_game(party_game):
+		if is_local_game(party_game) and not _custom_bots():
 			players.append({"name": "Игрок %d" % (i + 2), "bot": false, "local": true, "team": _local_team(i), "color": _local_color(i)})
 		else:
 			players.append({"name": BOT_NAMES[i % BOT_NAMES.size()], "bot": true, "color": _local_color(i)})
@@ -1387,6 +1441,14 @@ func start_game() -> String:
 	stillion = null
 	fours = null
 	gang = null
+	colt = null
+	first_contact = null
+	fc_seat = -1
+	strokes_game = null
+	ibs_seat = -1
+	green_team = null
+	gtw_seat = -1
+	ce_view_seat = -1
 	mind = null
 	mk = null
 	bc = null
@@ -1402,7 +1464,7 @@ func start_game() -> String:
 	kh_view_seat = 0
 	pkr = null
 	if is_custom_game(party_game):
-		var cg_options := {"roles": settings.get("cg_roles", []), "seat_order": _seat_perm, "turn_time": settings.get("turn_time", 0)}
+		var cg_options := {"roles": settings.get("cg_roles", []), "seat_order": _seat_perm, "turn_time": settings.get("turn_time", 0), "vars": settings.get("cg_lobby", {}).get(party_game, {})}
 		var result := CGSessionBridge.create_custom(party_game.trim_prefix("custom:"), players, cg_options) if party_game.begins_with("custom:") else CGSessionBridge.create(str(settings.get("cg_example", "card_race")), players, cg_options)
 		if not str(result.error).is_empty():
 			seat_peers.clear()
@@ -1424,6 +1486,22 @@ func start_game() -> String:
 	elif party_game == "the_mind":
 		mind = load("res://games/the_mind/logic/tm_rules.gd").new()
 		mind.new_game(players)
+		auto_advance_time = 0.0
+	elif party_game == "first_contact":
+		first_contact = load("res://games/first_contact/logic/fc_rules.gd").new()
+		first_contact.new_game(players,{"hard":settings.get("fc_hard",false),"opening":settings.get("fc_opening",false)})
+		auto_advance_time = 0.0
+	elif party_game == "in_broad_strokes":
+		strokes_game = load("res://games/in_broad_strokes/logic/ibs_rules.gd").new()
+		strokes_game.new_game(players, {"words": settings.get("ibs_words", "simple")})
+		auto_advance_time = 0.0
+	elif party_game == "green_team_wins":
+		green_team = load("res://games/green_team_wins/logic/gtw_rules.gd").new()
+		green_team.new_game(players)
+		auto_advance_time = 0.0
+	elif party_game == "colt_express":
+		colt = load("res://games/colt_express/logic/ce_rules.gd").new()
+		colt.new_game(players, {"sprites": settings.get("ce_sprites", false), "time_car": settings.get("ce_time_car",false), "teams": settings.get("ce_teams",false), "cursed": settings.get("ce_cursed",false), "marshal_player": settings.get("ce_marshal",false), "prison": settings.get("ce_prison",false), "coach": settings.get("ce_coach",false), "horses": settings.get("ce_horses",false) or settings.get("ce_coach",false), "whiskey": settings.get("ce_whiskey",false)})
 		auto_advance_time = 0.0
 	elif party_game == "the_gang":
 		gang = load("res://games/the_gang/logic/tg_rules.gd").new()
@@ -1486,7 +1564,8 @@ func start_game() -> String:
 		fours.excluded_cards28 = load("res://games/four_souls/logic/fs_data.gd").PARTIAL_OFF28.duplicate()  # Four Souls 06.11: partial-карты не в колодах
 		fours.strict_responses28 = true  # Four Souls 06.11: в чужой ход — только в ответ (5 с тишины стека)
 		fours.set_turn_clock(float(settings.get("fs_timer", 0)))
-		fours.choose_character_at_start = bool(settings.get("fs_character_choice", false))
+		fours.character_offer_count = int(settings.get("fs_character_options", 2 if settings.get("fs_character_choice", false) else 1))
+		fours.random_bonus_souls = bool(settings.get("fs_random_bonus_souls", false))
 		fours.new_game(players, bool(settings.get("fs_dlc", false)))
 		auto_advance_time = 0.0
 	elif party_game == "phantom_ink":
@@ -1672,6 +1751,48 @@ func send_action(kind: String, arg = null) -> void:
 		_rpc_action.rpc_id(1, kind, arg)
 
 
+## Хост: разрешить игроку места seat мини-игры в его ход (по умолчанию в свой ход они заблокированы).
+func set_minigame_turn_unlock(seat: int, unlocked: bool) -> void:
+	if not is_host() or not in_game or seat < 0 or seat >= seat_peers.size():
+		return
+	var peer: int = seat_peers[seat]
+	if peer <= 0:
+		return
+	if unlocked:
+		minigame_turn_unlocks[peer] = true
+	else:
+		minigame_turn_unlocks.erase(peer)
+	_push_state()
+
+
+## Заблокированы ли мини-игры у peer прямо сейчас: идёт его ход, и хост не разрешил.
+func minigames_locked_now(peer: int) -> bool:
+	if not in_game or minigame_turn_unlocks.has(peer):
+		return false
+	var seat := seat_peers.find(peer)
+	if seat < 0:
+		return false
+	return bool(_seat_view(seat, [], 0.0, false).get("minigames_blocked", false))
+
+
+func _minigame_turn_active(seat: int, seat_view: Dictionary) -> bool:
+	if mk != null:
+		return mk.current == seat and mk.phase in ["roll", "reroll", "harbor", "trawler", "choice", "build"]
+	if cg != null:
+		return not seat_view.get("legal", []).is_empty()
+	if bc != null:
+		return int(seat_view.get("next_voter", -1)) == seat or seat_view.has("request")
+	return TurnSeats.acting(str(seat_view.get("game", party_game)), seat_view).has(seat)
+
+
+func _input(event: InputEvent) -> void:
+	if not (event is InputEventKey and event.pressed and not event.echo and event.shift_pressed and event.keycode == KEY_TAB):
+		return
+	if steam_ok and steam.has_method("isOverlayEnabled") and steam.isOverlayEnabled() and steam.has_method("activateGameOverlay"):
+		steam.activateGameOverlay("friends")
+		get_viewport().set_input_as_handled()
+
+
 @rpc("any_peer", "reliable")
 func _rpc_action(kind: String, arg) -> void:
 	if is_host():
@@ -1679,7 +1800,7 @@ func _rpc_action(kind: String, arg) -> void:
 
 
 func _handle_action(peer: int, kind: String, arg) -> void:
-	if not in_game or (rules == null and perudo == null and wavelength == null and dwords == null and hues == null and rsb == null and wslam == null and tiptop == null and nothat == null and gloom == null and brod == null and phantom == null and fours == null and stillion == null and gang == null and mind == null and mk == null and bc == null and cg == null and tir == null and khr == null and pkr == null):
+	if not in_game or (rules == null and perudo == null and wavelength == null and dwords == null and hues == null and rsb == null and wslam == null and tiptop == null and nothat == null and gloom == null and brod == null and phantom == null and fours == null and stillion == null and gang == null and colt == null and green_team == null and strokes_game == null and first_contact == null and mind == null and mk == null and bc == null and cg == null and tir == null and khr == null and pkr == null):
 		return
 	var seat := seat_peers.find(peer)
 	Diag.last_action = "%s · место %d · %s" % [kind, seat, Time.get_time_string_from_system()]  # для сторожа зависаний
@@ -1746,6 +1867,66 @@ func _handle_action(peer: int, kind: String, arg) -> void:
 			seat = tr_view_seat
 		# Право хоста берётся только из отправителя RPC, не из выбранного места/аргумента.
 		if tir.action(seat, kind, arg, peer == 1):
+			_push_state()
+		return
+	if first_contact != null:
+		var request: Dictionary = arg if arg is Dictionary else {}
+		if mode == "offline" and peer == 1:
+			if kind == "fc_seat":
+				if int(request.get("seat",-1)) == first_contact.turn and first_contact.turn >= 0:
+					fc_seat = first_contact.turn
+					_push_state()
+				return
+			seat = fc_seat
+		if first_contact.action(seat,kind,request,peer == 1):
+			if first_contact.turn != fc_seat:
+				fc_seat = -1
+			_push_state()
+		return
+	if strokes_game != null:
+		var data: Dictionary = arg if arg is Dictionary else {}
+		if mode == "offline" and peer == 1:
+			if kind == "ibs_seat":
+				var requested := int(data.get("seat",-1))
+				if requested >= 0 and requested == strokes_game.turn:
+					ibs_seat = requested
+					_push_state()
+				return
+			seat = ibs_seat
+		if strokes_game.action(seat,kind,data,peer == 1):
+			if strokes_game.turn != ibs_seat:
+				ibs_seat = -1
+			_push_state()
+		return
+	if green_team != null:
+		var entry: Dictionary = arg if arg is Dictionary else {}
+		if mode == "offline" and peer == 1:
+			if kind == "gtw_seat":
+				var requested := int(entry.get("seat",-1))
+				if requested >= 0 and requested < green_team.players.size():
+					gtw_seat = requested
+					_push_state()
+				return
+			if kind == "answer":
+				seat = gtw_seat
+		if green_team.action(seat,kind,entry,peer == 1):
+			gtw_seat = -1
+			_push_state()
+		return
+	if colt != null:
+		var payload: Dictionary = arg if arg is Dictionary else {}
+		if mode == "offline" and peer == 1:
+			if kind == "ce_view_seat":
+				var requested := int(payload.get("seat", -1))
+				if requested == -1 or requested == colt.turn:
+					ce_view_seat = requested
+					_push_state()
+				return
+			seat = 0 if kind == "next" else ce_view_seat
+		var previous_turn: int = colt.turn
+		if colt.action(seat, kind, payload, peer == 1):
+			if colt.turn != previous_turn:
+				ce_view_seat = -1
 			_push_state()
 		return
 	if gang != null:
@@ -1895,6 +2076,7 @@ func _process(delta: float) -> void:
 	if cg != null:
 		if cg.tick(delta):
 			_push_state()
+		_cg_bots_step(delta)
 		return
 	if bc != null:
 		if bc.tick(delta):
@@ -1918,6 +2100,19 @@ func _process(delta: float) -> void:
 		return
 	if tir != null:
 		_tr_process(delta)
+		return
+	if first_contact != null:
+		return
+	if strokes_game != null:
+		if strokes_game.tick(delta):
+			_push_state()
+		return
+	if green_team != null:
+		return
+	if colt != null:
+		if colt.tick(delta):
+			ce_view_seat = -1
+			_push_state()
 		return
 	if gang != null:
 		_tg_process(delta)
@@ -2005,7 +2200,7 @@ func _process(delta: float) -> void:
 
 
 func _push_state() -> void:
-	if rules == null and perudo == null and wavelength == null and dwords == null and hues == null and rsb == null and wslam == null and tiptop == null and nothat == null and gloom == null and brod == null and phantom == null and fours == null and stillion == null and gang == null and mind == null and mk == null and bc == null and cg == null and tir == null and khr == null and pkr == null:
+	if rules == null and perudo == null and wavelength == null and dwords == null and hues == null and rsb == null and wslam == null and tiptop == null and nothat == null and gloom == null and brod == null and phantom == null and fours == null and stillion == null and gang == null and colt == null and green_team == null and strokes_game == null and first_contact == null and mind == null and mk == null and bc == null and cg == null and tir == null and khr == null and pkr == null:
 		return
 	if bc == null:
 		_match_metrics.observe(game_id,party_game,_game_obj(),seat_peers)
@@ -2026,6 +2221,14 @@ func _push_state() -> void:
 		phase = khr.phase
 	elif tir != null:
 		phase = tir.phase
+	elif first_contact != null:
+		phase = first_contact.phase
+	elif strokes_game != null:
+		phase = strokes_game.phase
+	elif green_team != null:
+		phase = green_team.phase
+	elif colt != null:
+		phase = colt.phase
 	elif gang != null:
 		phase = gang.phase
 	elif fours != null:
@@ -2066,11 +2269,11 @@ func _push_state() -> void:
 		var p := seat_peers[s]
 		if p == 0:
 			continue
-		_send_view(p, _seat_view(s, names, left, mode == "offline"))
+		_send_view(p, _seat_view(s, names, left, mode == "offline" and not (cg != null and _custom_bots())))
 	# зрители видят стол глазами рядового игрока (не ведущего), без права действовать
 	var specs := spectators()
 	if not specs.is_empty() and not seat_peers.is_empty():
-		var sv := _seat_view(-1 if phantom != null or fours != null or gang != null or mind != null or mk != null or bc != null or cg != null or tir != null or khr != null or pkr != null else _spectator_seat(), names, left, false)
+		var sv := _seat_view(-1 if phantom != null or fours != null or gang != null or colt != null or green_team != null or strokes_game != null or first_contact != null or mind != null or mk != null or bc != null or cg != null or tir != null or khr != null or pkr != null else _spectator_seat(), names, left, false)
 		sv["spectator"] = true
 		# что зритель может занять сам: место бота (с его прогрессом) или команду (прогресс общий)
 		var bot_seats := []
@@ -2119,6 +2322,22 @@ func _seat_view(s: int, names: Array, left: float, show_all: bool) -> Dictionary
 		v["hotseat"] = show_all
 		v["clock"] = tir.phase in ["place", "blind"]
 		v["disconnected"] = disconnected.keys()
+	elif first_contact != null:
+		v = first_contact.get_view(fc_seat if show_all else s)
+		v["hotseat"] = show_all
+		v["clock"] = false
+	elif strokes_game != null:
+		v = strokes_game.get_view(ibs_seat if show_all else s)
+		v["hotseat"] = show_all
+		v["clock"] = false
+	elif green_team != null:
+		v = green_team.get_view(gtw_seat if show_all else s)
+		v["hotseat"] = show_all
+		v["clock"] = false
+	elif colt != null:
+		v = colt.get_view(ce_view_seat if show_all else s)
+		v["hotseat"] = show_all
+		v["clock"] = false
 	elif gang != null:
 		v = gang.get_view(tg_view_seat if show_all else s)
 		v["hotseat"] = show_all
@@ -2163,7 +2382,10 @@ func _seat_view(s: int, names: Array, left: float, show_all: bool) -> Dictionary
 	v["reveal_speed"] = settings.get("reveal_speed", "normal")
 	v["game_id"] = game_id
 	v["personal_stats"] = {} if bc != null else _match_metrics.snapshot(s)
+	if str(v.get("phase", "")) == "game_over":
+		v["match_award"] = _match_metrics.award()
 	v["game_paused"] = paused
+	v["minigames_blocked"] = s >= 0 and s < seat_peers.size() and not minigame_turn_unlocks.has(seat_peers[s]) and _minigame_turn_active(s, v)
 	v["tutorial"] = tutorial
 	v["auto_in"] = int(left)
 	var tl := turn_limit()
@@ -2179,10 +2401,12 @@ func _seat_view(s: int, names: Array, left: float, show_all: bool) -> Dictionary
 		v["turn_left"] = fours.turn_time_left()
 		v["clock"] = fours.turn_clock_running()
 	if pkr != null:  # покер считает время хода сам — часы в верхней полосе берут его
-		v["turn_total"] = int(pkr.turn_time)
+		v["turn_total"] = int(pkr.cheat.PICK_TIME) if pkr.phase == "cheat_pick" else int(pkr.turn_time)
 		v["turn_left"] = maxf(0.0, pkr.time_left)  # дробное: часы и полоска не уходят на долю секунды
 		# ботов время хода не ограничивает (хост его не считает) — часы только у людей
 		v["clock"] = pkr.phase == "hand" and pkr.to_act >= 0 and pkr.turn_time > 0.0 and not bool(pkr.players[pkr.to_act].get("bot", false))
+		if pkr.phase == "cheat_pick":
+			v["clock"] = true
 	return v
 
 
@@ -2350,6 +2574,14 @@ func _gp() -> Array:
 		return khr.players
 	if tir != null:
 		return tir.players
+	if first_contact != null:
+		return first_contact.players
+	if strokes_game != null:
+		return strokes_game.players
+	if green_team != null:
+		return green_team.players
+	if colt != null:
+		return colt.players
 	if gang != null:
 		return gang.players
 	if stillion != null:
@@ -2504,7 +2736,7 @@ func _tr_process(delta: float) -> void:
 
 ## Время на ход из настроек комнаты (0 — без ограничения).
 func turn_limit() -> float:
-	if bc != null:
+	if bc != null or colt != null or first_contact != null or strokes_game != null or green_team != null:
 		return INF
 	if cg != null:
 		return float(cg.state.turn_seconds) if float(cg.state.turn_seconds) > 0 and cg.phase != "game_over" else INF
@@ -3467,7 +3699,7 @@ func set_paused(on: bool) -> void:
 
 ## Правила текущей игры (любой).
 func _game_obj() -> Object:
-	for o in [bc, cg, mk, mind, pkr, khr, tir, gang, stillion, fours, phantom, brod, gloom, nothat, tiptop, wslam, rsb, hues, dwords, wavelength, perudo, rules]:
+	for o in [first_contact, strokes_game, green_team, colt, bc, cg, mk, mind, pkr, khr, tir, gang, stillion, fours, phantom, brod, gloom, nothat, tiptop, wslam, rsb, hues, dwords, wavelength, perudo, rules]:
 		if o != null:
 			return o
 	return null
@@ -3593,6 +3825,7 @@ func end_game() -> void:
 
 
 func _finish_session() -> void:
+	minigame_turn_unlocks.clear()
 	host_tools.reset()
 	tir = null
 	tr_view_seat = 0
@@ -3602,6 +3835,14 @@ func _finish_session() -> void:
 	_client_start_pending = false
 	_client_expected_match = ""
 	gang = null
+	colt = null
+	first_contact = null
+	fc_seat = -1
+	strokes_game = null
+	ibs_seat = -1
+	green_team = null
+	gtw_seat = -1
+	ce_view_seat = -1
 	mind = null
 	mk = null
 	bc = null

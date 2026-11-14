@@ -1,7 +1,10 @@
 extends RefCounted
 ## Инструменты граней коробки: слои, текст/картинки, трансформации и запекание в штатные covers.
 
-const Style := preload("res://games/custom/ui/cg_style.gd")
+const Style := preload("res://editor/ed_style.gd")
+## Стиль игр — для предпросмотров того, что увидят игроки.
+const Game := preload("res://games/custom/ui/cg_style.gd")
+
 const View := preload("res://editor/ed_box_view.gd")
 const Assets := preload("res://editor/ed_assets.gd")
 const Fonts := preload("res://editor/ed_fonts.gd")

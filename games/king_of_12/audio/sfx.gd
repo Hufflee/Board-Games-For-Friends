@@ -17,6 +17,7 @@ const SOUNDS := {
 	"game_start": ["cards-pack-open-1"],
 	"hufflesoft": ["res://hub/audio/hufflesoft_chime.wav"],
 	"your_turn": ["res://hub/audio/your_turn.wav"],  # начался мой ход (tools/sfx_your_turn.py)
+	"mini_win": ["res://hub/audio/mini_win.wav"],  # победа в мини-игре, попадание в корзину (tools/sfx_mini_win.py)
 	"chip": ["chip-lay-1", "chip-lay-2", "chip-lay-3"],
 	"chips_soft": ["chips-collide-1", "chips-collide-2"],
 	"chips_win": ["chips-stack-1", "chips-stack-2"],

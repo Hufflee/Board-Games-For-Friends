@@ -16,6 +16,8 @@ signal board_moved(center: Vector2, bid: int)  # свою доску bid пер�
 signal board_held  # свою доску зажали — над ней смайлик (hub/sticker_ui.gd)
 signal poster_add_requested  # кнопка плаката в редакторе шкафа — повесить новый (hub/poster_ui.gd)
 signal poster_held(slot: int)  # плакат зажали — над ним значок галереи (hub/poster_ui.gd)
+signal view_turned(left: bool)  # камеру повернули к полкам на левой стене / обратно к шкафу
+signal room_changed(id: String)  # сменилась комната (окружение; личная расстановка не меняется)
 signal poster_moved(slot: int, center: Vector2)  # плакат перевесили (центр на стене, м)  # свою доску перевесили (центр на задней стене, x/y в метрах)
 
 const HINT := "ЛКМ — открыть игру · Удерживайте ЛКМ для переноса · ПКМ — выделить"
@@ -49,6 +51,24 @@ const ShelfOrder := preload("res://hub/shelf_layout.gd")
 const BOX_HOLD := 0.32  # с: удержание на коробке — взять её и переставлять (06.11: было 0,45 — отзывчивее)
 const DRAG_LIFT := 0.07  # м: взятая коробка выдвигается из шкафа к игроку
 const PublicRoom := preload("res://hub/public_room.gd")
+const Rooms := preload("res://hub/rooms/hub_rooms.gd")
+const Arrivals := preload("res://hub/rooms/arrivals.gd")
+signal arrival_changed  # прилетела новая игра / сняли обёртку / поставили — хаб перерисовывает карточку
+var arrival_box: GameBox  # новая игра у игрока в руках (hub/rooms/arrivals.gd): другие коробки не выбираются
+var _arrivals: Node
+var _pending_arrivals: Array = []  # новые коробки, найденные при загрузке шкафа
+var room_id := ""  # комната главного меню (HubRooms): окружение, украшения, вид за окном
+var _skateboard: Node3D  # тема комнаты может его переставить (зимой на его месте ёлка)
+var _skateboard_home := Transform3D.IDENTITY
+var shelf_wood := Color("2a1d42")  # цвет шкафа и тумбы под телевизором — личный выбор игрока, в любой комнате
+const SHELF_COLORS := [["Полночная слива", "2a1d42"], ["Слоновая кость", "e9dfc9"], ["Орех", "6b4a32"],
+	["Спелая вишня", "e8a3b9"], ["Кровавый", "5c1018"], ["Лесной зелёный", "1f3f2b"]]
+var tv_stand: Array = []  # [часть тумбы, насколько темнее шкафа]
+var door_hinge: Node3D  # створка двери (_wall_door)
+var cassettes: Array = []  # кассеты на полке тумбы (_tv_corner): тема может перекрасить
+var vcr_body: MeshInstance3D  # корпус видеомагнитофона: тема может перекрасить
+var _room_theme: Node3D  # украшения выбранной комнаты (скрипт темы из реестра), меняются без перестройки шкафа
+var _city_textures: Dictionary = {}  # вид за окном: {"front", "side"} и заснеженные {"front_snow", "side_snow"}
 var remote_view := false
 var remote_follow := true
 var _remote_zoom := 1.0
@@ -108,11 +128,20 @@ var _ball: Node3D
 var _ball_body: StaticBody3D
 var _window_sill_bounds: AABB
 var _basket: Node3D
+var _basket_left: Node3D  # вторая корзина — на левой стене с полками (владелец 14.11)
+var ball_left_on := false  # мяч в виде на полки (свой выключатель); включён в обоих видах — ходит за камерой
+var _ball_spots: Dictionary = {}  # вид (false — шкаф, true — полки) → где мяч остался
+const BALL_HOME_LEFT := Vector3(-1.6, 1.4, 0.4)  # отсюда мяч падает в виде на полки
+const BALL_FRONT_LEFT := -0.9  # невидимая стенка перед камерой в виде на полки (по X)
+var wall_shelf_wood := Color("2a1d42")  # цвет полок на левой стене (кнопка цвета в виде на полки)
+var wall_shelf_parts: Array = []
 var _ball_v := Vector3.ZERO
 var _ball_held := false
 var _ball_plane := -1.2  # глубина, на которой мяч ведут за курсором
 var _ball_asleep := false
 var _ball_view := ""
+var _ball_check := 0.0  # раз в BALL_CHECK с — виден ли мяч (не за телевизором, не за краем кадра)
+const BALL_CHECK := 5.0
 var ball_on := true  # мяч включают и выключают кнопкой в редакторе шкафа (user://room_props.cfg)
 const FIDGET_SCALE := 1.35  # крупнее настоящего: по ручкам должно быть легко попасть
 const FIDGET_COLORS := [Color("ff3ea5"), Color("2ef2ff"), Color("ffe14d")]
@@ -171,6 +200,10 @@ var _extra_lights: Array = []  # второстепенные лампы — в�
 
 
 func _ready() -> void:
+	var saved_color := ConfigFile.new()
+	if saved_color.load("user://room_props.cfg") == OK:
+		shelf_wood = Color.html(str(saved_color.get_value("cabinet", "color", "2a1d42")))
+		wall_shelf_wood = Color.html(str(saved_color.get_value("cabinet", "shelves", "2a1d42")))
 	_environment()
 	_room()
 	_furniture()
@@ -191,6 +224,11 @@ func _ready() -> void:
 	_basket = preload("res://hub/room_basket.gd").new()
 	_basket.room = self
 	add_child(_basket)
+	_basket_left = preload("res://hub/room_basket.gd").new()
+	_basket_left.set("key", "basket_left")
+	_basket_left.set("default_at", Vector2(-5.9, 1.25))
+	_basket_left.room = self
+	add_child(_basket_left)
 	panels = GamePanels.new()
 	add_child(panels)
 	panels.setup(
@@ -218,6 +256,16 @@ func _ready() -> void:
 	camera.add_child(_rim)
 	Prefs.changed.connect(_apply_quality)
 	_apply_quality()
+	apply_room(Rooms.saved_id(), false)
+	_apply_stand_color()
+	_arrivals = Arrivals.new()
+	_arrivals.name = "Arrivals"
+	_arrivals.set("room", self)
+	add_child(_arrivals)
+	_arrivals.changed.connect(func(): arrival_changed.emit())
+	if not _pending_arrivals.is_empty():
+		_arrivals.call("enqueue", _pending_arrivals)
+		_pending_arrivals = []
 
 
 ## Качество графики (Prefs.graphics): 0 — без теней и SSAO, без второстепенных ламп; 1 — тень только
@@ -231,6 +279,156 @@ func _apply_quality() -> void:
 	for l in _extra_lights:
 		(l as Light3D).visible = q >= 1
 	_rim.visible = q >= 1
+	if is_instance_valid(_room_theme) and _room_theme.has_method("apply_quality"):
+		_room_theme.call("apply_quality", q)
+
+
+# --- Комнаты главного меню (hub/rooms/hub_rooms.gd) -------------------------------------
+
+## Сменить комнату: украшения темы строятся отдельным узлом, шкаф и расстановка не трогаются.
+## save — запомнить выбор (своя комната); в режиме наблюдения комната друга не сохраняется.
+func apply_room(id: String, save: bool = true) -> void:
+	var entry: Dictionary = Rooms.by_id(id)
+	# своя сезонная комната вне сезона недоступна (у друга в гостях показываем как есть)
+	if entry.is_empty() or str(entry.get("kind", "")) != "neon" or (not remote_view and not Rooms.in_season(entry)):
+		entry = Rooms.by_id(Rooms.default_id())  # незнакомая или пока не поддержанная (сцена из мастерской)
+	if save and not remote_view:
+		Rooms.save_id(str(entry.id))
+	if str(entry.id) == room_id:
+		return
+	room_id = str(entry.id)
+	if is_instance_valid(_room_theme):
+		remove_child(_room_theme)
+		_room_theme.queue_free()
+	_room_theme = null
+	var theme_path := str(entry.get("theme", ""))
+	if theme_path != "" and ResourceLoader.exists(theme_path):
+		_room_theme = (load(theme_path) as GDScript).new()
+		_room_theme.name = "RoomTheme"
+		add_child(_room_theme)
+		_room_theme.call("build", self)
+	_set_window_snow(is_instance_valid(_room_theme) and bool(_room_theme.get("snow")))
+	if is_instance_valid(_skateboard):
+		var pose: Variant = _room_theme.get("skateboard_pose") if is_instance_valid(_room_theme) else null
+		_skateboard.transform = pose if pose is Transform3D else _skateboard_home
+	_apply_quality()
+	room_changed.emit(room_id)
+
+
+## Цвет шкафа и тумбы (редактор шкафа, значок шкафа): сохраняется локально, работает в любой комнате.
+func set_shelf_color(color: Color) -> void:
+	if color.is_equal_approx(shelf_wood):
+		return
+	shelf_wood = color
+	var prefs := ConfigFile.new()
+	prefs.load("user://room_props.cfg")
+	prefs.set_value("cabinet", "color", color.to_html(false))
+	prefs.save("user://room_props.cfg")
+	_rebuild_shelf_geometry()
+	_apply_stand_color()
+
+
+## Показать шкаф другого цвета, не сохраняя (комната друга и возвращение домой).
+func _show_wood(color: Color) -> void:
+	if color.is_equal_approx(shelf_wood):
+		return
+	shelf_wood = color
+	_rebuild_shelf_geometry()
+	_apply_stand_color()
+
+
+## Цвет полок на левой стене (кнопка цвета в виде на полки): сохраняется, друзья видят.
+func set_wall_shelf_color(color: Color) -> void:
+	var prefs := ConfigFile.new()
+	prefs.load("user://room_props.cfg")
+	prefs.set_value("cabinet", "shelves", color.to_html(false))
+	prefs.save("user://room_props.cfg")
+	_show_wall_shelves(color)
+
+
+func _show_wall_shelves(color: Color) -> void:
+	wall_shelf_wood = color
+	for mesh: Variant in wall_shelf_parts:
+		if is_instance_valid(mesh) and (mesh as MeshInstance3D).material_override is ShaderMaterial:
+			var m := (mesh as MeshInstance3D).material_override as ShaderMaterial
+			m.set_shader_parameter("albedo", color)
+			m.set_shader_parameter("albedo2", color.darkened(0.35))
+
+
+func _apply_stand_color() -> void:
+	for part: Array in tv_stand:
+		var mesh := part[0] as MeshInstance3D
+		if is_instance_valid(mesh) and mesh.material_override is ShaderMaterial:
+			var c := shelf_wood.darkened(float(part[1]))
+			(mesh.material_override as ShaderMaterial).set_shader_parameter("albedo", c)
+			(mesh.material_override as ShaderMaterial).set_shader_parameter("albedo2", c.darkened(0.35))
+
+
+## Габариты шкафа в координатах комнаты (украшения темы вешаются по его кромке); пустой — шкафа ещё нет.
+func shelf_bounds() -> AABB:
+	if not is_instance_valid(_shelf_root) or _row_info.is_empty():
+		return AABB()
+	var left := INF
+	var right := -INF
+	var top := 0.0
+	var back := float(_row_info[0].back)
+	for info: Dictionary in _row_info:
+		left = minf(left, float(info.left))
+		right = maxf(right, float(info.get("outer_right", info.right)))
+		top = maxf(top, float(info.floor) + float(info.get("height", CELL_H)))
+	var low := to_local(_shelf_root.to_global(Vector3(left - BOARD, 0.0, back)))
+	var high := to_local(_shelf_root.to_global(Vector3(right + BOARD, top + BOARD, back + CELL_D)))
+	return AABB(low, high - low)
+
+
+## Снег за окном: падающие снежинки (шейдер) и заснеженные крыши (картинка города).
+func _set_window_snow(on: bool) -> void:
+	if not is_instance_valid(_city_view) or _city_textures.is_empty():
+		return
+	if on and not _city_textures.has("front_snow"):
+		_city_textures.front_snow = ImageTexture.create_from_image(snowy_city((_city_textures.front as ImageTexture).get_image()))
+		_city_textures.side_snow = ImageTexture.create_from_image(snowy_city((_city_textures.side as ImageTexture).get_image()))
+	_city_view.set_shader_parameter("snow", 1.0 if on else 0.0)
+	_city_view.set_shader_parameter("front_city", _city_textures.front_snow if on else _city_textures.front)
+	_city_view.set_shader_parameter("side_city", _city_textures.side_snow if on else _city_textures.side)
+
+
+## Снег на крышах: там, где небо (градиент city_image) сменяется домом, — 2–3 светлых пикселя.
+static func snowy_city(source: Image) -> Image:
+	var image := source.duplicate() as Image
+	if image.is_compressed():
+		image.decompress()
+	image.convert(Image.FORMAT_RGB8)
+	var w := image.get_width()
+	var h := image.get_height()
+	var data := image.get_data()  # байты RGB: быстрее, чем get_pixel на каждый пиксель
+	var sky := PackedInt32Array()
+	sky.resize(h * 3)
+	for y in h:
+		var c := Color("251048").lerp(Color("c0447a"), pow(y / float(h), 2.2))
+		sky[y * 3] = c.r8
+		sky[y * 3 + 1] = c.g8
+		sky[y * 3 + 2] = c.b8
+	var snow := PackedByteArray([223, 230, 255])
+	var shade := PackedByteArray([169, 179, 230])
+	for x in w:
+		var was_sky := true
+		for y in h:
+			var i := (y * w + x) * 3
+			var diff := absi(data[i] - sky[y * 3]) + absi(data[i + 1] - sky[y * 3 + 1]) + absi(data[i + 2] - sky[y * 3 + 2])
+			var is_sky := diff < 24
+			if was_sky and not is_sky and y > 0:
+				var depth := 3 if (x * 7 + y * 3) % 3 == 0 else 2
+				for k in depth:
+					if y + k < h:
+						var j := ((y + k) * w + x) * 3
+						var tone := snow if k < depth - 1 else shade
+						data[j] = tone[0]
+						data[j + 1] = tone[1]
+						data[j + 2] = tone[2]
+			was_sky = is_sky
+	image.set_data(w, h, false, Image.FORMAT_RGB8, data)
+	return image
 
 
 # --- Окружение и свет ----------------------------------------------------------------
@@ -575,11 +773,13 @@ func _window() -> void:
 	_wall_decor.append([Rect2(Vector2(c.x, c.y) - size / 2.0 - Vector2(0.07, 0.06), size + Vector2(0.14, 0.12)), BACK + 0.14])
 	# ночной город за окном: готовая картинка (hub/art/city.png), если её нет — рисуем на лету
 	var tex: Texture2D = ImageTexture.create_from_image(_front_city_image())
+	_city_textures = {"front": tex, "side": ImageTexture.create_from_image(side_city_image())}
 	_city_view = ShaderMaterial.new()
 	_city_view.shader = preload("res://hub/window_city.gdshader")
 	_city_view.set_shader_parameter("side_view", 0.0)
+	_city_view.set_shader_parameter("window_aspect", size.x / size.y)
 	_city_view.set_shader_parameter("front_city", tex)
-	_city_view.set_shader_parameter("side_city", ImageTexture.create_from_image(side_city_image()))
+	_city_view.set_shader_parameter("side_city", _city_textures.side)
 	_quad(size, c, Vector3.ZERO, _city_view)
 	var frame := _mat(Color("efe9ff"), 0.6)
 	_box(Vector3(size.x + 0.08, 0.05, 0.06), c + Vector3(0, size.y / 2.0, 0.02), frame)
@@ -702,23 +902,91 @@ func _board_at(point: Vector2) -> Node3D:
 	return boards.get(int(hit.collider.get_meta("board_id", 0)), null)
 
 
+# --- Развёрнутая стена (владелец 14.11: плакаты, доски, корзина — и на левой стене с полками) ---------
+## Координата u вдоль стен: задняя стена — x ∈ [−3, 3]; левая продолжает её за углом:
+## u = −3 − (z − BACK), z ∈ [−2, 2.18] → u ∈ [−7.18, −3]. Форматы сохранения и сети прежние (x, y),
+## левая стена — просто x левее −3.
+const LEFT_WALL_END := -W * 0.5 - (ROOM_FRONT - BACK)
+
+
+static func wall_is_left(u: float) -> bool:
+	return u < -W * 0.5
+
+
+## Положение предмета на стене: at — (u, высота), offset — отступ от стены. На левой стене — лицом в комнату (+X).
+func wall_xform(at: Vector2, offset: float) -> Transform3D:
+	if wall_is_left(at.x):
+		return Transform3D(Basis(Vector3.UP, PI * 0.5), Vector3(-W * 0.5 + 0.05 + offset, at.y, BACK + (-W * 0.5 - at.x)))
+	return Transform3D(Basis.IDENTITY, Vector3(at.x, at.y, BACK + offset))
+
+
+## Где на развёрнутой стене висит узел (meta wall_at; у старых узлов — по положению на задней стене).
+func wall_coord(node: Node3D) -> Vector2:
+	return node.get_meta("wall_at", Vector2(node.position.x, node.position.y))
+
+
+func _hang(node: Node3D, at: Vector2, offset: float, tilt: float = 0.0) -> void:
+	var xf := wall_xform(at, offset)
+	node.transform = Transform3D(xf.basis * Basis(Vector3.BACK, tilt), xf.origin)
+	node.set_meta("wall_at", at)
+	node.set_meta("wall_off", offset)
+
+
+## Точка стены под курсором — той, на которую смотрит камера (Vector2 развёрнутой стены или null).
+func wall_hit(point: Vector2) -> Variant:
+	var origin := camera.project_ray_origin(point)
+	var ray := camera.project_ray_normal(point)
+	if _looking_left:
+		var side: Variant = Plane(Vector3.RIGHT, -W * 0.5 + 0.062).intersects_ray(origin, ray)
+		return null if side == null else Vector2(-W * 0.5 - ((side as Vector3).z - BACK), (side as Vector3).y)
+	var back: Variant = Plane(Vector3.BACK, BOARD_AT.z).intersects_ray(origin, ray)
+	return null if back == null else Vector2((back as Vector3).x, (back as Vector3).y)
+
+
+## Центр предмета (полуразмер half) в пределах своей стены.
+static func clamp_wall(center: Vector2, half: Vector2, low_y: float, high_y: float) -> Vector2:
+	var y := clampf(center.y, low_y, high_y)
+	if wall_is_left(center.x):
+		return Vector2(clampf(center.x, LEFT_WALL_END + half.x + 0.05, -W * 0.5 - half.x - 0.05), y)
+	return Vector2(clampf(center.x, -W * 0.5 + half.x + 0.03, W * 0.5 - half.x - 0.03), y)
+
+
+## Препятствие для мяча: плоский предмет на стене (центр at, размер extent, толщина от стены depth).
+func _wall_block(at: Vector2, extent: Vector2, depth: float) -> Array:
+	if wall_is_left(at.x):
+		var z := BACK + (-W * 0.5 - at.x)
+		return [Vector3(-W * 0.5, at.y - extent.y * 0.5, z - extent.x * 0.5), Vector3(-W * 0.5 + 0.05 + depth, at.y + extent.y * 0.5, z + extent.x * 0.5)]
+	return [Vector3(at.x - extent.x * 0.5, at.y - extent.y * 0.5, BACK), Vector3(at.x + extent.x * 0.5, at.y + extent.y * 0.5, BACK + depth)]
+
+
 ## Свободное место на стене для новой доски/плаката размера extent: не на шкафу, окне, других досках и плакатах.
 func free_wall_spot(extent: Vector2) -> Vector2:
+	var left := _looking_left  # вид на полки — вешаем на левую стену
 	var taken: Array = [shelf_wall_rect()]
 	for decor: Array in _wall_decor:
 		taken.append(decor[0])
+	# левая стена: полки с предметами и кровать
+	var shelves_u := Vector2(-W * 0.5 - (WALL_SHELF_FRONT - BACK), -W * 0.5 - (WALL_SHELF_BACK - BACK))
+	taken.append(Rect2(shelves_u.x, 1.05, shelves_u.y - shelves_u.x, 0.45))
+	taken.append(Rect2(shelves_u.x, 1.67, shelves_u.y - shelves_u.x, 0.45))
+	taken.append(Rect2(-W * 0.5 - 2.15, 0.0, 2.15, 0.6))
 	for board: Variant in boards.values():
 		if is_instance_valid(board):
-			taken.append(Rect2(Vector2(board.position.x, board.position.y) - BOARD_EXTENT / 2.0, BOARD_EXTENT))
+			taken.append(Rect2(wall_coord(board) - BOARD_EXTENT / 2.0, BOARD_EXTENT))
+	# корзины: щит 0,29 × 0,21 и кольцо с сеткой под ним
+	for basket: Node3D in _baskets():
+		taken.append(Rect2(wall_coord(basket) + Vector2(-0.16, -0.3), Vector2(0.32, 0.5)))
 	for poster: Node3D in posters:
 		if poster.visible:
 			taken.append(poster.wall_rect())
-	var best := Vector2(0.0, 1.6)
+	var best := Vector2(-5.5 if left else 0.0, 1.6)
 	var best_hits := 1 << 20
 	for row: float in [1.6, 1.1, 2.05, 0.75]:
 		for step in 11:
 			var x := (float(step) - 5.0) * 0.46
-			var spot := Vector2(clampf(x, -W / 2.0 + extent.x / 2.0 + 0.05, W / 2.0 - extent.x / 2.0 - 0.05), row)
+			if left:
+				x = lerpf(LEFT_WALL_END + extent.x / 2.0 + 0.1, -W / 2.0 - extent.x / 2.0 - 0.1, float(step) / 10.0)
+			var spot := clamp_wall(Vector2(x, row), extent / 2.0 + Vector2(0.02, 0.0), 0.0, H)
 			var rect := Rect2(spot - extent / 2.0, extent).grow(0.03)
 			var hits := 0
 			for other: Rect2 in taken:
@@ -774,6 +1042,8 @@ func _furniture() -> void:
 	deck.position = Vector3(-1.05, 0.4, BACK + 0.1)
 	deck.rotation_degrees = Vector3(-10, 0, -12)
 	add_child(deck)
+	_skateboard = deck
+	_skateboard_home = deck.transform
 	# дека: низ с неоновым рисунком (к игроку), сверху — шершавая шкурка
 	var board := MeshInstance3D.new()
 	var cap := CapsuleMesh.new()
@@ -1058,14 +1328,14 @@ func _tv_corner(tv_x: float) -> void:
 	var z := BACK + 0.28
 	var dark := Color("1d1630")
 	# тумба: верх, бока, полка, задняя стенка, цоколь
-	_soft(Vector3(0.86, 0.035, 0.5), Vector3(tv_x, 0.615, z), "wood_dark", dark)
-	_soft(Vector3(0.035, 0.6, 0.5), Vector3(tv_x - 0.4125, 0.3, z), "wood_dark", dark)
-	_soft(Vector3(0.035, 0.6, 0.5), Vector3(tv_x + 0.4125, 0.3, z), "wood_dark", dark)
-	_soft(Vector3(0.8, 0.03, 0.48), Vector3(tv_x, 0.32, z), "wood_dark", dark)
-	_soft(Vector3(0.8, 0.05, 0.48), Vector3(tv_x, 0.04, z), "wood_dark", dark)
-	_soft(Vector3(0.8, 0.6, 0.02), Vector3(tv_x, 0.3, z - 0.24), "wood_dark", dark.darkened(0.3))
+	tv_stand.append([_soft(Vector3(0.86, 0.035, 0.5), Vector3(tv_x, 0.615, z), "wood_dark", dark), 0.3])
+	tv_stand.append([_soft(Vector3(0.035, 0.6, 0.5), Vector3(tv_x - 0.4125, 0.3, z), "wood_dark", dark), 0.3])
+	tv_stand.append([_soft(Vector3(0.035, 0.6, 0.5), Vector3(tv_x + 0.4125, 0.3, z), "wood_dark", dark), 0.3])
+	tv_stand.append([_soft(Vector3(0.8, 0.03, 0.48), Vector3(tv_x, 0.32, z), "wood_dark", dark), 0.3])
+	tv_stand.append([_soft(Vector3(0.8, 0.05, 0.48), Vector3(tv_x, 0.04, z), "wood_dark", dark), 0.3])
+	tv_stand.append([_soft(Vector3(0.8, 0.6, 0.02), Vector3(tv_x, 0.3, z - 0.24), "wood_dark", dark.darkened(0.3)), 0.5])
 	# видеомагнитофон и приставка на полках
-	_soft(
+	vcr_body = _soft(
 		Vector3(0.42, 0.09, 0.3),
 		Vector3(tv_x + 0.05, 0.38, z + 0.02),
 		"plastic",
@@ -1103,7 +1373,7 @@ func _tv_corner(tv_x: float) -> void:
 		0.02
 	)
 	for k in 4:
-		_soft(
+		cassettes.append(_soft(
 			Vector3(0.025, 0.19, 0.11),
 			Vector3(tv_x + 0.18 + k * 0.03, 0.165, z + 0.12),
 			"plastic",
@@ -1111,7 +1381,7 @@ func _tv_corner(tv_x: float) -> void:
 			self,
 			Vector3(0, 0, -0.05 * k),
 			0.004
-		)
+		))
 	# телевизор: корпус со скруглёнными углами, кинескоп сзади, рамка, выпуклый экран, кнопки
 	var tv_y := 0.86
 	var tvz := BACK + 0.32
@@ -1292,15 +1562,20 @@ func _shelf() -> void:
 		_cups_z = z + 0.01
 		_place_cups(x_end, false)
 		boxes.append(b)
-	# 5) нижняя ячейка — стопка затемнённых коробок «Coming soon», лёжа
-	# Пользовательские коробки передаём общему упаковщику ShelfConfig вместе со встроенными.
+	# Игры вне исходной раскладки тоже получают коробки и проходят через систему прилёта.
+	var placed_ids: Dictionary = {}
+	for box: GameBox in boxes:
+		placed_ids[_shelf_id(box)] = true
 	for game: Dictionary in HubGames.all():
-		if not game.get("custom", false):
+		var id: String = game["id"]
+		if placed_ids.has(id):
 			continue
-		var custom_box: GameBox = make.call(game, n)
+		var extra_box: GameBox = make.call(game, n)
 		n += 1
-		_shelf_root.add_child(custom_box)
-		boxes.append(custom_box)
+		_shelf_root.add_child(extra_box)
+		boxes.append(extra_box)
+		placed_ids[id] = true
+	# Нижняя ячейка — стопка затемнённых коробок «Coming soon», лёжа.
 	var rng := RandomNumberGenerator.new()
 	rng.seed = 12
 	for r in range(BOXED_ROWS, rows):
@@ -1400,16 +1675,27 @@ func left_wall_view() -> bool:
 
 
 func can_turn_room() -> bool:
-	return not remote_view and not _editor_on and not board_focused() and focused == null and _drag_box == null and not _ball_held
+	# можно в редакторе шкафа и в гостях у друга (владелец 14.11); нельзя, пока что-то в руках
+	return not board_focused() and focused == null and _drag_box == null and not _ball_held and _edge_drag.is_empty()
 
 
 func look_left_wall(on: bool) -> void:
 	if not can_turn_room() or _looking_left == on:
 		return
 	_clear_shelf_selection()
+	# мяч: включён в обоих видах — идёт за камерой; только в одном — ждёт там, где его оставили
+	var was_on := _ball_view_on()
+	if is_instance_valid(_ball):
+		_ball_spots[_looking_left] = _ball.position
 	_looking_left = on
-	if on:
-		_ball_camera_paused = true
+	_ball_camera_paused = true
+	if is_instance_valid(_ball) and _ball_view_on():
+		_ball.position = _ball_home() if was_on else _ball_spots.get(on, _ball_home())
+		_ball_v = Vector3.ZERO
+		_ball_asleep = false
+	_apply_ball_on()
+	if is_instance_valid(_edge_overlay):
+		_edge_overlay.visible = _editor_on and not on
 	if is_instance_valid(_city_view):
 		if _city_blend != null and _city_blend.is_valid():
 			_city_blend.kill()
@@ -1419,6 +1705,20 @@ func look_left_wall(on: bool) -> void:
 	var previous := camera.transform
 	_frame_shelf()
 	camera.transform = previous
+	view_turned.emit(on)
+
+
+## Сразу к виду на шкаф (уход в гости и возвращение домой).
+func _reset_view() -> void:
+	if not _looking_left:
+		return
+	_looking_left = false
+	if is_instance_valid(_city_view):
+		_city_view.set_shader_parameter("side_view", 0.0)
+	_frame_shelf()
+	camera.transform = _cam_home
+	_apply_ball_on()
+	view_turned.emit(false)
 
 
 func _set_city_blend(value: float) -> void:
@@ -1459,6 +1759,7 @@ func _wall_door() -> void:
 		_box(Vector3(0.07, jamb_height, trim_depth), Vector3(x, jamb_height * 0.5, trim_front), trim, section)
 	_box(Vector3(width + 0.07, 0.07, trim_depth), Vector3(jamb + width * 0.5, height, trim_front), trim, section)
 	var hinge := Node3D.new()
+	door_hinge = hinge  # створка двери: на неё темы вешают украшения (зимой — венок)
 	section.add_child(hinge)
 	hinge.position = Vector3(jamb + width - 0.035, 0.025, face_z - 0.02)
 	hinge.rotation.y = -0.27
@@ -1484,9 +1785,9 @@ func _wall_shelves() -> void:
 	var line_material := _mat(Color("a2a7c1"), 0.5)
 	for surface: String in WALL_SHELVES:
 		var top: float = WALL_SHELVES[surface]
-		_soft(Vector3(WALL_SHELF_DEPTH, BOARD, length),
+		wall_shelf_parts.append(_soft(Vector3(WALL_SHELF_DEPTH, BOARD, length),
 			Vector3(center_x, top - BOARD * 0.5, WALL_SHELF_BACK + length * 0.5),
-			"wood_dark", Color("2a1d42"), self)
+			"wood_dark", wall_shelf_wood, self))
 		var edge := Vector3(center_x + WALL_SHELF_DEPTH * 0.5 - 0.018, top, WALL_SHELF_FRONT - 0.025)
 		var anchor := Vector3(-W * 0.5 + 0.055, top + 0.32, edge.z)
 		var line := _cyl(0.002, 0.002, edge.distance_to(anchor), (edge + anchor) * 0.5, line_material)
@@ -1745,9 +2046,25 @@ func _init_custom_shelf() -> void:
 		"height": CELL_H,
 		"cups": BOXED_ROWS - 1
 	}
-	var result := ShelfConfig.load_state(defaults, _shelf_ids(), _shelf_sizes())
+	# Новые игры (из обновления, свои, из мастерской) в шкаф сами не встают — прилетают к игроку
+	# (hub/rooms/arrivals.gd); до выбора места стоят на нижней полке левой стены.
+	var seen: Variant = Arrivals.seen_ids()
+	var fresh: Array = []
+	for box: GameBox in boxes:
+		var id := _shelf_id(box)
+		if seen != null and not (seen as Array).has(id) and not box.is_figurine() and not box.is_cups() and not box.dim:
+			fresh.append(box)
+	if seen == null:
+		Arrivals.mark_seen(boxes.map(func(box: GameBox) -> String: return _shelf_id(box)))
+	var result := ShelfConfig.load_state(defaults, _shelf_ids(), _shelf_sizes(), ShelfConfig.FILE,
+		fresh.map(func(box: GameBox) -> String: return _shelf_id(box)))
 	if result.ok:
 		_apply_shelf_state(result)
+	for box: GameBox in fresh:
+		park_on_wall(box)
+	if not fresh.is_empty():
+		_reflow(false)
+	_pending_arrivals = fresh
 
 
 func _apply_shelf_state(state: Dictionary) -> void:
@@ -1793,7 +2110,7 @@ func _rebuild_shelf_geometry() -> void:
 		level_y.append(y_cursor)
 		if level < rows:
 			y_cursor += BOARD + ShelfConfig.row_height(_cabinet, rows - 1 - level)
-	var wood := Color("2a1d42")
+	var wood := shelf_wood
 	_soft(
 		Vector3(full_width - 0.02, base_y, CELL_D - 0.02),
 		Vector3(SHELF_X, base_y * 0.5, z - 0.01),
@@ -1808,10 +2125,11 @@ func _rebuild_shelf_geometry() -> void:
 		wood.darkened(0.45),
 		_shelf_root
 	)
+	# боковины чуть выступают вперёд и выше досок: совпадающие передние грани мерцали (z-fighting)
 	for side in [-1.0, 1.0]:
 		_soft(
-			Vector3(BOARD, full_height, CELL_D),
-			Vector3(SHELF_X + side * (full_width - BOARD) * 0.5, base_y + full_height * 0.5, z),
+			Vector3(BOARD, full_height + 0.003, CELL_D + 0.004),
+			Vector3(SHELF_X + side * (full_width - BOARD) * 0.5, base_y + full_height * 0.5, z + 0.002),
 			"wood_dark",
 			wood,
 			_shelf_root
@@ -1840,7 +2158,7 @@ func _rebuild_shelf_geometry() -> void:
 		var floor_y: float = float(level_y[rows - 1 - bottom_row]) + BOARD
 		# перегородка справа — только на высоту этой ячейки
 		if float(c.x) + width < inner_width - 0.002:
-			_soft(Vector3(BOARD, height, CELL_D), Vector3(x + width + BOARD * 0.5, floor_y + height * 0.5, z), "wood_dark", wood, _shelf_root)
+			_soft(Vector3(BOARD, height, CELL_D + 0.004), Vector3(x + width + BOARD * 0.5, floor_y + height * 0.5, z + 0.002), "wood_dark", wood, _shelf_root)
 		# кусок полки под ячейкой (кроме дна) — от середины левой перегородки до середины правой
 		if bottom_row < rows - 1:
 			shelf_board.call(x - BOARD * 0.5, x + width + BOARD * 0.5, rows - 1 - bottom_row)
@@ -1963,7 +2281,7 @@ func request_shelf_geometry(geometry: Dictionary) -> String:
 func _frame_shelf() -> void:
 	if not is_instance_valid(camera):
 		return
-	if _looking_left and not remote_view and not _editor_on:
+	if _looking_left:
 		_cam_home = Transform3D(Basis.IDENTITY, Vector3(0.19, 1.44, -1.15)).looking_at(Vector3(-2.70, 1.33, -0.43))
 		return
 	var width: float = ShelfConfig.full_width(_cabinet) * SHELF_SCALE
@@ -1990,7 +2308,7 @@ func _frame_shelf() -> void:
 
 ## Масштаб меняет угол обзора, сохраняя точку съёмки и перспективу комнаты.
 func _shelf_camera_fov() -> float:
-	if _looking_left and not remote_view and not _editor_on and not board_focused():
+	if _looking_left and not board_focused():
 		return 56.0
 	if board_focused():
 		return CAMERA_FOV
@@ -2053,6 +2371,8 @@ func open_shelf_editor() -> void:
 		return
 	if _editor_on:
 		return
+	if is_instance_valid(_arrivals):
+		_arrivals.call("abort")  # новая игра прилетит снова после редактора
 	_cancel_drag()
 	release()
 	for box: GameBox in boxes:
@@ -2072,7 +2392,7 @@ func open_shelf_editor() -> void:
 	_editor_ui = load("res://hub/shelf_editor.gd").new()
 	_editor_ui.set("room", self)
 	add_child(_editor_ui)
-	_edge_overlay.visible = true
+	_edge_overlay.visible = not _looking_left
 	_reflow(false)
 	_frame_shelf()
 	editor_mode_changed.emit(true)
@@ -2356,27 +2676,9 @@ func _transfer_selected() -> void:
 			shelf_hint.emit("Нет свободного места для фигурки" if box.is_figurine() else "В шкафу нет места")
 			return
 	else:
-		var surface := "wall_upper" if box.is_figurine() else "wall_lower"
-		var span := _wall_span(box, surface)
-		var found := false
-		var extent := _wall_item_extent(box)
-		var candidates: Array[float] = [span[0].z]
-		for other: GameBox in boxes:
-			var anchor: Dictionary = anchors.get(_shelf_id(other), {})
-			if anchor.get("surface", "") == surface:
-				var point := _shelf_root.to_global(_wall_home(other, anchor).origin)
-				candidates.append(point.z + (_wall_item_extent(other).z + extent.z) * 0.5 + 0.009)
-		candidates.sort()
-		for z: float in candidates:
-			if z > span[1].z or not _wall_item_fits(box, surface, z):
-				continue
-			anchors[id] = {"surface": surface, "x": inverse_lerp(span[0].z, span[1].z, z)}
-			found = true
-			break
-		if not found:
+		if not _wall_spot(box, "wall_upper" if box.is_figurine() else "wall_lower"):
 			shelf_hint.emit("На этой полке нет места")
 			return
-		(_cabinet.get("figure_cells", {}) as Dictionary).erase(id)
 	_reflow(false)
 	_animate_transfer(box, start)
 	_finish_pose_change()
@@ -2384,6 +2686,66 @@ func _transfer_selected() -> void:
 		_editor_preferences = _shelf_ids()
 		_editor_ui.call("sync")
 	shelf_hint.emit(destination)
+
+
+## Свободное место на полке левой стены: якорь коробки ставится туда, false — места нет.
+func _wall_spot(box: GameBox, surface: String) -> bool:
+	var id := _shelf_id(box)
+	var anchors: Dictionary = _cabinet.get_or_add("figure_surfaces", {})
+	var saved: Variant = anchors.get(id)
+	anchors.erase(id)
+	var span := _wall_span(box, surface)
+	var extent := _wall_item_extent(box)
+	var candidates: Array[float] = [span[0].z]
+	for other: GameBox in boxes:
+		var anchor: Dictionary = anchors.get(_shelf_id(other), {})
+		if other != box and anchor.get("surface", "") == surface:
+			var point := _shelf_root.to_global(_wall_home(other, anchor).origin)
+			candidates.append(point.z + (_wall_item_extent(other).z + extent.z) * 0.5 + 0.009)
+	candidates.sort()
+	for z: float in candidates:
+		if z > span[1].z or not _wall_item_fits(box, surface, z):
+			continue
+		anchors[id] = {"surface": surface, "x": inverse_lerp(span[0].z, span[1].z, z)}
+		(_cabinet.get("figure_cells", {}) as Dictionary).erase(id)
+		return true
+	if saved != null:
+		anchors[id] = saved
+	return false
+
+
+## Новая игра — на полку у левой стены (нижняя, потом верхняя). Уже стоит там — остаётся.
+func park_on_wall(box: GameBox) -> bool:
+	var anchor: Dictionary = _cabinet.get("figure_surfaces", {}).get(_shelf_id(box), {})
+	if WALL_SHELVES.has(anchor.get("surface", "")) and _wall_item_fits(box, str(anchor.surface), _wall_anchor_z(box, anchor)):
+		return true
+	for surface: String in ["wall_lower", "wall_upper"]:
+		if _wall_spot(box, surface):
+			_reflow(false)
+			return true
+	return false
+
+
+func _wall_anchor_z(box: GameBox, anchor: Dictionary) -> float:
+	var span := _wall_span(box, str(anchor.surface))
+	return lerpf(span[0].z, span[1].z, float(anchor.get("x", 0.0)))
+
+
+## Новая игра — в шкаф, если там есть место (шкаф ради неё не расширяется).
+func arrival_to_cabinet(box: GameBox) -> bool:
+	var anchors: Dictionary = _cabinet.get_or_add("figure_surfaces", {})
+	var old: Dictionary = anchors.get(_shelf_id(box), {})
+	if not _return_to_cabinet(box, old):
+		return false
+	_reflow(false)
+	return true
+
+
+## Прилёт новой игры для карточки хаба: {} — нет; иначе {"wrapped": в обёртке, "clicks": осталось нажатий}.
+func arrival_info() -> Dictionary:
+	if arrival_box == null or not is_instance_valid(_arrivals):
+		return {}
+	return {"wrapped": bool(_arrivals.get("wrapped")), "left": Arrivals.CLICKS - int(_arrivals.get("clicks"))}
 
 
 func _return_figure_to_surface(box: GameBox) -> bool:
@@ -2619,6 +2981,8 @@ func _apply_cells(result: Dictionary) -> void:
 ## Правый клик в редакторе: по перегородке / куску полки — убрать (две ячейки → одна);
 ## внутри ячейки — поставить перегородку посередине.
 func _cells_right_click(screen: Vector2) -> void:
+	if _looking_left:
+		return
 	var edge := _edge_at(screen)
 	var point := _shelf_point(screen)
 	var cells: Array = ShelfConfig.shelf_cells(_cabinet)
@@ -2652,6 +3016,8 @@ func _cells_right_click(screen: Vector2) -> void:
 
 
 func _edge_at(screen: Vector2) -> Dictionary:
+	if _looking_left:
+		return {}  # шкаф за спиной: его рёбра не ловим
 	var best: Dictionary = {}
 	var distance := 12.0
 	for edge: Dictionary in _shelf_edges():
@@ -2786,31 +3152,83 @@ func _ball_make() -> void:
 	var saved := ConfigFile.new()
 	if saved.load("user://room_props.cfg") == OK:
 		ball_on = bool(saved.get_value("ball", "on", true))
+		ball_left_on = bool(saved.get_value("ball", "left_on", false))
 	_apply_ball_on()
 
 
+## Мяч виден игроку: в кадре и не заслонён мебелью или предметами (телевизор, лампа, кубик, шкаф).
+func ball_visible() -> bool:
+	if not is_instance_valid(_ball) or not is_instance_valid(camera):
+		return true
+	var at := _ball.global_position
+	if camera.is_position_behind(at):
+		return false
+	if not get_viewport().get_visible_rect().grow(-6.0).has_point(camera.unproject_position(at)):
+		return false
+	var eye := to_local(camera.global_position)
+	var near := _ball.position + (eye - _ball.position).normalized() * BALL_R * 1.2  # ближняя к камере точка мяча
+	for block: Array in _ball_blocks():
+		var box := AABB(block[0], block[1] - block[0])
+		if box.grow(-0.01).has_point(_ball.position) or box.intersects_segment(eye, near):
+			return false
+	# Предметы с кликабельной формой (лампа, кубик, телевизор…) — лучом от камеры до мяча.
+	var query := PhysicsRayQueryParameters3D.create(camera.global_position, to_global(near), 8)
+	query.exclude = [_ball_body.get_rid()]
+	var hit := get_world_3d().direct_space_state.intersect_ray(query)
+	return hit.is_empty() or str(hit.collider.get_meta("room_prop", "")) in ["poster", "board", "wall_lights"]  # гирлянды тонкие — мяч за ними виден
+
+
+## Мяч потерялся из виду — снова появляется на своём месте и падает в кадр.
+## Мяч включён в текущем виде (шкаф или полки).
+func ball_view_on() -> bool:
+	return _ball_view_on()
+
+
+func _ball_view_on() -> bool:
+	return ball_left_on if _looking_left else ball_on
+
+
+func _ball_home() -> Vector3:
+	return BALL_HOME_LEFT if _looking_left else BALL_HOME
+
+
+## Ось «глубины» вида: мяч в руке ведут по плоскости поперёк неё, бросок уходит к стене против неё.
+func _ball_axis() -> Vector3:
+	return Vector3.RIGHT if _looking_left else Vector3.BACK
+
+
+func _ball_reset() -> void:
+	_ball.position = _ball_home()
+	_ball_v = Vector3.ZERO
+	_ball_asleep = false
+
+
 ## Мяч в комнате есть / нет (кнопка в редакторе шкафа). Включили снова — появляется на своём месте.
+## Мяч в текущем виде есть / нет (кнопка мяча в редакторе): у вида на шкаф и вида на полки — свой выключатель.
 func set_ball_enabled(on: bool) -> void:
-	if on == ball_on:
+	if on == _ball_view_on():
 		return
-	ball_on = on
+	if _looking_left:
+		ball_left_on = on
+	else:
+		ball_on = on
 	if on and is_instance_valid(_ball):
-		_ball.position = BALL_HOME
+		_ball.position = _ball_home()
 		_ball_v = Vector3.ZERO
 		_ball_asleep = false
 	_apply_ball_on()
 	var saved := ConfigFile.new()
 	saved.load("user://room_props.cfg")
-	saved.set_value("ball", "on", on)
+	saved.set_value("ball", "left_on" if _looking_left else "on", on)
 	saved.save("user://room_props.cfg")
 
 
 func _apply_ball_on() -> void:
 	if not is_instance_valid(_ball):
 		return
-	_ball.visible = ball_on
-	_ball_body.collision_layer = 8 if ball_on and not _ball_camera_paused else 0
-	if not ball_on and _ball_held:
+	_ball.visible = _ball_view_on()
+	_ball_body.collision_layer = 8 if _ball_view_on() and not _ball_camera_paused else 0
+	if not _ball_view_on() and _ball_held:
 		_ball_held = false
 		Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 
@@ -2840,6 +3258,17 @@ func _ball_blocks() -> Array:
 		# Запас у боковин и передней кромки закрывает карманы, в которых мяч исчезал за шкафом.
 		blocks.append([Vector3(low.x - BALL_R * 2.0, 0.0, BACK),
 			Vector3(high.x + BALL_R * 2.0, high.y, high.z + BALL_R * 2.0)])
+	# полки на левой стене
+	for surface: String in WALL_SHELVES:
+		var top: float = WALL_SHELVES[surface]
+		blocks.append([Vector3(-W * 0.5, top - BOARD, WALL_SHELF_BACK), Vector3(-W * 0.5 + 0.05 + WALL_SHELF_DEPTH, top, WALL_SHELF_FRONT)])
+	# доски друзей на стене: мяч отскакивает от рамы и полочки, а не пролетает насквозь
+	for board: Variant in boards.values():
+		if is_instance_valid(board) and (board as Node3D).visible:
+			blocks.append(_wall_block(wall_coord(board), BOARD_EXTENT, float((board as Node3D).get_meta("wall_off", 0.012)) + 0.035))
+	# украшения комнаты (ёлка, подарки…) — тоже препятствия
+	if is_instance_valid(_room_theme) and _room_theme.has_method("ball_blocks"):
+		blocks.append_array(_room_theme.call("ball_blocks"))
 	return blocks
 
 
@@ -2849,7 +3278,10 @@ func _ball_grab() -> void:
 	_ball_held = true
 	_ball_asleep = false
 	_ball_v = Vector3.ZERO
-	_ball_plane = clampf(_ball.position.z, BACK + 0.6, BALL_FRONT - BALL_R)
+	if _looking_left:
+		_ball_plane = clampf(_ball.position.x, -W * 0.5 + 0.6, BALL_FRONT_LEFT - BALL_R)
+	else:
+		_ball_plane = clampf(_ball.position.z, BACK + 0.6, BALL_FRONT - BALL_R)
 	Input.set_default_cursor_shape(Input.CURSOR_DRAG)
 	shelf_hint.emit("Мяч-попрыгун · размахнитесь и отпустите")
 
@@ -2861,20 +3293,26 @@ func _ball_throw() -> void:
 	var speed := _ball_v.length()
 	if speed > 7.5:
 		_ball_v = _ball_v / speed * 7.5
-	_ball_v.z -= minf(speed, 7.5) * 0.45
+	_ball_v -= _ball_axis() * minf(speed, 7.5) * 0.45
 	shelf_hint.emit(HINT)
 
 
 func _ball_step(delta: float) -> void:
-	if not is_instance_valid(_ball) or not ball_on:
+	if not is_instance_valid(_ball) or not _ball_view_on():
 		return
 	if _ball_camera_paused:
 		var returned := camera.transform.basis.z.dot(_cam_home.basis.z) > 0.998 and camera.position.distance_to(_cam_home.origin) < 0.08
-		if board_focused() or (_looking_left and not _editor_on and not remote_view) or not returned:
+		if board_focused() or not returned:
 			_ball_body.collision_layer = 0
 			return
 		_ball_camera_paused = false
 		_ball_body.collision_layer = 8
+	# Камера у каждого своя (размер окна, приближение) — раз в 5 с проверяем, виден ли мяч; нет — он возвращается.
+	_ball_check += delta
+	if _ball_check >= BALL_CHECK:
+		_ball_check = 0.0
+		if not _ball_held and not ball_visible():
+			_ball_reset()
 	# камера сдвинулась (редактор шкафа, размер окна) — спящий мяч мог остаться за кадром: будим
 	var view_key := "%s|%s|%s" % [camera.global_transform, camera.fov, get_viewport().get_visible_rect().size]
 	if view_key != _ball_view:
@@ -2885,16 +3323,19 @@ func _ball_step(delta: float) -> void:
 		var mouse := get_viewport().get_mouse_position()
 		var origin := camera.project_ray_origin(mouse)
 		var ray := camera.project_ray_normal(mouse)
-		if absf(ray.z) > 0.0001:
-			var target := origin + ray * ((_ball_plane - origin.z) / ray.z)
+		var axis := _ball_axis()
+		if absf(ray.dot(axis)) > 0.0001:
+			var target := origin + ray * ((_ball_plane - origin.dot(axis)) / ray.dot(axis))
 			target.x = clampf(target.x, -W * 0.5 + BALL_R, W * 0.5 - BALL_R)
 			target.y = clampf(target.y, BALL_R, H - BALL_R)
+			target.z = clampf(target.z, BACK + BALL_R, ROOM_FRONT - 0.06 - BALL_R)
 			# и в руке мяч не уходит за край кадра
 			var seen := get_viewport().get_visible_rect().size
 			var shown := camera.unproject_position(target).clamp(Vector2(24, 24), seen - Vector2(24, 24))
 			var back_ray := camera.project_ray_normal(shown)
-			if absf(back_ray.z) > 0.0001:
-				target = camera.project_ray_origin(shown) + back_ray * ((_ball_plane - camera.project_ray_origin(shown).z) / back_ray.z)
+			var back_origin := camera.project_ray_origin(shown)
+			if absf(back_ray.dot(axis)) > 0.0001:
+				target = back_origin + back_ray * ((_ball_plane - back_origin.dot(axis)) / back_ray.dot(axis))
 			var next := _ball.position.lerp(target, 1.0 - exp(-delta * 28.0))
 			if delta > 0.0:
 				_ball_v = _ball_v.lerp((next - _ball.position) / delta, 0.35)
@@ -2922,11 +3363,14 @@ func _ball_step(delta: float) -> void:
 	var supported := false
 	for step in steps:
 		_ball_v.y -= 9.8 * dt
+		for basket: Node3D in _baskets():
+			_ball_v += basket.magnet_pull(_ball.position) * dt  # магнит под кольцом слегка подтягивает мяч
 		var at := _ball.position + _ball_v * dt
 		var contacts: Array = []  # [нормаль внутрь, на сколько вытолкнуть]
-		var rim_contact: Array = _basket.rim_contact(at, _ball_v, BALL_R) if is_instance_valid(_basket) else []
-		if not rim_contact.is_empty():
-			contacts.append(rim_contact)
+		for basket: Node3D in _baskets():
+			var rim_contact: Array = basket.rim_contact(at, _ball_v, BALL_R)
+			if not rim_contact.is_empty():
+				contacts.append(rim_contact)
 		# пол: настоящий или нижний край кадра на этой глубине — что выше (горизонтальный, мяч с него не скатывается)
 		var floor_y := BALL_R
 		if bottom.normal.y > 0.6:
@@ -2941,7 +3385,13 @@ func _ball_step(delta: float) -> void:
 			contacts.append([Vector3.LEFT, at.x - (W * 0.5 - BALL_R)])
 		if at.z < BACK + BALL_R:
 			contacts.append([Vector3.BACK, BACK + BALL_R - at.z])
-		if at.z > BALL_FRONT - BALL_R:
+		if _looking_left:
+			# вид на полки: стенка перед камерой — по X, впереди дверная стена
+			if at.x > BALL_FRONT_LEFT - BALL_R:
+				contacts.append([Vector3.LEFT, at.x - (BALL_FRONT_LEFT - BALL_R)])
+			if at.z > ROOM_FRONT - 0.06 - BALL_R:
+				contacts.append([Vector3.FORWARD, at.z - (ROOM_FRONT - 0.06 - BALL_R)])
+		elif at.z > BALL_FRONT - BALL_R:
 			contacts.append([Vector3.FORWARD, at.z - (BALL_FRONT - BALL_R)])
 		for edge: Plane in edges:
 			var room_left := edge.distance_to(at) - BALL_R * 1.3
@@ -2983,8 +3433,8 @@ func _ball_step(delta: float) -> void:
 		var flat := Vector3(travel.x, 0, travel.z)
 		if flat.length() > 0.00001:
 			_ball.rotate(Vector3.UP.cross(flat).normalized(), flat.length() / BALL_R)
-		if is_instance_valid(_basket) and rim_contact.is_empty():
-			_basket.check_ball(_ball.position, at, BALL_R)
+		for basket: Node3D in _baskets():
+			basket.check_ball(_ball.position, at, BALL_R)
 		_ball.position = at
 		if hit > 0.7:
 			Sfx.play("chip", clampf(-24.0 + hit * 3.2, -24.0, -6.0), 0.12, 0.06)
@@ -3147,11 +3597,12 @@ func _wall_point(point: Vector2) -> Variant:
 
 
 func _begin_board_drag(point: Vector2) -> void:
-	var hit: Variant = _wall_point(point)
+	var hit: Variant = wall_hit(point)
 	if hit == null or not is_instance_valid(sticker_board):
 		return
 	board_dragging = true
-	_board_grab = sticker_board.position - (hit as Vector3)
+	var grab: Vector2 = wall_coord(sticker_board) - (hit as Vector2)
+	_board_grab = Vector3(grab.x, grab.y, 0.0)
 	sticker_board.scale = Vector3.ONE * 1.04
 	Sfx.play("card_shove", -8, 0.05)
 	shelf_hint.emit("Доска друзей · ведите по стене и отпустите, чтобы повесить · крестик над ней — снять доску")
@@ -3160,12 +3611,11 @@ func _begin_board_drag(point: Vector2) -> void:
 
 
 func _drag_board(point: Vector2) -> void:
-	var hit: Variant = _wall_point(point)
+	var hit: Variant = wall_hit(point)
 	if hit == null:
 		return
-	var at := (hit as Vector3) + _board_grab
-	var center := preload("res://hub/stickers.gd").clamp_board_pos(Vector2(at.x, at.y))
-	sticker_board.position = Vector3(center.x, center.y, _board_depth(center, sticker_board))
+	var center := preload("res://hub/stickers.gd").clamp_board_pos((hit as Vector2) + Vector2(_board_grab.x, _board_grab.y))
+	_hang(sticker_board, center, _board_depth(center, sticker_board))
 
 
 func _end_board_drag() -> void:
@@ -3177,21 +3627,22 @@ func _end_board_drag() -> void:
 	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 	shelf_hint.emit(HINT if not _editor_on else "Доска друзей повешена")
 	# Бросили на шкаф — повесится в ближайшем свободном месте, его и сохраняем.
-	var spot := board_free_spot(Vector2(sticker_board.position.x, sticker_board.position.y))
+	var spot := board_free_spot(wall_coord(sticker_board))
 	_board_homes[active_board_id()] = spot
 	board_moved.emit(spot, active_board_id())
 
 
 ## Глубина доски: вплотную к стене, но поверх окна и постеров, если заходит на них (доска всегда перекрывает их).
+## Возвращает отступ от стены (м).
 func _board_depth(center: Vector2, board: Node3D = null) -> float:
 	var rect := Rect2(center - BOARD_EXTENT / 2.0, BOARD_EXTENT)
-	var depth := BOARD_AT.z
+	var depth := BOARD_AT.z - BACK
 	for decor: Array in _wall_decor:
 		if rect.intersects(decor[0]):
-			depth = maxf(depth, float(decor[1]))
+			depth = maxf(depth, float(decor[1]) - BACK)
 	for poster: Node3D in posters:
 		if is_instance_valid(poster) and poster.visible and rect.intersects(poster.wall_rect().grow(0.02)):
-			depth = maxf(depth, poster.position.z + 0.016)
+			depth = maxf(depth, float(poster.get_meta("wall_off", 0.012)) + 0.016)
 	# Доски друг на друге: доска с большим номером висит поверх пересекающейся с меньшим, без мерцания.
 	if board != null:
 		var ids := boards.keys()
@@ -3200,24 +3651,25 @@ func _board_depth(center: Vector2, board: Node3D = null) -> float:
 			var other: Node3D = boards[bid]
 			if int(bid) >= int(board.board_id) or not is_instance_valid(other):
 				continue
-			if rect.intersects(Rect2(Vector2(other.position.x, other.position.y) - BOARD_EXTENT / 2.0, BOARD_EXTENT)):
-				depth = maxf(depth, other.position.z + 0.03)
+			if rect.intersects(Rect2(wall_coord(other) - BOARD_EXTENT / 2.0, BOARD_EXTENT)):
+				depth = maxf(depth, float(other.get_meta("wall_off", 0.012)) + 0.03)
 	return depth
 
 
 ## Плакат на стене: вплотную, но поверх окна, если заходит на него.
+## Возвращает отступ от стены (м).
 func _poster_depth(rect: Rect2) -> float:
-	var depth := BACK + 0.012
+	var depth := 0.012
 	for decor: Array in _wall_decor:
 		if rect.intersects(decor[0]):
-			depth = maxf(depth, float(decor[1]))
+			depth = maxf(depth, float(decor[1]) - BACK)
 	return depth
 
 
 ## Центр плаката в пределах стены.
 func clamp_poster(poster: Node3D, center: Vector2) -> Vector2:
 	var half: Vector2 = poster.wall_size() / 2.0
-	return Vector2(clampf(center.x, -W / 2.0 + half.x + 0.03, W / 2.0 - half.x - 0.03), clampf(center.y, half.y + 0.12, H - half.y - 0.03))
+	return clamp_wall(center, half, half.y + 0.12, H - half.y - 0.03)
 
 
 ## Повесить плакат (своя комната — из сохранения, у друга — где повесил он). Во время переноса не трогаем.
@@ -3231,7 +3683,7 @@ func set_poster_position(slot: int, center: Vector2, layer: int = -1) -> void:
 	if layer < 0:
 		layer = slot  # порядок по умолчанию
 	var at := clamp_poster(poster, center)
-	poster.position = Vector3(at.x, at.y, _poster_depth(Rect2(at - poster.wall_size() / 2.0, poster.wall_size())) + layer * POSTER_LAYER)
+	_hang(poster, at, _poster_depth(Rect2(at - poster.wall_size() / 2.0, poster.wall_size())) + layer * POSTER_LAYER, float(poster.tilt))
 
 
 func poster_default_position(slot: int) -> Vector2:
@@ -3249,11 +3701,12 @@ func _poster_at(point: Vector2) -> Node3D:
 
 
 func _begin_poster_drag(poster: Node3D, point: Vector2) -> void:
-	var hit: Variant = _wall_point(point)
+	var hit: Variant = wall_hit(point)
 	if hit == null:
 		return
 	poster_dragging = poster
-	_poster_grab = poster.position - (hit as Vector3)
+	var grab: Vector2 = wall_coord(poster) - (hit as Vector2)
+	_poster_grab = Vector3(grab.x, grab.y, 0.0)
 	poster.scale = Vector3.ONE * 1.04
 	Sfx.play("card_shove", -8, 0.05)
 	shelf_hint.emit("Плакат · ведите по стене и отпустите · значки над ним: картинка, размер, крестик — снять")
@@ -3262,11 +3715,11 @@ func _begin_poster_drag(poster: Node3D, point: Vector2) -> void:
 
 
 func _drag_poster(point: Vector2) -> void:
-	var hit: Variant = _wall_point(point)
+	var hit: Variant = wall_hit(point)
 	if hit == null or poster_dragging == null:
 		return
-	var at := clamp_poster(poster_dragging, Vector2((hit as Vector3).x + _poster_grab.x, (hit as Vector3).y + _poster_grab.y))
-	poster_dragging.position = Vector3(at.x, at.y, _poster_depth(Rect2(at - poster_dragging.wall_size() / 2.0, poster_dragging.wall_size())) + posters.size() * POSTER_LAYER)
+	var at := clamp_poster(poster_dragging, (hit as Vector2) + Vector2(_poster_grab.x, _poster_grab.y))
+	_hang(poster_dragging, at, _poster_depth(Rect2(at - poster_dragging.wall_size() / 2.0, poster_dragging.wall_size())) + posters.size() * POSTER_LAYER, float(poster_dragging.tilt))
 
 
 func _end_poster_drag() -> void:
@@ -3278,7 +3731,7 @@ func _end_poster_drag() -> void:
 	Sfx.play("card_place", -8, 0.05)
 	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 	shelf_hint.emit(HINT if not _editor_on else "Плакат повешен")
-	poster_moved.emit(int(poster.slot), Vector2(poster.position.x, poster.position.y))
+	poster_moved.emit(int(poster.slot), wall_coord(poster))
 
 
 ## Камера подлетает к доске (наклеить другу / разобрать свою) и возвращается обратно. Плавно — через _cam_home.
@@ -3293,7 +3746,7 @@ func focus_board(on: bool) -> void:
 				_ball_held = false
 				_ball_v = Vector3.ZERO
 		var center := sticker_board.global_position
-		var eye := center + Vector3(0.0, 0.02, 0.78)
+		var eye := center + sticker_board.global_transform.basis.z.normalized() * 0.78 + Vector3(0.0, 0.02, 0.0)
 		var view := Transform3D(Basis.IDENTITY, eye)
 		_cam_home = view.looking_at(center, Vector3.UP)
 	elif _board_cam_saved != null:
@@ -3317,7 +3770,7 @@ func set_board_position(center: Vector2, bid: int = 0) -> void:
 	if _board_snap_frames > 0 or board.get_meta("fresh", false):
 		board.remove_meta("fresh")
 		var target := board_free_spot(center)
-		board.position = Vector3(target.x, target.y, _board_depth(target, board))
+		_hang(board, target, _board_depth(target, board))
 
 
 ## Прямоугольник шкафа на задней стене (x, y в метрах; с кубом окошек на крыше и небольшим зазором).
@@ -3338,6 +3791,8 @@ func shelf_wall_rect() -> Rect2:
 func board_free_spot(center: Vector2) -> Vector2:
 	var clamp_pos := func(p: Vector2) -> Vector2: return preload("res://hub/stickers.gd").clamp_board_pos(p)
 	var spot: Vector2 = clamp_pos.call(center)
+	if wall_is_left(spot.x):
+		return spot  # на левой стене шкафа нет
 	var shelf := shelf_wall_rect()
 	var half := BOARD_EXTENT / 2.0
 	if shelf.size == Vector2.ZERO or not Rect2(spot - half, BOARD_EXTENT).intersects(shelf):
@@ -3368,6 +3823,8 @@ func _room_prop_at(point: Vector2) -> String:
 
 func _use_room_prop(kind: String) -> void:
 	_clear_shelf_selection()
+	if is_instance_valid(_room_theme) and _room_theme.has_method("use_prop") and bool(_room_theme.call("use_prop", kind)):
+		return
 	if _wall_shelf_lights.has(kind):
 		_toggle_wall_shelf_light(kind)
 		Sfx.play("click", -12)
@@ -3399,9 +3856,15 @@ func _use_room_prop(kind: String) -> void:
 	Sfx.play("click", -12)
 
 
+## Кнопка корзины: в виде на шкаф — корзина у шкафа, в виде на полки — корзина на левой стене.
 func add_room_basket() -> void:
-	if not remote_view and is_instance_valid(_basket):
-		_basket.install()
+	var basket := _basket_left if _looking_left else _basket
+	if not remote_view and is_instance_valid(basket):
+		basket.install()
+
+
+func _baskets() -> Array:
+	return [_basket, _basket_left].filter(func(b): return is_instance_valid(b) and (b as Node3D).visible)
 
 
 func _box_at(screen_pos: Vector2) -> GameBox:
@@ -3989,7 +4452,7 @@ func _wall_drag_only() -> bool:
 	if _drag_box == null:
 		return false
 	var anchor: Dictionary = _cabinet.get("figure_surfaces", {}).get(_shelf_id(_drag_box), {})
-	return WALL_SHELVES.has(anchor.get("surface", "")) or (_looking_left and not _editor_on)
+	return WALL_SHELVES.has(anchor.get("surface", "")) or _looking_left
 
 
 func _drag_update(screen: Vector2) -> void:
@@ -4147,32 +4610,37 @@ func _cascade_rows(cell: int, index: int) -> Array:
 		(trial[cell] as Array).insert(index, _drag_box)
 		var at := cell
 		var ok := true
-		while _row_overflows(trial[at], at):
+		while ok and _row_overflows(trial[at], at):
 			var next := at + direction
 			if next < 0 or next >= trial.size():
 				ok = false
 				break
+			# Из переполненного ящика уходит столько предметов, сколько нужно, чтобы он влез (12.11: раньше —
+			# только один, и широкая коробка, вытолкнутая в почти полный ящик, торчала сквозь боковину шкафа).
 			var row: Array = trial[at]
-			var pick := -1
-			var order: Array = range(row.size() - 1, -1, -1) if direction > 0 else range(row.size())
-			for k: int in order:
-				var item: GameBox = row[k]
-				if item != _drag_box and not item.is_cups() and not _cabinet.get("figure_surfaces", {}).has(_shelf_id(item)):
-					pick = k
+			var pushed := 0
+			while _row_overflows(row, at):
+				var pick := -1
+				var order: Array = range(row.size() - 1, -1, -1) if direction > 0 else range(row.size())
+				for k: int in order:
+					var item: GameBox = row[k]
+					if item != _drag_box and not item.is_cups() and not _cabinet.get("figure_surfaces", {}).has(_shelf_id(item)):
+						pick = k
+						break
+				if pick < 0:
+					ok = false
 					break
-			if pick < 0:
-				ok = false
-				break
-			var moved: GameBox = row[pick]
-			var height := ShelfConfig.item_occupied(_shelf_id(moved), moved.size, int(_box_modes.get(_shelf_id(moved), 1))).y
-			if height > float(_row_info[next].get("height", CELL_H)) + 0.0005:
-				ok = false
-				break
-			row.remove_at(pick)
-			if direction > 0:
-				(trial[next] as Array).insert(0, moved)
-			else:
-				(trial[next] as Array).append(moved)
+				var moved: GameBox = row[pick]
+				var height := ShelfConfig.item_occupied(_shelf_id(moved), moved.size, int(_box_modes.get(_shelf_id(moved), 1))).y
+				if height > float(_row_info[next].get("height", CELL_H)) + 0.0005:
+					ok = false
+					break
+				row.remove_at(pick)
+				if direction > 0:
+					(trial[next] as Array).insert(0, moved)
+				else:
+					(trial[next] as Array).insert(pushed, moved)
+				pushed += 1
 			at = next
 		if ok:
 			return trial
@@ -4258,7 +4726,9 @@ func _cancel_drag() -> void:
 
 
 ## Коробка вылетает к игроку обложкой вперёд (чуть левее центра — справа карточка игры).
-func focus(b: GameBox) -> void:
+func focus(b: GameBox, flight_time: float = 0.71) -> void:
+	if arrival_box != null and b != arrival_box:
+		return  # сначала решить, куда поставить новую игру
 	if b.is_figurine():
 		_select_shelf_box(b)
 		return
@@ -4286,7 +4756,7 @@ func focus(b: GameBox) -> void:
 		var x_axis := -fwd
 		var z_axis := x_axis.cross(up).normalized()
 		basis = Basis(x_axis, up, z_axis).rotated(up, 0.18)
-	b.fly_to(b.get_parent().global_transform.affine_inverse() * Transform3D(basis, pos))
+	b.fly_to(b.get_parent().global_transform.affine_inverse() * Transform3D(basis, pos), flight_time)
 	var aim := pos + up * (b.size.y * 0.5 if b.face_z else 0.0)
 	_present.look_at(aim)
 	_rim.look_at(aim)
@@ -4299,8 +4769,8 @@ func focus(b: GameBox) -> void:
 
 
 func release() -> void:
-	if focused == null:
-		return
+	if focused == null or (arrival_box != null and focused == arrival_box):
+		return  # новую игру убирают только кнопками «на полку» / «в шкаф»
 	focused.fly_home()
 	focused = null
 	var t := create_tween().set_parallel()
@@ -4311,7 +4781,7 @@ func release() -> void:
 
 ## Листание: следующая / предыдущая коробка.
 func step(dir: int) -> void:
-	if focused == null:
+	if focused == null or arrival_box != null:
 		return
 	var games := boxes.filter(func(box): return not box.is_figurine())
 	var i := games.find(focused)
@@ -4349,9 +4819,11 @@ func _process(delta: float) -> void:
 		if not is_instance_valid(board) or (board_dragging and board == sticker_board):
 			continue
 		var target := board_free_spot(_board_homes[bid])
-		var now := Vector2(board.position.x, board.position.y)
-		var next := now.lerp(target, 1.0 - exp(-10.0 * delta)) if now.distance_to(target) > 0.002 and not snap else target
-		board.position = Vector3(next.x, next.y, _board_depth(next, board))
+		var now := wall_coord(board)
+		var same_wall := wall_is_left(now.x) == wall_is_left(target.x)
+		var next := now.lerp(target, 1.0 - exp(-10.0 * delta)) if now.distance_to(target) > 0.002 and not snap and same_wall else target
+		if not now.is_equal_approx(next) or not board.has_meta("wall_at"):
+			_hang(board, next, _board_depth(next, board))
 	if _poster_press != null:
 		_poster_hold += delta
 		if _poster_hold >= BOX_HOLD:
@@ -4455,19 +4927,36 @@ func public_snapshot() -> Dictionary:
 	var frame: Transform3D = _cam_home if _board_cam_saved == null else _board_cam_saved
 	var orientation := frame.basis.get_rotation_quaternion()
 	return PublicRoom.clean({
-		"config": state.config, "placements": state.placements, "poses": state.poses,
+		"config": _with_wood(state.config), "placements": state.placements, "poses": state.poses,
 		"selected": str(focused.game.get("id", "")) if focused != null else "",
-		"editor": _editor_on, "custom": custom,
+		"editor": _editor_on, "custom": custom, "room": room_id,
 		"camera": {"zoom": Prefs.shelf_camera_zoom, "frame": [
 			frame.origin.x, frame.origin.y, frame.origin.z, orientation.x, orientation.y, orientation.z, orientation.w
 		]}
 	})
 
 
+## Конфиг шкафа для друзей: с цветом шкафа (в своём _cabinet цвета нет — он в room_props.cfg).
+func _with_wood(config: Dictionary) -> Dictionary:
+	var out := config.duplicate()
+	out.wood = shelf_wood.to_html(false)
+	out.shelves = wall_shelf_wood.to_html(false)
+	if is_instance_valid(_room_theme) and _room_theme.get("modes") is Array:
+		out.lights = (_room_theme.get("modes") as Array).duplicate()
+	return out
+
+
 func show_remote(snapshot: Dictionary, follow: bool = true) -> bool:
 	var clean := PublicRoom.clean(snapshot)
 	if clean.is_empty():
 		return false
+	# цвет шкафа друга — отдельно от раскладки (иначе раскладка «менялась» бы при каждом снимке)
+	var friend_wood := Color.html(str(clean.config.get("wood", "2a1d42")))
+	var friend_shelves := Color.html(str(clean.config.get("shelves", "2a1d42")))
+	clean.config.erase("wood")
+	clean.config.erase("shelves")
+	var friend_lights: Variant = clean.config.get("lights")
+	clean.config.erase("lights")
 	# Фигурки друга, которых у нас нет (своя из мастерской, другая версия), пока не показываем —
 	# убираем их из раскладки, остальное стоит как у него. Позже здесь можно скачивать модель.
 	var known: Array = (_local_room.get("boxes", boxes) as Array).map(func(box): return _shelf_id(box))
@@ -4477,6 +4966,9 @@ func show_remote(snapshot: Dictionary, follow: bool = true) -> bool:
 	for row in clean.placements:
 		ids.append_array(row)
 	if not remote_view:
+		_reset_view()
+		if is_instance_valid(_arrivals):
+			_arrivals.call("abort")  # к другу — новая игра подождёт возвращения
 		if _editor_on:
 			finish_shelf_editor(false)
 		_cancel_drag()
@@ -4530,6 +5022,14 @@ func show_remote(snapshot: Dictionary, follow: bool = true) -> bool:
 			_local_room.remote_boxes.append(box)
 		_local_room.custom = clean.custom.duplicate(true)
 	remote_follow = follow
+	# Комната друга: знакомая — как у него; незнакомая (мастерская, новая версия) — своя.
+	# Старые версии комнату не передают — у них только неоновая.
+	var friend_room := str(clean.get("room", "neon90"))
+	apply_room(friend_room if Rooms.has(friend_room) else Rooms.saved_id(), false)
+	_show_wood(friend_wood)
+	_show_wall_shelves(friend_shelves)
+	if friend_lights is Array and is_instance_valid(_room_theme) and _room_theme.get("modes") is Array:
+		_room_theme.set("modes", Array(friend_lights, TYPE_INT, "", null))  # огни как у друга, не сохраняя
 	_remote_zoom = float(clean.get("camera", {}).get("zoom", 1.0))
 	var state_changed: bool = custom_changed or _cabinet != clean.config or _shelf_ids() != clean.placements or _box_modes != clean.poses
 	if state_changed:
@@ -4548,7 +5048,7 @@ func show_remote(snapshot: Dictionary, follow: bool = true) -> bool:
 				focus_id(local_selected)
 	_remote_editor = clean.editor
 	var frame: Array = clean.get("camera", {}).get("frame", [])
-	if remote_follow and not frame.is_empty():
+	if remote_follow and not frame.is_empty() and not _looking_left:
 		var rotation := Quaternion(frame[3], frame[4], frame[5], frame[6])
 		var owner_frame := Transform3D(Basis(rotation), Vector3(frame[0], frame[1], frame[2]))
 		if board_focused():
@@ -4568,6 +5068,7 @@ func return_home() -> void:
 		return
 	release()
 	_cancel_drag()
+	_reset_view()
 	remote_view = false
 	panels.input_locked = false
 	for box: GameBox in _local_room.remote_boxes:
@@ -4584,6 +5085,13 @@ func return_home() -> void:
 	_editor_preference_geometry = _local_room.geometry.duplicate(true)
 	_cam_home = _local_room.camera
 	camera.transform = _cam_home
+	apply_room(Rooms.saved_id(), false)
+	var own := ConfigFile.new()
+	own.load("user://room_props.cfg")
+	_show_wood(Color.html(str(own.get_value("cabinet", "color", "2a1d42"))))
+	_show_wall_shelves(Color.html(str(own.get_value("cabinet", "shelves", "2a1d42"))))
+	if is_instance_valid(_room_theme) and _room_theme.has_method("load_modes"):
+		_room_theme.call("load_modes")
 	var selected: String = _local_room.public.selected
 	_local_room = {}
 	_remote_selected = ""

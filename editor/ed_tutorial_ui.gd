@@ -1,7 +1,10 @@
 extends RefCounted
 ## Экран вкладки «Обучение»: список уроков, шаги текущего урока, «Показать где» / «Сделать за меня».
 ## Данные и проверки шагов — editor/ed_tutorial.gd.
-const Style := preload("res://games/custom/ui/cg_style.gd")
+const Style := preload("res://editor/ed_style.gd")
+## Стиль игр — для предпросмотров того, что увидят игроки.
+const Game := preload("res://games/custom/ui/cg_style.gd")
+
 const Help := preload("res://editor/ed_help.gd")
 const Tutorial := preload("res://editor/ed_tutorial.gd")
 

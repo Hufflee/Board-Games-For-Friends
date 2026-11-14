@@ -2,9 +2,11 @@ extends Control
 ## Приватный 2D стол: кольца, человеческая проверка и горячие места.
 const Style := preload("res://games/things_in_rings/ui/tr_style.gd")
 const Data := preload("res://games/things_in_rings/logic/tr_data.gd")
+const Title := preload("res://games/things_in_rings/ui/tr_card_title.gd")
 const Field := preload("res://games/things_in_rings/ui/tr_field.gd")
 const Card := preload("res://games/things_in_rings/ui/tr_card.gd")
 const Hand := preload("res://hub/private_hand.gd")
+const HAND_CARD_SIZE := Vector2(132, 198)
 var app: Node
 var view: Dictionary = {}
 var _top: TopBar
@@ -178,7 +180,7 @@ func _rebuild() -> void:
 		TurnNameGlow.apply(nick, waiting.has(seat) if phase == "blind" else (seat == active or seat == judging_author) and phase not in ["postgame", "game_over"])
 	_left.add_child(Style.label("З — знающий%s · карт: %d" % [" · ✓ — поставил" if blind_mode else "", view.deck_left], 12, Style.muted()))
 	_left.add_child(Style.label("Передайте экран и нажмите своё имя." if view.get("hotseat", false) else "Ваши карты видны только вам.", 12, Style.muted()))
-	_margin.add_theme_constant_override("margin_bottom", 16 if phase in ["choose_rules", "judge", "postgame", "game_over"] else 152)
+	_margin.add_theme_constant_override("margin_bottom", 16)
 	var text := _phase_text()
 	if view.get("disconnected", []).has(active):
 		text = "Ожидаем возвращения: " + str(people[active].name)
@@ -356,13 +358,14 @@ func _hand_signature() -> String:
 
 func _build_hand() -> void:
 	_hand_used = true
+	_margin.add_theme_constant_override("margin_bottom", int(HAND_CARD_SIZE.y) + 20)
 	if is_instance_valid(_hand):
 		move_child(_hand, -1)  # та же рука — только поверх заново собранного стола
 		return
 	_hand_key = _hand_signature()
 	var hand := Hand.new()
 	hand.name = "PrivateHand"
-	hand.card_size = Vector2(88, 132)
+	hand.card_size = HAND_CARD_SIZE
 	hand.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	hand.preview_delay = 0.0
 	hand.edge_peek = true
@@ -383,12 +386,13 @@ func _build_hand() -> void:
 	hand.offset_left = 200
 	hand.offset_right = -224
 	# За границей остаётся только нижняя кромка, включая веер и тень.
-	hand.offset_top = -132
+	hand.offset_top = -HAND_CARD_SIZE.y
 	hand.offset_bottom = 0
 	for id: int in view.hand:
 		var card: K12TableCard = hand._cards[str(id)]
 		card.name = "Card%d" % id
 		Style.outline(card._face)
+		Title.put(card._face, id)
 		card.hovered.connect(func(_card: K12TableCard, on: bool):
 			if on:
 				_show_preview_now(id))
@@ -478,6 +482,7 @@ func _show_preview_now(id: int) -> void:
 		return
 	_preview_generation += 1
 	_picture.texture = Data.texture(id)
+	Title.put(_picture, id)
 	_picture.get_node("CardOutline").show()
 	_translation.text = Data.translation(id)
 
@@ -485,6 +490,7 @@ func clear_preview() -> void:
 	_preview_generation += 1
 	if is_instance_valid(_picture):
 		_picture.texture = null
+		Title.put(_picture, -1)
 		_picture.get_node("CardOutline").hide()
 	if is_instance_valid(_translation):
 		_translation.text = ""

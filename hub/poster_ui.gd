@@ -77,6 +77,10 @@ func _apply() -> void:
 	var list: Array = data.get("posters", [])
 	var shown: Array = Stickers.poster_slots(data)
 	_room.show_posters(shown)
+	if is_instance_valid(_room._basket):
+		_room._basket.show_room(data.get("basket", []), _own_room())
+	if is_instance_valid(_room._basket_left):
+		_room._basket_left.show_room(data.get("basket_left", []), _own_room())
 	for slot: int in shown:
 		var poster: Node3D = _room.posters[slot]
 		var entry: Array = list[slot] if slot < list.size() and list[slot] is Array else []
@@ -174,7 +178,7 @@ func _cycle_size() -> void:
 	var poster: Node3D = _room.posters[_slot]
 	var next := 1.5 if poster.size_scale < 1.49 else (2.0 if poster.size_scale < 1.99 else 1.0)
 	poster.set_size_scale(next)
-	var center := _room.clamp_poster(poster, Vector2(poster.position.x, poster.position.y))
+	var center := _room.clamp_poster(poster, _room.wall_coord(poster))
 	Net.stickers.set_poster_scale(_slot, center, next)
 	Sfx.play("card_place", -8, 0.08)
 	_apply()
@@ -217,7 +221,7 @@ func _picked(slot: int, status: bool, paths: PackedStringArray, at: Variant = nu
 	if not status or paths.is_empty() or slot < 0 or slot >= _room.posters.size():
 		return
 	var poster: Node3D = _room.posters[slot]
-	var center: Vector2 = at if at is Vector2 else Vector2(poster.position.x, poster.position.y)
+	var center: Vector2 = at if at is Vector2 else _room.wall_coord(poster)
 	var hash: String
 	if paths[0].get_extension().to_lower() == "gif":
 		var file := FileAccess.open(paths[0], FileAccess.READ)

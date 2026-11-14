@@ -34,9 +34,9 @@ func _initialize() -> void:
 	g.monsters[0].dc = 7
 	var hp_before: int = g.hp[0]
 	# Первый бросок уже выпал, но порог проверяется при разрешении окна ответов.
-	check(g.action(0, "roll"), "Разрешён промах")
-	check(g.monsters[0].hp == 3, "Промах не уменьшает HP монстра")
-	check(g.hp[0] == hp_before - int(g.monsters[0].at), "Промах уменьшает HP игрока")
+	check(g.action(0, "roll"), "Разрешено попадание на шестёрке")
+	check(g.monsters[0].hp == 2, "Расчётная защита 7 ограничена шестью")
+	check(g.hp[0] == hp_before, "Попадание не наносит урон игроку")
 	g = make()
 	check(g.action(1, "activate", {"item": 0}), "На бросок отвечает другой игрок")
 	check(g.action(0, "roll") and g.phase == "effect", "Бросок ждёт ручной ответ")

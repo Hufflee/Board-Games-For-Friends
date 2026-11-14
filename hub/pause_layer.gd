@@ -427,7 +427,7 @@ func _spectator_allowed(c: Control) -> bool:
 		# Локальный просмотр архива не отправляет игровые действия; метку ставит код UI.
 		if n is BaseButton and n.get_meta("spectator_read_only", false) == true:
 			return true
-		if n == _root or n is K12ChatPanel or n is ThemeToggle or n.has_meta("top_bar_escape"):
+		if n == _root or n is TopBar or n is K12ChatPanel or n is ThemeToggle or n.is_in_group("spectator_public_ui"):
 			return true
 		if n is Control and (n as Control).theme_type_variation == "ConfirmPanel":
 			return true

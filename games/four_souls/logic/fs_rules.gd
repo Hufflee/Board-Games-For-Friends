@@ -37,6 +37,8 @@ func new_game(members: Array, expanded: bool = false, seed_value: int = 0) -> vo
 
 ## Каждый розыгрыш проходит через стек: запоминаем его до ответов (даже если его потом отменят).
 func _push(effect: Dictionary, resume: String) -> void:
+	if effect.kind == "purchase" and int(effect.slot) >= 0 and int(effect.slot) < shop.size():
+		effect["card"] = int(shop[int(effect.slot)])
 	_remember_play(effect)
 	_record_action_on_stack(effect)
 	var kind28 := str(effect.get("kind", ""))
@@ -182,8 +184,9 @@ func tick(delta: float) -> bool:
 		return false
 	_quiet = 0.0
 	var before := [phase, stack.size(), resolving.size()]
+	var previous_top: Dictionary = stack.back()
 	_finish_responses()
-	if before == [phase, stack.size(), resolving.size()]:
+	if before == [phase, stack.size(), resolving.size()] and is_same(previous_top, stack.back()):
 		return false
 	revision += 1
 	_check_bonuses()
@@ -296,6 +299,10 @@ func remove_player(seat: int) -> bool:
 	if not can_remove_player(seat):
 		return false
 	_withdrawn[seat] = true
+	_coin_offers.erase(seat)
+	for sender in _coin_offers.keys():
+		if int(_coin_offers[sender].target) == seat:
+			_coin_offers.erase(sender)
 	chars[seat] = -1
 	hp[seat] = 0
 	dead[seat] = true
@@ -1070,8 +1077,24 @@ func _apply_action(seat: int, kind: String, arg) -> bool:
 		"trade":
 			var target: int = int(a.get("target",-1)); var amount: int = int(a.get("amount",0))
 			if phase in ["turn","priority"] and target >= 0 and target < players.size() and target != seat and not is_out(target) and amount > 0 and amount <= coins[seat]:
-				_transfer_coins(seat, target, amount); _note("%s → %s: %d¢" % [name_of(seat),name_of(target),amount]); ok = true
-				_action_record("trade", seat, -1, {"kind": "coins", "seat": target, "amount": amount})
+				_coin_offers[seat] = {"sender": seat, "target": target, "amount": amount, "id": revision}
+				ok = true
+		"answer_trade":
+			var sender := int(a.get("sender", -1))
+			var offer: Dictionary = _coin_offers.get(sender, {})
+			if int(offer.get("target", -1)) != seat or int(a.get("id", -1)) != int(offer.id):
+				return false
+			_coin_offers.erase(sender)
+			ok = true
+			var amount := int(offer.amount)
+			if not bool(a.get("accept", false)):
+				_note("%s отклоняет предложение монет от %s" % [name_of(seat), name_of(sender)])
+			elif is_out(sender) or int(coins[sender]) < amount:
+				_note("Предложение монет от %s больше недоступно" % name_of(sender))
+			else:
+				_transfer_coins(sender, seat, amount)
+				_note("%s → %s: %d¢" % [name_of(sender), name_of(seat), amount])
+				_action_record("trade", sender, -1, {"kind": "coins", "seat": seat, "amount": amount})
 		"room":
 			if phase == "turn" and seat == current and dlc and (a.has("index") or _room_can_discard()):
 				if a.has("index"):
@@ -1177,7 +1200,7 @@ func get_view(seat: int, _show_all: bool = false) -> Dictionary:
 	var public := []
 	var off_turn_left := -1.0  # без ограничения по времени хода (06.11)
 	for i in players.size():
-		public.append({"name":players[i].name,"steam_id":int(players[i].get("steam_id", 0)),"withdrawn":is_out(i),"bot":bool(players[i].get("bot", false)),"char":chars[i],"items":items[i].duplicate(true),"hp":hp[i],"max_hp":max_hp[i],"attack":attack[i],"coins":coins[i],"souls":souls[i],"hand_count":hands[i].size(),"souls_cards":soul_cards[i].duplicate(true),"curses":curses[i].duplicate(),"ready":character_ready[i],"dead":dead[i], "respawn_egg17":_eggs_respawn17.has(i)})
+		public.append({"name":players[i].name,"steam_id":int(players[i].get("steam_id", 0)),"withdrawn":is_out(i),"bot":bool(players[i].get("bot", false)),"char":chars[i],"items":items[i].duplicate(true),"hp":hp[i],"max_hp":max_hp[i],"attack":attack[i],"coins":coins[i],"souls":souls[i],"hand_count":hands[i].size(),"souls_cards":soul_cards[i].duplicate(true),"curses":curses[i].duplicate(),"ready":character_ready[i],"dead":dead[i], "respawn_egg17":_eggs_respawn17.has(i), "spider_tokens15": int(_spider_tokens15.get(i, 0))})
 		if bool(_enigma_back26.get(i, false)):
 			public[i]["enigma_back26"] = true
 		public.back()["eggs"] = _egg_count("player", i)
@@ -1209,6 +1232,6 @@ func get_view(seat: int, _show_all: bool = false) -> Dictionary:
 	for entry: Dictionary in visible_monsters:
 		entry["eggs"] = _egg_count("monster", int(entry.id))
 		entry["untargetable"] = _untargetable(int(entry.id))
-		entry.dc = _monster_evasion(entry)
+		entry.dc = clampi(_monster_evasion(entry), 1, 6)
 		entry.at = _monster_attack(entry)
-	return {"roll_without_other_actions": preload("res://games/four_souls/logic/fs_legal.gd").roll_without_other_actions(self, seat), "native_room_actions24": _native_room_actions24(seat), "tap_price24": _tap_price24(), "extra_rooms20": _extra_rooms20.duplicate(true), "loot_top20": int(decks.loot.back()) if not decks.loot.is_empty() and _top_loot20.values().has(turn_serial) else -1, "can_top_loot20": int(_top_loot20.get(seat, -1)) == turn_serial, "die_sides20": 8 if _d8_next20.has(actor()) else 6, "last_die_sides20": _last_die_sides20, "last_raw_die20": _last_raw_die20, "battle_roller15": _battle_roller15(), "shadow_item15": items[seat].find(_shadow_penalty15[seat].item) if _shadow_penalty15.has(seat) and not _shadow_penalty15[seat].item.is_empty() else -1, "spider_tokens15": int(_spider_tokens15.get(seat, 0)), "familiar_targets15": _familiar_targets15(), "player_attack_defense16": _player_defenses17(), "blind_only17": attack_left > 0 and attack_left <= _optional_blind17, "forced_monster_slots": _forced_slots14(), "unlimited_loot":bool(_unlimited_loot13.get(seat,false)),"card_choice_previews":card_choice_previews,"card_choices":card_choices,"card_automated":_card_automation_active(),"card_roll_wait":str(_card_step().get("op", "")) == "auto_roll" and not resolving.has("automation_roll"),"players":public,"seat":seat,"discard_choice":discard_choice.duplicate(true),"battle_player":battle_player,"required_player_attacks":_required_player_remaining(),"player_attack_targets":_permitted_player_attack_targets(),"forced_deck_attacks":_forced_deck_remaining(),"spawn_slots":_peep_spawn_slots(),"effect_pending":_pending_manual_passives(),"starting_pending":phase=="priority" and _after_stack=="starting_continue","character_offers":_character_offers[seat].duplicate(true) if awaits_character_choice(seat) else [],"character_remaining":remaining_character_choices(),"starting_options":_starting_choices[0].cards.duplicate() if phase=="starting_item" and not _starting_choices.is_empty() and seat==actor() else [],"phase":phase,"current":current,"actor":actor(),"round_no":round_no,"dlc":dlc,"hand":hands[seat].duplicate() if seat >= 0 and seat < players.size() else [],"monsters":visible_monsters,"shop":shop.duplicate(),"shop_counters":_shop_counters20.duplicate(),"shop_price":_purchase_cost(seat if seat >= 0 else current,0),"discard_treasure":int(discards.treasure.back()) if seat >= 0 and _item_count(seat,473)>0 and not discards.treasure.is_empty() else -1,"room":room,"bonuses":bonuses.duplicate(),"bonus_targets":bonus_targets,"bonus_progress":bonus_progress.duplicate(),"claimed":claimed.duplicate(),"stack":visible_stack,"resolving":public_effect,"battle":battle,"roll_no":roll_no,"last_roll":last_roll,"log":log.duplicate(),"log_cards":log_cards.duplicate(),"action_history":action_history.duplicate(true),"winner":winner,"free_loot":free_loot,"bonus_loot_plays":int(_bonus_loot_plays[seat]) if seat >= 0 else 0,"gold_deck_attacks":_gold_deck_attacks,"bought":bought,"attacked":attacked,"counts":counts,"bank":bank,"reward_boost":reward_boost,"revision":revision,"peek":peek.duplicate(true) if int(peek.get("owner",-2)) == seat or bool(peek.get("public", false)) else {},"death_actor":int(_death_queue[0]) if not _death_queue.is_empty() else -1,"discard_limit":_discard_limit,"off_turn_left":off_turn_left,"response_window":_response_window28(),"played":played.duplicate(true),"fx28":fx28.duplicate(true),"loot_moment28":_loot_moment28(seat),"strict_responses28":strict_responses28,"blind_price28":_purchase_cost(seat if seat >= 0 else current, -1),"response_left28":(_response_window28() - _quiet) if phase == "priority" and not stack.is_empty() and _after_stack != "starting_continue" and _response_available() else -1.0,"discard_feed28":discard_feed28.duplicate(true),"live_discards":live_discards.duplicate(true)}
+	return {"coin_offers": _coin_offers.values().filter(func(offer): return int(offer.target) == seat).duplicate(true), "roll_without_other_actions": preload("res://games/four_souls/logic/fs_legal.gd").roll_without_other_actions(self, seat), "native_room_actions24": _native_room_actions24(seat), "tap_price24": _tap_price24(), "extra_rooms20": _extra_rooms20.duplicate(true), "loot_top20": int(decks.loot.back()) if not decks.loot.is_empty() and _top_loot20.values().has(turn_serial) else -1, "can_top_loot20": int(_top_loot20.get(seat, -1)) == turn_serial, "die_sides20": 8 if _d8_next20.has(actor()) else 6, "last_die_sides20": _last_die_sides20, "last_raw_die20": _last_raw_die20, "battle_roller15": _battle_roller15(), "shadow_item15": items[seat].find(_shadow_penalty15[seat].item) if _shadow_penalty15.has(seat) and not _shadow_penalty15[seat].item.is_empty() else -1, "spider_tokens15": int(_spider_tokens15.get(seat, 0)), "familiar_targets15": _familiar_targets15(), "player_attack_defense16": _player_defenses17(), "blind_only17": attack_left > 0 and attack_left <= _optional_blind17, "forced_monster_slots": _forced_slots14(), "unlimited_loot":bool(_unlimited_loot13.get(seat,false)),"card_choice_previews":card_choice_previews,"card_choices":card_choices,"card_automated":_card_automation_active(),"card_roll_wait":str(_card_step().get("op", "")) == "auto_roll" and not resolving.has("automation_roll"),"players":public,"seat":seat,"discard_choice":discard_choice.duplicate(true),"battle_player":battle_player,"required_player_attacks":_required_player_remaining(),"player_attack_targets":_permitted_player_attack_targets(),"forced_deck_attacks":_forced_deck_remaining(),"spawn_slots":_peep_spawn_slots(),"effect_pending":_pending_manual_passives(),"starting_pending":phase=="priority" and _after_stack=="starting_continue","character_offers":_character_offers[seat].duplicate(true) if awaits_character_choice(seat) else [],"character_remaining":remaining_character_choices(),"starting_options":_starting_choices[0].cards.duplicate() if phase=="starting_item" and not _starting_choices.is_empty() and seat==actor() else [],"phase":phase,"current":current,"actor":actor(),"round_no":round_no,"dlc":dlc,"hand":hands[seat].duplicate() if seat >= 0 and seat < players.size() else [],"monsters":visible_monsters,"shop":shop.duplicate(),"shop_counters":_shop_counters20.duplicate(),"shop_price":_purchase_cost(seat if seat >= 0 else current,0),"discard_treasure":int(discards.treasure.back()) if seat >= 0 and _item_count(seat,473)>0 and not discards.treasure.is_empty() else -1,"room":room,"bonuses":bonuses.duplicate(),"bonus_targets":bonus_targets,"bonus_progress":bonus_progress.duplicate(),"claimed":claimed.duplicate(),"stack":visible_stack,"resolving":public_effect,"battle":battle,"roll_no":roll_no,"last_roll":last_roll,"log":log.duplicate(),"log_cards":log_cards.duplicate(),"action_history":action_history.duplicate(true),"winner":winner,"free_loot":free_loot,"bonus_loot_plays":int(_bonus_loot_plays[seat]) if seat >= 0 else 0,"gold_deck_attacks":_gold_deck_attacks,"bought":bought,"attacked":attacked,"counts":counts,"bank":bank,"reward_boost":reward_boost,"revision":revision,"peek":peek.duplicate(true) if int(peek.get("owner",-2)) == seat or bool(peek.get("public", false)) else {},"death_actor":int(_death_queue[0]) if not _death_queue.is_empty() else -1,"discard_limit":_discard_limit,"off_turn_left":off_turn_left,"response_window":_response_window28(),"played":played.duplicate(true),"fx28":fx28.duplicate(true),"loot_moment28":_loot_moment28(seat),"strict_responses28":strict_responses28,"blind_price28":_purchase_cost(seat if seat >= 0 else current, -1),"response_left28":(_response_window28() - _quiet) if phase == "priority" and not stack.is_empty() and _after_stack != "starting_continue" and _response_available() else -1.0,"discard_feed28":discard_feed28.duplicate(true),"live_discards":live_discards.duplicate(true)}
