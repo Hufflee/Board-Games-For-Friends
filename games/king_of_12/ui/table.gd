@@ -802,11 +802,11 @@ func _update_plates() -> void:
 					group = gi
 		var discards: Array = _v.get("discards", [])
 		var played_now: Array = discards[s].duplicate() if s < discards.size() else []
-		var border := Color("8a6b45")
+		var border := K12UI.CARD_RIM
 		if show_trick and trick["winner"] == s:
 			border = K12UI.GOLD
 		elif _v["pending"].get("seat", -1) == s or _v["pending"].get("seats", []).has(s):
-			border = Color("5fb4ef")
+			border = K12UI.CRYSTAL
 		var tip := "Победы в раундах"
 		if under.size() > 0:
 			tip = "Под кубиком: " + ", ".join(under.map(func(c): return K12Cards.card_name(c)))
@@ -1144,7 +1144,7 @@ func _celebrate() -> void:
 	conf.scale_amount_max = 8.0
 	var grad := Gradient.new()
 	grad.set_color(0, Color("e8c26a"))
-	grad.set_color(1, Color("5fb4ef"))
+	grad.set_color(1, K12UI.CRYSTAL)
 	grad.add_point(0.33, Color("d9534f"))
 	grad.add_point(0.66, Color("6fcf6f"))
 	conf.color_initial_ramp = grad
@@ -1162,7 +1162,7 @@ func _on_chat_bubble(entry: Dictionary) -> void:
 	if _bubbles.has(s) and is_instance_valid(_bubbles[s]):
 		_bubbles[s].queue_free()
 	var b := K12UI.label(str(entry["text"]).left(60), 15 if entry["kind"] == "emote" else 13, K12UI.INK, HORIZONTAL_ALIGNMENT_CENTER)
-	b.add_theme_stylebox_override("normal", K12UI.box(Color("f6efdc"), 12, Color("8a6b45"), 2))
+	b.add_theme_stylebox_override("normal", K12UI.box(K12UI.CREAM, 12, K12UI.CARD_RIM, 2))
 	b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	b.custom_minimum_size = Vector2(150, 0)
 	b.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -1258,11 +1258,11 @@ func _tutorial_hints() -> void:
 	if is_instance_valid(_hint_panel):
 		_hint_panel.queue_free()
 	_hint_panel = PanelContainer.new()
-	_hint_panel.add_theme_stylebox_override("panel", K12UI.box(Color(0.12, 0.2, 0.3, 0.96), 12, Color("5fb4ef"), 2))
+	_hint_panel.add_theme_stylebox_override("panel", K12UI.box(Color(0.12, 0.2, 0.3, 0.96), 12, K12UI.CRYSTAL, 2))
 	_hint_panel.custom_minimum_size = Vector2(380, 0)
 	var col := K12UI.vbox(8)
 	_hint_panel.add_child(col)
-	col.add_child(K12UI.label("Подсказка", K12UI.BODY, Color("5fb4ef")))
+	col.add_child(K12UI.label("Подсказка", K12UI.BODY, K12UI.CRYSTAL))
 	var hint: String = HINTS[phase]
 	if phase == "roll":
 		hint = TossDie.roll_hint() + ". " + hint

@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Постоянное лобби; секретный редактор состава существует только у рассказчика.
 const Style := preload("res://games/blood_on_the_clocktower/ui/bc_style.gd")
 const Data := preload("res://games/blood_on_the_clocktower/logic/bc_data.gd")
@@ -122,7 +124,7 @@ func _ready() -> void:
 	local.visible = Net.mode == "offline"
 	start = Style.button("Начать партию")
 	start.name = "StartGame"
-	start.add_theme_stylebox_override("normal", Style.box(Style.ACCENT))
+	Style.primary(start)
 	start.pressed.connect(func(): _show_error(Net.start_game()))
 	public.add_child(start)
 	# Второстепенные кнопки — одной строкой под главной: так 16 участников и кнопки помещаются в 720p.
@@ -263,6 +265,7 @@ func _fill_roster(names: Array[String], story: int, minimum: int) -> void:
 		var nick := Style.label(names[i] + (" · рассказчик" if i == story else ""), Style.SMALL,
 			Style.INK if i == story else Style.MUTED)
 		nick.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(nick)
 		nick.tooltip_text = names[i]
 		nick.mouse_filter = Control.MOUSE_FILTER_PASS
 		nick.size_flags_horizontal = SIZE_EXPAND_FILL

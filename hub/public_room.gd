@@ -19,6 +19,7 @@ const MAX_COLS := 10
 ## отбрасывались целиком: в 0.9.0.2 «глазик» наблюдения перестал включаться).
 const Shelf := preload("res://hub/shelf_config.gd")
 const FIGURINES: Array = Shelf.FIGURINES
+const Upper := preload("res://hub/upper_shelves.gd")
 const SURFACES := ["tv", "stand_left", "stand_right", "cabinet", "wall_lower", "wall_upper"]
 const WALL_SURFACES := ["wall_lower", "wall_upper"]
 
@@ -89,6 +90,8 @@ static func clean(value: Variant) -> Dictionary:
 		config.wood = source.wood
 	if _hex6(source.get("shelves", "")):  # цвет полок на левой стене
 		config.shelves = source.shelves
+	if source.get("cube_hidden", false) == true:  # неоновый куб на шкафу невидим
+		config.cube_hidden = true
 	# режимы гирлянд зимней комнаты [ёлка, стены], 0..2
 	var lights: Variant = source.get("lights", [])
 	if lights is Array and (lights as Array).size() == 2 and (lights as Array).all(func(m): return m is int and m >= 0 and m <= 2):
@@ -113,6 +116,19 @@ static func clean(value: Variant) -> Dictionary:
 			var share := _number(box_positions[id], 0.0, 1.0)
 			if id is String and (id as String).length() <= 80 and not is_nan(share) and config.box_positions.size() < MAX_ITEMS:
 				config.box_positions[id] = share
+	var upper_edges := Upper.read(source)
+	var upper_surfaces: Dictionary = {}
+	if not upper_edges.is_empty():
+		Upper.store(config, upper_edges)
+		var shallow := Upper.shallow_keys(source, upper_edges)
+		if not shallow.is_empty():
+			config.upper_shallow_edges = shallow
+		for segment: Array in upper_edges:
+			if segment[0].y == segment[1].y:
+				upper_surfaces[Upper.surface(segment)] = true
+		var smoothing := _number(source.get("upper_smoothing", 0.0), 0.0, 1.0)
+		if not is_nan(smoothing) and smoothing > 0.0:
+			config.upper_smoothing = smoothing
 	for field in ["figure_yaw", "figure_surfaces"]:
 		var entries: Variant = source.get(field, {})
 		if not entries is Dictionary or not source.has(field):
@@ -122,17 +138,19 @@ static func clean(value: Variant) -> Dictionary:
 			var entry: Variant = entries[id]
 			if not id is String or (id as String).length() > 80 or (config[field] as Dictionary).size() >= MAX_ITEMS:
 				continue
-			var wall_item: bool = field == "figure_surfaces" and entry is Dictionary and entry.get("surface", "") in WALL_SURFACES
+			var wall_item: bool = field == "figure_surfaces" and entry is Dictionary and (entry.get("surface", "") in WALL_SURFACES or upper_surfaces.has(entry.get("surface", "")))
 			if not Shelf.is_figure(id) and not wall_item:
 				continue
 			if field == "figure_yaw":
 				var yaw := _number(entry, -PI, PI)
 				if not is_nan(yaw):
 					config[field][id] = yaw
-			elif entry is Dictionary and entry.get("surface", "") in SURFACES:
+			elif entry is Dictionary and (entry.get("surface", "") in SURFACES or upper_surfaces.has(entry.get("surface", ""))):
 				var fraction := _number(entry.get("x"), 0.0, 1.0)
 				if not is_nan(fraction):
 					config[field][id] = {"surface": entry.surface, "x": fraction}
+					if upper_surfaces.has(entry.surface) and entry.get("fit", false) == true:
+						config[field][id].fit = true
 			# незнакомая поверхность (из новой версии) — предмет у нас стоит в шкафу, комната не пропадает
 	# --- предметы шкафа ---
 	var allowed: Array = FIGURINES.duplicate()

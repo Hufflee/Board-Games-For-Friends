@@ -16,7 +16,7 @@ const CREAM_ART := Color("fbf3dd")
 ## Светлая (бумага афиши) и тёмная (docs/styleboard_ready_set_bet_dark.png) палитры интерфейса; set_dark().
 const LIGHT := {
 	"PAPER": Color("efe2c4"), "PAPER_DARK": Color("d9c69e"), "CREAM": Color("fbf3dd"), "HOVER": Color("fff8e6"),
-	"INK": Color("2b1d14"), "MUTED": Color("7a6650"), "RED": Color("c8312b"), "MONEY": Color("2e7d32"),
+	"INK": Color("2b1d14"), "MUTED": Color("6b5842"), "RED": Color("c8312b"), "MONEY": Color("2e7d32"),
 	"RAY": Color(1, 0.93, 0.75, 0.35),
 }
 const DARK := {
@@ -34,6 +34,10 @@ static var MUTED: Color = LIGHT["MUTED"]
 static var RED: Color = LIGHT["RED"]
 static var MONEY: Color = LIGHT["MONEY"]  # суммы и выигрыши (светлая — зелёный на бумаге, тёмная — золото)
 static var RAY: Color = LIGHT["RAY"]
+
+
+static func red_text() -> Color:
+	return Color("ef6a5e") if dark else RED
 
 
 static func set_dark(on: bool) -> void:
@@ -384,3 +388,14 @@ class Backdrop:
 			var col := RSBStyle.RED if k % 2 == 0 else RSBStyle.CREAM
 			draw_rect(Rect2(0, k * 4, size.x, 4), col)
 			draw_rect(Rect2(0, size.y - 12 + k * 4, size.x, 4), col)
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[INK, CREAM, "текст панели", false],
+		[MUTED, PAPER, "подпись", false],
+		[MONEY, CREAM, "выигрыш", false],
+		[red_text(), CREAM, "проигрыш", false],
+		[CREAM_ART, Color("2a2018"), "выбор VIP", false],
+	]

@@ -288,3 +288,10 @@ class Backdrop:
 			draw_arc(p + Vector2(sgn * 16, 22), 7, 0, TAU, 14, c, 2.0, true)
 		draw_line(p + Vector2(0, -16), p + Vector2(0, 16), c, 2.0, true)
 		draw_arc(p, 5, 0, TAU, 12, c, 2.0, true)
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[SILVER, COAL_2, "подсказка", false],
+	]

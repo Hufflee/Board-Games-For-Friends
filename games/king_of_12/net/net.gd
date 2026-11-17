@@ -52,8 +52,9 @@ const REVEAL_SLACK := 20.0  # Оракул наступает во время в
 const AUTO_PICK := 60.0  # победитель раунда долго не выбирает карту под кубик
 ## Цвета игроков: каждому случайный, клик по своему нику — сменить. По цвету видно, кто что сделал.
 const PLAYER_COLORS := ["e6194b", "3cb44b", "f2c318", "4363d8", "f58231", "911eb4", "2ec4d6", "f032e6", "8fcf2b", "f59ac0", "2a9d8f", "9a6324", "34408f", "6fd6a8", "c47cba", "94a863"]
+const UnmatchedMatch := preload("res://games/unmatched/logic/um_match.gd")
 const CGSessionBridge := preload("res://games/custom/logic/cg_session.gd")
-const LOCAL_GAMES := ["first_contact", "in_broad_strokes", "green_team_wins", "colt_express", "blood_on_the_clocktower", "machi_koro", "cg", "wavelength", "dangerous_words", "hues_and_cues", "ready_set_bet", "word_slam", "tip_top", "tip_top_18", "not_a_hat", "gloom", "brodilka", "phantom_ink", "four_souls", "stillion", "the_gang", "things_in_rings", "khorom", "the_mind"]  # офлайн — местные игроки, а не боты
+const LOCAL_GAMES := ["unmatched", "first_contact", "in_broad_strokes", "green_team_wins", "colt_express", "blood_on_the_clocktower", "machi_koro", "cg", "wavelength", "dangerous_words", "hues_and_cues", "ready_set_bet", "word_slam", "tip_top", "tip_top_18", "not_a_hat", "gloom", "brodilka", "phantom_ink", "four_souls", "stillion", "the_gang", "things_in_rings", "khorom", "the_mind"]  # офлайн — местные игроки, а не боты
 const BOT_NAMES := ["Бот Аркадий", "Бот Варвара", "Бот Геннадий", "Бот Дарья", "Бот Евсей", "Бот Жанна", "Бот Захар"]
 
 var auto_advance_time := 45.0  # через сколько секунд итог закрывается сам
@@ -81,6 +82,9 @@ var game_id := ""
 var tutorial := false
 var _avatars := {}  # steam_id -> Texture2D
 var rules: K12Rules = null  # «Дюжина короля»
+var unmatched: UnmatchedMatch
+var _um_viewer := -1
+var _um_hands := {}
 var perudo: PerudoRules = null  # «Перудо»
 var wavelength: WLRules = null  # «Длина волны»
 var dwords: DWRules = null  # «Опасные слова»
@@ -590,6 +594,11 @@ func leave(reason: String = "Добровольный выход или смен
 	khr = null
 	kh_view_seat = 0
 	pkr = null
+	if unmatched != null:
+		unmatched.close()
+	unmatched = null
+	_um_viewer = -1
+	_um_hands.clear()
 	tg_view_seat = 0
 	fours = null
 	phantom = null
@@ -671,6 +680,11 @@ func _reset_host() -> void:
 	khr = null
 	kh_view_seat = 0
 	pkr = null
+	if unmatched != null:
+		unmatched.close()
+	unmatched = null
+	_um_viewer = -1
+	_um_hands.clear()
 	tg_view_seat = 0
 	fours = null
 	phantom = null
@@ -1217,6 +1231,42 @@ func set_setting(key: String, value) -> void:
 	_broadcast_lobby()
 
 
+func set_unmatched_hero(place: int, hero: String) -> void:
+	if is_host():
+		_apply_unmatched_hero(1, place, hero)
+	else:
+		_rpc_unmatched_hero.rpc_id(1, place, hero)
+
+
+@rpc("any_peer", "reliable")
+func _rpc_unmatched_hero(place: int, hero: String) -> void:
+	if is_host():
+		_apply_unmatched_hero(multiplayer.get_remote_sender_id(), place, hero)
+
+
+func _apply_unmatched_hero(peer: int, place: int, hero: String) -> void:
+	if party_game != "unmatched" or in_game or settings.get("um_hero_mode", "free") != "free":
+		return
+	var total := player_total()
+	var count := 4 if total == 3 else clampi(total, 2, 4)
+	if place < 0 or place >= count or not UnmatchedMatch.Roster.HEROES.has(hero):
+		return
+	if mode != "offline":
+		var owner := 1 if total == 3 and place == 3 else place
+		if owner >= join_order.size() or join_order[owner] != peer:
+			return
+	elif peer != 1:
+		return
+	var chosen: Array = Array(settings.get("um_heroes", []))
+	if chosen.size() != count:
+		chosen = UnmatchedMatch.DEFAULT_HEROES.slice(0, count)
+	if hero in chosen and chosen[place] != hero:
+		return
+	chosen[place] = hero
+	settings["um_heroes"] = chosen
+	_broadcast_lobby()
+
+
 func player_total() -> int:
 	return members.size() + maxi(0, bots)
 
@@ -1385,7 +1435,7 @@ func start_game() -> String:
 	# Старое/неверное отрицательное значение добавочных мест не скрывает реальных участников.
 	var added_players: int = maxi(0, bots)
 	var total: int = members.size() + added_players
-	var maximum := 7 if party_game == "first_contact" else 12 if party_game == "green_team_wins" else 6 if party_game == "colt_express" else GANG_MAX if party_game == "the_gang" else (5 if party_game == "machi_koro" else (6 if party_game == "things_in_rings" else MAX_PLAYERS))
+	var maximum := 4 if party_game == "unmatched" else 7 if party_game == "first_contact" else 12 if party_game == "green_team_wins" else 6 if party_game == "colt_express" else GANG_MAX if party_game == "the_gang" else (5 if party_game == "machi_koro" else (6 if party_game == "things_in_rings" else MAX_PLAYERS))
 	var minimum := 3 if party_game in ["the_gang", "khorom", "green_team_wins"] else 2
 	if party_game == "blood_on_the_clocktower":
 		maximum = CLOCKTOWER_MAX
@@ -1395,7 +1445,7 @@ func start_game() -> String:
 	if party_game.begins_with("custom:") and not cg_transfer.can_start():
 		return cg_transfer.error if not cg_transfer.error.is_empty() else "Дождитесь загрузки игры у всех участников."
 	var deck: Array[String] = []
-	if not party_game.begins_with("custom:") and not party_game in ["first_contact", "in_broad_strokes", "green_team_wins", "colt_express", "blood_on_the_clocktower", "machi_koro", "cg", "perudo", "wavelength", "dangerous_words", "hues_and_cues", "ready_set_bet", "word_slam", "tip_top", "tip_top_18", "not_a_hat", "gloom", "brodilka", "phantom_ink", "four_souls", "stillion", "the_gang", "things_in_rings", "khorom", "poker", "the_mind"]:
+	if not party_game.begins_with("custom:") and not party_game in ["unmatched", "first_contact", "in_broad_strokes", "green_team_wins", "colt_express", "blood_on_the_clocktower", "machi_koro", "cg", "perudo", "wavelength", "dangerous_words", "hues_and_cues", "ready_set_bet", "word_slam", "tip_top", "tip_top_18", "not_a_hat", "gloom", "brodilka", "phantom_ink", "four_souls", "stillion", "the_gang", "things_in_rings", "khorom", "poker", "the_mind"]:
 		deck = build_deck()
 		if deck.is_empty():
 			return "Вручную нужно отметить ровно %d карт." % K12Cards.DECK_SIZE
@@ -1413,7 +1463,7 @@ func start_game() -> String:
 	# «Перемешать игроков» (настройка лобби): места тасуются вместе с подключениями.
 	# _seat_perm[новое место] = место по порядку входа — по нему пересчитываются настройки «по местам».
 	_seat_perm = range(players.size())
-	if bool(settings.get("shuffle_seats", false)) and party_game != "perudo":  # у Перудо своя рассадка в партии
+	if bool(settings.get("shuffle_seats", false)) and party_game not in ["perudo", "unmatched"]:
 		_seat_perm.shuffle()
 		var mixed := []
 		var peers: Array[int] = []
@@ -1463,6 +1513,11 @@ func start_game() -> String:
 	khr = null
 	kh_view_seat = 0
 	pkr = null
+	if unmatched != null:
+		unmatched.close()
+	unmatched = null
+	_um_viewer = -1
+	_um_hands.clear()
 	if is_custom_game(party_game):
 		var cg_options := {"roles": settings.get("cg_roles", []), "seat_order": _seat_perm, "turn_time": settings.get("turn_time", 0), "vars": settings.get("cg_lobby", {}).get(party_game, {})}
 		var result := CGSessionBridge.create_custom(party_game.trim_prefix("custom:"), players, cg_options) if party_game.begins_with("custom:") else CGSessionBridge.create(str(settings.get("cg_example", "card_race")), players, cg_options)
@@ -1692,6 +1747,15 @@ func start_game() -> String:
 		if err != "":
 			seat_peers.clear()
 			return err
+	elif party_game == "unmatched":
+		var chosen: Variant = settings.get("um_heroes", PackedStringArray())
+		if not (chosen is Array or chosen is PackedStringArray):
+			chosen = []
+		unmatched = UnmatchedMatch.create(str(settings.get("um_arena", "marmoreal")), PackedStringArray(chosen), players,
+			randi(), str(settings.get("um_hero_mode", "free")))
+		if unmatched == null:
+			seat_peers.clear()
+			return "Выберите доступное поле и разных героев для всех мест."
 	elif party_game == "perudo":
 		rules = null
 		wavelength = null
@@ -1800,7 +1864,7 @@ func _rpc_action(kind: String, arg) -> void:
 
 
 func _handle_action(peer: int, kind: String, arg) -> void:
-	if not in_game or (rules == null and perudo == null and wavelength == null and dwords == null and hues == null and rsb == null and wslam == null and tiptop == null and nothat == null and gloom == null and brod == null and phantom == null and fours == null and stillion == null and gang == null and colt == null and green_team == null and strokes_game == null and first_contact == null and mind == null and mk == null and bc == null and cg == null and tir == null and khr == null and pkr == null):
+	if not in_game or (rules == null and unmatched == null and perudo == null and wavelength == null and dwords == null and hues == null and rsb == null and wslam == null and tiptop == null and nothat == null and gloom == null and brod == null and phantom == null and fours == null and stillion == null and gang == null and colt == null and green_team == null and strokes_game == null and first_contact == null and mind == null and mk == null and bc == null and cg == null and tir == null and khr == null and pkr == null):
 		return
 	var seat := seat_peers.find(peer)
 	Diag.last_action = "%s · место %d · %s" % [kind, seat, Time.get_time_string_from_system()]  # для сторожа зависаний
@@ -1812,6 +1876,10 @@ func _handle_action(peer: int, kind: String, arg) -> void:
 		bc_bridge.handle_action(peer, seat, kind, arg)
 		return
 	host_tools.before_action(kind)
+	if unmatched != null:
+		if arg is Dictionary:
+			_handle_unmatched(seat, kind, arg)
+		return
 	if cg != null:
 		if mode == "offline" and peer == 1:
 			if kind == "view_seat":
@@ -2030,6 +2098,26 @@ func _handle_action(peer: int, kind: String, arg) -> void:
 
 
 ## Место выбыло из партии (игра сама говорит через is_out) — наблюдает, его «Дальше» не ждём.
+func _handle_unmatched(seat: int, kind: String, action: Dictionary) -> void:
+	var local := mode == "offline"
+	var viewer := _um_viewer if local else seat
+	if local and kind == "handoff":
+		if unmatched.actor() >= 0 and _um_viewer != unmatched.actor():
+			_um_viewer = unmatched.actor()
+			_push_state()
+		return
+	if local and (viewer < 0 or (unmatched.actor() >= 0 and viewer != unmatched.actor())):
+		return
+	if kind == "view_hand":
+		var place: Variant = action.get("seat")
+		if place is int and place >= 0 and place < unmatched.game.controllers.size() and unmatched.game.controllers[place] == viewer:
+			_um_hands[viewer] = place
+			_push_state()
+		return
+	if unmatched.act(viewer, kind, action):
+		_push_state()
+
+
 func _seat_out(seat: int) -> bool:
 	var g := _game_obj()
 	return g != null and g.has_method("is_out") and bool(g.call("is_out", seat))
@@ -2076,6 +2164,10 @@ func _process(delta: float) -> void:
 		# состояние ушло клиентам ещё со старым временем фазы — переотправляем с полным временем хода
 		_stamp_turn = false
 		_push_state()
+	if unmatched != null:
+		if unmatched.tick(delta):
+			_push_state()
+		return
 	if cg != null:
 		if cg.tick(delta):
 			_push_state()
@@ -2217,14 +2309,16 @@ func _process(delta: float) -> void:
 
 
 func _push_state() -> void:
-	if rules == null and perudo == null and wavelength == null and dwords == null and hues == null and rsb == null and wslam == null and tiptop == null and nothat == null and gloom == null and brod == null and phantom == null and fours == null and stillion == null and gang == null and colt == null and green_team == null and strokes_game == null and first_contact == null and mind == null and mk == null and bc == null and cg == null and tir == null and khr == null and pkr == null:
+	if rules == null and unmatched == null and perudo == null and wavelength == null and dwords == null and hues == null and rsb == null and wslam == null and tiptop == null and nothat == null and gloom == null and brod == null and phantom == null and fours == null and stillion == null and gang == null and colt == null and green_team == null and strokes_game == null and first_contact == null and mind == null and mk == null and bc == null and cg == null and tir == null and khr == null and pkr == null:
 		return
 	if bc == null:
 		_match_metrics.observe(game_id,party_game,_game_obj(),seat_peers)
 	host_tools.committed()
 	_handoff_dirty = true
 	var phase: String
-	if cg != null:
+	if unmatched != null:
+		phase = unmatched.phase
+	elif cg != null:
 		phase = cg.phase
 	elif bc != null:
 		phase = bc.phase
@@ -2290,7 +2384,7 @@ func _push_state() -> void:
 	# зрители видят стол глазами рядового игрока (не ведущего), без права действовать
 	var specs := spectators()
 	if not specs.is_empty() and not seat_peers.is_empty():
-		var sv := _seat_view(-1 if phantom != null or fours != null or gang != null or colt != null or green_team != null or strokes_game != null or first_contact != null or mind != null or mk != null or bc != null or cg != null or tir != null or khr != null or pkr != null else _spectator_seat(), names, left, false)
+		var sv := _seat_view(-1 if unmatched != null or phantom != null or fours != null or gang != null or colt != null or green_team != null or strokes_game != null or first_contact != null or mind != null or mk != null or bc != null or cg != null or tir != null or khr != null or pkr != null else _spectator_seat(), names, left, false)
 		sv["spectator"] = true
 		# что зритель может занять сам: место бота (с его прогрессом) или команду (прогресс общий)
 		var bot_seats := []
@@ -2314,7 +2408,13 @@ func _send_view(p: int, v: Dictionary) -> void:
 ## Состояние стола для места s (show_all — на одном компьютере видно всё).
 func _seat_view(s: int, names: Array, left: float, show_all: bool) -> Dictionary:
 	var v: Dictionary
-	if cg != null:
+	if unmatched != null:
+		var viewer := _um_viewer if show_all else s
+		var handoff := show_all and unmatched.actor() >= 0 and viewer != unmatched.actor()
+		v = unmatched.get_view(-1 if handoff else viewer, int(_um_hands.get(viewer, -1)))
+		v["hotseat"] = show_all
+		v["handoff"] = handoff
+	elif cg != null:
 		v = CGSessionBridge.view(cg, cg_view_seat if show_all else s, show_all)
 		v["disconnected"] = disconnected.keys()
 	elif bc != null:
@@ -2399,6 +2499,14 @@ func _seat_view(s: int, names: Array, left: float, show_all: bool) -> Dictionary
 	v["reveal_speed"] = settings.get("reveal_speed", "normal")
 	v["game_id"] = game_id
 	v["personal_stats"] = {} if bc != null else _match_metrics.snapshot(s)
+	var final := preload("res://hub/final_stats.gd").make(party_game, v, _gp(), _match_metrics.rows, _game_obj())
+	if not final.is_empty():
+		_match_metrics.add_final_columns(final)
+		var rating: Dictionary = final.ratings.get(s, {})
+		if not rating.is_empty() and not v.personal_stats.is_empty():
+			v.personal_stats.totals.merge(rating, true)
+		final.erase("ratings")
+		v["final_stats"] = final
 	if str(v.get("phase", "")) == "game_over":
 		v["match_award"] = _match_metrics.award()
 	v["game_paused"] = paused
@@ -2579,6 +2687,8 @@ const PERUDO_TURN := 60.0  # долго думает — ход делает б�
 
 ## Игроки текущей партии (любой игры).
 func _gp() -> Array:
+	if unmatched != null:
+		return unmatched.players
 	if bc != null:
 		return bc.players
 	if cg != null:
@@ -2769,7 +2879,7 @@ func _timed_new_game(rules: Object, key: String, delta: float) -> bool:
 
 ## Время на ход из настроек комнаты (0 — без ограничения).
 func turn_limit() -> float:
-	if bc != null:
+	if bc != null or unmatched != null:
 		return INF
 	# новые игры (15.11): часы только в фазах, где кто-то думает; «0» в настройке — без ограничения
 	if colt != null or first_contact != null or strokes_game != null or green_team != null:
@@ -3738,7 +3848,7 @@ func set_paused(on: bool) -> void:
 
 ## Правила текущей игры (любой).
 func _game_obj() -> Object:
-	for o in [first_contact, strokes_game, green_team, colt, bc, cg, mk, mind, pkr, khr, tir, gang, stillion, fours, phantom, brod, gloom, nothat, tiptop, wslam, rsb, hues, dwords, wavelength, perudo, rules]:
+	for o in [unmatched, first_contact, strokes_game, green_team, colt, bc, cg, mk, mind, pkr, khr, tir, gang, stillion, fours, phantom, brod, gloom, nothat, tiptop, wslam, rsb, hues, dwords, wavelength, perudo, rules]:
 		if o != null:
 			return o
 	return null
@@ -3871,6 +3981,11 @@ func _finish_session() -> void:
 	khr = null
 	kh_view_seat = 0
 	pkr = null
+	if unmatched != null:
+		unmatched.close()
+	unmatched = null
+	_um_viewer = -1
+	_um_hands.clear()
 	_client_start_pending = false
 	_client_expected_match = ""
 	gang = null

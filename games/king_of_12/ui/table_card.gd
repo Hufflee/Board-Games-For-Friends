@@ -59,6 +59,7 @@ func _init(card_id: String = "", up: bool = true, face: Control = null, face_siz
 func _ready() -> void:
 	if _face == null and card != "":
 		var view := K12CardView.new(card)
+		view.preview_enabled = false
 		view.stamp = stamp
 		_face = view
 	if _face:
@@ -208,9 +209,9 @@ func _to_parent(p: Vector2) -> Vector2:
 ## Рубашка карты: тёмно-синяя с золотой рамкой, ромбы и кристалл в центре.
 static func draw_back(ci: CanvasItem, r: Rect2) -> void:
 	var sb := StyleBoxFlat.new()
-	sb.bg_color = Color("1c2a4a")
+	sb.bg_color = K12UI.CARD_BACK
 	sb.set_corner_radius_all(int(r.size.x * 0.07))
-	sb.border_color = Color("d4b062")
+	sb.border_color = K12UI.CARD_BACK_RIM
 	sb.set_border_width_all(maxi(2, int(r.size.x * 0.03)))
 	sb.shadow_color = Color(0, 0, 0, 0.35)
 	sb.shadow_size = int(r.size.x * 0.04)
@@ -230,16 +231,16 @@ static func draw_back(ci: CanvasItem, r: Rect2) -> void:
 	ci.draw_rect(inner, Color(0.83, 0.69, 0.38, 0.6), false, maxf(1.0, r.size.x * 0.012))
 	var c := r.get_center()
 	var rad := r.size.x * 0.24
-	ci.draw_circle(c, rad * 1.25, Color("1c2a4a"))
-	ci.draw_arc(c, rad * 1.25, 0, TAU, 40, Color("d4b062"), maxf(1.0, r.size.x * 0.015), true)
+	ci.draw_circle(c, rad * 1.25, K12UI.CARD_BACK)
+	ci.draw_arc(c, rad * 1.25, 0, TAU, 40, K12UI.CARD_BACK_RIM, maxf(1.0, r.size.x * 0.015), true)
 	var outer := PackedVector2Array()
 	var inner_p := PackedVector2Array()
 	for i in 5:
 		var a := -PI / 2 + i * TAU / 5
 		outer.append(c + Vector2(cos(a), sin(a)) * rad)
 		inner_p.append(c + Vector2(cos(a), sin(a)) * rad * 0.6)
-	ci.draw_colored_polygon(outer, Color("2a6fa8"))
-	ci.draw_colored_polygon(inner_p, Color("5fb4ef"))
+	ci.draw_colored_polygon(outer, K12UI.CARD_BACK_GEM)
+	ci.draw_colored_polygon(inner_p, K12UI.CRYSTAL)
 	for i in 5:
 		ci.draw_line(outer[i], inner_p[i], Color(1, 1, 1, 0.4), 1.0, true)
 	var font := ThemeDB.fallback_font

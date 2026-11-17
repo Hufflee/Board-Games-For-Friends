@@ -25,6 +25,23 @@ static func poster(button: Control, color: Color) -> void:
 	_plus(button, c + Vector2(12, 10), color)
 
 
+## Куб (неоновый куб на шкафу): изометрический контур; скрыт — перечёркнут.
+static func cube(button: Control, color: Color, shown: bool) -> void:
+	var c := button.size * 0.5 + Vector2(0, 1)
+	var r := 10.0
+	var top := c + Vector2(0, -r)
+	var left := c + Vector2(-r * 0.87, -r * 0.5)
+	var right := c + Vector2(r * 0.87, -r * 0.5)
+	var low_left := c + Vector2(-r * 0.87, r * 0.5)
+	var low_right := c + Vector2(r * 0.87, r * 0.5)
+	var bottom := c + Vector2(0, r)
+	button.draw_polyline(PackedVector2Array([top, right, low_right, bottom, low_left, left, top]), color, WIDTH, true)
+	button.draw_polyline(PackedVector2Array([left, c, right]), color, WIDTH * 0.8, true)
+	button.draw_line(c, bottom, color, WIDTH * 0.8, true)
+	if not shown:
+		button.draw_line(c + Vector2(-13, 13), c + Vector2(13, -13), color, WIDTH + 0.5, true)
+
+
 ## Мяч: круг с наклонной полосой.
 static func ball(button: Control, color: Color, on: bool) -> void:
 	var c := button.size * 0.5
@@ -139,3 +156,11 @@ static func _plus(button: Control, at: Vector2, color: Color) -> void:
 	button.draw_circle(at, 6.5, Color(0.08, 0.05, 0.16, 0.9))
 	button.draw_line(at + Vector2(-3.5, 0), at + Vector2(3.5, 0), color, WIDTH, true)
 	button.draw_line(at + Vector2(0, -3.5), at + Vector2(0, 3.5), color, WIDTH, true)
+
+
+## Полка с диагональным левым концом и коробкой сверху.
+static func upper_shelves(button: Control, color: Color) -> void:
+	var c := button.size * 0.5
+	var points := PackedVector2Array([c + Vector2(-15, -5), c + Vector2(-6, 4), c + Vector2(15, 4)])
+	button.draw_polyline(points, color, WIDTH, true)
+	button.draw_rect(Rect2(c + Vector2(0, -7), Vector2(11, 10)), color, false, WIDTH)

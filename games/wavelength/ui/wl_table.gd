@@ -1,8 +1,11 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
+
 ## Стол «Длины волны»: счёт команд, подсказка, шкала со стрелкой, карточка, панель действий по роли.
 
 const TEAM_NAMES := ["Левое полушарие", "Правое полушарие"]
-const TEAM_COLORS := [Color("5f7fbf"), Color("d9895a")]
+const TEAM_COLORS := HCStyle.TEAM_COLORS
 
 var app: Node
 
@@ -142,7 +145,7 @@ func _update_info() -> void:
 		who = TEAM_NAMES[int(_v.get("active_team", 0)) if ph != "side" else 1 - int(_v.get("active_team", 0))]
 	var names := {"card": "выбор карточки", "clue": "подсказка", "guess": "угадывание", "side": "левее или правее?", "reveal": "итог"}
 	var p: String = names.get(ph, ph)
-	_top.info.text = ("%s: %s" % [who.get_slice(" ", 0), p]) if who != "" else p.capitalize()
+	_top.info.text = ("%s: %s" % [who.get_slice(" ", 0), p]) if who != "" else (p.left(1).to_upper() + p.substr(1))
 
 
 # --- Роли ---------------------------------------------------------------------------
@@ -190,10 +193,11 @@ func _update_teams() -> void:
 		var v := HCStyle.vbox(2)
 		p.add_child(v)
 		var head := HCStyle.hbox(8)
-		var nm := HCStyle.label("Команда" if _v["coop"] else TEAM_NAMES[t], HCStyle.BODY, tc.darkened(0.2), HORIZONTAL_ALIGNMENT_LEFT, "bold")
+		var nm := HCStyle.label("Команда" if _v["coop"] else TEAM_NAMES[t], HCStyle.BODY, HCStyle.team_ink(tc), HORIZONTAL_ALIGNMENT_LEFT, "bold")
 		nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		head.add_child(nm)
 		var score := HCStyle.label(str(_v["scores"][t]), HCStyle.H1, HCStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "title")
+		TextUI.stable_numbers(score, "000")
 		head.add_child(score)
 		v.add_child(head)
 		if not _v["coop"]:
@@ -202,7 +206,7 @@ func _update_teams() -> void:
 			var sc := int(_v["scores"][0])
 			v.add_child(_track(sc, WLRules.COOP_GOAL, HCStyle.SAGE))
 			var nx := WLRules.coop_next(sc)
-			var info := "Цель — %d очков («Вы победили!») · карточек осталось: %d" % [WLRules.COOP_GOAL, _v["cards_left"]]
+			var info := "Цель — %s («Вы победили!») · карточек осталось: %d" % [TextUI.plural(WLRules.COOP_GOAL, "очко", "очка", "очков"), _v["cards_left"]]
 			if not nx.is_empty() and sc >= WLRules.COOP_GOAL:
 				info = "Цель взята! До «%s» — ещё %d · карточек: %d" % [nx[1], int(nx[0]) - sc, _v["cards_left"]]
 			v.add_child(HCStyle.label(info, HCStyle.CAP, HCStyle.MUTED))
@@ -253,9 +257,11 @@ func _update_card() -> void:
 		return
 	for i in 2:
 		var box := PanelContainer.new()
-		box.add_theme_stylebox_override("panel", HCStyle.box(HCStyle.DUSK if i == 0 else HCStyle.CLAY, 14, Color.TRANSPARENT, 0, HCStyle.SHADOW, 10))
+		var fill := HCStyle.spectrum_fill(i)
+		var ink := HCStyle.spectrum_ink(fill)
+		box.add_theme_stylebox_override("panel", HCStyle.box(fill, 14, Color.TRANSPARENT, 0, HCStyle.SHADOW, 10))
 		box.custom_minimum_size = Vector2(280, 0)
-		var l := HCStyle.label(("← " if i == 0 else "") + pair[i] + (" →" if i == 1 else ""), HCStyle.BODY, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER, "bold")
+		var l := HCStyle.label(("← " if i == 0 else "") + pair[i] + (" →" if i == 1 else ""), HCStyle.BODY, ink, HORIZONTAL_ALIGNMENT_CENTER, "bold")
 		box.add_child(l)
 		_card_row.add_child(box)
 
@@ -406,6 +412,7 @@ func _update_panel() -> void:
 			btn.pressed.connect(func(): Net.send_action("next"))
 			row.add_child(btn)
 			_auto_label = HCStyle.label("", HCStyle.CAP, HCStyle.MUTED)
+			TextUI.stable_numbers(_auto_label, "авто через 00 с")
 			row.add_child(_auto_label)
 			row.add_child(ReadyDots.make(_v["players"], ReadyDots.pressed_next(_v)))
 			col.add_child(row)

@@ -85,8 +85,8 @@ func _rounded_panel() -> StyleBoxFlat:
 
 func show_menu(message: String = "") -> void:
 	var col := _centered()
-	col.add_child(TGStyle.heading("THE GANG", 48))
-	col.add_child(TGStyle.label("КООПЕРАТИВНЫЙ ПОКЕР · 3–10 ИГРОКОВ", 16, TGStyle.GOLD))
+	col.add_child(TGStyle.heading("THE GANG", TGStyle.MENU_TITLE))
+	col.add_child(TGStyle.label("КООПЕРАТИВНЫЙ ПОКЕР · 3–10 ИГРОКОВ", TGStyle.BODY, TGStyle.GOLD))
 	col.add_child(RoomPanel.make("the_gang", TGStyle.button, TGStyle.label))
 	var local := TGStyle.primary("Играть на одном компьютере")
 	local.name = "LocalGame"
@@ -101,7 +101,7 @@ func show_menu(message: String = "") -> void:
 	back.pressed.connect(_go_hub)
 	col.add_child(back)
 	if not message.is_empty():
-		col.add_child(TGStyle.label(message, 16, TGStyle.GOLD))
+		col.add_child(TGStyle.label(message, TGStyle.BODY, TGStyle.GOLD))
 
 func show_lobby() -> void:
 	_lobby_body = _centered(true)
@@ -119,7 +119,7 @@ func _on_lobby() -> void:
 func _rebuild_lobby() -> void:
 	TGStyle.clear(_lobby_body)
 	_lobby_body.add_child(TGStyle.heading("THE GANG · СОБИРАЕМ КОМАНДУ"))
-	_lobby_body.add_child(TGStyle.label("Базовая игра · 3–10 мест · без ботов", 16, TGStyle.GOLD))
+	_lobby_body.add_child(TGStyle.label("Базовая игра · 3–10 мест · без ботов", TGStyle.BODY, TGStyle.GOLD))
 	var data: Dictionary = Net.lobby_view
 	var members: Array = data.get("members", [])
 	var member_grid := GridContainer.new()
@@ -140,7 +140,7 @@ func _rebuild_lobby() -> void:
 		remove.pressed.connect(func(): Net.set_bots(Net.bots - 1))
 		row.add_child(remove)
 		_lobby_body.add_child(row)
-		var seats_hint := TGStyle.label("На столе переключайте места: чужие карты открываются только после выбора места.", 16, TGStyle.MUTED)
+		var seats_hint := TGStyle.label("На столе переключайте места: чужие карты открываются только после выбора места.", TGStyle.BODY, TGStyle.MUTED)
 		seats_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_lobby_body.add_child(seats_hint)
 	_lobby_body.add_child(TurnClock.settings_row(TGStyle.button, TGStyle.label))
@@ -166,12 +166,15 @@ func _rebuild_lobby() -> void:
 			if not error.is_empty():
 				_lobby_error.text = error)
 		_lobby_body.add_child(start)
+		var why := TGStyle.label("Нужно минимум 3 игрока" if members.size() < 3 else "", TGStyle.CAP, TGStyle.MUTED)
+		why.custom_minimum_size.y = 18
+		_lobby_body.add_child(why)
 	else:
 		_lobby_body.add_child(TGStyle.label("Ждём старта от хоста…"))
 	var back := TGStyle.button("← К выбору игры")
 	LeaveGuard.wire(back, "Выйти?", "Вы вернётесь к выбору игры.", back_to_hub)
 	_lobby_body.add_child(back)
-	_lobby_error = TGStyle.label("", 16, TGStyle.GOLD)
+	_lobby_error = TGStyle.label("", TGStyle.BODY, TGStyle.GOLD)
 	_lobby_body.add_child(_lobby_error)
 
 func show_table() -> void:

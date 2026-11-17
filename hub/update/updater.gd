@@ -49,7 +49,7 @@ func _ready() -> void:
 ## Апдейтер работает только в собранной не-Steam игре под Windows.
 static func is_supported() -> bool:
 	var force := OS.get_environment("PW_UPDATER")
-	if force == "0" or OS.has_feature("steam_store") or OS.get_name() != "Windows":
+	if force == "0" or OS.has_feature("steam_store") or OS.get_name() != "Windows" or OS.has_feature("bgs_social") or "--social" in OS.get_cmdline_user_args():
 		return false
 	return force == "1" or not OS.has_feature("editor")
 

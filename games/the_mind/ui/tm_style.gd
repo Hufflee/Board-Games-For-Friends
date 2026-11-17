@@ -189,3 +189,10 @@ class Background extends Control:
 		add_child(top_veil)
 	func _draw() -> void:
 		draw_rect(Rect2(Vector2.ZERO, size), Color("152a26") if TMStyle.dark() else TMStyle.PAPER)
+
+
+static func contrast_pairs() -> Array:
+	return [
+		[ink(), panel_color(), "текст панели", false],
+		[GREEN, GOLD, "главная кнопка", false],
+	]

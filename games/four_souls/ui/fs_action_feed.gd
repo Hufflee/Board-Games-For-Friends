@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Плавающая лента публичных действий. Источник слева, фактический результат справа.
 
 const LIMIT := 12
@@ -141,6 +143,7 @@ func show_entry(seq: int) -> void:
 		var nick := FSStyle.label(str(author.name), FSStyle.CAP)
 		nick.custom_minimum_size.x = 100
 		nick.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(nick)
 		source.add_child(nick)
 		_art(source, int(author.char), Vector2(28, 39))
 	if card >= 0:

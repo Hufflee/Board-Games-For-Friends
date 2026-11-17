@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Стол Unspoken: общая стопка, приватная рука и единогласная «Паника».
 
 const Style := preload("res://games/the_mind/ui/tm_style.gd")
@@ -112,7 +114,7 @@ func _rebuild() -> void:
 	seats.add_theme_constant_override("v_separation", 8)
 	_body.add_child(seats)
 	for i in players.size():
-		var text := "%s · %d карт" % [players[i].get("name", "Игрок"), int(players[i].count)]
+		var text := "%s · %s" % [players[i].get("name", "Игрок"), TextUI.plural(int(players[i].count), "карта", "карты", "карт")]
 		if _view.phase == "focus" and bool(_view.ready[i]):
 			text += " · готов"
 		if _view.phase == "vote" and bool(_view.votes[i]):
@@ -120,7 +122,10 @@ func _rebuild() -> void:
 		var b := Style.button(("● " if i == _seat else "") + text)
 		b.size_flags_horizontal = SIZE_EXPAND_FILL
 		b.clip_text = true
-		b.disabled = not bool(_view.get("hotseat", false))
+		b.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		if not bool(_view.get("hotseat", false)):
+			TextUI.display_only(b)
+		TextUI.full_on_hover(b)
 		b.pressed.connect(func(): Net.send_action("view_seat", {"seat": i}))
 		seats.add_child(b)
 		_seat_positions[i] = b
@@ -133,10 +138,14 @@ func _rebuild() -> void:
 	var status_col := Style.column(8)
 	status_col.size_flags_horizontal = SIZE_EXPAND_FILL
 	status_row.add_child(status_col)
-	status_col.add_child(Style.heading("ЖИЗНИ  %d     /     ПАНИКА  %d" % [int(_view.lives), int(_view.panic)], 28))
+	var counters := Style.heading("ЖИЗНИ  %d     /     ПАНИКА  %d" % [int(_view.lives), int(_view.panic)], 28)
+	TextUI.stable_numbers(counters, "ЖИЗНИ  0     /     ПАНИКА  0")
+	status_col.add_child(counters)
 	var msg := Style.label(str(_view.message))
 	if _view.phase == "play" and not bool(_view.get("can_play", true)):
 		msg.text = "У вас меньшая карта — нажмите СТОП." if bool(_view.get("can_stop", false)) else "Ждём СТОП владельца меньшей карты."
+	if _view.phase == "play" and float(_view.get("refocus_left", 0.0)) > 0.0:
+		msg.text += "\nМежду сборами команды должно пройти 15 секунд."
 	msg.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	status_col.add_child(msg)
 	status_col.add_child(Style.label("Бонус за уровень: " + str(_view.get("level_reward", "без бонуса")), 14))
@@ -175,7 +184,7 @@ func _rebuild() -> void:
 		face.mouse_exited.connect(_close_preview)
 		stack.add_child(face)
 	else:
-		var empty := Style.heading("%d КАРТ В СТОПКЕ" % int(_view.pile_count) if int(_view.pile_count) > 0 else "ПОЧУВСТВУЙТЕ МОМЕНТ", 28)
+		var empty := Style.heading(("%s в стопке" % TextUI.plural(int(_view.pile_count), "карта", "карты", "карт")).to_upper() if int(_view.pile_count) > 0 else "ПОЧУВСТВУЙТЕ МОМЕНТ", 28)
 		empty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		stack.add_child(empty)
 	var last: Dictionary = _view.get("last_play", {})
@@ -207,8 +216,9 @@ func _rebuild() -> void:
 			continue
 		var col := Style.column(4)
 		discards.add_child(col)
-		var owner := Style.label(str(players[int(item.seat)].get("name", "Игрок")), 12)
+		var owner := Style.label(str(players[int(item.seat)].get("name", "Игрок")), 13)
 		owner.clip_text = true
+		TextUI.full_on_hover(owner)
 		col.add_child(owner)
 		var face := Style.face(int(item.card), 28, 12)
 		face.custom_minimum_size = Vector2(64, 96)

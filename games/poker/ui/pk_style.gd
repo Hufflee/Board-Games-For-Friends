@@ -1,4 +1,8 @@
 extends RefCounted
+
+const CAP := 13
+const SEAT_FILL := Color("221238")
+const MY_SEAT_FILL := Color("2c1748")
 ## «Покер»: мини-дизайн-система — неоновый Лас-Вегас. Тёмная фиолетовая комната, сукно с неоновой каймой
 ## (розовый + голубой), золото — только для главного действия. Шрифты: Russo One — заголовки, Exo 2 — текст.
 ## Размеры текста: 28 / 16 / 12. Только тёмная тема (светлая убрана по решению владельца, 31.10).
@@ -282,3 +286,11 @@ class Backdrop extends Control:
 	func _draw() -> void:
 		if paint.is_valid():
 			paint.call(self, size, _motion)
+
+
+static func contrast_pairs() -> Array:
+	return [
+		[ink(), panel(), "текст панели", false],
+		[muted(), panel(), "подпись", false],
+		[gold_ink(), MY_SEAT_FILL, "стек игрока", false],
+	]

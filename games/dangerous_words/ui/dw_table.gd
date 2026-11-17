@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Стол «Опасных слов»: подземелье (комнаты, команды, монстр, проклятия), панели команд,
 ## центральная панель по фазе и роли (ловушки / объясняю / угадываю / ловлю ловушки).
 
@@ -38,7 +40,7 @@ func _ready() -> void:
 	_dungeon = Control.new()
 	_dungeon.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
 	_dungeon.offset_top = TopBar.HEIGHT
-	_dungeon.offset_bottom = TopBar.HEIGHT + 168
+	_dungeon.offset_bottom = TopBar.HEIGHT + 192
 	_dungeon.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(_dungeon)
 	for t in 2:
@@ -79,11 +81,11 @@ func _ready() -> void:
 
 func _layout() -> void:
 	var w := size.x
-	_teams[0].position = Vector2(12, TopBar.HEIGHT + 176)
+	_teams[0].position = Vector2(12, TopBar.HEIGHT + 200)
 	_teams[0].size = Vector2(250, 0)
-	_teams[1].position = Vector2(w - 262, TopBar.HEIGHT + 176)
+	_teams[1].position = Vector2(w - 262, TopBar.HEIGHT + 200)
 	_teams[1].size = Vector2(250, 0)
-	_center.position = Vector2(276, TopBar.HEIGHT + 176)
+	_center.position = Vector2(276, TopBar.HEIGHT + 200)
 	_center.size = Vector2(w - 552, 0)
 	_center.custom_minimum_size = Vector2(w - 552, 0)
 
@@ -157,6 +159,11 @@ func _phase_sound(prev: String) -> void:
 func _draw_dungeon() -> void:
 	DWStyle.clear(_dungeon)
 	_top.info.text = "Раунд %d из %d" % [_v["round_no"], DWRules.MAX_ROUNDS]
+	var legend := DWStyle.label("Фигура монстра — босс  ·  Рубашка карты — проклятье откроется при входе", DWStyle.CAP, DWStyle.TEXT, HORIZONTAL_ALIGNMENT_CENTER)
+	legend.set_anchors_and_offsets_preset(Control.PRESET_TOP_WIDE)
+	legend.offset_top = 167
+	legend.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	_dungeon.add_child(legend)
 	var rooms: Array = _v["rooms"]
 	var tile := 132.0
 	var gap := 10.0
@@ -257,7 +264,7 @@ func _draw_teams() -> void:
 		if st != "":
 			v.add_child(DWStyle.label(st, DWStyle.CAP, DWStyle.SLIME if st in ["ловушки готовы", "объясняет!"] else DWStyle.MUTED))
 		if _v["fighting"][t]:
-			v.add_child(_rule_card("Бой с монстром: " + DWData.MONSTERS[_v["monster"]]["name"], DWData.MONSTERS[_v["monster"]]["hard" if _v["hard"] else "text"], DWStyle.BLOOD))
+			v.add_child(_rule_card("Бой с монстром: " + DWData.MONSTERS[_v["monster"]]["name"], DWData.MONSTERS[_v["monster"]]["hard" if _v["hard"] else "text"], DWStyle.BLOOD.lightened(0.15)))
 		for id in _v["active_curses"][t]:
 			v.add_child(_rule_card("Проклятие: " + DWData.CURSES[id]["name"], DWData.CURSES[id]["text"], DWStyle.VIOLET))
 
@@ -337,6 +344,7 @@ func _timer_row(col: VBoxContainer) -> void:
 	var row := DWStyle.hbox(10)
 	_timer_label = DWStyle.label("", DWStyle.BODY, DWStyle.TEXT, HORIZONTAL_ALIGNMENT_LEFT, true)
 	_timer_label.custom_minimum_size.x = 120
+	TextUI.stable_numbers(_timer_label, "00:00")
 	row.add_child(_timer_label)
 	_timer_bar = ProgressBar.new()
 	_timer_bar.show_percentage = false
@@ -768,14 +776,14 @@ func _build_turn(col: VBoxContainer) -> void:
 			var li := i
 			var tw := word
 			b.pressed.connect(func():
-				LeaveGuard.ask(b, "Ловушка «%s»?" % tw, "Вы уверены, что это слово сказал объясняющий %s, а не кто-то другой?" % _name(exp_seat), "Да, ловушка!", func():
+				LeaveGuard.ask(b, "Ловушка «%s»?" % tw, "Вы уверены, что это слово сказал объясняющий %s, а не кто-то другой?" % _name(exp_seat), "Засчитать ловушку", func():
 					Sfx.play("card_shove", 0)
 					_send("dw_trap", {"line": li}), "Нет, отмена"))
 			grid.add_child(b)
 		col.add_child(grid)
 		var row2 := DWStyle.hbox(10)
 		row2.alignment = BoxContainer.ALIGNMENT_CENTER
-		var viol := DWStyle.button("Нарушение", DWStyle.BODY)
+		var viol := DWStyle.button("Отметить нарушение", DWStyle.BODY)
 		viol.tooltip_text = "Однокоренное с секретным словом, пример, имя собственное, «звучит как…», жест"
 		viol.disabled = reading
 		viol.pressed.connect(func(): _send("dw_violation"))
@@ -785,6 +793,7 @@ func _build_turn(col: VBoxContainer) -> void:
 		wr.pressed.connect(func(): _send("dw_wrong"))
 		row2.add_child(wr)
 		col.add_child(row2)
+		col.add_child(_hint(viol.tooltip_text, DWStyle.MUTED, DWStyle.CAP))
 
 
 func _reason_text(e: Dictionary) -> String:

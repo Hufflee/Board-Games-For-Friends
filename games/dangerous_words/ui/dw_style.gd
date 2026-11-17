@@ -84,7 +84,7 @@ static func theme() -> Theme:
 	t.set_color("font_color", "Label", TEXT)
 	for cls in ["Button", "OptionButton"]:
 		t.set_font("font", cls, font("bold"))
-		t.set_stylebox("normal", cls, box(Color("2a1540"), 14, VIOLET_DIM, 2, Color(0, 0, 0, 0.5)))
+		t.set_stylebox("normal", cls, box(Color("2a1540"), 14, Color(VIOLET, 0.7), 2, Color(0, 0, 0, 0.5)))
 		t.set_stylebox("hover", cls, box(Color("3d1d5c"), 14, PUMPKIN, 2, Color(PUMPKIN, 0.45)))
 		t.set_stylebox("pressed", cls, box(Color("1a0c29"), 14, PUMPKIN, 2, Color(PUMPKIN, 0.35)))
 		t.set_stylebox("disabled", cls, box(Color("1b1226"), 14, Color("3a2d4a"), 1))
@@ -241,3 +241,11 @@ static func clear(node: Node) -> void:
 
 static func art(name: String) -> Texture2D:
 	return load("res://games/dangerous_words/art/%s.png" % name)
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[TEXT, Color("2a1540"), "текст кнопки", false],
+		[Color(VIOLET, 0.7), Color("2a1540"), "рамка", true],
+	]

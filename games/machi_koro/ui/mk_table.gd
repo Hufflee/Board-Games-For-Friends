@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Открытый 2D-стол Мачи Коро: рынок, города, выборы и поясняющая анимация очереди хоста.
 
 const Style := preload("res://games/machi_koro/ui/mk_style.gd")
@@ -89,6 +91,7 @@ func _ready() -> void:
 	city_title = Style.heading("Мой город", 18)
 	city_title.clip_text = true
 	city_title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	TextUI.full_on_hover(city_title)
 	own.add_child(city_title)
 	var city_scroll := ScrollContainer.new()
 	city_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -103,6 +106,7 @@ func _ready() -> void:
 	landmark_title = Style.heading("Достопримечательности", 18)
 	landmark_title.clip_text = true
 	landmark_title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	TextUI.full_on_hover(landmark_title)
 	landmarks.add_child(landmark_title)
 	var landmark_scroll := ScrollContainer.new()
 	landmark_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -205,6 +209,7 @@ func _refresh() -> void:
 		button.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		button.clip_text = true
 		button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(button)
 		if s == int(view.current):
 			button.add_theme_stylebox_override("normal", Style.box(Style.ACCENT.darkened(0.5) if Style.dark() else Color("d3e6de"), 10))
 		TurnNameGlow.apply(button, s == int(view.current))
@@ -380,6 +385,7 @@ func _refresh_controls() -> void:
 			message = "Победа: %s" % str(view.players[int(view.winner)].name)
 	var label := Style.label(message if acting or view.phase in ["animation", "game_over"] else "Ждём %s…" % str(view.players[int(view.current)].name), 14)
 	label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	TextUI.full_on_hover(label)
 	label.size_flags_horizontal = SIZE_EXPAND_FILL
 	label.custom_minimum_size.x = 140
 	controls.add_child(label)
@@ -557,7 +563,7 @@ func _draw_effect() -> void:
 			var rect := Rect2(point - Vector2(60, 32), Vector2(120, 64))
 			fx.draw_style_box(Style.box(Style.ACCENT, 8), rect)
 			var caption: String = "Обмен" if mutation.op == "transfer" else "Снос" if mutation.op == "landmark" and not mutation.value else "Строительство"
-			fx.draw_string(Style.BODY, rect.position + Vector2(8, 36), caption, HORIZONTAL_ALIGNMENT_LEFT, 104, 14, Color("f2f0df"))
+			fx.draw_string(Style.BODY, rect.position + Vector2(8, 36), caption, HORIZONTAL_ALIGNMENT_LEFT, 104, 14, Style.CHANGE_TEXT)
 		if mutation.op != "money" or int(mutation.amount) <= 0:
 			continue
 		var source := Vector2(96, TopBar.HEIGHT + 32) if int(mutation.from) < 0 else Vector2(size.x - 148, TopBar.HEIGHT + 88 + int(mutation.from) * 48)
@@ -565,5 +571,5 @@ func _draw_effect() -> void:
 		var t := clampf((progress - 0.35) / 0.6, 0.0, 1.0)
 		var point := source.lerp(target, t) + Vector2(0, -sin(t * PI) * 56)
 		fx.draw_circle(point + Vector2(0, 3), 15, Color(0, 0, 0, 0.15))
-		fx.draw_circle(point, 14, Color("c69e55"))
-		fx.draw_string(Style.BODY, point + Vector2(-5, 6), str(mutation.amount), HORIZONTAL_ALIGNMENT_CENTER, -1, 14, Color("203c40"))
+		fx.draw_circle(point, 14, Style.COIN_FILL)
+		fx.draw_string(Style.BODY, point + Vector2(-5, 6), str(mutation.amount), HORIZONTAL_ALIGNMENT_CENTER, -1, 14, Style.COIN_INK)

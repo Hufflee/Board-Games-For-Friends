@@ -1,6 +1,8 @@
 class_name HCStyle
 extends RefCounted
 
+const ContrastUI = preload("res://hub/ui_contrast.gd")
+
 const ACCENT_FX := preload("res://hub/ui_accent_fx.gd")
 ## Современный спокойный стиль «Оттенков и подсказок»: светлый тёплый фон, мягкие тени, крупные скругления,
 ## приглушённые графит / шалфей / пыльно-синий. Всё яркое — только на самом поле.
@@ -15,8 +17,8 @@ const INK_ART := Color("2e3035")  # тёмный текст на самих иг
 
 const LIGHT := {
 	"BG": Color("f4f1eb"), "SURFACE": Color(1, 1, 1, 0.94), "SURFACE_2": Color("ece7df"), "LINE": Color("e0dacf"),
-	"CARD": Color.WHITE, "CARD_HI": Color("faf8f4"), "INK": Color("2e3035"), "MUTED": Color("6e7179"),
-	"SAGE": Color("5e8d7d"), "DUSK": Color("6b82b3"), "CLAY": Color("c8664f"), "ON_ACCENT": Color.WHITE,
+	"CARD": Color.WHITE, "CARD_HI": Color("faf8f4"), "INK": Color("2e3035"), "MUTED": Color("63666e"),
+	"SAGE": Color("4a7a69"), "DUSK": Color("6b82b3"), "CLAY": Color("c8664f"), "ON_ACCENT": Color.WHITE,
 	"SHADOW": Color(0.18, 0.15, 0.1, 0.10),
 }
 const DARK := {
@@ -43,6 +45,14 @@ static var SHADOW: Color = LIGHT["SHADOW"]
 
 
 ## Включить тёмную/светлую палитру (тема пересобирается при следующем theme()).
+const TEAM_COLORS := [Color("5f7fbf"), Color("d9895a")]
+
+
+static func team_ink(team: Color) -> Color:
+	var candidate := team.lightened(0.2) if dark else team.darkened(0.3)
+	return ContrastUI.pick(SURFACE, [candidate, INK])
+
+
 static func set_dark(on: bool) -> void:
 	dark = on
 	var pal: Dictionary = DARK if on else LIGHT
@@ -248,7 +258,7 @@ static func button(text: String, size: int = BODY, min_w: int = 0) -> Button:
 ## Главная кнопка: заливка шалфеем, белый текст.
 static func primary(text: String, size: int = BODY, min_w: int = 0) -> Button:
 	var b := button(text, size, min_w)
-	for st in [["normal", SAGE], ["hover", SAGE.lightened(0.08)], ["pressed", SAGE.darkened(0.12)], ["disabled", Color(SAGE, 0.35)]]:
+	for st in [["normal", SAGE], ["hover", SAGE.lightened(0.025) if not dark else SAGE.lightened(0.08)], ["pressed", SAGE.darkened(0.12)], ["disabled", Color(SAGE, 0.35)]]:
 		var sb := box(st[1], 12, Color.TRANSPARENT, 0, Color(SAGE, 0.25) if st[0] != "disabled" else Color.TRANSPARENT, 8)
 		sb.content_margin_top = 10
 		sb.content_margin_bottom = 10
@@ -395,3 +405,26 @@ class BrushStroke:
 			var x0 := rng.randf_range(0.0, size.x * 0.3)
 			var x1 := rng.randf_range(size.x * 0.7, size.x)
 			draw_line(Vector2(x0, yy), Vector2(x1, yy + rng.randf_range(-1.5, 1.5)), Color(1, 1, 1, 0.18), 1.0, true)
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[INK, BG.blend(SURFACE), "текст панели", false],
+		[MUTED, BG.blend(SURFACE), "подпись", false],
+		[ON_ACCENT, SAGE, "главная кнопка", false],
+		[ON_ACCENT, SAGE.lightened(0.08 if dark else 0.025), "главная кнопка при наведении", false],
+		[team_ink(TEAM_COLORS[0]), BG.blend(SURFACE), "синяя команда", false],
+		[team_ink(TEAM_COLORS[1]), BG.blend(SURFACE), "красная команда", false],
+		[spectrum_ink(spectrum_fill(0)), spectrum_fill(0), "левое слово карточки", false],
+		[spectrum_ink(spectrum_fill(1)), spectrum_fill(1), "правое слово карточки", false],
+	]
+
+## Заливка слова слева или справа на карточке «Длины волны».
+static func spectrum_fill(index: int) -> Color:
+	var fill := DUSK if index == 0 else CLAY
+	return fill if dark else fill.darkened(0.15 if index == 0 else 0.25)
+
+
+static func spectrum_ink(fill: Color) -> Color:
+	return ContrastUI.pick(fill, [Color.WHITE, INK_ART, Color.BLACK])

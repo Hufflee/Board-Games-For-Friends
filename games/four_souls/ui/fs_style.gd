@@ -7,6 +7,9 @@ const H1 := 30
 const BODY := 18
 const CAP := 14
 const GOLD := Color("c65b4b")
+const FLOAT_GAIN := Color(0.55, 0.8, 1.0)
+const FLOAT_CURSE := Color(0.78, 0.5, 1.0)
+const PRIMARY := Color("d9705e")
 const COAL := Color("251b19")
 const PAPER := Color("ebddbe")
 static func font(kind: String = "regular") -> Font:
@@ -52,7 +55,7 @@ static func theme() -> Theme:
 	t.set_color("font_color", "TooltipLabel", PAPER)
 	t.set_type_variation("PrimaryButton", "Button")
 	for state in ["normal", "pressed", "hover"]:
-		t.set_stylebox(state, "PrimaryButton", box(GOLD.lightened(0.1) if state == "hover" else GOLD))
+		t.set_stylebox(state, "PrimaryButton", box(PRIMARY.lightened(0.08) if state == "hover" else (PRIMARY.darkened(0.06) if state == "pressed" else PRIMARY)))
 		t.set_color("font_" + ("color" if state == "normal" else state + "_color"), "PrimaryButton", COAL)
 	t.set_type_variation("SelectedButton", "Button")
 	for state in ["normal", "hover", "pressed", "disabled"]:
@@ -135,3 +138,13 @@ class Backdrop extends Control:
 			draw_rect(Rect2(Vector2(0, size.y - inset.y), Vector2(size.x, inset.y)), c)
 			draw_rect(Rect2(Vector2.ZERO, Vector2(inset.x, size.y)), c)
 			draw_rect(Rect2(Vector2(size.x - inset.x, 0), Vector2(inset.x, size.y)), c)
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[ink(), surface(), "текст панели", false],
+		[GOLD.lightened(0.25), surface(), "акцентный текст", false],
+		[COAL, PRIMARY, "главная кнопка", false],
+		[COAL, PRIMARY.darkened(0.06), "главная кнопка при нажатии", false],
+	]

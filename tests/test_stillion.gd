@@ -23,6 +23,8 @@ func _init() -> void:
 	_timeout()
 	_oral()
 	_hotseat()
+	_dead_vote()
+	_skins()
 	_bots()
 	print("STILLION: %d проверок, %d ошибок" % [checks, failed])
 	quit(1 if failed > 0 else 0)
@@ -52,7 +54,7 @@ func _to_fuse(r: STRules) -> void:
 
 func _bank() -> void:
 	var cats := STRules.categories()
-	check(cats.size() == 90, "90 тем (есть %d)" % cats.size())
+	check(cats.size() == 180, "180 тем (есть %d)" % cats.size())
 	var names := {}
 	var bad := 0
 	for c: Dictionary in cats:
@@ -65,15 +67,15 @@ func _bank() -> void:
 			firsts[l] = true
 		if (c.answers as Array).size() != 14:
 			bad += 1
-	check(names.size() == 90, "Названия тем не повторяются")
+	check(names.size() == 180, "Названия тем не повторяются")
 	var hinted := {}
 	for c: Dictionary in cats:
 		if str(c.hint) != "":
 			hinted[c.cat] = c.hint
 	check(hinted.size() == 3 and hinted.has("Камень") and hinted.has("Продукт питания") and hinted.has("Часть дома"), "Подсказки у трёх тем, название без скобок")
 	check(bad == 0, "У каждой темы 14 ответов на разные разрешённые буквы (ошибок %d)" % bad)
-	check(STRules.LETTERS.size() == 24, "24 буквы")
-	for l in ["й", "ё", "ю", "э", "ц", "щ", "ъ", "ь", "ы"]:
+	check(STRules.MAIN_LETTERS.size() == 24, "24 основные буквы")
+	for l in ["ъ", "ь", "ы"]:
 		check(not STRules.LETTERS.has(l), "Буквы «%s» нет" % l)
 
 
@@ -86,8 +88,8 @@ func _letters() -> void:
 	_to_fuse(r)
 	r.submit(1, "аргентина")
 	check(r.last.kind == "wrong" and r.last.why == "used" and r.target == 1, "Занятая буква не принимается")
-	r.submit(1, "Эстония")
-	check(r.last.kind == "wrong" and r.last.why == "none", "Буквы «Э» нет — не принимается")
+	r.submit(1, "Ыгыатта")
+	check(r.last.kind == "wrong" and r.last.why == "none", "Буквы «Ы» нет — не принимается")
 	r.submit(1, "Ёлка")
 	check(r.letter_used("е") and r.target == 2, "«Ё» считается за «Е»")
 	check(r.get_view(2).category == r.category.cat and r.get_view(2).used.size() == 2, "Вид: тема и погасшие буквы")
@@ -177,7 +179,7 @@ func _oral() -> void:
 	check(r.players[0].last_answer == "на «К»", "Над игроком — буква")
 	_to_fuse(r)
 	check(not r.action(1, "st_answer", {"letter": "к"}), "Занятую букву не нажать")
-	check(not r.action(1, "st_answer", {"letter": "щ"}), "Буквы «Щ» нет")
+	check(not r.action(1, "st_answer", {"letter": "ы"}), "Буквы «Ы» нет")
 	check(r.action(2, "st_challenge", {}) and r.action(1, "st_challenge", {}) and r.target == 0, "Устный ответ тоже оспаривается")
 
 
@@ -221,3 +223,32 @@ func _bots() -> void:
 		b.tick(0.05)
 	check(b.last.kind != "challenged" and b.letter_used("а"), "Ответ не из списка боты не трогают")
 	check(b.challenge(1) and not b.letter_used("а"), "Человек оспорил — не засчитан")
+
+
+## Выбывшие тоже оспаривают; нужное число голосов — от всех людей, кроме автора, а не только от живых.
+func _dead_vote() -> void:
+	var r := _game(4)
+	r.players[3].alive = false
+	r.players[3].lives = 0
+	r.submit(0, "Бразилия")
+	check(r.votes_needed() == 2, "4 игрока, один выбыл: всё равно нужно 2 голоса из 3")
+	check(r.can_challenge(3), "Выбывший может оспорить")
+	check(r.challenge(3) and r.challenge(2) and not r.letter_used("б"), "Голос выбывшего засчитан")
+
+
+## Персонажи раздаются случайно и без повторов, в разных партиях — по-разному.
+func _skins() -> void:
+	var seen := {}
+	for seed_value in [11, 12, 13, 14, 15]:
+		var r := STRules.new()
+		r.new_game(_names(8), false, seed_value)
+		var skins: Array = []
+		for p: Dictionary in r.players:
+			skins.append(int(p.skin))
+		var uniq := {}
+		for k: int in skins:
+			uniq[k] = true
+		check(uniq.size() == 8 and skins.min() >= 0 and skins.max() < STRules.SKINS, "8 разных персонажей")
+		seen[str(skins)] = true
+		check(r.get_view(0).players[0].has("skin"), "Персонаж — в виде для стола")
+	check(seen.size() >= 4, "Раздача меняется от партии к партии")

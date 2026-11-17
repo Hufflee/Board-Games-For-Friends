@@ -1,4 +1,6 @@
 shader_type spatial;
+
+uniform bool reduce_motion = false;
 render_mode unshaded;
 
 uniform sampler2D front_city : source_color, filter_linear, repeat_disable;
@@ -21,7 +23,7 @@ float hash(vec2 p) {
 // Один слой снежинок: сетка ячеек, в части ячеек — снежинка со своим сдвигом, размером и покачиванием.
 float flakes(vec2 uv, float scale, float speed, float seed, vec2 shift) {
 	vec2 p = uv * scale + shift;
-	p.y -= TIME * speed;
+	p.y -= (reduce_motion ? 0.0 : TIME) * speed;
 	vec2 cell = floor(p);
 	vec2 f = fract(p) - 0.5;
 	float h = hash(cell + seed);
@@ -29,7 +31,7 @@ float flakes(vec2 uv, float scale, float speed, float seed, vec2 shift) {
 		return 0.0;
 	}
 	vec2 offs = (vec2(hash(cell + seed + 1.7), hash(cell + seed + 9.3)) - 0.5) * 0.6;
-	offs.x += sin(TIME * (0.6 + h) + h * 40.0) * 0.18;
+	offs.x += sin((reduce_motion ? 0.0 : TIME) * (0.6 + h) + h * 40.0) * 0.18;
 	float r = mix(0.07, 0.16, hash(cell + seed + 4.1));
 	float d = length(f - offs);
 	return smoothstep(r, r * 0.35, d) * mix(0.55, 1.0, h);

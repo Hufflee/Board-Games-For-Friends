@@ -18,7 +18,7 @@ const LIGHT := {
 	"panel_edge": Color("b99363"),
 	"inset": Color("eadcbc"),
 	"ink": Color("3a2416"),
-	"muted": Color("7c6143"),
+	"muted": Color("6b5236"),
 	"accent": Color("b2382b"),
 	"accent_ink": Color("fbf1dc"),
 	"brass": Color("c48a2c"),
@@ -382,3 +382,11 @@ static func draw_card_back(ci: CanvasItem, rect: Rect2) -> void:
 		var a := -PI / 2 + i * PI / 5
 		pts.append(center + Vector2(cos(a), sin(a)) * (r if i % 2 == 0 else r * 0.45))
 	ci.draw_colored_polygon(pts, Color("e2b65a"))
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[c("ink"), c("panel"), "текст панели", false],
+		[c("muted"), c("bg"), "подпись", false],
+	]

@@ -4,11 +4,13 @@ extends RefCounted
 ## → каждый сам решает «Ещё» / «Хватит» / «Удвоить» → дилер открывается и добирает до 17 → расчёт.
 ## Блэкджек (туз + десятка с раздачи) платит 3:2 (не меньше одной фишки), обычная победа — 1:1, ничья — ставка
 ## возвращается. Кончились фишки — «Начать заново» с одной фишкой. Вошедший посреди раздачи ждёт следующую.
+## После расчёта через NEXT_PAUSE секунд новая раздача начинается сама (кнопка «Новая раздача» — не ждать).
 ## Состояние: {"players": {peer: {...}}, "dealer": [карты], "deck": [карты], "phase", "clock", "last", "seq"}.
 ## Карта — число 0..51: масть = c / 13, номинал = c % 13 (0 — туз, 9..12 — 10, валет, дама, король).
 ## Тесты: godot --headless --path . --script res://tests/test_minigames.gd
 
 const DEALER_STEP := 0.8  # пауза между картами дилера — видно, как он добирает
+const NEXT_PAUSE := 3.0  # столько секунд виден расчёт, потом новая раздача сама
 const SUITS := ["♠", "♥", "♦", "♣"]
 const RANKS := ["A", "2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K"]
 
@@ -160,6 +162,12 @@ static func _maybe_dealer(state: Dictionary) -> void:
 
 ## Шаг времени (хост): дилер добирает по карте с паузой, потом расчёт. true — надо разослать снимок.
 static func step(state: Dictionary, dt: float, rng: RandomNumberGenerator) -> bool:
+	if state.phase == "done":
+		state.clock = float(state.clock) - dt
+		if float(state.clock) > 0.0:
+			return false
+		_new_round(state)  # расчёт показан — следующая раздача без нажатий
+		return true
 	if state.phase != "dealer":
 		return false
 	state.clock = float(state.clock) - dt
@@ -206,7 +214,8 @@ static func _settle(state: Dictionary) -> void:
 		p.delta = delta
 		p.status = "done"
 	state.phase = "done"
-	state.last = "У дилера %d%s" % [dealer, " — перебор!" if dealer > 21 else ""]
+	state.clock = NEXT_PAUSE
+	state.last = "У дилера %d%s · новая раздача через %d с" % [dealer, " — перебор!" if dealer > 21 else "", int(NEXT_PAUSE)]
 	_touch(state)
 
 

@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Лобби без семантических ботов: местные места либо настоящие друзья.
 const Style := preload("res://games/things_in_rings/ui/tr_style.gd")
 var app: Node
@@ -180,6 +182,7 @@ func _option(text: String) -> Button:
 	var b := Style.button(text)
 	b.custom_minimum_size.x = 112
 	b.clip_text = true
+	TextUI.full_on_hover(b)
 	return b
 
 ## Строка игрока: имя (у хоста — выбрать ведущим, если никто не вызвался) и переключатель «Хочу вести».
@@ -191,12 +194,12 @@ func _player_chip(seat: int, player_name: String, wants_lead: bool, mine: bool, 
 	name_button.name = "Knower%d" % seat
 	name_button.custom_minimum_size.x = 160
 	name_button.clip_text = true
-	name_button.tooltip_text = "Ведущий, если никто не вызвался"
+	name_button.tooltip_text = "%s — ведущий, если никто не вызвался" % name_button.text
 	Style.pick(name_button, chosen)
 	name_button.disabled = not host
 	name_button.pressed.connect(func(): Net.set_setting("tr_knower", seat))
 	chip.add_child(name_button)
-	var want := Style.button("Хочу вести" if not wants_lead else "Хочу вести ✓", 12)
+	var want := Style.button("Хочу вести" if not wants_lead else "Хочу вести ✓", 13)
 	want.name = "Want%d" % seat
 	want.custom_minimum_size.x = 120
 	want.tooltip_text = "Хочу быть ведущим (знающим). Если желающих несколько — ведущий выбирается случайно."

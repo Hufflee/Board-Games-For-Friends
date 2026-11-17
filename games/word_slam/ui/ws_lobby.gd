@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Лобби «Word Slamа»: команды (или один рассказчик), количество карт, имена, время часов, старт, чат.
 
 const TEAM_NAMES := ["Синие", "Оранжевые"]
@@ -140,7 +142,7 @@ func _rebuild() -> void:
 			var val: String = opt[0]
 			b.pressed.connect(func(): Net.set_setting("ws_cards", val))
 			r1.add_child(b)
-		r1.add_child(HCStyle.label("· %d карт" % count, HCStyle.CAP, HCStyle.MUTED))
+		r1.add_child(HCStyle.label("· " + TextUI.plural(count, "карта", "карты", "карт"), HCStyle.CAP, HCStyle.MUTED))
 		_body.add_child(r1)
 		var r2 := HCStyle.hbox(8)
 		r2.add_child(HCStyle.label("Время на ход:", HCStyle.BODY))
@@ -156,7 +158,7 @@ func _rebuild() -> void:
 	else:
 		_body.add_child(HCStyle.label("Слова: " + ("упрощённый · по порядку" if s.get("ws_catalog", "basic") == "simplified" else "базовый · перемешивать после «Слэм»"), HCStyle.CAP, HCStyle.MUTED))
 		var turn := "без ограничения времени" if int(s.get("ws_time", 120)) <= 0 else "на ход %d с" % int(s.get("ws_time", 120))
-		_body.add_child(HCStyle.label("%s · %d карт · %s" % ["Один рассказчик" if solo else "Две команды", count, turn], HCStyle.BODY))
+		_body.add_child(HCStyle.label("%s · %s · %s" % ["Один рассказчик" if solo else "Две команды", TextUI.plural(count, "карта", "карты", "карт"), turn], HCStyle.BODY))
 
 	var start_row := HCStyle.hbox(12)
 	if host:

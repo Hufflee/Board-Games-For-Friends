@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Лобби: распределение ролей духов и медиумов.
 var app: Node
 var _body: VBoxContainer
@@ -46,6 +48,7 @@ func _rebuild() -> void:
 		var name_label := PIStyle.label(str(members[i].name))
 		name_label.clip_text = true
 		name_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(name_label)
 		name_label.custom_minimum_size.x = 80
 		name_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		grid.add_child(name_label)

@@ -7,6 +7,10 @@ static var PANEL := Color("251e15")
 static var INK := Color("ead99b")
 static var MUTED := Color("b6a677")
 static var GOLD := Color("d9bd65")
+const CAP := 13
+const BODY := 16
+const H1 := 28
+const MENU_TITLE := 48
 const RED := Color("a42c20")
 const ROUND_COLORS := [Color("e7e5da"), Color("e4bd52"), Color("d57c42"), Color("c4544d")]
 const FONT := preload("res://games/dangerous_words/art/fonts/Nunito-Variable.ttf")
@@ -54,19 +58,19 @@ static func weighted_font(base: Font, weight: int) -> FontVariation:
 	result.variation_opentype = {TextServerManager.get_primary_interface().name_to_tag("wght"): weight}
 	return result
 
-static func label(text: String, size: int = 16, color: Color = Color.TRANSPARENT) -> Label:
+static func label(text: String, size: int = BODY, color: Color = Color.TRANSPARENT) -> Label:
 	var l := Label.new()
 	l.text = text
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", INK if color == Color.TRANSPARENT else color)
 	return l
 
-static func heading(text: String, size: int = 28) -> Label:
+static func heading(text: String, size: int = H1) -> Label:
 	var l := label(text, size)
 	l.add_theme_font_override("font", weighted_font(HEAD, 600))
 	return l
 
-static func button(text: String, size: int = 16) -> Button:
+static func button(text: String, size: int = BODY) -> Button:
 	var b := Button.new()
 	b.text = text
 	b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -124,3 +128,12 @@ class Background extends Control:
 		for spoke in 24:
 			var direction := Vector2.from_angle(TAU * spoke / 24.0)
 			draw_line(center + direction * 200, center + direction * 222, Color(TGStyle.GOLD, 0.09), 3.0, true)
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[INK, PANEL, "текст панели", false],
+		[MUTED, PANEL, "подпись", false],
+		[ROUND_COLORS[3].lightened(0.2), PANEL, "последний раунд", false],
+	]

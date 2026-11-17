@@ -124,13 +124,22 @@ func _rebuild() -> void:
 	var row: Dictionary = Net.player_stats.summary(_filter)
 	var metrics := HubStyle.hbox(14)
 	_body.add_child(metrics)
-	_metric(
-		metrics,
-		"ПОБЕДЫ",
-		"%.1f%%" % (100.0 * int(row.wins) / int(row.completed)) if int(row.completed) > 0 else "—",
-		"%d из %d партий с исходом" % [row.wins, row.completed],
-		HubStyle.CYAN
-	)
+	var sums: Dictionary = row.get("rating_totals", {})
+	var counts: Dictionary = row.get("rating_counts", {})
+	var ranked := int(counts.get("rank", 0))
+	var wins := int(row.wins)
+	_metric(metrics, "СОПЕРНИКОВ ОБОШЛИ",
+		"%.0f%%" % (float(sums.get("rank", 0)) / ranked) if ranked > 0 else "—",
+		"%d партий с известным местом · побед: %d" % [ranked, wins], HubStyle.CYAN)
+	var grouped: HBoxContainer
+	if int(counts.get("team", 0)) + int(counts.get("coop", 0)) > 0:
+		grouped = HubStyle.hbox(14)
+		_body.add_child(grouped)
+	for kind in ["team", "coop"]:
+		var count := int(counts.get(kind, 0))
+		if count > 0:
+			_metric(grouped, "КОМАНДНЫЕ ПОБЕДЫ" if kind == "team" else "УСПЕХИ В КООПЕРАТИВЕ",
+				"%.0f%%" % (float(sums.get(kind, 0)) / count), "%d партий" % count, HubStyle.CYAN)
 	_metric(
 		metrics,
 		"ОШИБКИ",
@@ -145,8 +154,9 @@ func _rebuild() -> void:
 		"%d сообщений · %d быстрых реплик" % [row.messages, row.emotes],
 		HubStyle.YELLOW
 	)
+	var rating_history: Array = row.get("rating_history", [])
 	var graph_button := HubStyle.button(
-		("Скрыть график" if _graph_open else "График последних 100 партий") + " · %d" % row.history.size(), 16
+		("Скрыть график" if _graph_open else "График последних 100 партий") + " · %d" % rating_history.size(), 16
 	)
 	graph_button.pressed.connect(
 		func():
@@ -156,10 +166,11 @@ func _rebuild() -> void:
 	_body.add_child(graph_button)
 	if _graph_open:
 		_body.add_child(
-			_label("Победа +1 · поражение −1 · слева старые партии, справа новые", HubStyle.MUTED, 14)
+			_label("Доля соперников, которых вы обошли в каждой партии. Слева старые партии.", HubStyle.MUTED, 14)
 		)
 		var graph := WinGraph.new()
-		graph.history = row.history
+		graph.history = rating_history
+		graph.ranked = true
 		_body.add_child(graph)
 	_body.add_child(_label("ВЫПАДЕНИЯ КУБИКОВ", HubStyle.CYAN, 19))
 	var dice := PlayerStatsStore.sorted_dice(row)
@@ -197,7 +208,7 @@ func _rebuild() -> void:
 		_body
 		. add_child(
 			_label(
-				"Статистика хранится на этом компьютере и собирается с момента добавления этой функции. Незавершённые партии не влияют на процент побед.",
+				"Статистика хранится на этом компьютере и собирается с момента добавления этой функции. Доля соперников считается по партиям, где известна ваша позиция. Старые победы сохранены.",
 				HubStyle.MUTED,
 				13
 			)
@@ -207,7 +218,7 @@ func _rebuild() -> void:
 		_body.add_child(
 			_label(
 				(
-					"Ещё %d партий без победы/поражения: они не влияют на процент побед и график."
+					"Ещё %d партий без победы/поражения: они не участвовали в прежнем счёте побед."
 					% int(row.unrated)
 				),
 				HubStyle.MUTED,

@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Стол Four Souls: закрытая рука, открытые карты, приоритет и ручная панель эффектов.
 const HealthBar := preload("res://games/four_souls/ui/fs_health.gd")
 const MonsterStats := preload("res://games/four_souls/ui/fs_monster_stats.gd")
@@ -528,7 +530,7 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 		timer_box.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		top_row28.add_child(timer_box)
 		_response_label28 = FSStyle.label("", FSStyle.BODY)
-		_response_label28.add_theme_color_override("font_color", FSStyle.GOLD.lightened(0.2))
+		_response_label28.add_theme_color_override("font_color", FSStyle.GOLD.lightened(0.25))
 		timer_box.add_child(_response_label28)
 		_response_bar28 = ProgressBar.new()
 		_response_bar28.show_percentage = false
@@ -552,6 +554,7 @@ func _changed(view: Dictionary, received: bool = true) -> void:
 	_controls(actions)
 	for button: Button in actions.find_children("*", "Button", true, false):
 		button.clip_text = true
+		TextUI.full_on_hover(button)
 		if button.tooltip_text.is_empty():
 			button.tooltip_text = button.text
 	if view.phase != "starting_character":
@@ -655,6 +658,7 @@ func _opponent_cards(parent: Control, view: Dictionary) -> void:
 	parent.add_child(col)
 	var title := _note(col, "%s · предметы" % player.name)
 	title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	TextUI.full_on_hover(title)
 	var scroll := ScrollContainer.new()
 	scroll.name = "OpponentCards"
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -1282,7 +1286,7 @@ func _played_pile(parent: Control, view: Dictionary) -> void:
 			image.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			_round_image(image)
 			holder.add_child(image)
-	var count := FSStyle.label("%d карт" % feed.size() if feed.size() < 40 else "последние 40", FSStyle.CAP)
+	var count := FSStyle.label(TextUI.plural(feed.size(), "карта", "карты", "карт") if feed.size() < 40 else "последние 40", FSStyle.CAP)
 	count.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	count.modulate.a = 0.7
 	col.add_child(count)
@@ -1306,7 +1310,7 @@ func _played_history() -> void:
 		_note(col, "Сброс пока пуст.")
 		_close_button(col)
 		return
-	_note(col, "Последние %d карт в сбросе · наведите на карту, чтобы рассмотреть." % feed.size())
+	_note(col, "%s в сбросе · наведите на карту, чтобы рассмотреть." % TextUI.plural(feed.size(), "карта", "карты", "карт"))
 	var scroll := ScrollContainer.new()
 	scroll.custom_minimum_size = Vector2(minf(size.x - 160, 760), minf(size.y - 260, 420))
 	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
@@ -1325,6 +1329,7 @@ func _played_history() -> void:
 		var info := FSStyle.label("%s · ход %d" % [piles.get(str(entry.pile), str(entry.pile)), int(entry.get("round", 0))], FSStyle.CAP)
 		info.custom_minimum_size.x = 104
 		info.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(info)
 		if index == feed.size() - 1:
 			info.add_theme_color_override("font_color", FSStyle.GOLD.lightened(0.25))
 		cell.add_child(info)
@@ -1613,6 +1618,7 @@ func _card_choice_dialog() -> void:
 		var option := _button(holder, str(_v.card_choices[index]), "card_choice", {"index": index, "revision": int(_v.revision)})
 		option.clip_text = true
 		option.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(option)
 		option.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		option.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		if card_id >= 0:
@@ -1858,11 +1864,11 @@ func _diff_fx28(prev: Dictionary, view: Dictionary) -> void:
 		elif int(b.souls) < int(a.souls):
 			FX.float_label(_fx_layer28, row, "−%d душа" % (int(a.souls) - int(b.souls)), FX.BAD, lane + 1, 24)
 		if int(b.get("hand_count", 0)) > int(a.get("hand_count", 0)):
-			FX.float_label(_fx_layer28, row, "+%d добыча" % (int(b.hand_count) - int(a.hand_count)), Color(0.55, 0.8, 1.0), lane + 2, 18)
+			FX.float_label(_fx_layer28, row, "+%d добыча" % (int(b.hand_count) - int(a.hand_count)), FSStyle.FLOAT_GAIN, lane + 2, 18)
 		if (b.get("items", []) as Array).size() > (a.get("items", []) as Array).size():
-			FX.float_label(_fx_layer28, row, "+ предмет", Color(0.55, 0.8, 1.0), lane + 3, 18)
+			FX.float_label(_fx_layer28, row, "+ предмет", FSStyle.FLOAT_GAIN, lane + 3, 18)
 		if (b.get("curses", []) as Array).size() > (a.get("curses", []) as Array).size():
-			FX.float_label(_fx_layer28, row, "проклятие!", Color(0.78, 0.5, 1.0), lane + 3, 20)
+			FX.float_label(_fx_layer28, row, "ПРОКЛЯТИЕ", FSStyle.FLOAT_CURSE, lane + 3, 20)
 	var old_monsters: Array = prev.get("monsters", [])
 	var new_monsters: Array = view.get("monsters", [])
 	for slot in mini(old_monsters.size(), new_monsters.size()):
@@ -1872,7 +1878,7 @@ func _diff_fx28(prev: Dictionary, view: Dictionary) -> void:
 			continue
 		var group: Control = _fx_anchor28.get("m%d" % slot)
 		if int(b.hp) <= 0 and int(a.hp) > 0:
-			FX.float_label(_fx_layer28, group, "УБИТ!", FX.GLOW, 0, 26)
+			FX.float_label(_fx_layer28, group, "УБИТ", FX.GLOW, 0, 26)
 			FX.flash(_fx_layer28, group, FX.BAD)
 			continue
 		FX.float_text(_fx_layer28, group, int(b.hp) - int(a.hp), " ХП")

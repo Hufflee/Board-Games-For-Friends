@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Стартовый экран: неоновая ретро-комната (NeonRoom) со шкафом настольных игр и интерфейс поверх неё.
 ##
 ## Наведение на коробку в шкафу — она выезжает; клик — вылетает к игроку обложкой вперёд,
@@ -61,8 +63,6 @@ func _ready() -> void:
 	_room.arrival_changed.connect(func():  # новая игра: обёртка снята / поставлена — карточка заново
 		if not _selected.is_empty() and is_instance_valid(_room.focused):
 			_show_card(_selected, false))
-	_room.panels.game_selected.connect(_on_box_selected)
-	_room.panels.game_released.connect(_on_box_released)
 	_ui = Control.new()
 	_ui.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	_ui.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -100,7 +100,7 @@ func _rebuild() -> void:
 	var head := HubStyle.vbox(0)
 	head.position = Vector2(26, 16)
 	head.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	head.add_child(HubStyle.neon_label("Board GAMES for FRIENDS", 34, HubStyle.PINK))
+	head.add_child(HubStyle.neon_label("BoardGame Shelf", 34, HubStyle.PINK))
 	_ui.add_child(head)
 	# пати слева
 	var in_party := Net.is_party() and not Net.lobby_view.is_empty()
@@ -115,12 +115,22 @@ func _rebuild() -> void:
 	# подсказка снизу по центру
 	var hint := HubStyle.label(NeonRoom.HINT if not in_party or Net.is_host() else "Игру запускает ведущий пати — откройте коробку и предложите ему свою", 14, HubStyle.MUTED, HORIZONTAL_ALIGNMENT_CENTER)
 	_shelf_hint = hint
-	hint.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
-	hint.grow_horizontal = Control.GROW_DIRECTION_BOTH
-	hint.offset_top = -40
-	hint.offset_bottom = -16
+	var hint_panel := PanelContainer.new()
+	var hint_box := HubStyle.box(Color(0.04, 0.02, 0.09, 0.6), 8, Color.TRANSPARENT, 0, 0.0)
+	hint_box.content_margin_left = 12
+	hint_box.content_margin_right = 12
+	hint_box.content_margin_top = 6
+	hint_box.content_margin_bottom = 6
+	hint_panel.add_theme_stylebox_override("panel", hint_box)
+	hint_panel.set_anchors_and_offsets_preset(Control.PRESET_CENTER_BOTTOM)
+	hint_panel.grow_horizontal = Control.GROW_DIRECTION_BOTH
+	hint_panel.grow_vertical = Control.GROW_DIRECTION_BEGIN
+	hint_panel.offset_bottom = -16
+	hint_panel.offset_top = -16
+	hint_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	hint.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	_ui.add_child(hint)
+	hint_panel.add_child(hint)
+	_ui.add_child(hint_panel)
 	# настройки и выход — справа сверху
 	var top := HubStyle.hbox(8)
 	top.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
@@ -130,16 +140,19 @@ func _rebuild() -> void:
 	top.offset_top = 18
 	top.alignment = BoxContainer.ALIGNMENT_END
 	var news := HubStyle.button("Что нового?", 15)
+	news.theme_type_variation = "QuietButton"
 	news.pressed.connect(func(): add_child(load("res://hub/whats_new.gd").new()))
 	top.add_child(news)
 	var comms := HubStyle.button("Общение", 15)
 	comms.tooltip_text = "Чат пати и мини-игры: Z — чат, X — мини-игры, Enter — писать"
 	comms.pressed.connect(func(): Net.chat.panel().call("toggle"))
 	top.add_child(comms)
-	var stats := HubStyle.button("Статистика",15)
+	var stats := HubStyle.button("Статистика", 15)
+	stats.theme_type_variation = "QuietButton"
 	stats.pressed.connect(func():add_child(load("res://hub/player_stats_screen.gd").new()))
 	top.add_child(stats)
 	var camera_reset := HubStyle.button("Сброс камеры", 15)
+	camera_reset.theme_type_variation = "QuietButton"
 	camera_reset.visible = _watch_peer == 0
 	camera_reset.pressed.connect(_room.reset_shelf_camera)
 	top.add_child(camera_reset)
@@ -150,7 +163,8 @@ func _rebuild() -> void:
 		add_child(screen))
 	top.add_child(settings)
 	var quit := HubStyle.button("Выход", 15)
-	quit.pressed.connect(func(): Sfx.request_quit())
+	quit.theme_type_variation = "QuietButton"
+	LeaveGuard.hold(quit, Sfx.request_quit, "Выйти из игры")
 	top.add_child(quit)
 	_ui.add_child(top)
 	# версия игры — мелко в правом нижнем углу
@@ -268,9 +282,7 @@ func _show_card(g: Dictionary, animate: bool = true) -> void:
 		row.add_child(play)
 	var back := HubStyle.button("Назад", 15)
 	back.disabled = _watch_peer != 0 and _watch_follow
-	back.pressed.connect(func():
-		_room.release()
-		_room.panels.deselect())
+	back.pressed.connect(_room.release)
 	row.add_child(back)
 	v.add_child(row)
 	v.add_child(HubStyle.label("← → или колесо мыши — соседняя игра", 12, HubStyle.MUTED))
@@ -365,14 +377,25 @@ func _party_create_panel() -> Control:
 	v.add_child(create)
 	var join_row := HubStyle.hbox(6)
 	_code = LineEdit.new()
-	_code.placeholder_text = "код пати"
+	_code.placeholder_text = "например, 1234567"
+	_code.add_theme_font_size_override("font_size", 14)
+	v.add_child(HubStyle.label("Код пати", 13, HubStyle.MUTED))
 	_code.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	join_row.add_child(_code)
 	var join := HubStyle.button("Войти", 14)
 	join.disabled = not Net.steam_ok
-	join.pressed.connect(func(): Net.join_steam(int(_code.text.strip_edges())))
+	var code_error := HubStyle.label("Введите цифры кода из приглашения", 13, HubStyle.PINK.lightened(0.3))
+	code_error.hide()
+	_code.text_changed.connect(func(_value: String): code_error.hide())
+	join.pressed.connect(func():
+		var value := _code.text.strip_edges()
+		if not value.is_valid_int() or value.begins_with("+") or int(value) <= 0:
+			code_error.show()
+			return
+		Net.join_steam(int(value)))
 	join_row.add_child(join)
 	v.add_child(join_row)
+	v.add_child(code_error)
 	var browse := HubStyle.button("Browse lobbies", 14)
 	browse.disabled = not Net.steam_ok
 	browse.tooltip_text = "Открытые пати этой игры в Steam, не только у друзей"
@@ -397,9 +420,9 @@ func _party_panel() -> Control:
 	if _watch_peer != 0:
 		var follow := CheckButton.new()
 		follow.name = "RoomFollow"
-		follow.text = "Отключить действия " + _watch_name()
+		follow.text = "Повторять действия " + _watch_name()
 		follow.add_theme_font_size_override("font_size", 13)
-		follow.button_pressed = not _watch_follow
+		follow.button_pressed = _watch_follow
 		follow.toggled.connect(_toggle_watch_follow)
 		v.add_child(follow)
 	v.add_child(HubStyle.label("Участники (%d/%d)" % [humans.size(), Net.party_capacity()], 13, HubStyle.MUTED))
@@ -421,16 +444,16 @@ func _party_panel() -> Control:
 			eye.pressed.connect(_watch_room.bind(peer))
 			row.add_child(eye)
 		if m["kind"] == "host":
-			row.add_child(HubStyle.label("хост", 12, HubStyle.YELLOW))
+			row.add_child(HubStyle.label("хост", 13, HubStyle.YELLOW))
 		elif Net.is_host() and peer > 1:
-			var kick := HubStyle.button("Исключить", 12)
+			var kick := HubStyle.button("Исключить", 13)
 			kick.tooltip_text = "Исключить участника из пати"
 			LeaveGuard.hold(kick, Net.kick_peer.bind(peer), "Исключить участника из пати")
 			row.add_child(kick)
 		v.add_child(row)
 		var sid := str(m.get("suggest", ""))
 		if sid != "":
-			var sl := HubStyle.label("Предлагает игру «%s»" % _game_title(sid), 12, HubStyle.PINK.lightened(0.3))
+			var sl := HubStyle.label("Предлагает игру «%s»" % _game_title(sid), 13, HubStyle.PINK.lightened(0.3))
 			sl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			sl.custom_minimum_size.x = 250
 			v.add_child(sl)
@@ -439,14 +462,15 @@ func _party_panel() -> Control:
 		code_row.add_child(HubStyle.label("Код:", 13, HubStyle.MUTED))
 		var code := HubStyle.label(str(data["code"]), 13, HubStyle.YELLOW)
 		code.clip_text = true
+		TextUI.full_on_hover(code)
 		code.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		code_row.add_child(code)
-		var copy := HubStyle.button("Копировать", 12)
+		var copy := HubStyle.button("Копировать", 14)
 		copy.pressed.connect(func(): DisplayServer.clipboard_set(str(data["code"]).split(",")[0]))
 		code_row.add_child(copy)
 		v.add_child(code_row)
 	if data.get("mode", "") == "steam":
-		var invite := HubStyle.primary("Пригласить друзей (Steam)", 14)
+		var invite := HubStyle.primary("Пригласить друзей (Steam)", 16)
 		invite.pressed.connect(Net.invite_friends)
 		v.add_child(invite)
 	var leave := HubStyle.button("Покинуть пати", 14)
@@ -581,8 +605,8 @@ func _watch_decor() -> void:
 	_ui.add_child(name_label)
 
 
-func _toggle_watch_follow(disabled: bool) -> void:
-	_watch_follow = not disabled
+func _toggle_watch_follow(follow: bool) -> void:
+	_watch_follow = follow
 	_room.remote_follow = _watch_follow
 	if not _selected.is_empty():
 		_show_card(_selected, false)

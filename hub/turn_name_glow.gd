@@ -1,5 +1,7 @@
 class_name TurnNameGlow
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Общая подсветка ника того, кто ходит: ник «светится» — сам текст светлеет и получает голубое
 ## свечение вокруг букв, а позади — мягкая синяя дымка, к краям переходящая в цвет ника.
 ## Одинаково во всех играх. Выключение возвращает ник к прежнему цвету.
@@ -85,6 +87,7 @@ static func _light_text(label: Control, ink: Color) -> void:
 		label.set("clip_text", false)
 		if int(label.get("text_overrun_behavior")) == TextServer.OVERRUN_NO_TRIMMING:
 			label.set("text_overrun_behavior", TextServer.OVERRUN_TRIM_ELLIPSIS)
+			TextUI.full_on_hover(label)
 	# светлый ник (тёмный фон) — светлеет; тёмный ник (светлый фон) — уходит в насыщенный синий,
 	# иначе светлый текст на светлой панели теряется
 	var lit := Color(ink, 1.0).lerp(TEXT_LIGHT, 0.6) if ink.get_luminance() >= 0.5 else Color(ink, 1.0).lerp(TEXT_DARK, 0.7)

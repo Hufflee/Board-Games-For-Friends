@@ -4,6 +4,17 @@ extends RefCounted
 
 const LIST := [
 	{
+		"id": "unmatched",
+		"title": "Unmatched",
+		"players": "2–4 игрока",
+		"time": "20–40 минут",
+		"description": "Герои двух томов «Битвы легенд» сражаются в дуэли или командами.",
+		"scene": "res://games/unmatched/ui/main.tscn",
+		"color": Color("875653"),
+		"thickness": 0.07,
+		"new": true,  # прилетает подарком и у тех, кто впервые открыл хаб с прилётами (neon_room.gd)
+	},
+	{
 		"id": "first_contact",
 		"title": "Первый контакт",
 		"players": "2–7 игроков",

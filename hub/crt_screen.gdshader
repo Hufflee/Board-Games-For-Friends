@@ -1,4 +1,6 @@
 shader_type spatial;
+
+uniform bool reduce_motion = false;
 // Экран ЭЛТ-телевизора: картинка экрана (SubViewport) через три эффекта кинескопа —
 // изгиб (barrel) с тёмными закруглёнными краями, разъезд цветовых каналов с мягким свечением (chroma bleed)
 // и строки развёртки с медленной «прокаткой» и мерцанием. Плюс выпуклое стекло, виньетка и блик.
@@ -66,9 +68,9 @@ void fragment() {
 	}
 	col += glow / 8.0 * bleed;
 	// строки развёртки: тонкие тёмные полосы, медленно катятся вниз, лёгкое мерцание
-	float scan = 0.78 + 0.22 * pow(0.5 + 0.5 * sin((uv.y * lines + TIME * 2.2) * 6.2832), 1.4);
-	float roll = 0.95 + 0.05 * sin(uv.y * 7.0 - TIME * 2.6);
-	float flicker = 0.975 + 0.025 * sin(TIME * 37.0);
+	float scan = 0.78 + 0.22 * pow(0.5 + 0.5 * sin((uv.y * lines + (reduce_motion ? 0.0 : TIME) * 2.2) * 6.2832), 1.4);
+	float roll = 0.95 + 0.05 * sin(uv.y * 7.0 - (reduce_motion ? 0.0 : TIME) * 2.6);
+	float flicker = 0.975 + 0.025 * sin((reduce_motion ? 0.0 : TIME) * 37.0);
 	col *= scan * roll * flicker;
 	// виньетка к закруглённым краям
 	// виньетка мягкая: края темнее, но не чёрные

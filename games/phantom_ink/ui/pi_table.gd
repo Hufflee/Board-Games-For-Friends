@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Общий планшет и личный экран. Ни одна закрытая подсказка не передаётся соперникам.
 var app: Node
 var _v: Dictionary = {}
@@ -165,9 +167,8 @@ func _show_ouija_letter(letter: String) -> void:
 
 
 func _clue_text(team: int, index: int, data: Dictionary) -> String:
-	var number := str(index + 1) + ("  ◉  " if PIData.EYES[team].has(index) else "      ")
 	var text := _shown_letters if Vector2i(team, index) == _writing_row else str(data.text)
-	return number + text + ("." if data.complete and text == str(data.text) else "")
+	return text + ("." if data.complete and text == str(data.text) else "")
 
 func _curtain() -> void:
 	var center := CenterContainer.new()
@@ -208,7 +209,13 @@ func _board_team(parent: Control, t: int) -> void:
 	col.add_child(names_label)
 	for i in 8:
 		var data: Dictionary = _v.rows[t][i] if i < _v.rows[t].size() else {}
-		var text := str(i + 1) + ("  ◉  " if PIData.EYES[t].has(i) else "      ")
+		var line := HBoxContainer.new()
+		line.add_theme_constant_override("separation", 4)
+		var number := PIStyle.label(str(i + 1) + (" ◉" if PIData.EYES[t].has(i) else ""), PIStyle.CAP)
+		number.custom_minimum_size.x = 38
+		number.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+		line.add_child(number)
+		var text := ""
 		var wrong_index := -1
 		if not data.is_empty():
 			if data.wrong and not str(data.text).is_empty():
@@ -225,19 +232,23 @@ func _board_team(parent: Control, t: int) -> void:
 				row.add_theme_color_override("font_disabled_color", Color("f0d49a"))
 				_ouija.track_clue(row, parent)
 		row.alignment = HORIZONTAL_ALIGNMENT_LEFT
+		row.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.custom_minimum_size.y = 44
 		row.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		if bool(data.get("wrong", false)):
-			row.add_theme_color_override("font_color", Color("c96e63"))
+			row.add_theme_color_override("font_color", Color("c96e63").lightened(0.15))
 		var eye: bool = _v.phase == "eye" and _v.can_act and data.get("kind", "") == "clue" and not data.get("complete", true)
-		row.disabled = not eye and not data.has("question")
+		if not eye and not data.has("question"):
+			TextUI.display_only(row)
 		if wrong_index >= 0:
 			preload("res://games/phantom_ink/ui/pi_wrong_letter.gd").wire(row, wrong_index)
 		if eye:
 			row.pressed.connect(func(): _send("eye", [t, i]))
 		elif data.has("question"):
 			row.pressed.connect(func(): _question_popup(int(data.question)))
-		col.add_child(row)
+		line.add_child(row)
+		TextUI.full_on_hover(row)
+		col.add_child(line)
 
 func _note(col: Control, text: String) -> void:
 	var l := PIStyle.label(text)
@@ -270,7 +281,7 @@ func _controls(col: Control) -> void:
 			if phase == "object":
 				var choice := _button(col, label, "object", i)
 				if votes.size() == 2 and int(votes[int(int(_v.role) / 2)]) == i:
-					choice.theme_type_variation = "PrimaryButton"
+					choice.theme_type_variation = "SelectedButton"
 			elif i == int(_v.object_slot):
 				_note(col, "Тайное слово: " + str(object_words[i]))
 	if phase == "game_over":
@@ -397,12 +408,12 @@ func _questions(col: Control) -> void:
 			_changed(_v))
 		b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		if _selected.has(q):
-			b.theme_type_variation = "PrimaryButton"
+			b.theme_type_variation = "SelectedButton"
 		var count: int = int(_v.get("question_votes", {}).get(q, 0))
 		var vote := PIStyle.button("♥ %d" % count, PIStyle.CAP)
 		vote.tooltip_text = "Голосовать за вопрос / снять свой голос"
 		if (_v.get("own_question_votes", []) as Array).has(q):
-			vote.theme_type_variation = "PrimaryButton"
+			vote.theme_type_variation = "SelectedButton"
 		vote.pressed.connect(func(): Net.send_action("question_vote", int(q)))
 		row.add_child(vote)
 
@@ -435,6 +446,7 @@ func _hide_preview() -> void:
 	_preview = null
 func _question_popup(id: int) -> void:
 	var popup := AcceptDialog.new()
+	popup.ok_button_text = "Закрыть"
 	popup.title = "Выбранный вопрос"
 	popup.dialog_text = PIData.question(id)
 	popup.confirmed.connect(popup.queue_free)
@@ -442,6 +454,7 @@ func _question_popup(id: int) -> void:
 	popup.popup_centered(Vector2i(540, 180))
 func _discard() -> void:
 	var popup := AcceptDialog.new()
+	popup.ok_button_text = "Закрыть"
 	popup.title = "Открытый сброс"
 	var scroll := ScrollContainer.new()
 	popup.add_child(scroll)

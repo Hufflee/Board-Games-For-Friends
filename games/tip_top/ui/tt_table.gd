@@ -283,7 +283,7 @@ func _update_theme() -> void:
 			for i in 2:
 				var b := Button.new()
 				b.custom_minimum_size = Vector2(0, 70)
-				b.add_theme_stylebox_override("normal", TTStyle.box(Color("f4f4f4"), 12, TTStyle.INK, 3, 0.0))
+				b.add_theme_stylebox_override("normal", TTStyle.box(TTStyle.READY_BADGE, 12, TTStyle.INK, 3, 0.0))
 				b.add_theme_stylebox_override("hover", TTStyle.box(TTStyle.accent().lightened(0.6), 12, TTStyle.INK, 3, 0.0))
 				b.add_theme_stylebox_override("pressed", TTStyle.box(TTStyle.accent(), 12, TTStyle.INK, 3, 0.0))
 				b.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
@@ -499,8 +499,8 @@ func _draw_track() -> void:
 	_track.draw_style_box(TTStyle.box(Color(0, 0, 0, 0.22), 18, Color(1, 1, 1, 0.5), 3, 0.0), r)
 	var f := TTStyle.font("title")
 	var hint := "ПЛАНШЕТ: от меньшего номера к большему" if not _v.get("expert", false) else "ПЛАНШЕТ: разложите ответы и назовите номера"
-	_track.draw_string(f, Vector2(14, 22), hint, HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color(1, 1, 1, 0.8))
-	_track.draw_string(f, Vector2(r.size.x - 70, r.size.y - 10), "→", HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1, 1, 1, 0.6))
+	_track.draw_string(f, Vector2(14, 22), hint, HORIZONTAL_ALIGNMENT_LEFT, -1, TTStyle.CAP, Color(1, 1, 1, 0.8))
+	_track.draw_string(f, Vector2(r.size.x - 70, r.size.y - 10), "→", HORIZONTAL_ALIGNMENT_LEFT, -1, TTStyle.H1, Color(1, 1, 1, 0.6))
 
 
 # --- Правая колонка: свой номер, ответ, эксперт ------------------------------------------
@@ -560,7 +560,7 @@ func _update_right() -> void:
 				var txt := "Перетащите ответы на планшет от меньшего номера к большему и меняйте их местами, сколько нужно. Двойной клик — положить / убрать."
 				if _v["expert"]:
 					txt = "Разложите ответы на планшете. Кликните по карте на планшете и назовите её номер."
-				var l := TTStyle.label(txt, TTStyle.CAP, TTStyle.WHITE, HORIZONTAL_ALIGNMENT_LEFT, "bold")
+				var l := _ray_hint(txt, HORIZONTAL_ALIGNMENT_LEFT)
 				l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 				_right.add_child(l)
 				if _v["expert"] and _selected >= 0:
@@ -577,13 +577,20 @@ func _update_right() -> void:
 					Sfx.play("chips_big", -6)
 					_send("tt_commit"))
 				_right.add_child(go)
+				var why := TTStyle.label(go.tooltip_text, TTStyle.CAP, TTStyle.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
+				why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+				why.custom_minimum_size.y = TTStyle.CAP * 2.0 + 4.0
+				if go.disabled:
+					var backing := TTStyle.box(Color(0, 0, 0, 0.25), 8, Color.TRANSPARENT, 0, 0.0)
+					why.add_theme_stylebox_override("normal", backing)
+				_right.add_child(why)
 			else:
-				var l := TTStyle.label("%s раскладывает ответы…" % _name(_v["captain"]), TTStyle.CAP, TTStyle.WHITE, HORIZONTAL_ALIGNMENT_CENTER, "bold")
+				var l := _ray_hint("%s раскладывает ответы…" % _name(_v["captain"]))
 				l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 				_right.add_child(l)
 		"guess":
 			if _seat() != int(_v["captain"]):
-				var l := TTStyle.label("Какой номер у капитана? Договоритесь и выберите вместе:", TTStyle.CAP, TTStyle.WHITE, HORIZONTAL_ALIGNMENT_LEFT, "bold")
+				var l := _ray_hint("Какой номер у капитана? Договоритесь и выберите вместе:", HORIZONTAL_ALIGNMENT_LEFT)
 				l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 				_right.add_child(l)
 				_right.add_child(_number_grid(func(n): _send("tt_guess", {"n": n}), -1))
@@ -709,3 +716,10 @@ func _process(_delta: float) -> void:
 		var left := maxi(0, (_auto_deadline - Time.get_ticks_msec()) / 1000)
 		var waiting: Array = _v.get("waiting", [])
 		_auto_label.text = ("ждём: %s · " % ", ".join(waiting) if not waiting.is_empty() else "") + "сами через %d с" % left
+
+func _ray_hint(text: String, align := HORIZONTAL_ALIGNMENT_CENTER) -> Label:
+	var label := TTStyle.label(text, TTStyle.CAP, TTStyle.WHITE, align, "bold")
+	var backing := TTStyle.box(Color(0, 0, 0, 0.25), 8, Color.TRANSPARENT, 0, 0.0)
+	backing.set_content_margin_all(6)
+	label.add_theme_stylebox_override("normal", backing)
+	return label

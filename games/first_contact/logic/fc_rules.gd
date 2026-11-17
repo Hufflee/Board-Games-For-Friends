@@ -72,6 +72,11 @@ func action(seat: int, kind: String, arg: Dictionary, host: bool) -> bool:
 		if feature < 0 or feature >= FEATURES.size() or symbol < -1 or symbol >= GLYPHS.size() or phase == "end":
 			return false
 		var row: Dictionary = notes.get(seat,{})
+		# один знак — один признак: новая запись знака заменяет прежнюю (владелец, 15.11); -1 — стереть
+		if symbol >= 0:
+			for other in row.keys():
+				if int(row[other]) == symbol:
+					row.erase(other)
 		row[feature] = symbol
 		notes[seat] = row
 		return true

@@ -93,6 +93,25 @@ func _run() -> void:
 	check(not clean_newer.poses.has(full.placements[0][1]), "незнакомая поза пропущена у одной коробки")
 	check(clean_newer.custom.size() == 24, "битая своя игра пропущена, остальные 24 на месте")
 
+	var upper := full.duplicate(true)
+	var game: String = full.placements[1][0]
+	upper.config.upper_edges = [[-2, 3, 1, 3], [1, 3, 2, 2], [99, 0, 0, 0], [1, 3, -2, 3]]
+	upper.config.upper_precise_edges = [[-33, 64, 22, 64], [500, 0, 22, 64]]
+	upper.config.upper_smoothing = 0.65
+	upper.config.upper_shallow_edges = ["-33:64:22:64", "10:20:30:40"]
+	upper.config.figure_surfaces[game] = {"surface": "above:-2:1:3", "x": 0.5}
+	upper.config.figure_surfaces["shelf_girl"] = {"surface": "above:u:-33:22:64", "x": 0.25, "fit": true}
+	upper.config.figure_surfaces["shelf_andy"] = {"surface": "above:1:2:3", "x": 0.5}
+	var clean_upper: Dictionary = PublicRoom.clean(upper)
+	check(clean_upper.config.upper_edges == [[-2, 3, 1, 3], [1, 3, 2, 2]], "исправные отрезки остаются, битый и повтор пропускаются")
+	check(clean_upper.config.upper_smoothing == 0.65, "скругление остаётся в снимке")
+	check(clean_upper.config.figure_surfaces[game] == {"surface": "above:-2:1:3", "x": 0.5}, "коробка сохраняет положение на горизонтальной полке")
+	check(not clean_upper.config.figure_surfaces.has("shelf_andy"), "наклонный отрезок не принимается как поверхность")
+	check(clean_upper.config.upper_precise_edges == [[-33, 64, 22, 64]], "Координаты новой сетки сохраняются, битый отрезок пропускается.")
+	check(clean_upper.config.figure_surfaces.shelf_girl == {"surface": "above:u:-33:22:64", "x": 0.25, "fit": true}, "Место на новой сетке проходит проверку.")
+	check(clean_upper.config.upper_shallow_edges == ["-33:64:22:64"], "Половинная глубина сохраняется у существующего отрезка.")
+	check(PublicRoom.clean(clean_upper) == clean_upper, "повторная проверка сохраняет новые поля")
+
 	# Старая версия (0.9.0) — без мест коробок, комнаты, гирлянд, ячеек.
 	var older := {
 		"config": {"rows": 4, "cols": 2, "cups": 4, "width": 0.4, "height": 0.34, "figure_x": 1.0},

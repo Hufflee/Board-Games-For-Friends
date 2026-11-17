@@ -90,7 +90,7 @@ func _run() -> void:
 	await seat(1)
 	check(buttons(app, "vote")[1].text == "♥ 1", "Второй медиум видит счётчик команды в UI")
 	await click(buttons(app, "vote")[1])
-	check(buttons(app, "vote")[1].text == "♥ 2" and buttons(app, "vote")[1].theme_type_variation == "PrimaryButton", "UI показывает общий счёт2 и выделяет свой голос")
+	check(buttons(app, "vote")[1].text == "♥ 2" and buttons(app, "vote")[1].theme_type_variation == "SelectedButton", "UI показывает общий счёт2 и выделяет свой голос")
 	# Пауза штатная Net; проверяем и физический клик под overlay, и отказ серверного маршрута.
 	net.set_paused(true)
 	await settle()

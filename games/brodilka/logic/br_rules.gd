@@ -5,6 +5,8 @@
 class_name BRRules
 extends RefCounted
 
+const TextUI = preload("res://hub/ui_text.gd")
+
 const START_COINS := 0
 const MAX_PLAYERS := 8
 const LOG_MAX := 30
@@ -498,7 +500,7 @@ func _cell_fx(s: int) -> void:
 			_ask(s, "card_die", ["Бросить кубик"], "Шахта: схвати кубик мышью и брось", {fx = "mine"})
 		"nooo":
 			var nn := 3 if has_shop(s, "charm") else 10
-			_log(s, "Нееет! −%d монет%s" % [nn, " (оберег)" if nn == 3 else ""])
+			_log(s, "Нееет! −%s%s" % [TextUI.plural(nn, "монета", "монеты", "монет"), " (оберег)" if nn == 3 else ""])
 			_lose(s, nn)
 		"luck_die":
 			_ask(s, "card_die", ["Бросить кубик"], "Кубик удачи: бросок 1 из 3", {fx = "luck_die", left = 3, sum = 0})

@@ -1,4 +1,6 @@
 shader_type canvas_item;
+
+uniform bool reduce_motion = false;
 // Пол таверны (доски), тёплый свет свечей, овальный стол: дерево, кожа, сукно.
 
 uniform sampler2D planks : source_color, repeat_enable, filter_linear_mipmap;
@@ -53,7 +55,7 @@ float ellipse_dist(vec2 p, vec2 c, vec2 r) {
 
 void fragment() {
 	vec2 p = UV * rect_size;
-	float t = TIME;
+	float t = (reduce_motion ? 0.0 : TIME);
 
 	// --- пол ---
 	vec3 floor_col = texture(planks, (p - cursor_shift) / 420.0).rgb;

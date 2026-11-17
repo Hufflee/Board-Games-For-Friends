@@ -4,6 +4,10 @@ const Splash := preload("res://hub/boot/hufflesoft_splash.gd")
 var _opening := false
 
 func _ready() -> void:
+	if OS.has_feature("bgs_social") or "--social" in OS.get_cmdline_user_args():
+		get_tree().root.set_meta(&"bgs_social", true)
+		get_tree().change_scene_to_file.call_deferred("res://hub/social/social.tscn")
+		return
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var splash := Splash.new()
 	add_child(splash)

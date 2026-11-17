@@ -54,6 +54,18 @@ func award() -> Dictionary:
 	return {}
 
 
+## Счётчики титулов уже собраны хостом. В итогах видны значения каждого места.
+func add_final_columns(table: Dictionary) -> void:
+	for key: String in _titles:
+		var id := "record_" + key
+		table.columns[id] = TITLES[key][0]
+		var scores: Dictionary = _titles[key]
+		for place: Dictionary in table.rows:
+			var seat: int = place.seat
+			if seat >= 0 and seat < _enabled.size() and _enabled[seat]:
+				place.values[id] = int(scores.get(seat, 0))
+
+
 static func empty_row() -> Dictionary:
 	return {"decisions": 0, "errors": 0, "remarks": 0, "messages": 0, "emotes": 0, "dice": {}, "result": ""}
 

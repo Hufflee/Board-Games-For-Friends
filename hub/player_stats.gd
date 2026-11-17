@@ -30,12 +30,18 @@ static func empty_row() -> Dictionary:
 		"messages": 0,
 		"emotes": 0,
 		"dice": {},
-		"history": []
+		"history": [],
+		"rating_totals": {},
+		"rating_counts": {},
+		"rating_history": []
 	}
 
 
 static func _canonical_totals(source: Dictionary) -> Dictionary:
-	var out: Dictionary = {"result": str(source.get("result", "")), "dice": {}}
+	var out: Dictionary = {
+		"result": str(source.get("result", "")), "dice": {},
+		"kind": str(source.get("kind", "")), "rating": int(source.get("rating", -1))
+	}
 	for key in ["decisions", "errors", "remarks", "messages", "emotes"]:
 		out[key] = int(source.get(key, 0))
 	for face in source.get("dice", {}):
@@ -57,6 +63,9 @@ func consume(snapshot: Dictionary) -> bool:
 		totals.dice[face] = maxi(int(totals.dice.get(face, 0)), int(old.dice[face]))
 	if str(old.result) != "":
 		totals.result = old.result
+	if int(old.rating) >= 0:
+		totals.rating = old.rating
+		totals.kind = old.kind
 	if old == totals:
 		return false
 	var row: Dictionary = data.games.get(game, empty_row())
@@ -69,6 +78,20 @@ func consume(snapshot: Dictionary) -> bool:
 		)
 	var match_id: String = str(snapshot.get("match_id", snapshot.id))
 	var finished: Dictionary = data.get("finished", {})
+	var rated: Dictionary = data.get("rated", {})
+	var kind := str(totals.kind)
+	if kind in ["rank", "team", "coop"] and int(totals.rating) in range(101) and not rated.has(match_id):
+		var sums: Dictionary = row.get_or_add("rating_totals", {})
+		var counts: Dictionary = row.get_or_add("rating_counts", {})
+		sums[kind] = int(sums.get(kind, 0)) + int(totals.rating)
+		counts[kind] = int(counts.get(kind, 0)) + 1
+		if kind == "rank":
+			var track: Array = row.get_or_add("rating_history", [])
+			track.append({"rating": totals.rating, "time": int(snapshot.get("time", Time.get_unix_time_from_system()))})
+			if track.size() > 100:
+				track.pop_front()
+		rated[match_id] = true
+		data.rated = rated
 	if str(totals.get("result", "")) != "" and not finished.has(match_id):
 		var won: bool = totals.result == "win"
 		if totals.result == "unrated":
@@ -118,8 +141,14 @@ func summary(game: String = "") -> Dictionary:
 		for face in row.dice:
 			total.dice[face] = int(total.dice.get(face, 0)) + int(row.dice[face])
 		total.history.append_array(row.history)
+		for field in ["rating_totals", "rating_counts"]:
+			for kind in row.get(field, {}):
+				total[field][kind] = int(total[field].get(kind, 0)) + int(row[field][kind])
+		total.rating_history.append_array(row.get("rating_history", []))
 	total.history.sort_custom(func(a, b): return int(a.get("order", a.time)) < int(b.get("order", b.time)))
 	total.history = total.history.slice(maxi(0, total.history.size() - 100))
+	total.rating_history.sort_custom(func(a, b): return int(a.time) < int(b.time))
+	total.rating_history = total.rating_history.slice(maxi(0, total.rating_history.size() - 100))
 	return total
 
 

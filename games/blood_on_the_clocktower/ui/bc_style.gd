@@ -51,7 +51,7 @@ static func theme() -> Theme:
 	result.set_stylebox("selected", "ItemList", box(ACCENT))
 	result.set_stylebox("selected_focus", "ItemList", box(ACCENT))
 	for state: String in ["normal", "hover", "pressed", "focus"]:
-		result.set_stylebox(state, "Button", box(PANEL.lightened(0.08) if state == "hover" else PANEL))
+		result.set_stylebox(state, "Button", box(PANEL.lightened(0.08) if state == "hover" else (INSET if state == "pressed" else PANEL)))
 	result.set_color("font_hover_color", "Button", INK)
 	result.set_color("font_pressed_color", "Button", INK)
 	result.set_stylebox("normal", "LineEdit", box(INSET))
@@ -73,3 +73,23 @@ static func button(text: String, size: int = BODY) -> Button:
 	node.add_theme_font_size_override("font_size", size)
 	node.custom_minimum_size.y = 40
 	return node
+
+static func primary(button: Button) -> void:
+	button.add_theme_stylebox_override("normal", box(ACCENT))
+	button.add_theme_stylebox_override("hover", box(ACCENT.lightened(0.1)))
+	button.add_theme_stylebox_override("pressed", box(ACCENT.darkened(0.1)))
+	button.add_theme_stylebox_override("disabled", box(INSET))
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[INK, PANEL, "текст панели", false],
+		[INK, ACCENT, "номинация", false],
+	]
+
+const BOOK_INK_FADED := Color(0.17, 0.11, 0.07, 0.62)
+const BOOK_INK_RED := Color("7a1a1a")
+const BOOK_INK_BLUE := Color("1f3550")
+const BOOK_INK := Color("2b1b12")
+const BOOK_DIM := Color(0.02, 0.02, 0.04, 0.66)

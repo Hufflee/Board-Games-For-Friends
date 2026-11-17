@@ -14,6 +14,7 @@ extends RefCounted
 const MAIN_LETTERS := ["а", "б", "в", "г", "д", "е", "ж", "з", "и", "к", "л", "м", "н", "о", "п", "р", "с", "т", "у", "ф", "х", "ч", "ш", "я"]
 const OPTIONAL_LETTERS := ["й", "ц", "щ", "э", "ю", "ё"]
 const LETTERS := MAIN_LETTERS + OPTIONAL_LETTERS
+const SKINS := 8  # персонажей на листе (ui/st_portrait.gd)
 const MAX_LIVES := 2  # жизней по умолчанию (настройка st_lives)
 const ANSWER_TIME := 10.0  # время на ответ по умолчанию (настройка st_time)
 const AIM_TIME := 0.9  # пушка поворачивается к игроку
@@ -84,8 +85,16 @@ func new_game(player_list: Array, use_bots: bool = false, seed_value: int = 0) -
 	else:
 		rng.randomize()
 	players.clear()
+	# Персонажи (SKINS листа contestants) каждую партию раздаются заново случайно, без повторов.
+	var skins: Array = range(SKINS)
+	for i in range(skins.size() - 1, 0, -1):
+		var j := rng.randi_range(0, i)
+		var t: int = skins[i]
+		skins[i] = skins[j]
+		skins[j] = t
 	for p: Dictionary in player_list:
 		players.append({"name": str(p.get("name", "Игрок")), "lives": max_lives, "alive": true, "last_answer": "",
+			"skin": int(skins[players.size() % SKINS]),
 			"bot": bool(p.get("bot", false)) or (use_bots and bool(p.get("local", false)))})
 	winner = -1
 	_new_round(rng.randi_range(0, players.size() - 1))
@@ -158,7 +167,7 @@ func letters_left() -> int:
 	return count
 
 
-## Сколько нажатий «Оспорить» нужно: больше половины живых людей, кроме автора (1 на 1 — одно); на одном компьютере — одно.
+## Сколько нажатий «Оспорить» нужно: больше половины всех игроков-людей, кроме автора (выбывшие тоже голосуют; 1 на 1 — одно); на одном компьютере — одно.
 ## Боты не оспаривают и в счёт не входят: ответы игроков по списку не проверяются, решают только люди.
 func votes_needed() -> int:
 	if prev.is_empty():
@@ -167,7 +176,7 @@ func votes_needed() -> int:
 		return 1
 	var n := 0
 	for s in players.size():
-		if players[s].alive and not players[s].bot and s != int(prev.seat):
+		if not players[s].bot and s != int(prev.seat):
 			n += 1
 	return maxi(1, n / 2 + 1)
 
@@ -175,7 +184,7 @@ func votes_needed() -> int:
 func can_challenge(seat: int) -> bool:
 	if prev.is_empty() or not phase in ["aim", "fuse", "review"] or seat < 0 or seat >= players.size():
 		return false
-	if votes.has(seat) or (not hotseat and (not players[seat].alive or players[seat].bot)):
+	if votes.has(seat) or (not hotseat and players[seat].bot):
 		return false
 	return hotseat or seat != int(prev.seat)
 

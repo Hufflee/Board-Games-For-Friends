@@ -1,4 +1,6 @@
 shader_type canvas_item;
+
+uniform bool reduce_motion = false;
 // Ночное небо подземелья: фиолетовый градиент, луна с ореолом, ползущий туман, лёгкое мерцание.
 
 uniform vec2 rect_size = vec2(1280.0, 720.0);
@@ -23,7 +25,7 @@ float fbm(vec2 p) {
 void fragment() {
 	vec2 uv = UV;
 	vec2 p = uv * rect_size - cursor_shift;
-	float t = TIME;
+	float t = (reduce_motion ? 0.0 : TIME);
 	vec3 top = vec3(0.10, 0.04, 0.17);
 	vec3 bottom = vec3(0.03, 0.02, 0.06);
 	vec3 col = mix(top, bottom, uv.y);

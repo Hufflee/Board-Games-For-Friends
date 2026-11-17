@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Приватный 2D стол: кольца, человеческая проверка и горячие места.
 const Style := preload("res://games/things_in_rings/ui/tr_style.gd")
 const Data := preload("res://games/things_in_rings/logic/tr_data.gd")
@@ -12,6 +14,8 @@ var view: Dictionary = {}
 var _top: TopBar
 var _left: VBoxContainer
 var _main: VBoxContainer
+var _feedback_until := 0
+var _phase_info := ""
 var _picture: TextureRect
 var _translation: Label
 var _selection: Label
@@ -83,12 +87,12 @@ func _ready() -> void:
 	_picture.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	_picture.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	sidebar.add_child(_picture)
-	_translation = Style.label("", 16, Color(Style.muted(), 0.8))
+	_translation = Style.label("", 16, Style.muted())
 	_translation.name = "Translation"
 	_translation.custom_minimum_size = Vector2(200, 120)
 	_translation.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	sidebar.add_child(_translation)
-	var hint := Style.label("Наведите на открытую карту. «Название» — по английскому оригиналу.", 12, Style.muted())
+	var hint := Style.label("Наведите на открытую карту. «Название» — по английскому оригиналу.", 13, Style.muted())
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	hint.custom_minimum_size.x = 200
 	sidebar.add_child(hint)
@@ -148,7 +152,8 @@ func _rebuild() -> void:
 	var active: int = view.actor
 	var blind_mode: bool = str(view.get("mode", "classic")) == "blind"
 	var stage := "финал" if phase in ["postgame", "game_over"] else ("все искатели" if phase == "blind" else ("знающий" if active == view.knower else "искатель"))
-	_top.info.text = "Круг %d · %s%s" % [view.round_no, "Blind Mind · " if blind_mode else "", stage]
+	_phase_info = "Круг %d · %s%s" % [view.round_no, "Blind Mind · " if blind_mode else "", stage]
+	_restore_phase_info()
 	var waiting: Array = view.get("blind_waiting", [])
 	var placed: Array = view.get("blind_placed", [])
 	_left.add_child(Style.section("За столом"))
@@ -166,20 +171,21 @@ func _rebuild() -> void:
 		_left.add_child(b)
 		# Зелёный ореол — у того, кто ходит; в Blind Mind — у всех, от кого ещё ждём карточку.
 		# Ореол рисуется позади своего родителя, поэтому ник — отдельной надписью поверх заливки кнопки.
-		var nick := Style.label(b.text, 12)
+		var nick := Style.label(b.text, 13)
 		nick.name = "Nick"
 		nick.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		nick.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 		nick.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		nick.clip_text = true
+		TextUI.full_on_hover(nick)
 		b.text = ""
 		b.tooltip_text = nick.text
 		b.add_child(nick)
 		nick.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		var judging_author: int = int(view.get("pending", {}).get("by", -1)) if phase == "judge" else -1
 		TurnNameGlow.apply(nick, waiting.has(seat) if phase == "blind" else (seat == active or seat == judging_author) and phase not in ["postgame", "game_over"])
-	_left.add_child(Style.label("З — знающий%s · карт: %d" % [" · ✓ — поставил" if blind_mode else "", view.deck_left], 12, Style.muted()))
-	_left.add_child(Style.label("Передайте экран и нажмите своё имя." if view.get("hotseat", false) else "Ваши карты видны только вам.", 12, Style.muted()))
+	_left.add_child(Style.label("З — знающий%s · карт: %d" % [" · ✓ — поставил" if blind_mode else "", view.deck_left], 13, Style.muted()))
+	_left.add_child(Style.label("Передайте экран и нажмите своё имя." if view.get("hotseat", false) else "Ваши карты видны только вам.", 13, Style.muted()))
 	_margin.add_theme_constant_override("margin_bottom", 16)
 	var text := _phase_text()
 	if view.get("disconnected", []).has(active):
@@ -202,7 +208,7 @@ func _rebuild() -> void:
 	if phase in ["postgame", "game_over"]:
 		field.custom_minimum_size.y = 240
 	_field = field
-	_selection = Style.label("Перетащите вещь в кольца или выберите карту и нажмите область.", 12, Style.muted())
+	_selection = Style.label("Перетащите вещь в кольца или выберите карту и нажмите область.", 13, Style.muted())
 	if phase in ["blind", "blind_check"]:
 		_selection.text = _blind_hint()
 	if phase in ["postgame", "game_over"]:
@@ -236,7 +242,6 @@ func _rebuild() -> void:
 		done.name = "BlindDone"
 		done.theme_type_variation = "SelectedButton"
 		done.disabled = phase != "blind_check"
-		done.modulate.a = 1.0 if phase == "blind_check" else 0.5  # пока ждём искателей — приглушена
 		done.tooltip_text = "Доступно, когда все искатели поставят карточки (или выйдет время)."
 		done.pressed.connect(func(): _send("blind_done"))
 		done_row.add_child(done)
@@ -246,6 +251,10 @@ func _rebuild() -> void:
 		_selection.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		done_row.add_child(_selection)
 		_main.add_child(done_row)
+		var why := Style.label(done.tooltip_text if done.disabled else "", 13, Style.muted())
+		why.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		why.custom_minimum_size.y = 20
+		_main.add_child(why)
 		if not view.hand.is_empty():
 			_build_hand()
 	elif phase not in ["postgame", "game_over"]:
@@ -324,7 +333,7 @@ func _build_choices() -> void:
 			card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			choice.add_child(card)
 			card.position = Vector2(6, 5)
-			var translation := Style.label(Data.translation(id), 12, Style.muted())
+			var translation := Style.label(Data.translation(id), 13, Style.muted())
 			translation.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			translation.position = Vector2(104, 8)
 			translation.size = Vector2(96, 126)
@@ -511,7 +520,7 @@ func _build_final_rules() -> void:
 		var up: bool = ring < opened.size() and bool(opened[ring]) and id >= 0
 		var col := Style.column(4)
 		row.add_child(col)
-		col.add_child(Style.label(Style.category_name(category), 12, Style.muted()))
+		col.add_child(Style.label(Style.category_name(category), 13, Style.muted()))
 		var card := TextureRect.new()
 		card.name = "FinalCondition%d" % ring
 		card.custom_minimum_size = Vector2(94, 144)
@@ -561,14 +570,22 @@ func _feedback(event: Dictionary) -> void:
 	_flash(bool(event.get("correct", false)))
 
 ## Вспышка рамки и звук ответа: верно — зелёная, ошибка — красная.
+func _restore_phase_info() -> void:
+	if Time.get_ticks_msec() >= _feedback_until and is_instance_valid(_top):
+		_top.info.text = _phase_info
+
+
 func _flash(correct: bool) -> void:
+	_feedback_until = Time.get_ticks_msec() + 2000
+	get_tree().create_timer(2.05).timeout.connect(_restore_phase_info)
+	_top.info.text = "Верно — карточка в нужной области" if correct else "Неверно — карточка в другой области"
 	var layer := Control.new()
 	layer.name = "AnswerFeedback"
 	layer.z_index = 120
 	layer.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	layer.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	add_child(layer)
-	var color := Color("62e6a5") if correct else Color("eb5d71")
+	var color: Color = Style.RINGS[0] if correct else Style.RINGS[2]
 	layer.draw.connect(func():
 		for i: int in 12:
 			var inset := float(i) * 2.0 + 1.0
@@ -682,7 +699,7 @@ func _reveal_one(item: Dictionary) -> void:
 	flyer.position = start.position
 	flyer.modulate.a = 0.0
 	field.add_child(flyer)
-	var tag := Style.label(str(view.players[int(item.seat)].name), 12)
+	var tag := Style.label(str(view.players[int(item.seat)].name), 13)
 	tag.name = "RevealTag"
 	tag.add_theme_color_override("font_outline_color", Style.paper())
 	tag.add_theme_constant_override("outline_size", 6)

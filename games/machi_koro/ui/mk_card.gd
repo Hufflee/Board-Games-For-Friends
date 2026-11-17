@@ -1,4 +1,6 @@
 extends PanelContainer
+
+const ContrastUI = preload("res://hub/ui_contrast.gd")
 ## Открытая карта Мачи Коро: иллюстрация из TTS-атласа, корректный текст рисуется Godot.
 
 const Style := preload("res://games/machi_koro/ui/mk_style.gd")
@@ -71,7 +73,9 @@ func _ready() -> void:
 	info.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	info.clip_text = true
 	info.mouse_filter = MOUSE_FILTER_IGNORE
-	info.add_theme_color_override("font_color", color.lightened(0.25) if Style.dark() else color)
+	var ink := ContrastUI.pick(surface, [color.lightened(0.25), Color.WHITE]) if Style.dark() else (
+		ContrastUI.pick(surface, [color, color.darkened(0.2), color.darkened(0.35), Color.BLACK]))
+	info.add_theme_color_override("font_color", ink)
 	var kind := str(definition.get("icon", ""))
 	var icon_texture := Art.type_icon(kind)
 	if icon_texture == null:
@@ -81,7 +85,7 @@ func _ready() -> void:
 		details.alignment = BoxContainer.ALIGNMENT_CENTER
 		details.mouse_filter = MOUSE_FILTER_IGNORE
 		var badge := PanelContainer.new()
-		badge.add_theme_stylebox_override("panel", Style.box(Color("f5efdf"), 3))
+		badge.add_theme_stylebox_override("panel", Style.box(Style.surface(), 3))
 		badge.size_flags_vertical = SIZE_SHRINK_CENTER
 		badge.mouse_filter = MOUSE_FILTER_IGNORE
 		var icon := TextureRect.new()

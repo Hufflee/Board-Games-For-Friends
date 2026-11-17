@@ -1,6 +1,10 @@
 class_name BRStyle
 extends RefCounted
 
+const TextUI = preload("res://hub/ui_text.gd")
+
+const ContrastUI = preload("res://hub/ui_contrast.gd")
+
 const ACCENT_FX := preload("res://hub/ui_accent_fx.gd")
 ## Стиль «Большой бродилки»: деревянная настолка — рамки из досок, пергаментные окна и карты,
 ## мультяшные фишки (как на поле в art/src). Дизайн-система: 2 цвета — дерево (панели, рамки)
@@ -47,6 +51,10 @@ static func dark() -> bool:
 ## Тёмная тема — пергамент заметно темнее (как в сумерках), текст остаётся тёмным и читаемым.
 static func parch() -> Color:
 	return Color("b39e72") if dark() else PARCH
+
+
+static func muted() -> Color:
+	return ContrastUI.pick(parch(), [INK.lightened(0.15), INK]) if dark() else MUTED
 
 
 static func parch_dim() -> Color:
@@ -143,8 +151,8 @@ static func theme() -> Theme:
 	t.set_stylebox("hover", "QuietButton", qh)
 	t.set_stylebox("pressed", "QuietButton", qh)
 	t.set_color("font_color", "QuietButton", Color(INK, 0.7))
-	t.set_color("font_hover_color", "QuietButton", RED)
-	t.set_color("font_pressed_color", "QuietButton", RED)
+	t.set_color("font_hover_color", "QuietButton", INK)
+	t.set_color("font_pressed_color", "QuietButton", INK)
 	t.set_type_variation("ConfirmPanel", "PanelContainer")
 	var cp := box(parch(), 10, WOOD, 6, 0.45)
 	cp.set_content_margin_all(26)
@@ -270,7 +278,9 @@ static func coin_label(n: int, size: int = BODY) -> HBoxContainer:
 	var c := Coin.new()
 	c.custom_minimum_size = Vector2(size, size)
 	h.add_child(c)
-	h.add_child(label(str(n), size, INK, HORIZONTAL_ALIGNMENT_LEFT, "bold"))
+	var count := label(str(n), size, INK, HORIZONTAL_ALIGNMENT_LEFT, "bold")
+	TextUI.stable_numbers(count, "000")
+	h.add_child(count)
 	return h
 
 
@@ -326,3 +336,11 @@ class Backdrop:
 		for k in 10:
 			var t := k / 10.0
 			draw_rect(Rect2(0, size.y * t, size.x, size.y / 10.0 + 1), Color(0, 0, 0, 0.025 * k))
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[INK, parch(), "текст на пергаменте", false],
+		[muted(), parch(), "подпись на пергаменте", false],
+	]

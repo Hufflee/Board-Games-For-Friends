@@ -19,6 +19,7 @@ var _applied_res := ""  # какой размер окна уже ставили
 var ui_scale := 1.0  # масштаб интерфейса (content_scale_factor окна)
 const UI_SCALE_MIN := 0.8
 const UI_SCALE_MAX := 1.4
+var reduce_motion := false
 var parallax := true  # двигающийся за мышью задний фон во всех играх и в хабе
 var card_preview_mode := "card"
 var dice_style := "classic"
@@ -72,6 +73,7 @@ func _ready() -> void:
 		fullscreen = cfg.get_value("video", "fullscreen", fullscreen)
 		ui_scale = clampf(float(cfg.get_value("video", "ui_scale", ui_scale)), UI_SCALE_MIN, UI_SCALE_MAX)
 		parallax = cfg.get_value("video", "parallax", parallax)
+		reduce_motion = cfg.get_value("video", "reduce_motion", false)
 		card_preview_mode = str(cfg.get_value("video", "card_preview_mode", "card"))
 		if card_preview_mode not in ["card", "magnifier"]: card_preview_mode = "card"
 		dice_style = "reel" if cfg.get_value("game", "dice_style", "classic") == "reel" else "classic"
@@ -220,6 +222,7 @@ func save() -> void:
 	cfg.set_value("video", "fullscreen", fullscreen)
 	cfg.set_value("video", "ui_scale", ui_scale)
 	cfg.set_value("video", "parallax", parallax)
+	cfg.set_value("video", "reduce_motion", reduce_motion)
 	cfg.set_value("video", "card_preview_mode", card_preview_mode)
 	cfg.set_value("game", "magnifier_shift", magnifier_shift)
 	cfg.set_value("game", "minigame_zoom", minigame_zoom)
@@ -315,3 +318,10 @@ func _stats() -> ConfigFile:
 	var cfg := ConfigFile.new()
 	cfg.load(STATS)
 	return cfg
+
+## Остановить декоративное время в шейдере при переключении настройки.
+func watch_motion_shader(owner: Node, paint: ShaderMaterial) -> void:
+	var sync := func() -> void: paint.set_shader_parameter("reduce_motion", reduce_motion)
+	changed.connect(sync)
+	owner.tree_exiting.connect(func(): changed.disconnect(sync))
+	sync.call()

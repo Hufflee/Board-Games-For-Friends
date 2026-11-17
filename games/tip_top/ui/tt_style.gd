@@ -14,6 +14,7 @@ const YELLOW := Color("ffd23f")
 ## белые карточки, чёрный текст и контур; зелёный/красный — только концы шкалы темы, розовый — только 18+.
 ## Текст — 3 размера:
 const H1 := 28
+const READY_BADGE := Color("f4f4f4")
 const BODY := 17
 const CAP := 14
 
@@ -198,8 +199,9 @@ static func button(text: String, size: int = BODY, min_w: int = 0) -> Button:
 ## Главная кнопка — жёлтая (розовая у «Для взрослых»).
 static func primary(text: String, size: int = BODY, min_w: int = 0) -> Button:
 	var b := button(text, size, min_w)
-	b.add_theme_stylebox_override("normal", box(accent(), 12, INK, 3, 0.35))
-	b.add_theme_stylebox_override("hover", box(accent().lightened(0.2), 12, INK, 3, 0.35))
+	var fill := Color("c72d82") if adult else accent()
+	b.add_theme_stylebox_override("normal", box(fill, 12, INK, 3, 0.35))
+	b.add_theme_stylebox_override("hover", box(fill.lightened(0.05 if adult else 0.2), 12, INK, 3, 0.35))
 	b.add_theme_font_override("font", font("title"))
 	for c in ["font_color", "font_hover_color", "font_pressed_color"]:
 		b.add_theme_color_override(c, INK if not adult else WHITE)
@@ -303,3 +305,10 @@ class Gauge:
 		var u := TTStyle.tex("token_unicorn")
 		draw_texture_rect(p, Rect2(Vector2(0, size.y / 2.0 - 22), Vector2(44, 44)), false)
 		draw_texture_rect(u, Rect2(Vector2(size.x - 44, size.y / 2.0 - 22), Vector2(44, 44)), false)
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[WHITE, Color("c72d82"), "главная кнопка 18+", false],
+	]

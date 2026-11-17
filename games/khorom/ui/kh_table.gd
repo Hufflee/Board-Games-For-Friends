@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## «Хором!»: стол. Слева игроки и очки, сверху карточка раунда, в центре блокноты.
 ## Пишу — мой блокнот на весь центр; готов — все блокноты уменьшаются и встают рядом (чужие строки под пластинками).
 ## Открытие — блокнот того, кто ходит, крупнее в 1,5 раза.
@@ -14,6 +16,7 @@ var _card: PanelContainer
 var _card_kind: Label
 var _card_topic: Label
 var _area: Control
+var _scroll: ScrollContainer
 var _fall: Control
 var _bottom: HBoxContainer
 var _caption: Label
@@ -54,10 +57,15 @@ func _ready() -> void:
 	_card_topic.custom_minimum_size.x = 440
 	card_col.add_child(_card_topic)
 	add_child(_card)
+	_scroll = ScrollContainer.new()
+	_scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	_scroll.vertical_scroll_mode = ScrollContainer.SCROLL_MODE_AUTO
+	add_child(_scroll)
 	_area = Control.new()
 	_area.name = "Books"
 	_area.mouse_filter = Control.MOUSE_FILTER_IGNORE
-	add_child(_area)
+	_area.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_scroll.add_child(_area)
 	_bottom = Style.row(16)
 	_bottom.name = "Actions"
 	_bottom.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -152,16 +160,21 @@ func _rebuild() -> void:
 		names.alignment = BoxContainer.ALIGNMENT_CENTER
 		var nick := Style.label(str(people[seat].name), 16, Style.ACCENT if seat == turn and phase == "reveal" else Color.TRANSPARENT)
 		nick.clip_text = true
+		TextUI.full_on_hover(nick)
 		TurnNameGlow.apply(nick, seat == turn and phase == "reveal")
 		names.add_child(nick)
 		if marks != "":
-			var sub := Style.label(marks, 12, Style.muted())
+			var sub := Style.label(marks, 13, Style.muted())
 			sub.clip_text = true
+			TextUI.full_on_hover(sub)
 			names.add_child(sub)
 		line.add_child(names)
 		var gain := int(view.books[seat].points)
 		if phase in ["reveal", "round_end"] and gain != 0:
-			var plus := Style.label("%+d" % gain, 12, Style.GOOD if gain > 0 else Style.BAD)
+			var score_ink := Style.GOOD if gain > 0 else Style.BAD
+			if not Style.dark():
+				score_ink = score_ink.darkened(0.35 if gain > 0 else 0.2)
+			var plus := Style.label("%+d" % gain, 13, score_ink)
 			plus.name = "Gain"
 			plus.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 			plus.size_flags_vertical = Control.SIZE_FILL
@@ -178,11 +191,11 @@ func _rebuild() -> void:
 		b.add_child(line)
 		_left.add_child(b)
 	if bool(view.get("hotseat", false)):
-		var hint := Style.label("Один компьютер: передайте экран и нажмите своё имя.", 12, Style.muted())
+		var hint := Style.label("Один компьютер: передайте экран и нажмите своё имя.", 13, Style.muted())
 		hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_left.add_child(hint)
 	_left.add_child(Style.section("Доп. раунд · ничья" if bool(view.get("tiebreak", false)) else "Раунд %d из %d" % [int(view.round_no) + 1, int(view.total_rounds)]))
-	var rule := Style.label(str(KHData.KIND_HINTS.get(str(view.kind), "")), 12, Style.muted())
+	var rule := Style.label(str(KHData.KIND_HINTS.get(str(view.kind), "")), 13, Style.muted())
 	rule.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_left.add_child(rule)
 	# Карточка раунда: название сверху, тема посередине.
@@ -297,9 +310,9 @@ func _layout() -> void:
 	_bottom.size = Vector2(center_w, 44)
 	_bottom.position = Vector2(center_x, size.y - GAP - 44)
 	var area_top := _card.position.y + _card.size.y + GAP
-	var area := Rect2(center_x, area_top, center_w, _bottom.position.y - GAP - area_top)
-	_area.position = Vector2.ZERO
-	_area.size = size
+	_scroll.position = Vector2(center_x, area_top)
+	_scroll.size = Vector2(center_w, maxf(1.0, _bottom.position.y - GAP - area_top))
+	var area := Rect2(Vector2.ZERO, _scroll.size)
 	var phase := str(view.phase)
 	var me := _me()
 	var shown: Array = []
@@ -312,6 +325,16 @@ func _layout() -> void:
 		_books[seat].visible = shown.has(seat)
 	var active := int(view.turn) if phase == "reveal" else -1
 	var placement := _fit(shown, active, area)
+	var content_h := 0.0
+	for target: Array in placement.values():
+		content_h = maxf(content_h, target[0].y + Notebook.SIZE.y * target[1].y)
+	_area.custom_minimum_size.y = content_h
+	if content_h > area.size.y:
+		area.size.x -= _scroll.get_v_scroll_bar().get_combined_minimum_size().x
+		placement = _fit(shown, active, area)
+		for target: Array in placement.values():
+			content_h = maxf(content_h, target[0].y + Notebook.SIZE.y * target[1].y)
+		_area.custom_minimum_size.y = content_h
 	for seat: int in placement:
 		var book: Control = _books[seat]
 		var target: Array = placement[seat]
@@ -328,8 +351,8 @@ func _layout() -> void:
 func _fit(seats: Array, active: int, area: Rect2) -> Dictionary:
 	var base: Vector2 = Notebook.SIZE
 	var best := {}
-	var low := 0.1
-	var high := 1.0 if active < 0 or seats.size() == 1 else 1.0 / 1.5
+	var low := 0.75
+	var high := 1.0
 	for _i: int in 18:
 		var s := high if best.is_empty() and _i == 0 else (low + high) * 0.5
 		var rows := _rows(seats, active, s, area.size.x)
@@ -347,7 +370,7 @@ func _fit(seats: Array, active: int, area: Rect2) -> Dictionary:
 	if best.is_empty():
 		best = {"s": low, "rows": _rows(seats, active, low, area.size.x), "h": area.size.y}
 	var result := {}
-	var y := area.position.y + (area.size.y - float(best.h)) * 0.5
+	var y := area.position.y
 	for row: Array in best.rows:
 		var x := area.position.x + (area.size.x - float(row[2])) * 0.5
 		for seat: int in row[0]:

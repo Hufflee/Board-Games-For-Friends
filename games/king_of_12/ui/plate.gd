@@ -1,5 +1,7 @@
 class_name K12Plate
 extends PanelContainer
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Табличка игрока у края стола: аватар, имя, группа, жетоны-монеты, звёзды побед,
 ## сыгранные в раунде карты, статус, рубашки карт в руке.
 
@@ -45,6 +47,7 @@ func set_data(d: Dictionary) -> void:
 		name_l = K12UI.label(d["name"], K12UI.BODY, K12UI.GOLD if d.get("me", false) else K12UI.CREAM)
 	name_l.set("clip_text", true)
 	name_l.set("text_overrun_behavior", TextServer.OVERRUN_TRIM_ELLIPSIS)
+	TextUI.full_on_hover(name_l)
 	name_l.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	head.add_child(name_l)
 	var stars := K12UI.label("★".repeat(d["wins"]) + "☆".repeat(maxi(0, 2 - d["wins"])), K12UI.BODY, K12UI.GOLD)
@@ -89,6 +92,7 @@ func set_data(d: Dictionary) -> void:
 	var st := K12UI.label(d.get("status", ""), K12UI.CAP, d.get("status_color", K12UI.MUTED))
 	st.clip_text = true
 	st.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	TextUI.full_on_hover(st)
 	col.add_child(st)
 
 

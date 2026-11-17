@@ -12,7 +12,7 @@ static func paper() -> Color:
 	return Color("302a36") if Prefs.dark_theme() else Color("f1e6d2")
 
 static func muted() -> Color:
-	return Color("aaa3ab") if Prefs.dark_theme() else Color("625d68")
+	return Color("aaa3ab") if Prefs.dark_theme() else Color("544f5a")
 
 static func box(color: Color = Color.TRANSPARENT, pad: int = 16) -> StyleBoxFlat:
 	var b := StyleBoxFlat.new()
@@ -121,3 +121,11 @@ static func outline(parent: Control) -> void:
 	border.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	parent.add_child(border)
 	border.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[ink(), paper(), "текст панели", false],
+		[muted(), paper(), "подпись", false],
+	]

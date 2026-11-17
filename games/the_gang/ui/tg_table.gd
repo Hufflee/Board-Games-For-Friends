@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## 2D-стол: публичная история фишек, закрытая личная рука и общее вскрытие.
 
 const Flip := preload("res://hub/card_flip.gd")
@@ -36,15 +38,15 @@ func _ready() -> void:
 	background.decor = false
 	add_child(background)
 	_top = TopBar.make(self, "The Gang", TGStyle.button, null, TGStyle.INK, TGStyle.HEAD)
-	var rules := TGStyle.button("Правила", 14)
+	var rules := TGStyle.button("Правила", TGStyle.CAP)
 	rules.name = "Rules"
 	rules.pressed.connect(func(): app.show_rules())
 	_top.actions.add_child(rules)
-	var settings := TGStyle.button("Настройки", 14)
+	var settings := TGStyle.button("Настройки", TGStyle.CAP)
 	settings.name = "Settings"
 	settings.pressed.connect(func(): app.show_settings())
 	_top.actions.add_child(settings)
-	var leave := TGStyle.button("Выйти", 14)
+	var leave := TGStyle.button("Выйти", TGStyle.CAP)
 	LeaveGuard.wire(leave, "Завершить игру?", "Возвращение к выбору игры.", func(): app.back_to_hub())
 	_top.actions.add_child(leave)
 	var margin := MarginContainer.new()
@@ -117,24 +119,27 @@ func _rebuild() -> void:
 	var round_number := clampi(int(_view.get("round_no", 1)), 1, 4)
 	var me := int(_view.get("seat", -1))
 	_top.info.text = "Ограбление %d · %s" % [int(_view.get("heist_no", 1)), ["Префлоп", "Флоп", "Тёрн", "Ривер"][round_number - 1]]
-	_players.add_child(TGStyle.heading("КОМАНДА", 24))
+	_players.add_child(TGStyle.heading("КОМАНДА", TGStyle.H1))
 	if bool(_view.get("hotseat", false)):
-		_players.add_child(TGStyle.label("Нажмите имя для смены места", 12, TGStyle.MUTED))
-	_players.add_child(TGStyle.label("ИСТОРИЯ ФИШЕК", 14, TGStyle.MUTED))
+		_players.add_child(TGStyle.label("Нажмите имя для смены места", TGStyle.CAP, TGStyle.MUTED))
+	_players.add_child(TGStyle.label("ИСТОРИЯ ФИШЕК", TGStyle.CAP, TGStyle.MUTED))
 	var history: Array = _view.get("history", [])
 	var chips: Array = _view.get("chips", [])
 	for seat in players.size():
 		var player_row := TGStyle.row(4)
-		var title := TGStyle.button(("● " if seat == me else "") + str(players[seat].get("name", "Игрок")), 14)
+		var title := TGStyle.button(("● " if seat == me else "") + str(players[seat].get("name", "Игрок")), TGStyle.CAP)
 		title.name = "Seat%d" % seat
 		title.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		title.clip_text = true
+		title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		title.add_theme_color_override("font_color", TGStyle.GOLD if seat == me else TGStyle.INK)
 		for state in ["normal", "hover", "pressed", "disabled", "focus"]:
 			title.add_theme_stylebox_override(state, TGStyle.box(TGStyle.PANEL, 1))
-		title.disabled = not bool(_view.get("hotseat", false))
+		if not bool(_view.get("hotseat", false)):
+			TextUI.display_only(title)
 		title.pressed.connect(func(): Net.send_action("view_seat", {"seat": seat}))
+		TextUI.full_on_hover(title)
 		player_row.add_child(title)
 		var chip_row := TGStyle.row(4)
 		for index in 4:
@@ -146,7 +151,7 @@ func _rebuild() -> void:
 			if index == round_number - 1 and phase == "rank" and value > 0 and seat != me:
 				chip_row.add_child(_chip(value, seat, 28))
 			else:
-				var marker := TGStyle.label("%d" % value if value > 0 else "·", 12, TGStyle.ROUND_COLORS[index])
+				var marker := TGStyle.label("%d" % value if value > 0 else "·", TGStyle.CAP, TGStyle.ROUND_COLORS[index].lightened(0.2) if index == 3 else TGStyle.ROUND_COLORS[index])
 				marker.custom_minimum_size = Vector2(28, 28)
 				marker.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 				marker.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -154,15 +159,15 @@ func _rebuild() -> void:
 		player_row.add_child(chip_row)
 		_players.add_child(player_row)
 	var status := TGStyle.row(24)
-	status.add_child(TGStyle.heading("ХРАНИЛИЩА %d / 3" % int(_view.get("vaults", 0)), 24))
-	status.add_child(TGStyle.heading("ТРЕВОГИ %d / 3" % int(_view.get("alarms", 0)), 24))
+	status.add_child(TGStyle.heading("ХРАНИЛИЩА %d / 3" % int(_view.get("vaults", 0)), TGStyle.H1))
+	status.add_child(TGStyle.heading("ТРЕВОГИ %d / 3" % int(_view.get("alarms", 0)), TGStyle.H1))
 	_main.add_child(status)
 	var board_panel := PanelContainer.new()
 	board_panel.add_theme_stylebox_override("panel", TGStyle.box(Color.TRANSPARENT, 12))
 	_main.add_child(board_panel)
 	var board := TGStyle.column(8)
 	board_panel.add_child(board)
-	board.add_child(TGStyle.label("ОБЩИЕ КАРТЫ", 14, TGStyle.MUTED))
+	board.add_child(TGStyle.label("ОБЩИЕ КАРТЫ", TGStyle.CAP, TGStyle.MUTED))
 	var board_row := TGStyle.row(10)
 	board_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	board.add_child(board_row)
@@ -178,7 +183,7 @@ func _take(value: int) -> void:
 	_send("take", {"value": value})
 
 func _build_rank(me: int, chips: Array, players: Array) -> void:
-	var note := TGStyle.label("Перетащите фишку к своим картам. 1 — слабейшая, %d — сильнейшая. Чужую можно забрать. Карты и комбинацию не называйте." % players.size(), 14, TGStyle.MUTED)
+	var note := TGStyle.label("Перетащите фишку к своим картам. 1 — слабейшая, %d — сильнейшая. Чужую можно забрать. Карты и комбинацию не называйте." % players.size(), TGStyle.CAP, TGStyle.MUTED)
 	note.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	_main.add_child(note)
 	var center_panel := PanelContainer.new()
@@ -188,7 +193,7 @@ func _build_rank(me: int, chips: Array, players: Array) -> void:
 	_main.add_child(center_panel)
 	var center := TGStyle.column(4)
 	center_panel.add_child(center)
-	center.add_child(TGStyle.label("ЦЕНТР · сюда можно вернуть свою фишку", 14, TGStyle.MUTED))
+	center.add_child(TGStyle.label("ЦЕНТР · сюда можно вернуть свою фишку", TGStyle.CAP, TGStyle.MUTED))
 	var chip_row := TGStyle.row(6)
 	chip_row.custom_minimum_size.y = 54
 	chip_row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -206,8 +211,8 @@ func _build_rank(me: int, chips: Array, players: Array) -> void:
 	hand_panel.add_child(hand)
 	var hand_header := TGStyle.row(16)
 	hand.add_child(hand_header)
-	hand_header.add_child(TGStyle.heading("ВАШИ КАРТЫ" if me >= 0 else "РЕЖИМ ЗРИТЕЛЯ", 24))
-	var flip_hint := TGStyle.label("Потяните край карты, чтобы открыть или скрыть её", 14, TGStyle.MUTED)
+	hand_header.add_child(TGStyle.heading("ВАШИ КАРТЫ" if me >= 0 else "РЕЖИМ ЗРИТЕЛЯ", TGStyle.H1))
+	var flip_hint := TGStyle.label("Потяните край карты, чтобы открыть или скрыть её", TGStyle.CAP, TGStyle.MUTED)
 	flip_hint.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	hand_header.add_child(flip_hint)
 	var cards := TGStyle.row(12)
@@ -252,7 +257,7 @@ func _build_result(phase: String, players: Array) -> void:
 	var title := "ХРАНИЛИЩЕ ОТКРЫТО" if success else "СРАБОТАЛА ТРЕВОГА"
 	if phase == "game_over":
 		title = "КОМАНДА ПОБЕДИЛА" if bool(_view.get("won", false)) else "ОГРАБЛЕНИЕ ПРОВАЛЕНО"
-	_main.add_child(TGStyle.heading(title, 28))
+	_main.add_child(TGStyle.heading(title, TGStyle.H1))
 	if phase == "showdown" and not bool(_view.get("spectator", false)):
 		var next := TGStyle.primary("Следующее ограбление")
 		next.name = "NextHeist"
@@ -268,7 +273,13 @@ func _build_result(phase: String, players: Array) -> void:
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 12)
 	grid.add_theme_constant_override("v_separation", 12)
-	_main.add_child(grid)
+	var scroll := ScrollContainer.new()
+	scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	grid.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	_main.add_child(scroll)
+	scroll.add_child(grid)
+	var card_size := Vector2(48, 68) if players.size() > 6 else Vector2(66, 94)
 	for seat_value in result.get("order", []):
 		var seat := int(seat_value)
 		var panel := PanelContainer.new()
@@ -276,14 +287,14 @@ func _build_result(phase: String, players: Array) -> void:
 		grid.add_child(panel)
 		var column := TGStyle.column(6)
 		panel.add_child(column)
-		column.add_child(TGStyle.label("%d★ · %s" % [int(_view.chips[seat]), str(players[seat].get("name", "Игрок"))], 16, TGStyle.GOLD))
+		column.add_child(TGStyle.label("%d★ · %s" % [int(_view.chips[seat]), str(players[seat].get("name", "Игрок"))], TGStyle.BODY, TGStyle.GOLD))
 		if seat < ranks.size():
 			column.add_child(TGStyle.label(str(ranks[seat].get("name", ""))))
 		var row := TGStyle.row(8)
 		column.add_child(row)
 		if seat < hands.size():
 			for id in hands[seat]:
-				_add_card(row, int(id), Vector2(66, 94))
+				_add_card(row, int(id), card_size)
 
 func _add_card(parent: Control, id: int, dimensions: Vector2) -> void:
 	var texture := load("res://games/the_gang/art/cards/%s.webp" % (str(id) if id >= 0 else "back")) as Texture2D

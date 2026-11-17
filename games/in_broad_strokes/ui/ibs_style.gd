@@ -22,10 +22,10 @@ const LIGHT := {
 	"tape": Color(0.95, 0.85, 0.5, 0.85),
 	"stroke": Color("23272a"),
 	"ink": Color("23302e"),
-	"muted": Color("687a76"),
+	"muted": Color("5c6e6a"),
 	"accent": Color("2d6cb3"),
 	"accent_ink": Color("f4f8ff"),
-	"red": Color("c8473b"),
+	"red": Color("b83b30"),
 	"shadow": Color(0.1, 0.2, 0.2, 0.18),
 }
 
@@ -200,3 +200,13 @@ static func draw_sheet(ci: CanvasItem, rect: Rect2) -> void:
 		ci.draw_set_transform(corner, deg_to_rad(-35.0 if corner == rect.position else 35.0))
 		ci.draw_rect(Rect2(-22, -8, 44, 16), c("tape"))
 		ci.draw_set_transform(Vector2.ZERO)
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[c("ink"), c("panel"), "текст панели", false],
+		[c("muted"), c("bg"), "подпись на фоне", false],
+		[c("accent_ink"), c("accent"), "главная кнопка", false],
+		[c("red"), c("panel"), "сдача", false],
+	]

@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## «Покер»: стол. Неоновый овал с сукном, места по кругу (я — снизу), общие карты и банк в центре,
 ## ставки — кучами фишек-спрайтов перед местами (чем больше ставка, тем выше куча, до «горы»).
 ## Слева — сессия/итоги и журнал, снизу — панель ставки: поле ввода, ползунок, 2×/3×/4×, ва-банк.
@@ -393,7 +395,7 @@ func _build_seats() -> void:
 		var glow := Style.PINK if turn else (Style.GOLD if seat == me else Color.TRANSPARENT)
 		var plate := PanelContainer.new()
 		plate.name = "Seat%d" % seat
-		plate.add_theme_stylebox_override("panel", Style.box(Color("221238") if seat != me else Color("2c1748"), 10, 12, glow))
+		plate.add_theme_stylebox_override("panel", Style.box(Style.SEAT_FILL if seat != me else Style.MY_SEAT_FILL, 10, 12, glow))
 		plate.custom_minimum_size = SEAT
 		plate.size = SEAT
 		plate.position = _seat_pos(seat) - SEAT * 0.5
@@ -406,10 +408,12 @@ func _build_seats() -> void:
 		var nick := Style.label(str(person.name), 16, Style.felt_ink())
 		nick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		nick.clip_text = true
+		TextUI.full_on_hover(nick)
 		TurnNameGlow.apply(nick, turn)
 		head.add_child(nick)
 		var chips := Style.heading(str(roundi(_disp[seat])), 16, Style.GOLD)
 		chips.name = "Stack"
+		TextUI.stable_numbers(chips, "0000")
 		_stack_labels.append([chips, seat, "seat"])
 		head.add_child(chips)
 		col.add_child(head)
@@ -418,9 +422,10 @@ func _build_seats() -> void:
 			note = "выбыл до конца сессии" if str(view.mode) != "classic" else "без фишек"
 		elif turn:
 			note = "думает…"
-		var sub := Style.label(note, 12, Style.PINK if turn else Color("c9b8e6"))
+		var sub := Style.label(note, Style.CAP, Style.PINK if turn else Color("c9b8e6"))
 		sub.name = "LastAction"
 		sub.clip_text = true
+		TextUI.full_on_hover(sub)
 		col.add_child(sub)
 		_seats_layer.add_child(plate)
 		if seat == me and phase == "showdown" and not (view.hole[seat] as Array).is_empty():
@@ -681,6 +686,15 @@ func _add_eye(plate: Control) -> void:
 		var tw := eye.create_tween().set_loops()
 		tw.tween_property(eye, "modulate", Color(1.25, 1.25, 1.25), 0.6).set_trans(Tween.TRANS_SINE)
 		tw.tween_property(eye, "modulate", Color.WHITE, 0.6).set_trans(Tween.TRANS_SINE)
+		var sync_motion := func() -> void:
+			if Prefs.reduce_motion:
+				tw.pause()
+				eye.modulate = Color.WHITE
+			else:
+				tw.play()
+		Prefs.changed.connect(sync_motion)
+		eye.tree_exiting.connect(func(): Prefs.changed.disconnect(sync_motion))
+		sync_motion.call()
 
 
 # ---------------------------------------------------------------- стеки и выигрыш
@@ -819,10 +833,10 @@ func _build_side() -> void:
 	var sport := str(view.mode) != "classic"
 	if sport:
 		_side.add_child(Style.section("Сессия %d · раздача %d/%d" % [int(view.session_no), int(view.hand_no), int(view.session_hands)]))
-		_side.add_child(Style.label("Победа — %d очков" % int(view.target), 12, Style.muted()))
+		_side.add_child(Style.label("Победа — " + TextUI.plural(int(view.target), "очко", "очка", "очков"), Style.CAP, Style.muted()))
 	else:
 		_side.add_child(Style.section("Классика · раздача %d" % int(view.hand_no)))
-		_side.add_child(Style.label("Фишки (± от начальных, с докупками)", 12, Style.muted()))
+		_side.add_child(Style.label("Фишки (± от начальных, с докупками)", Style.CAP, Style.muted()))
 	var order := range(people.size())
 	if sport:
 		order.sort_custom(func(a: int, b: int) -> bool: return int(view.scores[a]) > int(view.scores[b]))
@@ -833,29 +847,30 @@ func _build_side() -> void:
 		var nick := Style.label(str(people[seat].name), 16, Style.PINK if seat == _me() else Color.TRANSPARENT)
 		nick.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		nick.clip_text = true
+		TextUI.full_on_hover(nick)
 		line.add_child(nick)
 		if sport:
 			line.add_child(Style.heading("%d" % int(view.scores[seat]), 16, Style.gold_ink()))
-			line.add_child(Style.label("/%d" % int(view.target), 12, Style.muted()))
+			line.add_child(Style.label("/%d" % int(view.target), Style.CAP, Style.muted()))
 		else:
 			# главное — фишки в стеке, в скобках — плюс/минус от начального (с докупками)
 			var value := Style.heading(str(roundi(_disp[seat])), 16, Style.gold_ink())
 			line.add_child(value)
-			var delta := Style.label("", 12)
+			var delta := Style.label("", Style.CAP)
 			line.add_child(delta)
 			_stack_labels.append([value, seat, "side"])
 			_stack_labels.append([delta, seat, "profit"])
 			if int(view.rebuys[seat]) > 0:
-				line.add_child(Style.label("×%d" % (int(view.rebuys[seat]) + 1), 12, Style.muted()))
+				line.add_child(Style.label("×%d" % (int(view.rebuys[seat]) + 1), Style.CAP, Style.muted()))
 		_side.add_child(line)
 	if view.has("cheat"):
 		for effect: String in view.cheat.get("effects", []):
-			_side.add_child(Style.label(effect, 12, Style.GOLD))
+			_side.add_child(Style.label(effect, Style.CAP, Style.GOLD))
 	Style.clear(_log)
 	var entries: Array = view.log
 	var count := 4 if view.has("cheat") and size.y < 800 else 9
 	for i: int in range(maxi(0, entries.size() - count), entries.size()):
-		var entry := Style.label(str(entries[i]), 12, Style.muted() if i < entries.size() - 1 else Style.ink())
+		var entry := Style.label(str(entries[i]), Style.CAP, Style.muted() if i < entries.size() - 1 else Style.ink())
 		entry.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		entry.custom_minimum_size.x = LEFT_W - 28
 		_log.add_child(entry)
@@ -893,7 +908,7 @@ func _build_action() -> void:
 		rebuy.pressed.connect(func(): Net.send_action("rebuy", {}))
 		_action_row.add_child(rebuy)
 	elif me >= 0 and bool(mine.get("can_rebuy", false)):
-		_action_row.add_child(Style.label("· сесть заново можно после раздачи", 12, Style.muted()))
+		_action_row.add_child(Style.label("· сесть заново можно после раздачи", Style.CAP, Style.muted()))
 	if _finish != null:
 		_finish.visible = str(view.mode) == "classic" and phase != "game_over"
 
@@ -953,7 +968,7 @@ func _build_bet_controls(mine: Dictionary) -> void:
 		call.theme_type_variation = "SelectedButton"
 	_action_row.add_child(call)
 	if not can_raise:
-		var hint := Style.label("повысить нельзя", 12, Style.muted())
+		var hint := Style.label("повысить нельзя", Style.CAP, Style.muted())
 		hint.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		_action_row.add_child(hint)
 		return
@@ -1066,7 +1081,7 @@ func _build_premoves() -> void:
 	if owed <= 0:
 		options.insert(1, ["check", "Чек"])
 	for item: Array in options:
-		var b := Style.button(item[1], 16)
+		var b := Style.button(("✓ " if _premove == item[0] else "") + str(item[1]), 16)
 		b.name = "Pre_" + str(item[0])
 		b.toggle_mode = true
 		b.button_pressed = _premove == item[0]
@@ -1129,7 +1144,7 @@ func _build_overlay() -> void:
 		line.add_child(Style.label("+%d" % int(entry.points), 16, Style.GOOD if int(entry.points) > 0 else Style.muted()))
 		if int(entry.get("bonus", 0)) > 0:
 			# бонус: забрал за сессию все фишки у всех соперников
-			var bonus := Style.label("+1 за все фишки", 12, Style.GOLD)
+			var bonus := Style.label("+1 за все фишки", Style.CAP, Style.GOLD)
 			bonus.name = "Bonus%d" % seat
 			bonus.tooltip_text = "Забрал за сессию все фишки у всех соперников — дополнительное победное очко"
 			bonus.mouse_filter = Control.MOUSE_FILTER_STOP
@@ -1142,7 +1157,7 @@ func _build_overlay() -> void:
 		col.add_child(line)
 	if bool(view.get("tiebreak", false)) and view.winners.is_empty():
 		col.add_child(Style.label("Ничья по очкам на финише — дополнительная сессия до победы", 14, Style.PINK))
-	col.add_child(Style.label("Новая сессия — у всех снова 100 BB", 12, Style.muted()))
+	col.add_child(Style.label("Новая сессия — у всех снова 100 BB", Style.CAP, Style.muted()))
 	if Net.is_host():
 		var next := Style.button("Следующая сессия")
 		next.name = "NextSession"

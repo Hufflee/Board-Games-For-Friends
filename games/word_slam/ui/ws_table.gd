@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Стол «Word Slamа»: сверху — слово (рассказчику) и часы, в центре — две подставки с карточками
 ## (в командах: «Подставка 1» — синие, «Подставка 2» — оранжевые; обе видны всем в тех же позициях,
 ## но карточки чужой команды закрыты серыми пластинами — в конце хода пластины падают),
@@ -8,8 +10,7 @@ extends Control
 
 const PerudoDieView := preload("res://games/perudo/ui/d6_view.gd")
 const TEAM_NAMES := ["Синие", "Оранжевые"]
-const TEAM_COLORS := [Color("5f7fbf"), Color("d9895a")]
-const LEVEL_COLORS := {"green": Color("6fbf73"), "yellow": Color("e8c547"), "red": Color("e06a5a")}
+const TEAM_COLORS := HCStyle.TEAM_COLORS
 const CARD_GAP := 8.0
 const WordCard := preload("res://games/word_slam/ui/ws_word_card.gd")
 
@@ -66,6 +67,7 @@ func _ready() -> void:
 	var tbox := HCStyle.vbox(2)
 	tbox.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_timer_label = HCStyle.label("", HCStyle.BODY, HCStyle.INK, HORIZONTAL_ALIGNMENT_CENTER, "bold")
+	TextUI.stable_numbers(_timer_label, "⚠ 00:00")
 	tbox.add_child(_timer_label)
 	_timer_bar = ProgressBar.new()
 	_timer_bar.show_percentage = false
@@ -304,7 +306,7 @@ func _update_side() -> void:
 	var groups := [0] if _solo() else [0, 1]
 	for t in groups:
 		if not _solo():
-			_side_teams.add_child(HCStyle.label(TEAM_NAMES[t], HCStyle.CAP, TEAM_COLORS[t].darkened(0.2), HORIZONTAL_ALIGNMENT_LEFT, "bold"))
+			_side_teams.add_child(HCStyle.label(TEAM_NAMES[t], HCStyle.CAP, HCStyle.team_ink(TEAM_COLORS[t]), HORIZONTAL_ALIGNMENT_LEFT, "bold"))
 		for s in _v["players"].size():
 			if not _solo() and _team(s) != t:
 				continue
@@ -313,6 +315,7 @@ func _update_side() -> void:
 			var nm := PlayerTag.make_seat(_v["players"], s, _me, 14, HCStyle.INK if st else HCStyle.MUTED, (" ✎" if st else "") + (" (вы)" if s == _me and not _hotseat() else ""))
 			nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 			nm.clip_text = true
+			TextUI.full_on_hover(nm)
 			TurnNameGlow.apply(nm, st)
 			row.add_child(nm)
 			if _solo():
@@ -336,7 +339,7 @@ func _update_feed() -> void:
 	list.reverse()
 	for g in list:
 		var s: int = g["seat"]
-		var col: Color = HCStyle.INK if _solo() else TEAM_COLORS[_team(s)].darkened(0.25)
+		var col: Color = HCStyle.INK if _solo() else HCStyle.team_ink(TEAM_COLORS[_team(s)])
 		var l := HCStyle.label("%s: %s%s" % [_name(s), g["text"], "  ✓" if g["ok"] else ""], HCStyle.CAP, HCStyle.SAGE.darkened(0.2) if g["ok"] else col, HORIZONTAL_ALIGNMENT_LEFT, "bold" if g["ok"] else "regular")
 		l.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		l.custom_minimum_size.x = 240
@@ -889,7 +892,7 @@ func _update_bottom() -> void:
 			for id: String in order:
 				var b := Button.new()
 				b.text = WSRules.card_word(id)
-				b.add_theme_font_size_override("font_size", 13)
+				b.add_theme_font_size_override("font_size", HCStyle.CAP)
 				b.add_theme_font_override("font", HCStyle.font("bold"))
 				var sb := HCStyle.box(WSCardFace.COLORS[cat], 8, WSCardFace.EDGES[cat], 1)
 				sb.content_margin_left = 8
@@ -931,7 +934,7 @@ func _update_bottom() -> void:
 		_guess_edit.placeholder_text = "Напишите слово и нажмите Enter (можно и голосом — рассказчик отметит)"
 		_guess_edit.max_length = 60
 		_guess_edit.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-		_guess_edit.add_theme_font_size_override("font_size", 20)
+		_guess_edit.add_theme_font_size_override("font_size", HCStyle.BODY)
 		_guess_edit.text_submitted.connect(func(_t): _send_guess())
 		row.add_child(_guess_edit)
 		var go := HCStyle.primary("Отгадать", HCStyle.BODY)
@@ -1061,10 +1064,12 @@ func _process(_delta: float) -> void:
 		# 15 секунд рассказчики смотрят слово и подсказки, потом раунд начинается сам
 		var look := float(_v.get("look_time", 15.0))
 		var left_look := maxf(0.0, _time_left - (Time.get_ticks_msec() - _time_stamp) / 1000.0)
-		_timer_label.text = "⏳ 0:%02d" % ceili(left_look)
+		var urgent := left_look < 15.0
+		_timer_label.text = "%s 0:%02d" % ["⚠" if urgent else "⏳", ceili(left_look)]
+		_timer_color(urgent)
 		_timer_bar.value = left_look / look * 100.0
 		_timer_bar.visible = true
-		_timer_label.add_theme_color_override("font_color", HCStyle.CLAY if left_look < 5 else HCStyle.INK)
+		_timer_label.add_theme_color_override("font_color", HCStyle.CLAY if urgent else HCStyle.INK)
 	elif phase == "play" and total <= 0.0:
 		_timer_label.text = "⏳ ∞"
 		_timer_bar.visible = false
@@ -1074,10 +1079,12 @@ func _process(_delta: float) -> void:
 		if ceili(left) != _last_tick:
 			_last_tick = ceili(left)
 			Sfx.countdown(_last_tick)
-		_timer_label.text = "⏳ %d:%02d" % [int(left) / 60, int(left) % 60]
+		var urgent := left < 15.0
+		_timer_label.text = "%s %d:%02d" % ["⚠" if urgent else "⏳", int(left) / 60, int(left) % 60]
+		_timer_color(urgent)
 		_timer_bar.value = left / total * 100.0
 		_timer_bar.visible = true
-		_timer_label.add_theme_color_override("font_color", HCStyle.CLAY if left < 15 else HCStyle.INK)
+		_timer_label.add_theme_color_override("font_color", HCStyle.CLAY if urgent else HCStyle.INK)
 	else:
 		_timer_label.text = ""
 		_timer_bar.value = 0.0
@@ -1086,3 +1093,7 @@ func _process(_delta: float) -> void:
 		var l := maxi(0, (_auto_deadline - Time.get_ticks_msec()) / 1000)
 		var waiting: Array = _v.get("waiting", [])
 		_auto_label.text = ("ждём: %s · " % ", ".join(waiting) if not waiting.is_empty() else "") + "сами через %d с" % l
+
+func _timer_color(urgent: bool) -> void:
+	var fill := _timer_bar.get_theme_stylebox("fill") as StyleBoxFlat
+	fill.bg_color = HCStyle.CLAY if urgent else HCStyle.SAGE

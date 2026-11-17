@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Стол «Стиллиона»: игроки по кругу, в центре пушка (STCannon), сверху тема раунда, справа клавиатура
 ## из 24 основных и 6 дополнительных букв (погасшие — уже названы) и «Оспорить», снизу поле ответа (в устном режиме — только подсказка,
 ## отвечают нажатием буквы). Состояние приходит с хоста (Net.state_changed); фитиль между
@@ -44,6 +46,7 @@ var _key_fades: Dictionary = {}
 const KEY_FADE_TIME := 2.5
 var _prev_label: Label
 var _prev_hint: Label
+var _challenge_rule: Label
 var _challenge: Button
 var _fx: Control  # всплывающие надписи
 var _fuse_t0 := 0.0
@@ -102,7 +105,7 @@ func _ready() -> void:
 	qwrap.add_child(qcard)
 	var qcol := STStyle.vbox(4)
 	qcard.add_child(qcol)
-	_q_cat = STStyle.label("", STStyle.CAP, STStyle.RED, HORIZONTAL_ALIGNMENT_CENTER, "bold")
+	_q_cat = STStyle.label("", STStyle.CAP, STStyle.red_text(), HORIZONTAL_ALIGNMENT_CENTER, "bold")
 	qcol.add_child(_q_cat)
 	_q_text = STStyle.label("", STStyle.H1, Color(0, 0, 0, 0), HORIZONTAL_ALIGNMENT_CENTER, "title")
 	_q_text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -149,7 +152,7 @@ func _ready() -> void:
 	_answer.max_length = 40
 	_answer.text_submitted.connect(func(_t): _submit())
 	brow.add_child(_answer)
-	_send = STStyle.primary("Ответить!", STStyle.BODY, 150)
+	_send = STStyle.primary("Ответить", STStyle.BODY, 150)
 	_send.pressed.connect(_submit)
 	brow.add_child(_send)
 	_fx = Control.new()
@@ -253,6 +256,9 @@ func _build_keyboard() -> void:
 	_challenge.tooltip_text = "Ответ не подходит к теме? Нажмите. Если оспорит больше половины остальных игроков (1 на 1 — один),\nответ не засчитан: буква снова свободна, отвечающий отвечает заново. Оспорят второй раз подряд — выстрел."
 	_challenge.pressed.connect(func(): Net.send_action("st_challenge", {}))
 	col.add_child(_challenge)
+	_challenge_rule = STStyle.label("Большинство оспорило — ответ снимается, буква освобождается.", STStyle.CAP, STStyle.muted())
+	_challenge_rule.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(_challenge_rule)
 
 
 func _on_state(v: Dictionary) -> void:
@@ -344,7 +350,7 @@ func _build_seats() -> void:
 		_seats.clear()
 		for i in pl.size():
 			var seat := Seat.new()
-			seat.index = i
+			seat.index = int(pl[i].get("skin", i))  # персонаж, выпавший игроку в этой партии
 			seat.compact_answers = pl.size() >= 7
 			_stage.add_child(seat)
 			_seats.append(seat)
@@ -471,6 +477,7 @@ func _update_keys() -> void:
 	var used := {}
 	for u: Dictionary in _v.get("used", []):
 		used[str(u.letter)] = u
+	var recent := PackedStringArray()
 	var press := _oral() and _can_answer()
 	for letter: String in _keys:
 		var b: Button = _keys[letter]
@@ -488,13 +495,18 @@ func _update_keys() -> void:
 	for letter: String in STRules.MAIN_LETTERS:
 		if used.has(letter):
 			left -= 1
+	var history: Array = _v.get("used", [])
+	for entry: Dictionary in history.slice(maxi(0, history.size() - 2)):
+		recent.append("%s — %s" % [str(entry.letter).to_upper(), str(_v.players[int(entry.seat)].name)])
 	_keys_left.text = "основных: %d" % left
+	if not recent.is_empty():
+		_keys_left.text += " · " + " · ".join(recent)
 
 
 func _style_used_key(button: Button, remaining: float) -> void:
 	var weight := clampf(remaining / KEY_FADE_TIME, 0.0, 1.0)
 	var fill := Color(STStyle.ink(), 0.12).lerp(STStyle.RED, weight)
-	var font := Color(STStyle.ink(), 0.3).lerp(STStyle.PAPER, weight)
+	var font := Color(STStyle.ink(), 0.55).lerp(STStyle.PAPER, weight)
 	button.add_theme_stylebox_override("disabled", STStyle.box(fill, 10, 3 if fill.a > 0.5 else 2, 3 if fill.a > 0.5 else 0, 2))
 	button.add_theme_color_override("font_disabled_color", font)
 
@@ -519,6 +531,7 @@ func _update_challenge() -> void:
 		_prev_label.text = "—"
 		_prev_hint.text = "Сомнительный ответ можно оспорить, пока отвечает следующий."
 		_challenge.visible = false
+		_challenge_rule.hide()
 		return
 	var who := str(_v.players[int(prev.seat)].name)
 	var name := str(prev.name)
@@ -528,6 +541,7 @@ func _update_challenge() -> void:
 	var mine := int(_v.get("seat", -1))
 	_prev_hint.text = "Его уже оспаривали: оспорят ещё раз — выстрел!" if bool(prev.get("retry", false)) else ""
 	_challenge.visible = not bool(_v.get("spectator", false))
+	_challenge_rule.visible = _challenge.visible
 	var voted := votes.has(mine) and not bool(_v.get("hotseat", false))
 	_challenge.text = ("Вы оспорили" if voted else "Оспорить") + ("  %d/%d" % [votes.size(), need] if need > 1 else "")
 	_challenge.disabled = not bool(_v.get("can_challenge", false)) or _game_paused()
@@ -567,7 +581,7 @@ func _update_input() -> void:
 	elif can and oral:
 		_who.text = ("%s, " % name if Net.mode == "offline" else "") + "нажмите свободную букву и скажите ответ вслух!"
 	elif can:
-		_who.text = ("Отвечает %s!" % name) if Net.mode == "offline" else "Ваш ответ!"
+		_who.text = ("Отвечает %s" % name) if Net.mode == "offline" else "Ваш ответ!"
 	else:
 		_who.text = "Отвечает %s" % name
 	if can and not oral and not _answer.has_focus() and get_viewport().gui_get_focus_owner() == null and not _top.chat.expanded:
@@ -638,7 +652,7 @@ func _play_event(e: Dictionary) -> void:
 ## Короткое сообщение красным на месте «Отвечает …» (на 2,5 с).
 func _flash_note(text: String) -> void:
 	_who.text = text
-	_who.add_theme_color_override("font_color", STStyle.RED)
+	_who.add_theme_color_override("font_color", STStyle.red_text())
 	var no := _last_no
 	get_tree().create_timer(2.5).timeout.connect(
 		func():
@@ -784,10 +798,11 @@ class Seat:
 		_portrait.size = Vector2(85, 113)
 		_portrait.position = Vector2(SIZE.x * 0.5 - 42.5, 22)
 		add_child(_portrait)
-		_last_answer = STStyle.label("", 13 if compact_answers else 16, Color("b8b2a6"), HORIZONTAL_ALIGNMENT_CENTER, "bold")
+		_last_answer = STStyle.label("", 16, Color("b8b2a6"), HORIZONTAL_ALIGNMENT_CENTER, "bold")
 		_last_answer.position = Vector2(0, 8 if compact_answers else -1)
 		_last_answer.size = Vector2(SIZE.x, 20 if compact_answers else 26)
 		_last_answer.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(_last_answer)
 		_last_answer.add_theme_color_override("font_outline_color", Color("39342f"))
 		_last_answer.add_theme_constant_override("outline_size", 2 if compact_answers else 3)
 		add_child(_last_answer)
@@ -805,7 +820,7 @@ class Seat:
 		var cx := SIZE.x * 0.5
 		# прожектор на цели
 		if targeted:
-			var r := 70.0 + sin(_t * 6.0) * 4.0
+			var r := 70.0 if Prefs.reduce_motion else 70.0 + sin(_t * 6.0) * 4.0
 			draw_circle(Vector2(cx, 90), r, Color(1, 0.92, 0.6, 0.28))
 			draw_arc(Vector2(cx, 90), r, 0, TAU, 40, Color(STStyle.RED, 0.9), 4.0, true)
 		# тень и персонаж

@@ -12,6 +12,7 @@ var _updater: Node
 var _base_version := OS.get_environment("UPD_TEST_BASE")
 var _v1 := OS.get_environment("UPD_TEST_PATCH1")
 var _v2 := OS.get_environment("UPD_TEST_PATCH2")
+var _new_base := OS.get_environment("UPD_TEST_NEWBASE")
 
 
 func check(cond: bool, msg: String) -> void:
@@ -128,7 +129,7 @@ func _base() -> void:
 	check(inst != "", "папка установки задана")
 	var c := _client()
 	await c.check()
-	check(c.state == Client.State.AVAILABLE and c.kind == "base" and c.target == "0.9.0", "предложена полная версия 0.9.0: %d %s %s" % [c.state, c.kind, c.target])
+	check(c.state == Client.State.AVAILABLE and c.kind == "base" and c.target == _new_base, "предложена полная версия %s: %d %s %s" % [_new_base, c.state, c.kind, c.target])
 	await c.start()
 	check(c.state == Client.State.READY, "база установлена (%d %s)" % [c.state, c.error])
 	check(FileAccess.get_file_as_string(inst.path_join("PartyWorld.exe")) == "new exe", "exe заменён")
@@ -136,7 +137,7 @@ func _base() -> void:
 	check(FileAccess.get_file_as_string(inst.path_join("steam_api64.dll")) == "new dll", "dll заменена")
 	check(not FileAccess.file_exists(inst.path_join("PartyWorld.exe.new")), "временных .new не осталось")
 	var trial: Dictionary = _updater.read_json(_updater.BASE_TRIAL)
-	check(str(trial.get("to", "")) == "0.9.0" and not bool(trial.get("started", true)), "записана проба новой базы: %s" % trial)
+	check(str(trial.get("to", "")) == _new_base and not bool(trial.get("started", true)), "записана проба новой базы: %s" % trial)
 	# Новая база дважды не дошла до хаба → файлы возвращаются.
 	trial["to"] = _updater.base_version
 	trial["started"] = true

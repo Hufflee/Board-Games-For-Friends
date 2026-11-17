@@ -8,6 +8,14 @@ var _zoom_label: Label
 var _undo: Button
 var _ball: Button  # мяч в комнате: вкл / выкл
 var _room_button: Button  # выбор комнаты главного меню (HubRooms)
+var _upper_button: Button
+var _upper_panel: PanelContainer
+var _upper_slider: HSlider
+var _upper_grid: OptionButton
+var _upper_depth: OptionButton
+var _upper_depth_label: Label
+var _upper_message: Label
+var _upper_undo: Button
 var _panel: PanelContainer  # параметры шкафа (справа): в виде на полки прячется
 var _items_button: Button  # раскрывает предметы комнаты
 var _color_button: Button  # цвет шкафа (значок шкафа)
@@ -102,6 +110,16 @@ func _ready() -> void:
 		room.call("set_ball_enabled", not bool(room.call("ball_view_on")))
 		_sync_ball())
 	_items.add_child(_ball)
+	var cube := _icon_button("", func(b: Button): RoomIcons.cube(b, HubStyle.MUTED if bool(room.get("cube_hidden")) else HubStyle.TEXT, not bool(room.get("cube_hidden"))))
+	cube.name = "EditorCube"
+	var sync_cube := func():
+		cube.tooltip_text = "Неоновый куб на шкафу невидим (нажимать на него можно) — нажмите, чтобы показать" if bool(room.get("cube_hidden")) else "Сделать неоновый куб на шкафу невидимым (нажимать на него по-прежнему можно)"
+		cube.queue_redraw()
+	cube.pressed.connect(func():
+		room.call("set_cube_hidden", not bool(room.get("cube_hidden")))
+		sync_cube.call())
+	sync_cube.call()
+	_items.add_child(cube)
 	var add_board := _icon_button("Повесить ещё одну доску друзей", func(b: Button): RoomIcons.board(b, HubStyle.TEXT))
 	add_board.name = "EditorAddBoard"
 	add_board.pressed.connect(func(): room.call("add_friend_board"))
@@ -128,6 +146,11 @@ func _ready() -> void:
 		else:
 			open_room_list())
 	props.add_child(_room_button)
+	_upper_button = _icon_button("Полки над шкафом", func(b: Button): RoomIcons.upper_shelves(b, HubStyle.CYAN if _upper_panel.visible else HubStyle.TEXT))
+	_upper_button.name = "EditorUpperShelves"
+	_upper_button.pressed.connect(func(): _set_upper_mode(not _upper_panel.visible))
+	props.add_child(_upper_button)
+	_make_upper_panel()
 	var help := (
 		HubStyle
 		. label(
@@ -162,10 +185,73 @@ func _ready() -> void:
 	_on_view_turned(bool(room.call("left_wall_view")))
 
 
+func _make_upper_panel() -> void:
+	_upper_panel = HubStyle.panel(HubStyle.CYAN)
+	_upper_panel.set_anchors_and_offsets_preset(Control.PRESET_TOP_RIGHT)
+	_upper_panel.grow_horizontal = Control.GROW_DIRECTION_BEGIN
+	_upper_panel.offset_left = -264
+	_upper_panel.offset_right = -16
+	_upper_panel.offset_top = 82
+	_upper_panel.hide()
+	add_child(_upper_panel)
+	var col := HubStyle.vbox(12)
+	col.custom_minimum_size.x = 216
+	_upper_panel.add_child(col)
+	col.add_child(HubStyle.neon_label("ПОЛКИ НАД ШКАФОМ", 18, HubStyle.CYAN))
+	var help := HubStyle.label("Тяните от точки к точке. Клик по полке выбирает её. ПКМ удаляет отрезок.", 14, HubStyle.MUTED)
+	help.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(help)
+	col.add_child(HubStyle.label("Шаг сетки", 14))
+	_upper_grid = OptionButton.new()
+	_upper_grid.name = "UpperShelfGrid"
+	_upper_grid.add_item("Обычная (16,5 см)")
+	_upper_grid.add_item("Мелкая (8,25 см)")
+	_upper_grid.item_selected.connect(func(index: int): room.set_upper_fine_grid(index == 1))
+	col.add_child(_upper_grid)
+	_upper_depth_label = HubStyle.label("Глубина новой полки", 14)
+	col.add_child(_upper_depth_label)
+	_upper_depth = OptionButton.new()
+	_upper_depth.name = "UpperShelfDepth"
+	_upper_depth.add_item("Обычная (36 см)")
+	_upper_depth.add_item("Половинная (18 см)")
+	_upper_depth.item_selected.connect(func(index: int): room.set_upper_shallow(index == 1))
+	col.add_child(_upper_depth)
+	col.add_child(HubStyle.label("Скругление углов", 14))
+	_upper_slider = HSlider.new()
+	_upper_slider.name = "UpperShelfSmoothing"
+	_upper_slider.max_value = 1.0
+	_upper_slider.step = 0.05
+	_upper_slider.value = room.upper_smoothing()
+	_upper_slider.value_changed.connect(func(value: float): room.set_upper_smoothing(value))
+	col.add_child(_upper_slider)
+	_upper_message = HubStyle.label("", 14, HubStyle.YELLOW)
+	_upper_message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	col.add_child(_upper_message)
+	_upper_undo = HubStyle.button("↶ Отменить изменение", 14)
+	_upper_undo.pressed.connect(func(): room.undo_shelf_edit())
+	col.add_child(_upper_undo)
+	var done := HubStyle.button("Готово", 16)
+	done.pressed.connect(func(): room.finish_shelf_editor(true))
+	col.add_child(done)
+	var cancel := HubStyle.button("Отмена", 14)
+	cancel.pressed.connect(func(): room.finish_shelf_editor(false))
+	col.add_child(cancel)
+
+
+func _set_upper_mode(enabled: bool) -> void:
+	_upper_panel.visible = enabled
+	_panel.visible = not enabled and not room.left_wall_view()
+	_upper_button.queue_redraw()
+	room.set_upper_edit(enabled)
+	sync()
+
+
 ## Вид на полки: параметры шкафа прячутся; плакат, доска, мяч, корзина — для левой стены; цвет — полок.
 func _on_view_turned(left: bool) -> void:
-	if is_instance_valid(_panel):
-		_panel.visible = not left
+	if left and _upper_panel.visible:
+		_set_upper_mode(false)
+	_upper_button.visible = not left
+	_panel.visible = not left and not _upper_panel.visible
 	close_color_list()
 	_sync_ball()
 	if is_instance_valid(_color_button):
@@ -175,6 +261,7 @@ func _on_view_turned(left: bool) -> void:
 func _process(_delta: float) -> void:
 	if is_instance_valid(_undo) and is_instance_valid(room):
 		_undo.disabled = not bool(room.call("can_undo_shelf"))
+		_upper_undo.disabled = _undo.disabled
 
 
 ## Список комнат справа от кнопки: значок, название, подсказка; выбор применяется сразу и сохраняется.
@@ -331,6 +418,11 @@ func sync_zoom() -> void:
 
 
 func sync(message: String = "") -> void:
+	_upper_depth_label.text = "Глубина выбранной полки" if room.upper_has_selection() else "Глубина новой полки"
+	_upper_depth.select(1 if room.upper_shallow() else 0)
+	_upper_grid.select(1 if room.upper_fine_grid() else 0)
+	_upper_slider.set_value_no_signal(room.upper_smoothing())
+	_upper_message.text = message
 	var geometry: Dictionary = room.get("_cabinet")
 	for key in _values:
 		(_values[key] as SpinBox).set_value_no_signal(

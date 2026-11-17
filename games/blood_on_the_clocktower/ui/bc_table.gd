@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Постоянный стол: публичные места, собственная роль и адресные запросы. View не пересоздаёт сцену.
 const Style := preload("res://games/blood_on_the_clocktower/ui/bc_style.gd")
 const Data := preload("res://games/blood_on_the_clocktower/logic/bc_data.gd")
@@ -109,6 +111,7 @@ func _ready() -> void:
 	# и плашки мест подёргивались. Длиннее — многоточие, целиком в подсказке.
 	nomination.max_lines_visible = 2
 	nomination.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	TextUI.full_on_hover(nomination)
 	nomination.custom_minimum_size.y = 2 * (Style.SMALL + 7)
 	nomination.mouse_filter = MOUSE_FILTER_PASS
 	square.add_child(nomination)
@@ -137,7 +140,7 @@ func _ready() -> void:
 		var button := _action(operation[0], operation[1], choose)
 		if operation[0] == "hand": button.name = "RaiseHand"
 		if operation[0] == "cast_vote":
-			button.add_theme_stylebox_override("normal", Style.box(Style.ACCENT))
+			Style.primary(button)
 		# Кнопка у всех: по правилам выстрел Истребителя можно заявить блефом, иначе кнопка выдавала бы роль.
 		if operation[0] == "slay":
 			button.tooltip_text = "Публично заявить выстрел Истребителя в выбранного игрока — один раз за партию.\nЕсли вы не Истребитель или цель не демон, все увидят «ничего не произошло»."
@@ -175,6 +178,7 @@ func _ready() -> void:
 	role_toggle.name = "RoleToggle"
 	role_toggle.alignment = HORIZONTAL_ALIGNMENT_LEFT
 	role_toggle.clip_text = true
+	TextUI.full_on_hover(role_toggle)
 	role_toggle.tooltip_text = "Свернуть или развернуть карточку роли"
 	role_toggle.pressed.connect(func():
 		role_folded = not role_folded
@@ -207,6 +211,7 @@ func _ready() -> void:
 	role_text.custom_minimum_size.x = 200
 	role_text.max_lines_visible = 3
 	role_text.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	TextUI.full_on_hover(role_text)
 	card_text.add_child(role_text)
 	personal.mouse_entered.connect(_show_preview)
 	personal.mouse_exited.connect(func(): preview.hide())
@@ -263,6 +268,7 @@ func _ready() -> void:
 		menu.fit_to_longest_item = false
 		menu.add_theme_font_size_override("font_size", Style.SMALL)
 		menu.clip_text = true
+		TextUI.full_on_hover(menu)
 		(slot_row if menu == slot_role else pair_line).add_child(menu)
 	slot_left.item_selected.connect(func(_i: int): _slot_changed(0))
 	slot_right.item_selected.connect(func(_i: int): _slot_changed(1))
@@ -402,8 +408,9 @@ func update_view(next: Dictionary) -> void:
 		# Ник — одна строка с многоточием, роль — своей строкой под ним (длинный ник её не вытесняет).
 		refs.role.visible = role_of.has(seat)
 		if role_of.has(seat):
-			refs.role.text = _role_caption(role_of[seat])
 			var known: Dictionary = role_of[seat]
+			var team := "Зло" if known.get("side", "") == "evil" else "Добро"
+			refs.role.text = "%s · %s" % [team, _role_caption(known)]
 			refs.role.add_theme_color_override("font_color", Style.EVIL if str(known.get("side", "")) == "evil" else Style.GOOD)
 		# Плашка узкая (текст ~104 px): состояние — одной короткой строкой, рука — стрелкой у имени,
 		# полное пояснение — в подсказке. «Мёртв» без пометки — последний голос уже потрачен.
@@ -568,6 +575,7 @@ func _ensure_seats(people: Array) -> void:
 		nick.custom_minimum_size.x = 80
 		nick.size_flags_horizontal = SIZE_EXPAND_FILL
 		nick.clip_text = true
+		TextUI.full_on_hover(nick)
 		nick.mouse_filter = MOUSE_FILTER_IGNORE
 		row.add_child(nick)
 		row.add_child(votes)
@@ -590,6 +598,7 @@ func _ensure_seats(people: Array) -> void:
 		role_line.custom_minimum_size.x = 104
 		role_line.clip_text = true
 		role_line.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(role_line)
 		role_line.mouse_filter = MOUSE_FILTER_IGNORE
 		role_line.visible = false
 		col.add_child(role_line)
@@ -904,7 +913,10 @@ func _paint_picks() -> void:
 	for seat: int in seat_nodes:
 		var refs: Dictionary = seat_nodes[seat]
 		var voting := seat == int(view.get("next_voter", -1))
-		var fill := Style.ACCENT if seat == int(view.get("nominee", -1)) else Style.PANEL
+		var nominated := seat == int(view.get("nominee", -1))
+		(refs.state as Label).add_theme_color_override("font_color", Style.INK if nominated else Style.MUTED)
+		(refs.whisper as Label).add_theme_color_override("font_color", Style.INK if nominated else Style.MUTED)
+		var fill := Style.ACCENT if nominated else Style.PANEL
 		var box := Style.box(fill.lightened(0.12) if voting else fill)
 		if voting or marked.has(seat):
 			box.set_border_width_all(3)

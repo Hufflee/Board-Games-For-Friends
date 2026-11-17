@@ -10,6 +10,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var mat := ShaderMaterial.new()
 	mat.shader = load("res://games/dangerous_words/ui/dw_night.gdshader")
+	Prefs.watch_motion_shader(self, mat)
 	material = mat
 	preload("res://hub/cursor_parallax.gd").watch(self, func(shift: Vector2): mat.set_shader_parameter("cursor_shift", shift))
 	resized.connect(func(): mat.set_shader_parameter("rect_size", size))

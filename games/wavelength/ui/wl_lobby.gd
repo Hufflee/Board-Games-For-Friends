@@ -80,7 +80,7 @@ func _rebuild() -> void:
 			p.custom_minimum_size = Vector2(300, 0)
 			var v := HCStyle.vbox(6)
 			p.add_child(v)
-			v.add_child(HCStyle.label(TEAM_NAMES[team], HCStyle.BODY, TEAM_COLORS[team].darkened(0.2), HORIZONTAL_ALIGNMENT_LEFT, "bold"))
+			v.add_child(HCStyle.label(TEAM_NAMES[team], HCStyle.BODY, HCStyle.team_ink(TEAM_COLORS[team]), HORIZONTAL_ALIGNMENT_LEFT, "bold"))
 			for i in members.size():
 				var m: Dictionary = members[i]
 				if int(m.get("team", -1)) == team:

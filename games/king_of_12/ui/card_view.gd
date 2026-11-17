@@ -1,9 +1,12 @@
 class_name K12CardView
 extends PanelContainer
+
+const CardPreview = preload("res://hub/card_hover_preview.gd")
 ## Карта: портрет, название, текст эффекта. В компактном виде — только портрет и название.
 
 signal pressed(card: String)
 
+var preview_enabled := true
 var card := ""
 var compact := false
 var selected := false:
@@ -59,12 +62,17 @@ func _ready() -> void:
 	pic.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	v.add_child(pic)
 	if not compact:
-		var text := K12UI.label(K12Cards.card_text(card), 11, K12UI.INK)  # текст на самой карте — её «типографика», не UI
+		var text := K12UI.label(K12Cards.card_text(card), 12, K12UI.INK)
 		text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		text.size_flags_vertical = Control.SIZE_EXPAND_FILL
 		text.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		v.add_child(text)
-	tooltip_text = "%s\n%s" % [K12Cards.card_name(card), K12Cards.card_text(card)]
+	if preview_enabled:
+		CardPreview.wire(self, func() -> Control:
+			var face: Control = get_script().new(card)
+			face.preview_enabled = false
+			face.size = Vector2(180, 260)
+			return face)
 	_stamp_label = K12UI.label(stamp, 13 if compact else 16, Color.WHITE, HORIZONTAL_ALIGNMENT_CENTER)
 	_stamp_label.add_theme_stylebox_override("normal", K12UI.box(Color(K12UI.RED, 0.9), 4))
 	_stamp_label.set_anchors_and_offsets_preset(Control.PRESET_CENTER)

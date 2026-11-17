@@ -5,9 +5,10 @@ extends Node
 ##   {"format": 1, "version": "0.8.10", "page": "...",
 ##    "base": {"version": "0.8.9", "url": "...zip", "size": N, "sha256": "..."},
 ##    "patches": [{"version": "0.8.10", "url": "...pck", "size": N, "sha256": "..."}, ...]}
-## - база манифеста новее нашего exe → качаем zip, сверяем SHA-256, кладём файлы рядом с exe
-##   (старые → *.old), после перезапуска Updater следит, что новая версия запустилась;
-## - база та же → докачиваем недостающий хвост цепочки патчей в user://updates/.
+## - установленная цепочка годна и совместима с линией манифеста → докачиваем недостающий хвост
+##   патчей в user://updates/ (подробно — _plan: full / patch_from / lines);
+## - иначе полная сборка новее нашего exe → качаем zip, сверяем SHA-256, кладём файлы рядом с exe
+##   (старые → *.old), после перезапуска Updater следит, что новая версия запустилась.
 ## Без сети/при ошибке молча остаётся в NONE/FAILED — играть это не мешает.
 ## Проверка локально: env PW_UPDATE_URL=http://127.0.0.1:8765/latest.json, PW_UPDATE_INSTALL_DIR=<папка>.
 
@@ -15,6 +16,7 @@ signal changed
 
 const MANIFEST_URL := "https://github.com/Hufflee/Board-Games-For-Friends/releases/latest/download/latest.json"
 const RELEASES_PAGE := "https://github.com/Hufflee/Board-Games-For-Friends/releases/latest"
+const SOCIAL_EXE := "BGSocial.exe"  # отдельное окно «Общение»; докачивается рядом с игрой, если его нет
 
 enum State { IDLE, CHECKING, NONE, AVAILABLE, DOWNLOADING, INSTALLING, READY, FAILED, MANUAL }
 
@@ -84,9 +86,19 @@ func check(force: bool = false) -> void:
 		return
 	_manifest = m
 	page = str(m.get("page", RELEASES_PAGE))
-	_plan()
+	await _plan()
 
 
+## Выбор пакета. Поля манифеста сверх формата 1 (старые клиенты их не читают):
+##   "full": {version, url, size, sha256} — полная сборка, если патчами нельзя (по умолчанию — "base");
+##   "patch_from": "0.9.1" — патчами обновляем, только если не нужно качать патчи этой версии и старше
+##     (у старых установок полная сборка со сжатыми картами меньше, чем патч 0.9.1 на 435 МБ);
+##   "lines": [{"base": "0.8.12", "patches": [...]}] — цепочки патчей для разных exe (по умолчанию —
+##     одна: base + patches). После перехода на новую базу старые exe остаются на своей линии;
+##   "social": {version, url, size, sha256} — BGSocial.exe: если его нет в папке игры, качается вместе
+##     с патчами (в полной сборке он уже есть) или один, когда обновлять больше нечего.
+## Патчи — только если установленная цепочка совпадает с началом линии по SHA-256, все её звенья
+## подключены в этом запуске (Updater.loaded), файлы целы и действующая версия равна её концу.
 func _plan() -> void:
 	_queue.clear()
 	_keep.clear()
@@ -96,49 +108,105 @@ func _plan() -> void:
 	# Другая контрольная сумма цепочки не повод предлагать ту же версию снова.
 	var latest := str(_manifest.get("version", ""))
 	if latest == "" or Updater.compare(latest, Updater.version) <= 0:
+		_queue = _social_entry()
+		if not _queue.is_empty():
+			kind = "social"
+			target = "BGSocial"
+			_set_state(State.AVAILABLE)
+			return
 		_set_state(State.NONE)
 		return
 	var base: Dictionary = _manifest.get("base", {})
-	var mb := str(base.get("version", ""))
-	var patches: Array = _manifest.get("patches", [])
-	if Updater.compare(mb, Updater.base_version) > 0:
+	var full: Dictionary = _manifest.get("full", base)
+	var lines: Array = _manifest.get("lines", [{"base": str(base.get("version", "")), "patches": _manifest.get("patches", [])}])
+	var patch_from := str(_manifest.get("patch_from", ""))
+	var have := await _intact_chain()
+	# Сначала линия, с которой совпадает установленная цепочка; нет такой — ставим цепочку линии заново.
+	for reinstall: bool in [false, true]:
+		for line: Variant in lines:
+			if line is Dictionary and _plan_line(line, have, patch_from, reinstall):
+				kind = "patch"
+				target = str(_queue[-1]["version"])
+				_queue.append_array(_social_entry())
+				_set_state(State.AVAILABLE)
+				return
+	_queue.clear()
+	_keep.clear()
+	var fv := str(full.get("version", ""))
+	# Полная сборка новее нашего exe (если по действующей версии она не новее — следом придут патчи).
+	if fv != "" and Updater.compare(fv, Updater.base_version) > 0:
 		kind = "base"
-		target = str(_manifest.get("version", mb))
-		_queue = [_entry(base, "base-%s.zip" % mb)]
+		target = fv
+		_queue = [_entry(full, "base-%s.zip" % fv)]
 		var dir := Updater.install_dir()
 		_set_state(State.AVAILABLE if dir != "" and _writable(dir) else State.MANUAL)
 		return
-	# Полная сборка новее базы манифеста (игрок скачал архив сразу последней версии, а не базу):
-	# её содержимое = база + патчи до её версии, поэтому докачиваем только патчи после неё.
-	var start := 0
-	if mb != Updater.base_version:
-		start = -1
+	_set_state(State.NONE)
+
+
+## BGSocial.exe к загрузке ([] — уже лежит рядом с игрой, в манифесте нет или ставить некуда).
+func _social_entry() -> Array:
+	var social: Dictionary = _manifest.get("social", {})
+	var dir := Updater.install_dir()
+	if social.is_empty() or dir == "" or FileAccess.file_exists(dir.path_join(SOCIAL_EXE)) or not _writable(dir):
+		return []
+	var e := _entry(social, SOCIAL_EXE + ".download")
+	e["install"] = SOCIAL_EXE
+	return [e]
+
+
+## Линия подходит: exe — её база или полная сборка одной из её версий; докачать надо хвост новее patch_from.
+func _plan_line(line: Dictionary, have: Array, patch_from: String, reinstall: bool) -> bool:
+	var patches: Array = line.get("patches", [])
+	var start := -1
+	if str(line.get("base", "")) == Updater.base_version:
+		start = 0
+	else:
+		# Полная сборка новее базы линии: её содержимое = база + патчи до её версии.
 		for i in patches.size():
 			if Updater.compare(str(patches[i].get("version", "")), Updater.base_version) == 0:
 				start = i + 1
-		if start < 0:
-			_set_state(State.NONE)
-			return
+	if start < 0:
+		return false
 	var tail: Array = patches.slice(start)
-	# Установленная цепочка должна совпадать с началом манифеста, иначе ставим заново.
-	var have := Updater.chain()
-	var same := have.size() <= tail.size()
-	for i in have.size():
-		if not same:
-			break
-		same = str(have[i].get("sha256", "")) == str(tail[i].get("sha256", ""))
-	_keep = have if same else []
-	_queue = []
-	patches = tail
-	for i in range(_keep.size(), patches.size()):
-		var p: Dictionary = patches[i]
+	var keep := 0
+	while keep < have.size() and keep < tail.size() and str(have[keep].get("sha256", "")) == str(tail[keep].get("sha256", "")).to_lower():
+		keep += 1
+	if keep < have.size():
+		if not reinstall:
+			return false  # стоит чужая цепочка (другая линия или пересобранный патч)
+		keep = 0
+	var end: String = Updater.base_version if keep == 0 else str(have[keep - 1].get("version", ""))
+	if patch_from != "" and Updater.compare(end, patch_from) < 0:
+		return false  # пришлось бы качать старые тяжёлые патчи — полная сборка выгоднее
+	if keep == tail.size():
+		return false  # линия кончилась раньше манифеста — нечего докачивать
+	_keep = have.slice(0, keep)
+	for i in range(keep, tail.size()):
+		var p: Dictionary = tail[i]
 		_queue.append(_entry(p, "patch-%s.pck" % str(p.get("version", i))))
-	if _queue.is_empty():
-		_set_state(State.NONE)
-		return
-	kind = "patch"
-	target = str(_queue[-1]["version"])
-	_set_state(State.AVAILABLE)
+	return true
+
+
+## Годное начало установленной цепочки: звено подключено в этом запуске (Updater.loaded — по порядку),
+## файл на месте и его SHA-256 совпадает с записанной. Обрыв — дальше не считаем (докачаем заново).
+## Если действующая версия не совпала с последним подключённым звеном, цепочке не верим вовсе.
+func _intact_chain() -> Array:
+	var have: Array = Updater.chain()
+	var ok: Array = []
+	for i in have.size():
+		var p: Variant = have[i]
+		if not (p is Dictionary) or i >= Updater.loaded.size() or Updater.loaded[i] != str(p.get("version", "")):
+			break
+		var sum: String = await _sha256(Updater.DIR + str(p.get("file", "")))
+		if sum != str(p.get("sha256", "")).to_lower():
+			break
+		ok.append(p)
+	# Действующая версия обязана быть версией последнего подключённого звена, иначе состояние неясно.
+	var last: String = Updater.base_version if Updater.loaded.is_empty() else Updater.loaded[-1]
+	if Updater.compare(last, Updater.version) != 0:
+		return []
+	return ok
 
 
 func _entry(src: Dictionary, file: String) -> Dictionary:
@@ -173,6 +241,8 @@ func start() -> void:
 	_set_state(State.INSTALLING)
 	await get_tree().process_frame
 	var err := _install_base() if kind == "base" else _install_patches()
+	if err == "":
+		err = _install_social()
 	if err != "":
 		_fail(err)
 		return
@@ -221,11 +291,28 @@ func _download(q: Dictionary, path: String) -> bool:
 
 
 func _install_patches() -> String:
+	if kind != "patch":
+		return ""
 	var list: Array = _keep.duplicate()
 	for q: Dictionary in _queue:
+		if q.has("install"):
+			continue
 		list.append({"version": q["version"], "file": q["file"], "sha256": q["sha256"], "size": q["size"]})
 	if not Updater.save_chain(list, _keep.size()):
 		return "не удалось записать список патчей"
+	return ""
+
+
+## Скачанный BGSocial.exe — в папку игры (копией: user:// и папка игры могут быть на разных дисках).
+func _install_social() -> String:
+	for q: Dictionary in _queue:
+		if not q.has("install"):
+			continue
+		var src := Updater.DIR + str(q["file"])
+		var dest := Updater.install_dir().path_join(str(q["install"]))
+		if not FileAccess.file_exists(dest) and DirAccess.copy_absolute(src, dest) != OK:
+			return "не удалось положить %s в папку игры" % q["install"]
+		DirAccess.remove_absolute(src)
 	return ""
 
 

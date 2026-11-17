@@ -59,10 +59,10 @@ func _rebuild() -> void:
 		references.add_child(reference)
 	_body.add_child(references)
 	if data["mode"] == "offline":
-		var tl := BRStyle.label("Игра на одном компьютере: ходите по очереди за всех — экран показывает, чей сейчас ход.", BRStyle.CAP, BRStyle.MUTED)
+		var tl := BRStyle.label("Игра на одном компьютере: ходите по очереди за всех — экран показывает, чей сейчас ход.", BRStyle.CAP, BRStyle.muted())
 		tl.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		_body.add_child(tl)
-	_body.add_child(BRStyle.label("ИГРОКИ · от 2 до 8", BRStyle.CAP, BRStyle.MUTED, HORIZONTAL_ALIGNMENT_LEFT, "bold"))
+	_body.add_child(BRStyle.label("ИГРОКИ · от 2 до 8", BRStyle.CAP, BRStyle.muted(), HORIZONTAL_ALIGNMENT_LEFT, "bold"))
 	var members: Array = data["members"]
 	var grid := GridContainer.new()
 	grid.columns = 2
@@ -81,7 +81,7 @@ func _rebuild() -> void:
 		rem.pressed.connect(func(): Net.set_bots(Net.bots - 1))
 		lrow.add_child(rem)
 		_body.add_child(lrow)
-	_body.add_child(BRStyle.label("НАСТРОЙКИ", BRStyle.CAP, BRStyle.MUTED, HORIZONTAL_ALIGNMENT_LEFT, "bold"))
+	_body.add_child(BRStyle.label("НАСТРОЙКИ", BRStyle.CAP, BRStyle.muted(), HORIZONTAL_ALIGNMENT_LEFT, "bold"))
 	var coins := int(s.get("br_start_coins", 0))
 	if host:
 		var r := BRStyle.hbox(8)
@@ -106,7 +106,7 @@ func _rebuild() -> void:
 				_error.text = err)
 		start_row.add_child(start)
 	else:
-		start_row.add_child(BRStyle.label("Ждём, когда хост начнёт игру…", BRStyle.BODY, BRStyle.MUTED))
+		start_row.add_child(BRStyle.label("Ждём, когда хост начнёт игру…", BRStyle.BODY, BRStyle.muted()))
 	_body.add_child(start_row)
 	_error = BRStyle.label("", BRStyle.CAP, BRStyle.RED)
 	_body.add_child(_error)

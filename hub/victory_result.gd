@@ -15,6 +15,9 @@ static func resolve(game: String, view: Dictionary) -> Dictionary:
 	var winners: Array = []
 	var teams: Array = []
 	match game:
+		"unmatched":
+			winners = view.get("winners", []).duplicate()
+			result.team = bool(view.get("team", false))
 		"blood_on_the_clocktower":
 			winners = view.get("winners", []).duplicate()
 			result.leader = int(view.get("storyteller", -1))

@@ -2,15 +2,12 @@ extends Control
 ## Гримуар рассказчика (и снимок Шпиона) в виде старой записной книги: разворот на кожаном переплёте,
 ## записи рукописным шрифтом, иконки ролей «чернилами», кляксы и наброски на полях.
 ## Ассеты — tools/bc_grimoire_art.py. Таблица мест — слева, «Эта ночь» и журнал действий — справа.
+const Style := preload("res://games/blood_on_the_clocktower/ui/bc_style.gd")
 const Data := preload("res://games/blood_on_the_clocktower/logic/bc_data.gd")
 const Art := preload("res://games/blood_on_the_clocktower/ui/bc_art.gd")
 const Status := preload("res://games/blood_on_the_clocktower/ui/bc_status.gd")
 const DIR := "res://games/blood_on_the_clocktower/art/"
 const BOOK_SIZE := Vector2(1600, 1000)
-const INK := Color("2b1b12")
-const INK_FADED := Color(0.17, 0.11, 0.07, 0.62)
-const INK_RED := Color("7a1a1a")
-const INK_BLUE := Color("1f3550")
 
 signal closed
 
@@ -36,7 +33,7 @@ static func hand_font() -> Font:
 			_hand.load_dynamic_font(path)
 	return _hand
 
-static func _ink_label(text: String, size: int, color: Color = INK) -> Label:
+static func _ink_label(text: String, size: int, color: Color = Style.BOOK_INK) -> Label:
 	var label := Label.new()
 	label.text = text
 	label.add_theme_font_override("font", hand_font())
@@ -49,7 +46,7 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	mouse_filter = MOUSE_FILTER_STOP
 	var dim := ColorRect.new()
-	dim.color = Color(0.02, 0.02, 0.04, 0.66)
+	dim.color = Style.BOOK_DIM
 	dim.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 	dim.gui_input.connect(func(event: InputEvent):
 		if event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
@@ -78,7 +75,7 @@ func _ready() -> void:
 	left_page.add_child(left)
 	title = _ink_label("Гримуар", 40)
 	left.add_child(title)
-	subtitle = _ink_label("", 20, INK_FADED)
+	subtitle = _ink_label("", 20, Style.BOOK_INK_FADED)
 	left.add_child(subtitle)
 	var scroll := ScrollContainer.new()
 	scroll.size_flags_vertical = SIZE_EXPAND_FILL
@@ -102,12 +99,12 @@ func _ready() -> void:
 	head.add_child(records)
 	var close := Button.new()
 	close.name = "CloseGrimoire"
-	close.text = "закрыть ✕"
+	close.text = "Закрыть"
 	close.flat = true
 	close.add_theme_font_override("font", hand_font())
-	close.add_theme_font_size_override("font_size", 22)
+	close.add_theme_font_size_override("font_size", Style.BODY)
 	for state: String in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
-		close.add_theme_color_override(state, INK_RED if state != "font_color" else INK)
+		close.add_theme_color_override(state, Style.BOOK_INK_RED if state != "font_color" else Style.BOOK_INK)
 	close.pressed.connect(_close)
 	head.add_child(close)
 	notes = RichTextLabel.new()
@@ -116,8 +113,8 @@ func _ready() -> void:
 	notes.scroll_following = true
 	notes.size_flags_vertical = SIZE_EXPAND_FILL
 	notes.add_theme_font_override("normal_font", hand_font())
-	notes.add_theme_font_size_override("normal_font_size", 19)
-	notes.add_theme_color_override("default_color", INK)
+	notes.add_theme_font_size_override("normal_font_size", Style.BODY)
+	notes.add_theme_color_override("default_color", Style.BOOK_INK)
 	notes.add_theme_constant_override("line_separation", -2)
 	right.add_child(notes)
 	# Подписи пером на полях.
@@ -140,7 +137,7 @@ func _sketch(path: String, at: Vector2, width: float, alpha: float, angle: float
 	book.add_child(image)
 
 func _margin_note(text: String, at: Vector2, angle: float, size: int) -> void:
-	var note := _ink_label(text, size, INK_FADED)
+	var note := _ink_label(text, size, Style.BOOK_INK_FADED)
 	note.rotation = angle
 	note.set_meta("at", at)
 	note.add_to_group("grimoire_sketch")
@@ -208,18 +205,18 @@ func _entry(item: Dictionary, players: Array) -> Control:
 	text.size_flags_horizontal = SIZE_EXPAND_FILL
 	text.mouse_filter = MOUSE_FILTER_IGNORE
 	text.add_theme_font_override("normal_font", hand_font())
-	text.add_theme_font_size_override("normal_font_size", 18)
+	text.add_theme_font_size_override("normal_font_size", Style.BODY)
 	text.add_theme_constant_override("line_separation", -4)
-	text.add_theme_color_override("default_color", INK)
+	text.add_theme_color_override("default_color", Style.BOOK_INK)
 	var seat := int(item.seat)
 	var nick := str(players[seat].name) if seat >= 0 and seat < players.size() else "?"
 	var role_name := str(Data.catalog().get(role, {}).get("name", role))
 	var shown := str(item.get("shown_role", role))
 	var evil := str(item.get("side", "")) == "evil"
-	var color := (INK_RED if evil else INK_BLUE).to_html(false)
+	var color := (Style.BOOK_INK_RED if evil else Style.BOOK_INK_BLUE).to_html(false)
 	var line := "%s — [color=#%s]%s[/color]" % [_escape(nick), color, role_name]
 	if shown != role:
-		line += " [color=#%s](думает: %s)[/color]" % [INK_FADED.to_html(false), str(Data.catalog().get(shown, {}).get("name", shown))]
+		line += " [color=#%s](думает: %s)[/color]" % [Style.BOOK_INK_FADED.to_html(false), str(Data.catalog().get(shown, {}).get("name", shown))]
 	if not alive:
 		line = "[s]%s[/s] ✝" % line
 	var marks: Array[String] = []
@@ -227,7 +224,7 @@ func _entry(item: Dictionary, players: Array) -> Control:
 	var described := Status.describe(item.get("status", {}), players)
 	if not described.is_empty(): marks.append(described.replace("\n", "; "))
 	if not marks.is_empty():
-		line += "\n[font_size=15][color=#%s]%s[/color][/font_size]" % [INK_FADED.to_html(false), _escape(", ".join(marks))]
+		line += "\n[font_size=%d][color=#%s]%s[/color][/font_size]" % [Style.SMALL, Style.BOOK_INK_FADED.to_html(false), _escape(", ".join(marks))]
 	text.text = line
 	text.tooltip_text = "%s — %s%s" % [nick, role_name, ("\n" + ", ".join(marks)) if not marks.is_empty() else ""]
 	row.add_child(text)

@@ -1,4 +1,8 @@
 extends "res://hub/float_panel.gd"
+
+const TextUI = preload("res://hub/ui_text.gd")
+
+const ContrastUI = preload("res://hub/ui_contrast.gd")
 ## Окно «Общение»: чат пати и мини-игры в одном плавающем окне. Одно на всю игру, живёт в своём слое
 ## поверх любого экрана (создаёт Net.chat.panel()), поэтому место, размер, черновик и вкладки не теряются.
 ##
@@ -11,7 +15,7 @@ extends "res://hub/float_panel.gd"
 ## Данные: Net.chat (hub/chat_net.gd) и Net.minigames (hub/minigames/mg_net.gd).
 
 const Board := preload("res://hub/minigames/mg_board.gd")
-const REACTIONS := ["Думаю...", "Блефую!", "Кидаю кость!", "Хитро!", "Ой…", "Мне повезёт!", "Удивительно!", "Эй, вы ещё здесь?"]
+const REACTIONS := ["Думаю…", "Блефую!", "Кидаю кость!", "Хитро!", "Ой…", "Мне повезёт!", "Удивительно!", "Эй, вы ещё здесь?"]
 const BallsView := preload("res://hub/minigames/mg_balls_view.gd")
 const Confetti := preload("res://hub/confetti.gd")
 const MinesView := preload("res://hub/minigames/mg_mines_view.gd")
@@ -212,6 +216,9 @@ func _repaint() -> void:
 	if _mini_button != null:
 		_lift_mini(tone, fill.get_luminance() < 0.5)
 	set_palette_from_button(tone, text)
+	if _mini_button != null:
+		var ink := ContrastUI.pick(_button_fill(), [c_ink, Color.WHITE, Color.BLACK])
+		_mini_button.add_theme_color_override("font_color", ink)
 	if _mini_button == null:
 		rebuild_mini()  # простая плашка красится палитрой окна
 
@@ -385,7 +392,21 @@ func unread() -> int:
 
 # --- Постройка -----------------------------------------------------------------------------
 
+func _close_button_pressed() -> void:
+	if get_tree().root.has_meta(&"bgs_social"):
+		get_tree().quit()
+	else:
+		super._close_button_pressed()
+
+
 func _fill_header() -> void:
+	if get_tree().root.has_meta(&"bgs_social"):
+		var invite := small_button("Пригласить", "Приглашение в пати Steam")
+		invite.pressed.connect(func(): SteamInvite.open_panel(100))
+		header_extra.add_child(invite)
+		var friends := small_button("Лобби друзей", "Открытые лобби друзей Steam")
+		friends.pressed.connect(func(): get_tree().current_scene.call("show_friends", friends))
+		header_extra.add_child(friends)
 	var add := small_button("+", "Написать лично или команде")
 	_add_button = add
 	add.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -445,6 +466,7 @@ func _build_chat() -> void:
 	_reply_label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_reply_label.clip_text = true
 	_reply_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	TextUI.full_on_hover(_reply_label)
 	_reply_bar.add_child(_reply_label)
 	var reply_x := small_button("×", "Не отвечать")
 	reply_x.pressed.connect(_set_reply.bind({}))
@@ -747,6 +769,7 @@ func _append(entry: Dictionary) -> void:
 		quote.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		quote.clip_text = true
 		quote.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(quote)
 		quote.focus_mode = Control.FOCUS_NONE
 		quote.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 		quote.add_theme_font_size_override("font_size", px(11))
@@ -1407,6 +1430,7 @@ func _show_session(id: String) -> void:
 		_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		_status.clip_text = true
 		_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(_status)
 		bar.add_child(_status)
 		_board = Board.new()
 		_board.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -1499,6 +1523,7 @@ func _game_column(id: String) -> VBoxContainer:
 	_status.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_status.clip_text = true
 	_status.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	TextUI.full_on_hover(_status)
 	_status.mouse_filter = Control.MOUSE_FILTER_PASS
 	bar.add_child(_status)
 	return col

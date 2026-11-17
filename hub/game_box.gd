@@ -392,6 +392,7 @@ func _build_soon() -> void:
 	body.mesh = bm
 	var m := ShaderMaterial.new()
 	m.shader = preload("res://hub/tv_static.gdshader")
+	Prefs.watch_motion_shader(self, m)
 	m.set_shader_parameter("half_size", size / 2.0)
 	m.set_shader_parameter("speed", 20.0 + randf() * 8.0)
 	if dim:

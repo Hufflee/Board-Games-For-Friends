@@ -77,10 +77,13 @@ static func theme() -> Theme:
 	field.bg_color = Color(0, 0, 0, 0)
 	field.set_content_margin_all(4)
 	t.set_stylebox("normal", "LineEdit", field)
-	t.set_stylebox("focus", "LineEdit", field)
+	var editing := field.duplicate() as StyleBoxFlat
+	editing.border_color = ACCENT
+	editing.border_width_bottom = 2
+	t.set_stylebox("focus", "LineEdit", editing)
 	t.set_stylebox("read_only", "LineEdit", field)
 	t.set_color("font_color", "LineEdit", ink())
-	t.set_color("font_placeholder_color", "LineEdit", Color(muted(), 0.6))
+	t.set_color("font_placeholder_color", "LineEdit", Color(muted(), 0.85))
 	t.set_color("caret_color", "LineEdit", ACCENT)
 	return t
 
@@ -137,3 +140,11 @@ static func paint_backdrop(surface: CanvasItem, dimensions: Vector2) -> void:
 		surface.draw_line(Vector2(0, y), Vector2(dimensions.x, y), Color(MATCH, 0.05), 1.0)
 		y += step
 	surface.draw_line(Vector2(72, 0), Vector2(72, dimensions.y), Color(BAD, 0.08), 2.0)
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[ink(), paper(), "текст блокнота", false],
+		[muted(), paper(), "подпись блокнота", false],
+	]

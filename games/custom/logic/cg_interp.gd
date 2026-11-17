@@ -3,6 +3,9 @@ extends RefCounted
 ## Ограниченный интерпретатор JSON-блоков. Продолжение цепочки — только сериализуемые словари.
 
 const Blocks := preload("res://games/custom/logic/cg_blocks.gd")
+const CardPiles := preload("res://hub/card_piles.gd")
+const CardReveal := preload("res://hub/card_reveal.gd")
+const PlayerChoice := preload("res://hub/player_choice.gd")
 const STEP_LIMIT := 10000
 const LOOP_LIMIT := 1000
 
@@ -190,12 +193,7 @@ static func run(r: Object, frames: Array) -> String:
 				if not r.state.zones.has(zone):
 					r.last_error = "Зона перемешивания не найдена."
 					continue
-				var cards: Array = r.state.zones[zone]
-				for i in range(cards.size() - 1, 0, -1):
-					var j: int = r.rng.randi_range(0, i)
-					var tmp: Variant = cards[i]
-					cards[i] = cards[j]
-					cards[j] = tmp
+				CardPiles.shuffle(r.state.zones[zone], r.rng)
 			"deal", "draw":
 				var count := int(number(r, block.count, ctx))
 				if count < 0 or count > 300:
@@ -222,7 +220,7 @@ static func run(r: Object, frames: Array) -> String:
 				elif op == "show":
 					var audience: Variant = value(r, block.get("for", "all"), ctx)
 					var who := -1 if audience is String and audience == "all" else int(number(r, {"op": "literal", "value": audience}, ctx))
-					r.state.reveals[id] = {"seconds": 2.0, "seat": who}
+					CardReveal.show(r.state.reveals, [id], who, 2.0)
 				elif op == "close":
 					r.state.cards[id].face_up = false
 					r.state.cards[id].visible_to = []
@@ -371,10 +369,8 @@ static func run(r: Object, frames: Array) -> String:
 					if not r.state.zones.has(zone):
 						r.last_error = "Зона выбора не найдена."
 						continue
-					pending.options = []
-					for id: String in r.state.zones[zone]:
-						if r.card_visible(id, int(pending.seat)):
-							pending.options.append(id)
+					pending.options = CardPiles.matching(r.state.zones[zone], func(id: String) -> bool:
+						return r.card_visible(id, int(pending.seat)))
 					if pending.options.is_empty():
 						r.last_error = "В зоне нет доступных для выбора карт."
 						continue
@@ -470,7 +466,7 @@ static func answer(r: Object, seat: int, kind: String, data: Dictionary) -> bool
 	var supplied: Variant = data.get("value")
 	match str(pending.kind):
 		"ask_card", "ask_player", "ask_option":
-			if not pending.get("options", []).has(supplied): return false
+			if not PlayerChoice.accepts(pending, seat, supplied): return false
 		"ask_number":
 			if not (supplied is int or supplied is float) or supplied < pending.min or supplied > pending.max: return false
 		"roll":

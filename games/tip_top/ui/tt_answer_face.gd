@@ -42,7 +42,7 @@ func _draw() -> void:
 	# автор
 	draw_circle(r.position + Vector2(16, 16), 7, TTStyle.INK)
 	draw_circle(r.position + Vector2(16, 16), 5.5, author_color)
-	draw_string(TTStyle.font("bold"), r.position + Vector2(28, 21), author, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 70, 12, Color(TTStyle.INK, 0.65))
+	draw_string(TTStyle.font("bold"), r.position + Vector2(28, 21), author, HORIZONTAL_ALIGNMENT_LEFT, r.size.x - 70, 13, Color(TTStyle.INK, 0.65))
 	# текст ответа
 	var fs := 15 if text.length() < 40 else 12
 	draw_multiline_string(TTStyle.font("bold"), r.position + Vector2(10, 42), text, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 20, fs, 4, TTStyle.INK)

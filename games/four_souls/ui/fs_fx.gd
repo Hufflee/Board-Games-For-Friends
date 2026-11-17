@@ -115,10 +115,12 @@ static func wiggle(card: Control) -> void:
 	tween.tween_interval(1.1)
 	period += 1.1
 	tween.custom_step(fmod(Time.get_ticks_msec() / 1000.0, period))
+	var stationary := [false]
 	var still := func(stop: bool) -> void:
+		stationary[0] = stop
 		if not is_instance_valid(face):
 			return
-		if stop:
+		if stop or Prefs.reduce_motion:
 			tween.pause()
 			face.rotation_degrees = 0.0
 			face.position.y = 0.0
@@ -133,6 +135,16 @@ static func wiggle(card: Control) -> void:
 	var pulse := glow.create_tween().set_loops()
 	pulse.tween_property(glow, "modulate:a", 0.45, 0.6)
 	pulse.tween_property(glow, "modulate:a", 1.0, 0.6)
+	var sync_motion := func() -> void:
+		still.call(stationary[0])
+		if Prefs.reduce_motion:
+			pulse.pause()
+			glow.modulate.a = 1.0
+		else:
+			pulse.play()
+	Prefs.changed.connect(sync_motion)
+	glow.tree_exiting.connect(func(): Prefs.changed.disconnect(sync_motion))
+	sync_motion.call()
 
 
 ## Значок на карте: "target" — мишень атакуемого монстра, "buy" — идёт покупка.
@@ -147,6 +159,15 @@ static func badge(card: Control, kind: String) -> void:
 	var tween := mark.create_tween().set_loops()
 	tween.tween_property(mark, "modulate:a", 0.55, 0.7).set_trans(Tween.TRANS_SINE)
 	tween.tween_property(mark, "modulate:a", 1.0, 0.7).set_trans(Tween.TRANS_SINE)
+	var sync_motion := func() -> void:
+		if Prefs.reduce_motion:
+			tween.pause()
+			mark.modulate.a = 1.0
+		else:
+			tween.play()
+	Prefs.changed.connect(sync_motion)
+	mark.tree_exiting.connect(func(): Prefs.changed.disconnect(sync_motion))
+	sync_motion.call()
 
 
 class Marker extends Control:

@@ -103,7 +103,7 @@ func show_menu(message: String = "") -> void:
 		b.pressed.connect(entry[1])
 		row.add_child(b)
 	col.add_child(row)
-	col.add_child(STStyle.label(message, STStyle.CAP, STStyle.RED, HORIZONTAL_ALIGNMENT_CENTER))
+	col.add_child(STStyle.label(message, STStyle.CAP, STStyle.red_text(), HORIZONTAL_ALIGNMENT_CENTER))
 	m.add_child(STStyle.FilmFX.new())
 	_set_screen(m)
 

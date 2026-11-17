@@ -2,7 +2,6 @@ extends SceneTree
 ## Проверка самостоятельного окна справочника реальным вводом Godot, снимок 1280×720.
 ## --audio-driver Dummy --path . --resolution 1280x720 --script res://tests/test_blood_on_the_clocktower_ui.gd.
 
-const Handbook := preload("res://games/blood_on_the_clocktower/ui/bc_handbook.gd")
 var checks := 0
 var failures := 0
 
@@ -36,7 +35,7 @@ func click(node: Control) -> void:
 
 func _run() -> void:
 	root.size = Vector2i(1280, 720)
-	var book := Handbook.new()
+	var book: Control = load("res://games/blood_on_the_clocktower/ui/bc_handbook.gd").new()
 	root.add_child(book)
 	await process_frame
 	await process_frame

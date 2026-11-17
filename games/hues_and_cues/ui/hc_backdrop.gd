@@ -16,6 +16,7 @@ func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 	var m := ShaderMaterial.new()
 	m.shader = load("res://games/hues_and_cues/ui/hc_backdrop.gdshader")
+	Prefs.watch_motion_shader(self, m)
 	m.set_shader_parameter("painted", painted)
 	m.set_shader_parameter("base", Vector3(HCStyle.BG.r, HCStyle.BG.g, HCStyle.BG.b))
 	if HCStyle.dark:

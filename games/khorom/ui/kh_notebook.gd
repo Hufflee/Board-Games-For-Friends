@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## «Хором!»: блокнот игрока на 6 строк. Свой — с полями ввода и кнопками «глазик» / «✓» («✕»);
 ## чужой — строки под пластинками (как в Word Slam), открытая строка — пластинка падает.
 ## Засчитанный ответ — полупрозрачная зелёная пластинка, снятый в «Белой вороне» — красная.
@@ -46,6 +48,7 @@ func setup(owner_seat: int, is_mine: bool, round_kind: String, round_topics: Arr
 	_title.position = Vector2(PAD, 14)
 	_title.size = Vector2(SIZE.x - PAD * 2 - 120, 24)
 	_title.clip_text = true
+	TextUI.full_on_hover(_title)
 	add_child(_title)
 	_status = Style.label("", 12, Style.muted())
 	_status.position = Vector2(SIZE.x - PAD - 120, 18)
@@ -61,15 +64,17 @@ func setup(owner_seat: int, is_mine: bool, round_kind: String, round_topics: Arr
 		topic_label.position = area.position + Vector2(4, 2)
 		topic_label.size = Vector2(area.size.x, 16)
 		topic_label.clip_text = true
+		TextUI.full_on_hover(topic_label)
 		add_child(topic_label)
 		_topic_labels.append(topic_label)
-		var text_box := Rect2(area.position + Vector2(0, 18 if kind == "blitz" else 8), Vector2(area.size.x, area.size.y - (18 if kind == "blitz" else 8)))
-		var text := Style.label("", 16)
+		var text_box := Rect2(area.position + Vector2(0, 17 if kind == "blitz" else 4), Vector2(area.size.x, area.size.y - (18 if kind == "blitz" else 8)))
+		var text := Style.label("", 14 if kind == "blitz" else 16)
 		text.name = "Text%d" % row
 		text.position = text_box.position + Vector2(4, 0)
 		text.size = text_box.size - Vector2(4, 0)
 		text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
-		text.clip_text = true
+		text.custom_minimum_size.y = text_box.size.y
+		text.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		add_child(text)
 		_texts.append(text)
 		var edit: LineEdit = null

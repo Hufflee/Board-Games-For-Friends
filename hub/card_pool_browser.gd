@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Просмотр публичного каталога карт без доступа к раздаче и текущим колодам.
 ## На странице загружаются только12 изображений, поиск и фильтры работают по метаданным.
 const PAGE_SIZE := 12
@@ -173,6 +175,7 @@ func _render() -> void:
 		label.custom_minimum_size.x = 144
 		label.clip_text = true
 		label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(label)
 		label.add_theme_font_size_override("font_size", 14)
 		col.add_child(label)
 		var show_card := func():

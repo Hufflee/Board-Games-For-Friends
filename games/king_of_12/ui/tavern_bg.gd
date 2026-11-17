@@ -26,6 +26,7 @@ func _ready() -> void:
 	set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 	var mat := ShaderMaterial.new()
 	mat.shader = load("res://games/king_of_12/ui/tavern.gdshader")
+	Prefs.watch_motion_shader(self, mat)
 	mat.set_shader_parameter("planks", load("res://games/king_of_12/art/env/dark_wooden_planks_diff_1k.jpg"))
 	mat.set_shader_parameter("wood", load("res://games/king_of_12/art/env/dark_wood_diff_1k.jpg"))
 	mat.set_shader_parameter("leather", load("res://games/king_of_12/art/env/brown_leather_albedo_1k.jpg"))

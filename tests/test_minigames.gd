@@ -537,6 +537,33 @@ func _stars() -> void:
 
 
 ## «Блэкджек»: очки руки, раздача после ставок всех, дилер до 17, расчёт, «Начать заново», вход посреди раздачи.
+## Раздачи сменяются сами: проигрыш последней фишки и «Начать заново» не оставляют стол стоять.
+func _blackjack_auto_round(rng: RandomNumberGenerator) -> void:
+	var st := Blackjack.new_state()
+	Blackjack.join(st, 1, "Один", 0)
+	var lost := false
+	for attempt in 40:
+		Blackjack.act(st, 1, {"bet": 1}, rng)
+		if str(st.players[1].status) == "play":
+			Blackjack.act(st, 1, {"hit": true} if Blackjack.value(st.players[1].hand) < 21 else {"stand": true}, rng)
+			while str(st.players[1].status) == "play":
+				Blackjack.act(st, 1, {"hit": true}, rng)
+		while st.phase == "dealer":
+			Blackjack.step(st, 1.0, rng)
+		check(st.phase == "done", "блэкджек: раздача рассчитана")
+		if int(st.players[1].chips) == 0:
+			lost = true
+			break
+		# не проиграл — следующая раздача начнётся сама
+		Blackjack.step(st, Blackjack.NEXT_PAUSE + 0.1, rng)
+		check(st.phase == "bet", "блэкджек: после расчёта новая раздача сама")
+	check(lost, "блэкджек: за 40 раздач с добором до перебора фишка проиграна")
+	check(Blackjack.act(st, 1, {"restart": true}, rng) == "" and int(st.players[1].chips) == 1, "блэкджек: начать заново во время расчёта")
+	Blackjack.step(st, Blackjack.NEXT_PAUSE + 0.1, rng)
+	check(st.phase == "bet" and str(st.players[1].status) == "bet", "блэкджек: после «Начать заново» вторая раздача начинается сама")
+	check(Blackjack.act(st, 1, {"bet": 1}, rng) == "" and st.phase != "bet", "блэкджек: вторая раздача пошла")
+
+
 func _blackjack() -> void:
 	check(Blackjack.value([0, 12]) == 21 and Blackjack.is_blackjack([0, 12]), "блэкджек: туз + король = 21")
 	check(Blackjack.value([0, 0, 8]) == 21, "блэкджек: два туза и девятка = 21 (туз за 1)")
@@ -568,6 +595,7 @@ func _blackjack() -> void:
 		check(int(p.chips) == 1 + int(p.delta), "блэкджек: фишки изменились ровно на результат")
 	check(Blackjack.act(st, 1, {"next": true}, rng) == "" and st.phase == "bet", "блэкджек: новая раздача")
 	check(str(st.players[3].status) == "bet", "блэкджек: ждавший садится за стол")
+	_blackjack_auto_round(rng)
 	# много раздач подряд: фишки не уходят в минус, «Начать заново» возвращает одну
 	for round_no in 300:
 		for peer: int in st.players.keys():

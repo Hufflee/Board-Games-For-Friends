@@ -26,12 +26,14 @@ const LIGHT := {
 	"tile": Color("efe1bb"),
 	"item_tint": Color("f4e7c4"),
 	"ink": Color("3b2a17"),
-	"muted": Color("7d6644"),
-	"ochre": Color("b5741f"),
+	"muted": Color("65502f"),
+	"ochre": Color("9a5f14"),
 	"ochre_ink": Color("fff6e2"),
 	"alien": Color("15a99c"),
+	"alien_text": Color("086a62"),
 	"alien_soft": Color(0.08, 0.66, 0.61, 0.18),
 	"alien_ink": Color("eafffb"),
+	"ship_text": Color("3fe0cf"),
 	"ship": Color("123c45"),
 	"shadow": Color(0.25, 0.16, 0.05, 0.22),
 }
@@ -48,8 +50,10 @@ const DARK := {
 	"ochre": Color("e0a23e"),
 	"ochre_ink": Color("2a1b08"),
 	"alien": Color("3fe0cf"),
+	"alien_text": Color("3fe0cf"),
 	"alien_soft": Color(0.25, 0.88, 0.81, 0.16),
 	"alien_ink": Color("06231f"),
+	"ship_text": Color("3fe0cf"),
 	"ship": Color("0d2a31"),
 	"shadow": Color(0, 0, 0, 0.4),
 }
@@ -164,7 +168,7 @@ static func style_button(button: Button, kind: String = "secondary", size: int =
 	for state in ["normal", "hover", "pressed", "disabled"]:
 		button.add_theme_stylebox_override(state, button_box(kind, state))
 	button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	var ink := c("ochre_ink") if kind == "primary" else (c("alien") if kind == "alien" else (c("muted") if kind == "quiet" else c("ink")))
+	var ink := c("ochre_ink") if kind == "primary" else (c("alien_text") if kind == "alien" else (c("muted") if kind == "quiet" else c("ink")))
 	for key in ["font_color", "font_hover_color", "font_focus_color"]:
 		button.add_theme_color_override(key, ink)
 	button.add_theme_color_override("font_pressed_color", c("alien_ink") if kind == "alien" else ink)
@@ -223,3 +227,15 @@ static func draw_backdrop(ci: CanvasItem, rect: Rect2) -> void:
 	while x < rect.size.x:
 		ci.draw_line(Vector2(x, 0), Vector2(x + rng.randf_range(-2, 2), rect.size.y), Color(c("fiber"), 0.5), rng.randf_range(1, 2))
 		x += rng.randf_range(14, 30)
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[c("ink"), c("panel"), "текст панели", false],
+		[c("muted"), c("panel"), "подпись", false],
+		[c("ship_text"), c("ship"), "ship", false],
+		[c("alien_text"), c("panel"), "знаки пришельцев", false],
+		[c("ochre_ink"), c("ochre"), "главная кнопка", false],
+		[Color("eafffb"), Color("086a62"), "баннер пришельца", false],
+	]

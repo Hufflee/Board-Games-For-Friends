@@ -1,4 +1,8 @@
 extends Control
+
+const ContrastUI = preload("res://hub/ui_contrast.gd")
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Стол «Оттенков и подсказок»: поле в центре, подсказки сверху, игроки и счёт справа,
 ## панель действия снизу (выбор цвета / подсказка / ход / итог раунда).
 
@@ -269,6 +273,7 @@ func _update_cues() -> void:
 		cue.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		cue.clip_text = true
 		cue.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(cue)
 		cue.tooltip_text = str(cues[i])
 		row.add_child(cue)
 		pill.add_child(row)
@@ -298,6 +303,7 @@ func _update_players() -> void:
 		var nm := PlayerTag.make_seat(_v["players"], s, _me, 15, HCStyle.INK, " (вы)" if s == _me and not _hotseat() else "")
 		nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 		nm.clip_text = true
+		TextUI.full_on_hover(nm)
 		TurnNameGlow.apply(nm, active)
 		nv.add_child(nm)
 		var sub := ""
@@ -308,12 +314,13 @@ func _update_players() -> void:
 		elif placed.has(s):
 			sub = "фишек: %d" % placed[s]
 		if sub != "":
-			nv.add_child(HCStyle.label(sub, HCStyle.CAP, HCStyle.SAGE if s == int(_v["giver"]) else HCStyle.MUTED))
+			nv.add_child(HCStyle.label(sub, HCStyle.CAP, HCStyle.team_ink(HCStyle.SAGE) if s == int(_v["giver"]) else HCStyle.MUTED))
 		h.add_child(nv)
 		if s < gained.size() and int(gained[s]) > 0:
-			h.add_child(HCStyle.label("+%d" % gained[s], HCStyle.CAP, HCStyle.SAGE, HORIZONTAL_ALIGNMENT_RIGHT, "bold"))
+			h.add_child(HCStyle.label("+%d" % gained[s], HCStyle.CAP, HCStyle.team_ink(HCStyle.SAGE), HORIZONTAL_ALIGNMENT_RIGHT, "bold"))
 		var sc := HCStyle.label(str(_v["scores"][s]), HCStyle.BODY, HCStyle.INK, HORIZONTAL_ALIGNMENT_RIGHT, "title")
 		sc.custom_minimum_size.x = 30
+		TextUI.stable_numbers(sc, "000")
 		h.add_child(sc)
 		row.add_child(h)
 		_players_box.add_child(row)
@@ -405,7 +412,7 @@ func _card_button(cell: int) -> Button:
 	b.text = HCData.coord(cell)
 	b.add_theme_font_override("font", HCStyle.font("bold"))
 	b.add_theme_font_size_override("font_size", 14)
-	var txt := Color.WHITE if col.get_luminance() < 0.6 else HCStyle.INK_ART
+	var txt := ContrastUI.pick(col, [Color.WHITE, HCStyle.INK_ART, Color.BLACK])
 	for k in ["font_color", "font_hover_color", "font_pressed_color"]:
 		b.add_theme_color_override(k, txt)
 	b.pressed.connect(func(): _on_cell(cell))
@@ -500,7 +507,7 @@ func _game_over_panel(row: HBoxContainer) -> void:
 	var col := HCStyle.vbox(2)
 	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var text := ("Победа: %s" % names[0]) if names.size() == 1 else "Общая победа: %s" % ", ".join(names)
-	var sub := "%d очков" % _v["scores"][winners[0]] if not winners.is_empty() else ""
+	var sub := TextUI.plural(int(_v["scores"][winners[0]]), "очко", "очка", "очков") if not winners.is_empty() else ""
 	if _v.get("coop", false):
 		var team := int(_v["scores"][0])
 		var goal := int(_v["coop_goal"])

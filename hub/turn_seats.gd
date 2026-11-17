@@ -42,6 +42,8 @@ static func acting(game: String, view: Dictionary) -> Array:
 	var players: Array = view.get("players", [])
 	var out: Array = []
 	match game:
+		"unmatched":
+			out = _seat(view.get("actor", -1))
 		"brodilka":
 			var w := _int(view.get("waiting", -1))
 			out = _seat(w if w >= 0 else view.get("turn", -1))

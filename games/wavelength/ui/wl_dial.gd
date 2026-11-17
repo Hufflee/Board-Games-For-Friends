@@ -65,7 +65,7 @@ func _draw() -> void:
 				continue  # полоса ушла за край шкалы — её цифру не рисуем (иначе цифры налезают друг на друга)
 			var a := angle_of(target + band[0])
 			var p := c + Vector2(cos(a), sin(a)) * (r - 40)
-			draw_string(font, p + Vector2(-6, 8), str(band[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 22, Color(1, 1, 1, 0.95))
+			draw_string(font, p + Vector2(-6, 8), str(band[1]), HORIZONTAL_ALIGNMENT_LEFT, -1, 22, HCStyle.INK_ART)
 	# деления
 	for i in 21:
 		var a := angle_of(i * 5.0)
@@ -96,7 +96,7 @@ func _draw() -> void:
 	draw_circle(c, 18, arrow)
 	draw_circle(c, 7, HCStyle.CLAY)
 	if can_drag:
-		var pulse := 0.5 + 0.5 * sin(Time.get_ticks_msec() / 220.0)
+		var pulse := 1.0 if Prefs.reduce_motion else 0.5 + 0.5 * sin(Time.get_ticks_msec() / 220.0)
 		draw_circle(tip, 10 + pulse * 4, Color(HCStyle.CLAY, 0.3))
 
 

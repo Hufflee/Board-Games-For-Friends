@@ -128,3 +128,9 @@ class Backdrop extends Control:
 			draw_arc(c, r, 0, TAU, 120, Color(PIStyle.GOLD, 0.09), 1, true)
 
 
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[ink(), surface(), "текст доски", false],
+		[Color("c96e63").lightened(0.15), surface(), "неверная догадка", false],
+	]

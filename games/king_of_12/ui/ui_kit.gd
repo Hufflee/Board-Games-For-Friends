@@ -14,12 +14,19 @@ const PANEL_LIGHT := Color("4a3423")
 const GOLD := Color("e8c26a")
 const GOLD_DARK := Color("a8833c")
 const CREAM := Color("f6efdc")
+const CARD_RIM := Color("8a6b45")
+const CARD_BACK := Color("1c2a4a")
+const CARD_BACK_RIM := Color("d4b062")
+const CARD_BACK_GEM := Color("2a6fa8")
+const PERUDO_SEAT := Color(0.07, 0.05, 0.03, 0.88)
+const PERUDO_ACTIVE_SEAT := Color(0.16, 0.105, 0.035, 0.95)
 const INK := Color("3a2a1c")
 const CRYSTAL := Color("5fb4ef")
 const CRYSTAL_DARK := Color("2a6fa8")
 const RED := Color("d9534f")
 const GREEN := Color("6fcf6f")
 const MUTED := Color("b9b09a")
+const BUTTON_DISABLED_INK := Color("948a7a")
 
 ## Дизайн-система «таверны» (docs/styleboard_tavern.png): золото — акцент/CTA, сукно — стол, дерево — панели;
 ## крем — текст, MUTED — подписи; GREEN — только успех, RED — только провал; CRYSTAL — только «◆».
@@ -124,7 +131,7 @@ static func theme() -> Theme:
 		t.set_color("font_color", cls, CREAM)
 		t.set_color("font_hover_color", cls, Color.WHITE)
 		t.set_color("font_pressed_color", cls, GOLD)
-		t.set_color("font_disabled_color", cls, Color("7d7466"))
+		t.set_color("font_disabled_color", cls, BUTTON_DISABLED_INK)
 
 	var edit := box(Color(0.05, 0.035, 0.02, 0.92), 6, GOLD_DARK, 1)
 	var edit_focus := box(Color(0.06, 0.04, 0.025, 0.95), 6, GOLD, 2)
@@ -359,3 +366,11 @@ static func clear(node: Node) -> void:
 	for c in node.get_children():
 		node.remove_child(c)
 		c.queue_free()
+
+
+static func contrast_pairs() -> Array:
+	return [
+		[CREAM, BG.blend(PANEL), "текст панели", false],
+		[MUTED, BG.blend(PANEL), "подпись", false],
+		[BUTTON_DISABLED_INK, BG.blend(PANEL), "недоступная кнопка", false],
+	]

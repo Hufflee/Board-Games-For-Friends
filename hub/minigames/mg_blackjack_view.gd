@@ -1,4 +1,6 @@
 extends VBoxContainer
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## «Блэкджек» в окне «Общение»: дилер сверху, ваши карты крупно, остальные игроки списком, внизу ставка
 ## и действия. Наведение на любую руку — крупный просмотр её карт рядом. Снимок стола приходит от хоста
 ## (hub/minigames/mg_net.gd, правила — logic/mg_blackjack.gd); окно лишь шлёт действия room_act("blackjack", …).
@@ -130,7 +132,7 @@ func refresh() -> void:
 			var delta := int(mine.delta)
 			var sign := "+" if delta > 0 else ""
 			var color: Color = Color("6fd28b") if delta > 0 else (Color("ff7a6e") if delta < 0 else panel.c_muted)
-			box.add_child(_label("%s · %s%d %s" % [mine.result, sign, delta, _chips_word(absi(delta))], 14, color))
+			box.add_child(_label("%s · %s%s" % [mine.result, sign, TextUI.plural(delta, "фишка", "фишки", "фишек")], 14, color))
 	# остальные игроки
 	var others := list.filter(func(r: Dictionary) -> bool: return int(r.peer) != me)
 	if not others.is_empty():
@@ -149,6 +151,7 @@ func refresh() -> void:
 			var nick := _label("%s · %d" % [str(row.name).left(12), int(row.chips)], 12, Net.color_of(int(row.color)).lightened(0.35))
 			nick.custom_minimum_size.x = _px(96)
 			nick.clip_text = true
+			TextUI.full_on_hover(nick)
 			line.add_child(nick)
 			var cards: Array = row.get("hand", [])
 			if not cards.is_empty():
@@ -161,12 +164,6 @@ func refresh() -> void:
 	_controls(mine, phase)
 
 
-func _chips_word(n: int) -> String:
-	if n % 10 == 1 and n % 100 != 11:
-		return "фишка"
-	if n % 10 in [2, 3, 4] and not n % 100 in [12, 13, 14]:
-		return "фишки"
-	return "фишек"
 
 
 func _status_text(row: Dictionary) -> String:

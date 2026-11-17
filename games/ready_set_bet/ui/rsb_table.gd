@@ -1,4 +1,8 @@
 extends Control
+
+const CardPreview = preload("res://hub/card_hover_preview.gd")
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Черепашьи бега «Ready Set Bet»: трек и комментатор слева, поле ставок справа, лоток жетонов снизу.
 ## Ставка — двумя способами: перетащить жетон на ячейку или кликнуть по ячейке и выбрать жетон
 ## (либо сначала выбрать жетон в лотке, потом ячейку).
@@ -66,6 +70,7 @@ func _ready() -> void:
 	_ticker.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	_ticker.clip_text = true
 	_ticker.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	TextUI.full_on_hover(_ticker)
 	trow.add_child(_ticker)
 	_host_bar = RSBStyle.hbox(4)
 	trow.add_child(_host_bar)
@@ -357,6 +362,7 @@ func _update_players() -> void:
 		nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		nm.clip_text = true
 		nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(nm)
 		row.add_child(nm)
 		var used := 0
 		for t in _v["tokens"][s]:
@@ -365,9 +371,13 @@ func _update_players() -> void:
 		row.add_child(RSBStyle.label("ставок %d/%d" % [used, _v["tokens"][s].size()], RSBStyle.CAP, RSBStyle.MUTED))
 		var vipc: Array = _v["vips"][s]
 		if not vipc.is_empty():
-			var vl := RSBStyle.label("VIP×%d" % vipc.size(), RSBStyle.CAP, RSBStyle.RED, HORIZONTAL_ALIGNMENT_LEFT, "bold")
+			var vl := RSBStyle.label("VIP×%d" % vipc.size(), RSBStyle.BODY, RSBStyle.red_text(), HORIZONTAL_ALIGNMENT_LEFT, "bold")
 			vl.mouse_filter = Control.MOUSE_FILTER_STOP
-			vl.tooltip_text = "\n".join(vipc.map(func(i): return RSBData.vip_title(RSBData.VIP[i]) + " — " + RSBData.vip_text(RSBData.VIP[i])))
+			CardPreview.wire(vl, func() -> Control:
+				var cards := RSBStyle.hbox(6)
+				for index: int in vipc:
+					cards.add_child(RSBVipFace.new(index))
+				return cards, 1.8, false)
 			row.add_child(vl)
 		var m := RSBStyle.label(RSBStyle.money(_v["money"][s]), RSBStyle.BODY, RSBStyle.MONEY, HORIZONTAL_ALIGNMENT_RIGHT, "title")
 		m.custom_minimum_size.x = 56
@@ -805,7 +815,7 @@ func _results_panel() -> void:
 		txt.fit_content = true
 		txt.add_theme_font_size_override("normal_font_size", 13)
 		for l in lines.slice(0, 8):
-			var c := "#1f5c36" if l["win"] else "#c8312b"
+			var c := "#" + (RSBStyle.MONEY if l["win"] else RSBStyle.red_text()).to_html(false)
 			txt.append_text("[color=%s]%s[/color]  «%d» — %s\n" % [c, ("+$%d" % l["delta"]) if l["win"] else ("−$%d" % -int(l["delta"])), l["v"], l["title"]])
 		col.add_child(txt)
 	var row := RSBStyle.hbox(10)
@@ -836,10 +846,10 @@ func _vip_panel() -> void:
 		for k in _v["players"].size():
 			if not _v["vip_hand"][k].is_empty():
 				waiting.append(_name(k))
-		col.add_child(RSBStyle.label("Вы выбрали карту. Ждём: %s" % ", ".join(waiting), RSBStyle.BODY, RSBStyle.CREAM, HORIZONTAL_ALIGNMENT_CENTER, "bold"))
+		col.add_child(RSBStyle.label("Вы выбрали карту. Ждём: %s" % ", ".join(waiting), RSBStyle.BODY, RSBStyle.CREAM_ART, HORIZONTAL_ALIGNMENT_CENTER, "bold"))
 		return
 	var who := ("Выбирает %s: " % _name(s)) if _hotseat() else ""
-	col.add_child(RSBStyle.label(who + "перетащите карту в свою ложу или дважды кликните — вторая уйдёт в сброс.", RSBStyle.BODY, RSBStyle.CREAM, HORIZONTAL_ALIGNMENT_CENTER, "bold"))
+	col.add_child(RSBStyle.label(who + "перетащите карту в свою ложу или дважды кликните — вторая уйдёт в сброс.", RSBStyle.BODY, RSBStyle.CREAM_ART, HORIZONTAL_ALIGNMENT_CENTER, "bold"))
 	# карты — общая механика карт сборника (K12TableCard)
 	var area := Control.new()
 	area.custom_minimum_size = Vector2(640, 330)

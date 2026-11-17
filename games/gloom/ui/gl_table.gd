@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Стол Gloom. Сверху — семьи соперников, внизу слева — ваша семья, справа — рука.
 ## В середине: колода и сброс, панель действия, журнал «истории». Карту из руки перетаскивают на
 ## персонажа (или выбирают щелчком, затем персонажа). Наведение — крупный просмотр карты/стопки.
@@ -351,11 +353,7 @@ func _story_card(st: Dictionary, w: float) -> Control:
 	tr.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
 	tr.custom_minimum_size = Vector2(w, w * GLStyle.CARD.y / GLStyle.CARD.x)
 	var data: Dictionary = GLData.STORIES[id]
-	var req: Array = data["req"]
-	tr.tooltip_text = (
-		"%s\nНужно в семье (живые или мёртвые): %s. Отобрать — нужно больше, чем у владельца."
-		% [data["name"], ", ".join(req.map(func(ic): return "«%s»" % GLData.ICON_NAMES.get(ic, ic)))]
-	)
+	tr.tooltip_text = str(data["name"])
 	var can: bool = st.get("can", false)
 	if st.get("pick", false) and int(_v.get("prompt", {}).get("seat", -1)) == _actor():
 		var pv := id if _v["prompt"]["kind"] == "pick_story" else 1000 + id
@@ -433,6 +431,7 @@ func _family_box(s: int, w: float, mine: bool) -> Control:
 	var total := _family_total(s)
 	if total != 0:
 		var tl := GLStyle.label("  † %+d" % total, GLStyle.CAP, GLStyle.BLOOD_LIGHT)
+		TextUI.stable_numbers(tl, "  † −000")
 		tl.tooltip_text = "Сумма очков мёртвых персонажей (чем меньше — тем лучше)"
 		tl.mouse_filter = Control.MOUSE_FILTER_PASS
 		head.add_child(tl)
@@ -923,7 +922,7 @@ func _show_discard() -> void:
 	p.add_child(col)
 	col.add_child(
 		GLStyle.label(
-			"Сброс · %d карт (сверху — последние)" % d.size(),
+			"Сброс · %s (сверху — последние)" % TextUI.plural(d.size(), "карта", "карты", "карт"),
 			GLStyle.BODY,
 			GLStyle.INK,
 			HORIZONTAL_ALIGNMENT_LEFT,
@@ -1059,7 +1058,7 @@ func _build_turn(col: VBoxContainer, who: String) -> void:
 			_line(
 				"Пока сверху лежит «Застрял в поезде» / «Попал в тюрьму», события играть нельзя.",
 				false,
-				GLStyle.MUTED
+				GLStyle.SILVER
 			)
 		)
 	if _sel >= 0:
@@ -1151,7 +1150,7 @@ func _build_turn(col: VBoxContainer, who: String) -> void:
 				_line(
 					"Перетащите карту на персонажа или щёлкните карту, а затем персонажа. Минусы — своим, плюсы — чужим.",
 					false,
-					GLStyle.MUTED
+					GLStyle.SILVER
 				)
 			)
 		)
@@ -1308,7 +1307,7 @@ func _card_buttons(cards: Array, on_pick: Callable, empty_text: String) -> Contr
 		b.mouse_exited.connect(func(): _preview.visible = false)
 		row.add_child(b)
 	if cards.is_empty() and empty_text != "":
-		row.add_child(_line(empty_text, false, GLStyle.MUTED))
+		row.add_child(_line(empty_text, false, GLStyle.SILVER))
 	return row
 
 
@@ -1346,12 +1345,12 @@ func _build_prompt(col: VBoxContainer, who: String) -> void:
 	var text := ""
 	match pr["kind"]:
 		"discard":
-			text = "Сбросьте %d %s: щёлкните их в руке." % [n, _cards_word(n)]
+			text = "Сбросьте %s: щёлкните их в руке." % TextUI.plural(n, "карту", "карты", "карт")
 		"give":
-			text = "Отдайте %d %s игроку %s: щёлкните их в руке." % [n, _cards_word(n), _name(int(pr["to"]))]
+			text = "Отдайте %s игроку %s: щёлкните их в руке." % [TextUI.plural(n, "карту", "карты", "карт"), _name(int(pr["to"]))]
 		"refresh":
 			text = (
-				("Отметьте до %d карт для сброса (можно ни одной) — потом доберёте до лимита." % n)
+				("Отметьте до %s для сброса (можно ни одной) — потом доберёте до лимита." % TextUI.plural(n, "карты", "карт", "карт"))
 				if n > 0
 				else "Отметьте карты, которые хотите сбросить (можно ни одной), — потом доберёте до лимита."
 			)
@@ -1377,12 +1376,6 @@ func _build_prompt(col: VBoxContainer, who: String) -> void:
 	col.add_child(ok)
 
 
-func _cards_word(n: int) -> String:
-	if n % 10 == 1 and n % 100 != 11:
-		return "карту"
-	if n % 10 in [2, 3, 4] and not n % 100 in [12, 13, 14]:
-		return "карты"
-	return "карт"
 
 
 func _build_react(col: VBoxContainer, who: String) -> void:
@@ -1409,7 +1402,7 @@ func _build_react(col: VBoxContainer, who: String) -> void:
 		row.add_child(no)
 		col.add_child(row)
 	else:
-		col.add_child(_line("Можно ответить… несколько секунд.", false, GLStyle.MUTED))
+		col.add_child(_line("Можно ответить… несколько секунд.", false, GLStyle.SILVER))
 
 
 func _build_results(col: VBoxContainer) -> void:

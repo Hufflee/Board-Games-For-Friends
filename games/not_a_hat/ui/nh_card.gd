@@ -3,8 +3,10 @@ extends Control
 ## Карточка «Это не шляпа!»: лицом — белая с чёрным рисунком и подписью; рубашкой — розовая
 ## с белой стрелкой, куда её передавать (влево / вправо).
 
+const CardPreview = preload("res://hub/card_hover_preview.gd")
 const Flip := preload("res://hub/card_flip.gd")
 var _flip: Node
+var preview_enabled := true
 var _front_gift := -1
 
 var gift := -1  # -1 — рубашкой вверх
@@ -27,6 +29,11 @@ func _init(g: int = -1, d: int = 1) -> void:
 
 func _ready() -> void:
 	_flip = Flip.attach(self, _show_side, gift >= 0)
+	if preview_enabled:
+		CardPreview.wire(self, func() -> Control:
+			var preview: Control = get_script().new(gift, dir)
+			preview.preview_enabled = false
+			return preview, 2.25)
 
 
 func set_card(g: int, d: int, animate: bool = false) -> void:
@@ -42,7 +49,6 @@ func set_card(g: int, d: int, animate: bool = false) -> void:
 			_flip.set_face(g >= 0)
 	else:
 		gift = g
-	tooltip_text = NHData.gift_name(g) if g >= 0 else ("Рубашка: передаётся " + ("влево" if d < 0 else "вправо"))
 	queue_redraw()
 
 
@@ -63,8 +69,13 @@ func _draw() -> void:
 			draw_texture_rect(tex, Rect2(Vector2((r.size.x - s) * 0.5, 10), Vector2(s, s)), false)
 		var f := NHStyle.font("bold")
 		var name := NHData.gift_name(gift)
-		var fs := 13 if name.length() <= 11 else 11
-		draw_string(f, Vector2(4, r.size.y - 10), name, HORIZONTAL_ALIGNMENT_CENTER, r.size.x - 8, fs, NHStyle.INK)
+		var width := r.size.x - 8
+		var text := TextParagraph.new()
+		text.width = width
+		text.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		text.break_flags = TextServer.BREAK_MANDATORY | TextServer.BREAK_WORD_BOUND | TextServer.BREAK_ADAPTIVE
+		text.add_string(name, f, 13)
+		text.draw(get_canvas_item(), Vector2(4, r.size.y - text.get_size().y - 4), NHStyle.INK)
 	else:
 		draw_style_box(NHStyle.box(NHStyle.PINK, 12, NHStyle.INK, 3, 0.25), r)
 		var inner := r.grow(-8)

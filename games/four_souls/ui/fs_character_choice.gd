@@ -128,7 +128,8 @@ func _process(_delta: float) -> void:
 	for index in _pairs.size():
 		var pair := _pairs[index]
 		var face := pair.get_node("Cards") as Control
-		face.position.y = sin(time * 2.0 + index * PI) * 3.0 - (face.scale.x - 1.0) * 120.0
+		var bob := 0.0 if Prefs.reduce_motion else sin(time * 2.0 + index * PI) * 3.0
+		face.position.y = bob - (face.scale.x - 1.0) * 120.0
 
 
 func _highlight(selected: Button) -> void:

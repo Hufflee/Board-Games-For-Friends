@@ -1,5 +1,7 @@
 class_name TopBar
 extends PanelContainer
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Общая верхняя полоса стола: слева мелкое название игры и часы, под ними ход/раунд, по центру гнездо монетки, справа — общие кнопки
 ## Клавиши Tab и Esc выдвигают прежний ряд действий из-за верхнего края; слева всё видно постоянно.
 ## Всё общее живёт здесь, а стол игры начинается ниже (HEIGHT) — ничего не залезает на поле.
@@ -21,6 +23,7 @@ var coin_dock: Control  # место для монетки-антистресс�
 var coin_center := false  # гнездо монетки — по центру полосы (в некоторых играх), а не за часами
 var coin_at := Callable()  # своё место гнезда: -> Vector2 (центр в экранных координатах), напр. под панелью игры
 var _victory_screen: Control
+var _final_stats_button: Button
 var _table_panel: StyleBox
 var _victory_panel: StyleBoxFlat
 var _victory_backdrop := false
@@ -92,8 +95,8 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 	row.add_child(left)
 	t.title = Label.new()
 	t.title.text = game_title.to_upper()
-	t.title.add_theme_font_size_override("font_size", 11)
-	t.title.add_theme_color_override("font_color", Color(text, 0.8))
+	t.title.add_theme_font_size_override("font_size", 13)
+	t.title.add_theme_color_override("font_color", text)
 	var tf := FontVariation.new()  # разрядка букв
 	tf.base_font = title_font if title_font else ThemeDB.fallback_font
 	tf.spacing_glyph = 2
@@ -111,9 +114,10 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 	t.info.clip_text = true  # длинный ник — многоточием
 	t.info.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	left.add_child(t.info)
+	TextUI.full_on_hover(t.info)
 	t._clock = TurnClock.new()
 	t._clock.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	t._clock.font_size = 12  # в строке мелкого названия — чуть меньше (не scale: он ломал место под плашку)
+	t._clock.font_size = 13  # в строке мелкого названия — чуть меньше (не scale: он ломал место под плашку)
 	head.add_child(t._clock)
 	row.add_child(spacer)
 	t._esc_btn = load("res://hub/escape_key.gd").new()
@@ -196,6 +200,10 @@ static func make(parent: Control, game_title: String, make_button: Callable, bar
 	victory.accent = entry.get("color", Color("b99346"))
 	parent.add_child(victory)
 	t._victory_screen = victory
+	t._final_stats_button = make_button.call("Статистика", 14)
+	t._final_stats_button.hide()
+	t._final_stats_button.pressed.connect(func(): preload("res://hub/final_stats_screen.gd").open(parent, Net.view.get("final_stats", {})))
+	t.actions.add_child(t._final_stats_button)
 	t._ensure_chat_bubbles.call_deferred(parent)
 	parent.add_child(TurnEdgeGlow.new())
 	return t
@@ -243,7 +251,7 @@ func set_victory_backdrop(active: bool, ink := Color("f9edd8")) -> void:
 	add_theme_stylebox_override("panel", _victory_panel if active else _table_panel)
 	coin_dock.z_index = z_index if active else 0
 	var text := ink if active else _table_text
-	title.add_theme_color_override("font_color", Color(text, 0.8))
+	title.add_theme_color_override("font_color", text)
 	info.add_theme_color_override("font_color", text)
 	_esc_btn.set_ink(text)
 
@@ -279,6 +287,7 @@ func _process(_d: float) -> void:
 		if get_parent().has_method("presentation_view"):
 			shown = get_parent().call("presentation_view")
 		_victory_screen.sync(shown)
+		_final_stats_button.visible = shown.has("final_stats") and not _victory_screen.visible
 	# z_index влияет на рисунок, но поздние контейнеры стола перехватывают GUI.
 	# Поднимаем полосу только под немодальными соседями; окна остаются последними.
 	var parent := get_parent()
@@ -322,13 +331,10 @@ func _process(_d: float) -> void:
 		if absf(_left.custom_minimum_size.x - w) > 0.5:
 			_left.custom_minimum_size.x = w
 	var playing := Net.in_session() and not Net.view.is_empty()
-	var spectator := bool(Net.view.get("spectator", false))
 	_pause_btn.visible = playing and Net.is_host()
-	_host_btn.visible = playing and Net.is_host() and not spectator
 	_pause_icon.sync_state(Net.paused)
 	_pause_btn.text = "Продолжить" if Net.paused else "Пауза"
 	_invite_btn.visible = Net.is_party()
-	_spec_btn.visible = playing and not spectator and Net.can_spectate()
 	var unread := chat.unread() if chat else 0
 	unread += int(Net.minigames.dots())  # непрочитанное в чате + ходы соперников и приглашения
 	var t := "Общение" + (" (%d)" % unread if unread > 0 else "")
@@ -341,12 +347,33 @@ func _process(_d: float) -> void:
 func _place_actions() -> void:
 	if not is_instance_valid(_drawer) or not is_instance_valid(_esc_btn):
 		return
-	var natural := _drawer.get_combined_minimum_size()
 	var right := _esc_btn.global_position.x - 6.0
 	var left := _left.get_global_rect().end.x + 12.0
-	if not coin_center and not coin_at.is_valid():
+	if not coin_at.is_valid():
 		left = maxf(left, coin_dock.get_global_rect().end.x + 12.0)
-	var fit := minf(1.0, maxf(1.0, right - left) / maxf(1.0, natural.x))
+	var available := maxf(1.0, right - left)
+	var playing := Net.in_session() and not Net.view.is_empty()
+	var spectator := bool(Net.view.get("spectator", false))
+	var show_host := playing and Net.is_host() and not spectator
+	var show_spec := playing and not spectator and Net.can_spectate()
+	var separation := _drawer.get_theme_constant("separation")
+	var full_width := 0.0
+	var count := 0
+	for child: Control in _drawer.get_children():
+		var shown := child.visible
+		if child == _host_btn:
+			shown = show_host
+		elif child == _spec_btn:
+			shown = show_spec
+		if shown:
+			full_width += child.get_combined_minimum_size().x
+			count += 1
+	full_width += separation * maxi(0, count - 1)
+	var show_optional := available >= full_width * 0.85
+	_host_btn.visible = show_host and show_optional
+	_spec_btn.visible = show_spec and show_optional
+	var natural := _drawer.get_combined_minimum_size()
+	var fit := minf(1.0, available / maxf(1.0, natural.x))
 	# Раньше правый HBox растягивался по высоте общей строки вместе с левым блоком.
 	_drawer.size = Vector2(natural.x, maxf(natural.y, _left.size.y))
 	_drawer.scale = Vector2(fit, fit)

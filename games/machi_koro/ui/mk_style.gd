@@ -3,7 +3,10 @@ extends RefCounted
 
 const HEAD := preload("res://games/brodilka/art/fonts/Oswald-Variable.ttf")
 const BODY := preload("res://games/dangerous_words/art/fonts/Nunito-Variable.ttf")
-const ACCENT := Color("278c93")
+const CHANGE_TEXT := Color("f2f0df")
+const COIN_FILL := Color("c69e55")
+const COIN_INK := Color("203c40")
+const ACCENT := Color("1f7a81")
 
 static func dark() -> bool:
 	return Prefs.dark_theme()
@@ -54,8 +57,8 @@ static func theme() -> Theme:
 	t.set_font("font", "Title", HEAD)
 	t.set_color("font_color", "ConfirmPanel", ink())
 	for state: String in ["normal", "hover", "pressed", "focus"]:
-		t.set_stylebox(state, "SelectedButton", box(ACCENT.lightened(0.1) if state == "hover" else ACCENT, 10))
-		t.set_color("font_" + ("color" if state == "normal" else state + "_color"), "SelectedButton", Color("f1f3e7"))
+		t.set_stylebox(state, "SelectedButton", box(ACCENT.darkened(0.07) if state == "hover" else ACCENT, 10))
+		t.set_color("font_" + ("color" if state == "normal" else state + "_color"), "SelectedButton", Color.WHITE)
 	return t
 
 static func label(text: String, font_size: int = 18) -> Label:
@@ -96,3 +99,11 @@ static func clear(node: Node) -> void:
 	for child in node.get_children():
 		node.remove_child(child)
 		child.queue_free()
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[ink(), surface(), "текст карты", false],
+		[Color.WHITE, ACCENT, "выбранная кнопка", false],
+	]

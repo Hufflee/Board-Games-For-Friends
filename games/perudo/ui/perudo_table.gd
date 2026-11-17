@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Стол «Перудо»: стаканы игроков по кругу, свои кости, ставка в центре, панель ставки,
 ## вскрытие с подсчётом. Состояние — из Net.view, действия — Net.send_action.
 
@@ -99,6 +101,7 @@ func _ready() -> void:
 	# история ставок лежит прямо на пергаменте стола — тёмные «чернила» со светлой обводкой
 	_history = K12UI.label("", K12UI.CAP, Color("3a2410"), HORIZONTAL_ALIGNMENT_CENTER)
 	_history.add_theme_font_override("font", K12UI.font("bold"))
+	TextUI.stable_numbers(_history, "000")
 	_history.add_theme_color_override("font_outline_color", Color(0.96, 0.9, 0.76, 0.85))
 	_history.add_theme_constant_override("outline_size", 4)
 	_history.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -286,7 +289,7 @@ func _build() -> void:
 	_rows.clear()
 	_shaken_seen.clear()
 	for s in _n:
-		var p := K12UI.panel(Color(0.07, 0.05, 0.03, 0.88), 6, "small")
+		var p := K12UI.panel(K12UI.PERUDO_SEAT, 6, "small")
 		_seats_layer.add_child(p)
 		_plates.append(p)
 		var cup := PerudoCup.new(76.0 if s == _me else 62.0)
@@ -365,6 +368,8 @@ func _update_plates() -> void:
 		nm.clip_text = false
 		var fits := nm.get_combined_minimum_size().x <= avail
 		nm.clip_text = not fits
+		nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(nm)
 		nm.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN if fits else Control.SIZE_EXPAND_FILL
 		nm.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 		head.add_child(nm)
@@ -392,7 +397,7 @@ func _update_plates() -> void:
 		p.modulate = Color(1, 1, 1, 0.45) if _v["counts"][s] == 0 else Color.WHITE
 		# место ходящего: тёплая заливка, толстая золотая рамка и пульсирующее золотое свечение (_process);
 		# поля внутри те же, что у остальных, — раскладка не прыгает
-		var sb := K12UI.box(Color(0.16, 0.105, 0.035, 0.95) if turn_now else Color(0.07, 0.05, 0.03, 0.88), 6, K12UI.GOLD if turn_now else Color(K12UI.GOLD, 0.0), 3)
+		var sb := K12UI.box(K12UI.PERUDO_ACTIVE_SEAT if turn_now else K12UI.PERUDO_SEAT, 6, K12UI.GOLD if turn_now else Color(K12UI.GOLD, 0.0), 3)
 		if turn_now:
 			sb.shadow_color = Color(K12UI.GOLD, 0.5)
 			sb.shadow_size = 12
@@ -546,7 +551,10 @@ func _update_panel() -> void:
 		dudo.pressed.connect(func():
 			Sfx.play("arr", -2)
 			Net.send_action("challenge"))
-		act.add_child(dudo)
+		var challenge := K12UI.vbox(3)
+		challenge.add_child(dudo)
+		challenge.add_child(K12UI.label("На столе меньше ставки", 13, K12UI.INK))
+		act.add_child(challenge)
 
 		_add_calza(act)
 	if _v["can_maputo"]:
@@ -881,7 +889,7 @@ func _on_chat_bubble(entry: Dictionary) -> void:
 	if _bubbles.has(s) and is_instance_valid(_bubbles[s]):
 		_bubbles[s].queue_free()
 	var b := K12UI.label(str(entry["text"]).left(60), 15 if entry["kind"] == "emote" else 13, K12UI.INK, HORIZONTAL_ALIGNMENT_CENTER)
-	b.add_theme_stylebox_override("normal", K12UI.box(Color("f6efdc"), 12, Color("8a6b45"), 2))
+	b.add_theme_stylebox_override("normal", K12UI.box(Color(K12UI.CREAM, 0.92), 12, K12UI.CARD_RIM, 2))
 	b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	b.custom_minimum_size = Vector2(150, 0)
 	b.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -934,4 +942,7 @@ func _add_calza(parent: Control) -> void:
 		if _can_act() and bool(_v.get("can_calza", false)):
 			Sfx.play("card_shove")
 			Net.send_action("calza"))
-	parent.add_child(calza)
+	var exact := K12UI.vbox(3)
+	exact.add_child(calza)
+	exact.add_child(K12UI.label("Ставка верна ровно", 13, K12UI.INK))
+	parent.add_child(exact)

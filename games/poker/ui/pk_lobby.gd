@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## «Покер»: лобби. Число мест (офлайн — с ботами) и режим: «Классика» / «Спортивный».
 const Style := preload("res://games/poker/ui/pk_style.gd")
 var app: Node
@@ -78,8 +80,8 @@ func _rebuild() -> void:
 	var goal := chosen if chosen > 0 else auto_target
 	var hint := "Раздачи без конца. Проиграли стек — садитесь заново со 100 BB."
 	if mode != "classic":
-		hint = "Сессии по %d раздач, очки за места; забрал за сессию все фишки — ещё +1. Победа — %d очков%s." % [
-			PKRules.SESSION_HANDS, goal, " (2 × %d + 1)" % count_now if chosen <= 0 else ""]
+		hint = "Сессии по %d раздач, очки за места; забрал за сессию все фишки — ещё +1. Победа — %s%s." % [
+			PKRules.SESSION_HANDS, TextUI.plural(goal, "очко", "очка", "очков"), " (2 × %d + 1)" % count_now if chosen <= 0 else ""]
 	if mode == "cheat":
 		hint += " После префлопа, флопа и тёрна — по одной жульнической карте."
 	if mode == "cheat_experimental":

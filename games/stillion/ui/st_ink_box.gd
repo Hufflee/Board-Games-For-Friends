@@ -28,7 +28,12 @@ func set_corner_radius_all(r: int) -> void:
 
 
 func _draw(ci: RID, rect: Rect2) -> void:
+	if rect.size.x <= 1.0 or rect.size.y <= 1.0:
+		return
 	var outline := _shape(rect, wobble)
+	if Geometry2D.triangulate_polygon(outline).is_empty():
+		outline = PackedVector2Array([rect.position, Vector2(rect.end.x, rect.position.y),
+			rect.end, Vector2(rect.position.x, rect.end.y)])
 	if shadow_offset != Vector2.ZERO and shadow_color.a > 0.0:
 		var sh := PackedVector2Array()
 		for p in outline:

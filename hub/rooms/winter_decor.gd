@@ -115,13 +115,13 @@ func _process(delta: float) -> void:
 	_t += delta
 	for group in 2:
 		for i in BULB_COLORS.size():
-			var state := _light_state(modes[group], i, _t)
+			var state := Vector2(0.68, i) if Prefs.reduce_motion else _light_state(modes[group], i, _t)
 			var m := _bulb_materials[group * BULB_COLORS.size() + i]
 			m.set_shader_parameter("lit", state.x)
 			m.set_shader_parameter("color_index", int(state.y))
-			m.set_shader_parameter("blink", 1.0 if modes[group] == 2 else 0.0)  # мигание вразнобой считает шейдер
+			m.set_shader_parameter("blink", 1.0 if modes[group] == 2 and not Prefs.reduce_motion else 0.0)  # мигание вразнобой считает шейдер
 	if _star_material != null:
-		_star_material.emission_energy_multiplier = 0.91 + 0.18 * sin(_t * 2.1)
+		_star_material.emission_energy_multiplier = 0.91 if Prefs.reduce_motion else 0.91 + 0.18 * sin(_t * 2.1)
 	_shelf_clock += delta
 	if _shelf_clock >= 0.25:
 		_shelf_clock = 0.0
@@ -1288,8 +1288,9 @@ class TvSnow extends Control:
 			_flakes.append(Vector4(rng.randf() * size.x, rng.randf() * size.y, rng.randf_range(18.0, 46.0), rng.randf_range(3.0, 7.0)))
 
 	func _process(delta: float) -> void:
-		_time += delta
-		queue_redraw()
+		if not Prefs.reduce_motion:
+			_time += delta
+			queue_redraw()
 
 	func _draw() -> void:
 		for f: Vector4 in _flakes:

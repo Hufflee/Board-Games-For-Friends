@@ -63,6 +63,7 @@ var _skateboard_home := Transform3D.IDENTITY
 var shelf_wood := Color("2a1d42")  # цвет шкафа и тумбы под телевизором — личный выбор игрока, в любой комнате
 const SHELF_COLORS := [["Полночная слива", "2a1d42"], ["Слоновая кость", "e9dfc9"], ["Орех", "6b4a32"],
 	["Спелая вишня", "e8a3b9"], ["Кровавый", "5c1018"], ["Лесной зелёный", "1f3f2b"]]
+var cube_hidden := false  # неоновый куб на шкафу невидим (нажимать можно)
 var tv_stand: Array = []  # [часть тумбы, насколько темнее шкафа]
 var door_hinge: Node3D  # створка двери (_wall_door)
 var cassettes: Array = []  # кассеты на полке тумбы (_tv_corner): тема может перекрасить
@@ -109,7 +110,7 @@ var _board_press := false  # нажали на доску: короткий кл
 var _board_hold := 0.0
 var _board_grab := Vector3.ZERO
 const BOARD_AT := Vector3(1.13, 1.02, BACK + 0.012)
-var panels: GamePanels  # «окошки игр» (стеклянный куб на шкафу)
+var _shelf_cube: Node3D
 var shelf_top_right := Vector3.ZERO  # место на крышке шкафа у правого края (куб-кнопка окошек игр)
 var _hover: GameBox
 var _cam_home := Transform3D.IDENTITY
@@ -130,7 +131,6 @@ var _window_sill_bounds: AABB
 var _basket: Node3D
 var _basket_left: Node3D  # вторая корзина — на левой стене с полками (владелец 14.11)
 var ball_left_on := false  # мяч в виде на полки (свой выключатель); включён в обоих видах — ходит за камерой
-var _ball_spots: Dictionary = {}  # вид (false — шкаф, true — полки) → где мяч остался
 const BALL_HOME_LEFT := Vector3(-1.6, 1.4, 0.4)  # отсюда мяч падает в виде на полки
 const BALL_FRONT_LEFT := -0.9  # невидимая стенка перед камерой в виде на полки (по X)
 var wall_shelf_wood := Color("2a1d42")  # цвет полок на левой стене (кнопка цвета в виде на полки)
@@ -140,7 +140,8 @@ var _ball_held := false
 var _ball_plane := -1.2  # глубина, на которой мяч ведут за курсором
 var _ball_asleep := false
 var _ball_view := ""
-var _ball_check := 0.0  # раз в BALL_CHECK с — виден ли мяч (не за телевизором, не за краем кадра)
+var _ball_hidden_time := 0.0
+var _ball_check := 0.0  # период проверки видимости; BALL_CHECK — порог непрерывной невидимости
 const BALL_CHECK := 5.0
 var ball_on := true  # мяч включают и выключают кнопкой в редакторе шкафа (user://room_props.cfg)
 const FIDGET_SCALE := 1.35  # крупнее настоящего: по ручкам должно быть легко попасть
@@ -229,13 +230,19 @@ func _ready() -> void:
 	_basket_left.set("default_at", Vector2(-5.9, 1.25))
 	_basket_left.room = self
 	add_child(_basket_left)
-	panels = GamePanels.new()
-	add_child(panels)
-	panels.setup(
-		camera, boxes.filter(func(b): return not b.is_figurine()).map(func(b): return b.game), shelf_top_right
-	)
-	panels.editor_requested.connect(open_shelf_editor)
+	_shelf_cube = preload("res://hub/shelf_cube.gd").new()
+	add_child(_shelf_cube)
+	_shelf_cube.setup(camera, shelf_top_right)
+	_shelf_cube.editor_requested.connect(open_shelf_editor)
+	var cube_prefs := ConfigFile.new()
+	cube_prefs.load("user://room_props.cfg")
+	cube_hidden = bool(cube_prefs.get_value("panels", "cube_hidden", false))
+	_shelf_cube.set_launcher_hidden(cube_hidden)
 	_make_shelf_ui()
+	get_viewport().size_changed.connect(func():
+		if _upper_edit:
+			_frame_shelf()
+	)
 	_frame_shelf()
 	camera.fov = _shelf_camera_fov()
 	# «презентационный» свет от камеры: слабый всегда, ярче — когда коробка в руках
@@ -335,6 +342,16 @@ func _show_wood(color: Color) -> void:
 	shelf_wood = color
 	_rebuild_shelf_geometry()
 	_apply_stand_color()
+
+
+## Кнопка куба в редакторе: неоновый куб на шкафу невидим / снова виден. Сохраняется, друзья видят так же.
+func set_cube_hidden(hidden: bool) -> void:
+	cube_hidden = hidden
+	_shelf_cube.set_launcher_hidden(hidden)
+	var prefs := ConfigFile.new()
+	prefs.load("user://room_props.cfg")
+	prefs.set_value("panels", "cube_hidden", hidden)
+	prefs.save("user://room_props.cfg")
 
 
 ## Цвет полок на левой стене (кнопка цвета в виде на полки): сохраняется, друзья видят.
@@ -549,17 +566,12 @@ func _soft(size: Vector3, pos: Vector3, look: String, col: Color, parent: Node3D
 	var m := GameBox.soft_material(size / 2.0, rad, col, 0.5)
 	match look:
 		"wood_dark", "wood_light":
-			m.set_shader_parameter("albedo2", col.darkened(0.35 if look == "wood_dark" else 0.22))
-			m.set_shader_parameter("grain", 1.0)
-			m.set_shader_parameter("grain_scale", 30.0)
-			var longest := Vector3(0, 1, 0)
+			var longest := Vector3.UP
 			if size.x >= size.y and size.x >= size.z:
-				longest = Vector3(1, 0, 0)
+				longest = Vector3.RIGHT
 			elif size.z >= size.y:
-				longest = Vector3(0, 0, 1)
-			m.set_shader_parameter("grain_dir", longest)
-			m.set_shader_parameter("roughness", 0.42)
-			m.set_shader_parameter("clearcoat_amount", 0.55)
+				longest = Vector3.BACK
+			_wood_finish(m, col, longest, look == "wood_light")
 		"plastic":
 			m.set_shader_parameter("roughness", 0.35)
 			m.set_shader_parameter("clearcoat_amount", 0.3)
@@ -583,6 +595,16 @@ func _soft(size: Vector3, pos: Vector3, look: String, col: Color, parent: Node3D
 	mi.rotation = rot
 	parent.add_child(mi)
 	return mi
+
+
+## Та же фактура дерева и лак для шкафа и фигурных полок.
+func _wood_finish(material: ShaderMaterial, color: Color, direction: Vector3, lighter: bool = false) -> void:
+	material.set_shader_parameter("albedo2", color.darkened(0.22 if lighter else 0.35))
+	material.set_shader_parameter("grain", 1.0)
+	material.set_shader_parameter("grain_scale", 30.0)
+	material.set_shader_parameter("grain_dir", direction)
+	material.set_shader_parameter("roughness", 0.42)
+	material.set_shader_parameter("clearcoat_amount", 0.55)
 
 
 func _cyl(r_top: float, r_bot: float, h: float, pos: Vector3, mat: Material, parent: Node3D = self) -> MeshInstance3D:
@@ -776,6 +798,7 @@ func _window() -> void:
 	_city_textures = {"front": tex, "side": ImageTexture.create_from_image(side_city_image())}
 	_city_view = ShaderMaterial.new()
 	_city_view.shader = preload("res://hub/window_city.gdshader")
+	Prefs.watch_motion_shader(self, _city_view)
 	_city_view.set_shader_parameter("side_view", 0.0)
 	_city_view.set_shader_parameter("window_aspect", size.x / size.y)
 	_city_view.set_shader_parameter("front_city", tex)
@@ -1421,6 +1444,7 @@ func _tv_corner(tv_x: float) -> void:
 	screen.mesh = q
 	var sm := ShaderMaterial.new()
 	sm.shader = preload("res://hub/crt_screen.gdshader")
+	Prefs.watch_motion_shader(self, sm)
 	# что показывает экран — рисуется в отдельную картинку, а шейдер кинескопа её изгибает,
 	# раздвигает по каналам и прочерчивает строками (надписи — часть картинки, а не поверх стекла)
 	sm.set_shader_parameter("screen_tex", _tv_picture().get_texture())
@@ -1658,6 +1682,22 @@ func _figure_radius(box: GameBox) -> float:
 
 ## Места для фигурок вне шкафа: верх телевизора и тумба по бокам от него, верх шкафа.
 const FIGURE_SURFACES := ["tv", "stand_left", "stand_right", "cabinet"]
+const Upper := preload("res://hub/upper_shelves.gd")
+const INVALID_UPPER_POINT := Vector2i(1000, 1000)
+var _upper_edit := false
+var _upper_start := INVALID_UPPER_POINT
+var _upper_press_screen := Vector2.ZERO
+var _upper_selected: Array = []
+var _upper_new_shallow := false
+var _upper_depths: Dictionary = {}
+var _upper_root: Node3D
+var _upper_spans: Dictionary = {}
+var _upper_lines: Array[PackedVector2Array] = []
+var _upper_support: Dictionary = {}
+var _upper_faces: Dictionary = {}
+const UPPER_CONTACT_EPS := 0.0005
+
+
 const WALL_SHELVES := {"wall_lower": 1.10, "wall_upper": 1.72}
 const WALL_SHELF_DEPTH := 0.45
 const WALL_SHELF_BACK := -1.84
@@ -1683,16 +1723,10 @@ func look_left_wall(on: bool) -> void:
 	if not can_turn_room() or _looking_left == on:
 		return
 	_clear_shelf_selection()
-	# мяч: включён в обоих видах — идёт за камерой; только в одном — ждёт там, где его оставили
-	var was_on := _ball_view_on()
-	if is_instance_valid(_ball):
-		_ball_spots[_looking_left] = _ball.position
 	_looking_left = on
 	_ball_camera_paused = true
-	if is_instance_valid(_ball) and _ball_view_on():
-		_ball.position = _ball_home() if was_on else _ball_spots.get(on, _ball_home())
-		_ball_v = Vector3.ZERO
-		_ball_asleep = false
+	_ball_check = 0.0
+	_ball_hidden_time = 0.0
 	_apply_ball_on()
 	if is_instance_valid(_edge_overlay):
 		_edge_overlay.visible = _editor_on and not on
@@ -1913,6 +1947,423 @@ func _wall_item_extent(box: GameBox) -> Vector3:
 	return Vector3(ext.z, ext.y, ext.x)
 
 
+func set_upper_edit(enabled: bool) -> void:
+	_upper_edit = enabled and _editor_on and not _looking_left
+	_upper_start = INVALID_UPPER_POINT
+	_upper_selected.clear()
+	_cancel_drag()
+	_frame_shelf()
+	_edge_overlay.queue_redraw()
+
+
+func upper_fine_grid() -> bool:
+	return _cabinet.get("upper_fine_grid", false) == true
+
+
+func set_upper_fine_grid(enabled: bool) -> void:
+	if _upper_edit:
+		_cabinet.upper_fine_grid = enabled
+		_upper_start = INVALID_UPPER_POINT
+		_edge_overlay.queue_redraw()
+
+
+func upper_has_selection() -> bool:
+	return not _upper_selected.is_empty() and Upper.read(_cabinet).has(_upper_selected)
+
+
+func upper_shallow() -> bool:
+	if not upper_has_selection():
+		return _upper_new_shallow
+	return Upper.shallow_keys(_cabinet, [_upper_selected]).size() == 1
+
+
+func set_upper_shallow(enabled: bool) -> void:
+	if not _upper_edit:
+		return
+	if not upper_has_selection():
+		_upper_new_shallow = enabled
+		return
+	var edges := Upper.read(_cabinet)
+	var shallow := Upper.shallow_keys(_cabinet, edges)
+	for segment: Array in Upper.connected(edges, _upper_selected):
+		var key := Upper.segment_key(segment)
+		shallow.erase(key)
+		if enabled:
+			shallow.append(key)
+	_apply_upper_edges(edges, shallow)
+
+
+func upper_smoothing() -> float:
+	return clampf(float(_cabinet.get("upper_smoothing", 0.0)), 0.0, 1.0)
+
+
+func set_upper_smoothing(amount: float) -> void:
+	if not _upper_edit:
+		return
+	var previous := upper_smoothing()
+	_cabinet.upper_smoothing = clampf(amount, 0.0, 1.0)
+	_rebuild_upper_shelves()
+	if not _upper_boxes_fit():
+		_cabinet.upper_smoothing = previous
+		_rebuild_upper_shelves()
+		_editor_ui.call("sync", "Освободите место у стыка, чтобы скруглить угол.")
+		return
+	_reflow(false)
+
+
+func _upper_floor(config: Dictionary) -> float:
+	return (0.06 + ShelfConfig.full_height(config)) * SHELF_SCALE + 0.14
+
+
+func _rebuild_upper_shelves() -> void:
+	if is_instance_valid(_upper_root):
+		remove_child(_upper_root)
+		_upper_root.queue_free()
+	_upper_root = Node3D.new()
+	add_child(_upper_root)
+	var edges := Upper.read(_cabinet)
+	var shallow := Upper.shallow_keys(_cabinet, edges)
+	_upper_spans.clear()
+	_upper_depths.clear()
+	_upper_lines.clear()
+	_upper_support.clear()
+	_upper_faces.clear()
+	# Форма уже задана мешем; границы мягкого бокса вынесены за его пределы.
+	var wood := GameBox.soft_material(Vector3.ONE * 10.0, 0.0, shelf_wood)
+	_wood_finish(wood, shelf_wood, Vector3.RIGHT)
+	for depth: float in [Upper.DEPTH, Upper.SHALLOW_DEPTH]:
+		var group := edges.filter(func(segment): return shallow.has(Upper.segment_key(segment)) == (depth == Upper.SHALLOW_DEPTH))
+		var geometry := Upper.geometry(group, upper_smoothing())
+		_upper_spans.merge(geometry.flat)
+		_upper_support.merge(geometry.support)
+		for surface: String in geometry.flat:
+			_upper_depths[surface] = depth
+		_upper_lines.append_array(geometry.lines)
+		_upper_faces[depth] = Upper.build(_upper_root, geometry.lines, wood, depth)
+
+func _upper_screen(p: Vector2, depth: float = Upper.DEPTH) -> Vector2:
+	return camera.unproject_position(Vector3(p.x, p.y, Upper.FRONT - Upper.DEPTH + depth))
+
+
+func _upper_grid_depth() -> float:
+	return Upper.SHALLOW_DEPTH if upper_shallow() else Upper.DEPTH
+
+
+func _upper_grid_points() -> Array[Vector2i]:
+	var points: Array[Vector2i] = []
+	var step := Upper.FINE_TICKS if upper_fine_grid() else Upper.BASIC_TICKS
+	var floor_y := _upper_floor(_cabinet)
+	for y in range(Upper.GRID_TOP, Upper.MAX_Y + 1, step):
+		if Upper.point(Vector2i(0, y)).y < floor_y:
+			break
+		for x in range(-Upper.HALF_WIDTH, Upper.HALF_WIDTH + 1, step):
+			points.append(Vector2i(x, y))
+	# Узел имеющейся полки остаётся доступным при смене шага и после загрузки старой сетки.
+	for segment: Array in Upper.read(_cabinet):
+		for cell: Vector2i in segment:
+			if not points.has(cell):
+				points.append(cell)
+	return points
+
+
+func _upper_point_at(screen: Vector2) -> Vector2i:
+	var depth := _upper_grid_depth()
+	var best := 14.0
+	var found := INVALID_UPPER_POINT
+	for cell: Vector2i in _upper_grid_points():
+		var distance := screen.distance_to(_upper_screen(Upper.point(cell), depth))
+		if distance < best:
+			best = distance
+			found = cell
+	return found
+
+
+func _draw_upper_grid() -> void:
+	var depth := _upper_grid_depth()
+	var hover := _upper_point_at(get_viewport().get_mouse_position())
+	for cell: Vector2i in _upper_grid_points():
+		var active := cell == hover or cell == _upper_start
+		_edge_overlay.draw_circle(
+			_upper_screen(Upper.point(cell), depth), 4.0 if active else 2.5,
+			HubStyle.CYAN if active else Color(HubStyle.CYAN, 0.53), true, -1.0, true
+		)
+	if upper_has_selection():
+		for segment: Array in Upper.connected(Upper.read(_cabinet), _upper_selected):
+			var a := _upper_screen(Upper.point(segment[0]), depth)
+			var b := _upper_screen(Upper.point(segment[1]), depth)
+			_edge_overlay.draw_line(a, b, Color(HubStyle.CYAN, 0.55), 2.0, true)
+	if _upper_start != INVALID_UPPER_POINT:
+		var end := get_viewport().get_mouse_position() if hover == INVALID_UPPER_POINT else _upper_screen(Upper.point(hover), depth)
+		_edge_overlay.draw_line(_upper_screen(Upper.point(_upper_start), depth), end, HubStyle.CYAN, 3.0, true)
+
+
+func _upper_pointer(event: InputEvent) -> bool:
+	if not _upper_edit or not event is InputEventMouse:
+		return false
+	if event is InputEventMouseMotion:
+		Input.set_default_cursor_shape(Input.CURSOR_CROSS)
+		return true
+	if not event is InputEventMouseButton:
+		return false
+	if event.button_index == MOUSE_BUTTON_LEFT:
+		if event.pressed:
+			_upper_press_screen = event.position
+			_upper_start = _upper_point_at(event.position)
+		else:
+			_upper_finish_line(event.position)
+		return true
+	if event.button_index == MOUSE_BUTTON_RIGHT and event.pressed:
+		_upper_erase(event.position)
+		return true
+	return false
+
+
+func _upper_finish_line(screen: Vector2) -> void:
+	var start := _upper_start
+	_upper_start = INVALID_UPPER_POINT
+	if screen.distance_to(_upper_press_screen) < 5.0:
+		_upper_selected = _upper_segment_at(screen)
+		_editor_ui.call("sync")
+		return
+	var end := _upper_point_at(screen)
+	if start == INVALID_UPPER_POINT or end == INVALID_UPPER_POINT or start == end:
+		return
+	var edges := Upper.read(_cabinet)
+	var segment := Upper.edge(start, end)
+	if edges.has(segment):
+		return
+	if edges.size() >= Upper.MAX_EDGES:
+		_editor_ui.call("sync", "Достигнут предел числа отрезков.")
+		return
+	var shallow := Upper.shallow_keys(_cabinet, edges)
+	var adjoining := Upper.connected(edges, segment)
+	var narrow := _upper_new_shallow
+	if not adjoining.is_empty():
+		narrow = shallow.has(Upper.segment_key(adjoining[0]))
+		for existing: Array in adjoining:
+			if shallow.has(Upper.segment_key(existing)) != narrow:
+				_editor_ui.call("sync", "Чтобы соединить полки, сначала задайте им одинаковую глубину.")
+				return
+	if adjoining.is_empty():
+		_upper_selected.clear()
+	if narrow:
+		shallow.append(Upper.segment_key(segment))
+	edges.append(segment)
+	_apply_upper_edges(edges, shallow)
+
+
+func _upper_segment_at(screen: Vector2) -> Array:
+	var edges := Upper.read(_cabinet)
+	var shallow := Upper.shallow_keys(_cabinet, edges)
+	var closest: Array = []
+	var best := 12.0
+	for segment: Array in edges:
+		var depth := Upper.SHALLOW_DEPTH if shallow.has(Upper.segment_key(segment)) else Upper.DEPTH
+		var a := _upper_screen(Upper.point(segment[0]), depth)
+		var b := _upper_screen(Upper.point(segment[1]), depth)
+		var distance := screen.distance_to(Geometry2D.get_closest_point_to_segment(screen, a, b))
+		if distance < best:
+			best = distance
+			closest = segment
+	return closest
+
+
+func _upper_erase(screen: Vector2) -> void:
+	var closest := _upper_segment_at(screen)
+	if closest.is_empty():
+		return
+	var edges := Upper.read(_cabinet)
+	edges.erase(closest)
+	_apply_upper_edges(edges, Upper.shallow_keys(_cabinet, edges))
+
+
+func _apply_upper_edges(edges: Array, shallow: Array[String]) -> void:
+	var previous := Upper.read(_cabinet)
+	var previous_shallow := Upper.shallow_keys(_cabinet, previous)
+	Upper.store(_cabinet, edges)
+	_store_upper_depths(shallow)
+	_rebuild_upper_shelves()
+	if not _upper_boxes_fit():
+		Upper.store(_cabinet, previous)
+		_store_upper_depths(previous_shallow)
+		_rebuild_upper_shelves()
+		_editor_ui.call("sync", "Сначала снимите коробки с затронутой полки.")
+		return
+	_reflow(false)
+	_editor_ui.call("sync")
+	Sfx.play("card_place", -8)
+
+
+func _store_upper_depths(shallow: Array[String]) -> void:
+	if shallow.is_empty():
+		_cabinet.erase("upper_shallow_edges")
+	else:
+		_cabinet.upper_shallow_edges = shallow
+
+
+func _upper_front(surface: String) -> float:
+	return Upper.FRONT - Upper.DEPTH + float(_upper_depths[surface])
+
+
+func _upper_extent(box: GameBox) -> Vector3:
+	return (_figure_cabinet_extent(box) if box.is_figurine() else _box_extent(box)) * SHELF_SCALE
+
+
+func _upper_center_range(surface: String, width: float) -> Vector2:
+	var flat: Array = _upper_spans[surface]
+	var support: Array = _upper_support[surface]
+	var first := maxf(flat[0].x, support[0].x + width * 0.5)
+	var last := minf(flat[1].x, support[1].x - width * 0.5)
+	if first > last and first - last <= UPPER_CONTACT_EPS:
+		return Vector2.ONE * ((first + last) * 0.5)
+	return Vector2(first, last)
+
+
+func _upper_center_z(surface: String, depth: float) -> float:
+	var spare := maxf(0.0, float(_upper_depths[surface]) - depth)
+	return _upper_front(surface) - depth * 0.5 - minf(0.008, spare)
+
+
+func _upper_home(box: GameBox, surface: String, share: float, legacy: bool = false) -> Transform3D:
+	var extent := _upper_extent(box)
+	var span := _upper_center_range(surface, extent.x)
+	var flat: Array = _upper_spans[surface]
+	var floor_y := float(flat[0].y) + Upper.THICKNESS * 0.5
+	if legacy:
+		# Старые доли отсчитывались от обрезанного радиусом участка с запасом.
+		var inset := extent.x * 0.5 + 0.005
+		span = Vector2(flat[0].x + inset, flat[1].x - inset)
+	var home := Vector3(lerpf(span.x, span.y, share), floor_y + extent.y * 0.5, _upper_center_z(surface, extent.z))
+	return Transform3D(_box_basis(box), _shelf_root.to_local(home))
+
+
+func _upper_placed_home(box: GameBox, anchor: Dictionary) -> Transform3D:
+	return _upper_home(box, str(anchor.surface), float(anchor.x), anchor.get("fit", false) != true)
+
+
+## Свободные позиции центра с учётом реальной грани доски на высоте коробки.
+func _upper_open_ranges(surface: String, extent: Vector3) -> Array[Vector2]:
+	var limits := _upper_center_range(surface, extent.x)
+	if limits.x > limits.y or extent.z > float(_upper_depths[surface]) + UPPER_CONTACT_EPS:
+		return []
+	var bottom := float(_upper_spans[surface][0].y) + Upper.THICKNESS * 0.5
+	var top := bottom + extent.y
+	if top >= H - 0.01:
+		return []
+	var back := _upper_center_z(surface, extent.z) - extent.z * 0.5
+	var open: Array[Vector2] = [limits]
+	var half_width := extent.x * 0.5 - UPPER_CONTACT_EPS
+	for depth: float in _upper_faces:
+		if back >= Upper.FRONT - Upper.DEPTH + depth - UPPER_CONTACT_EPS:
+			continue
+		for face: PackedVector2Array in _upper_faces[depth]:
+			var covered := Upper.face_range_at_height(face, bottom + UPPER_CONTACT_EPS, top - UPPER_CONTACT_EPS)
+			if covered.x > covered.y:
+				continue
+			var blocked := Vector2(covered.x - half_width, covered.y + half_width)
+			if blocked.y <= limits.x or blocked.x >= limits.y:
+				continue
+			var remaining: Array[Vector2] = []
+			for span: Vector2 in open:
+				if blocked.y <= span.x or blocked.x >= span.y:
+					remaining.append(span)
+				else:
+					if span.x <= blocked.x:
+						remaining.append(Vector2(span.x, blocked.x))
+					if span.y >= blocked.y:
+						remaining.append(Vector2(blocked.y, span.y))
+			open = remaining
+			if open.is_empty():
+				return open
+	return open
+
+
+func _upper_can_place(box: GameBox, surface: String, share: float, legacy: bool = false) -> bool:
+	if not _upper_spans.has(surface):
+		return false
+	var extent := _upper_extent(box)
+	var at := _shelf_root.to_global(_upper_home(box, surface, share, legacy).origin)
+	var fits := _upper_open_ranges(surface, extent).any(func(span: Vector2):
+		return at.x >= span.x - 0.00001 and at.x <= span.y + 0.00001
+	)
+	if not fits:
+		return false
+	var bounds := Rect2(Vector2(at.x, at.y) - Vector2(extent.x, extent.y) * 0.5, Vector2(extent.x, extent.y))
+	for other: GameBox in boxes:
+		if other == box or other == _drag_box:
+			continue
+		var anchor: Dictionary = _cabinet.get("figure_surfaces", {}).get(_shelf_id(other), {})
+		var other_surface := str(anchor.get("surface", ""))
+		if not _upper_spans.has(other_surface):
+			continue
+		var center := _shelf_root.to_global(_upper_placed_home(other, anchor).origin)
+		var size := _upper_extent(other)
+		if absf(center.z - at.z) >= (extent.z + size.z) * 0.5 + 0.004:
+			continue
+		if bounds.grow(0.004).intersects(Rect2(Vector2(center.x, center.y) - Vector2(size.x, size.y) * 0.5, Vector2(size.x, size.y))):
+			return false
+	return true
+
+
+func _upper_boxes_fit() -> bool:
+	for box: GameBox in boxes:
+		var anchor: Dictionary = _cabinet.get("figure_surfaces", {}).get(_shelf_id(box), {})
+		var surface := str(anchor.get("surface", ""))
+		if surface.begins_with(Upper.PREFIX) and not _upper_can_place(box, surface, float(anchor.x), anchor.get("fit", false) != true):
+			return false
+	return true
+
+
+func _upper_drop(screen: Vector2) -> bool:
+	if _looking_left:
+		return false
+	var extent := _upper_extent(_drag_box)
+	var best := 34.0
+	var target := ""
+	var requested_x := 0.0
+	for surface: String in _upper_spans:
+		var span: Array = _upper_spans[surface]
+		var a: Vector2 = span[0]
+		var b: Vector2 = span[1]
+		var mid_y := a.y + (extent.y + Upper.THICKNESS) * 0.5
+		var front_z := _upper_center_z(surface, extent.z)
+		var first := camera.unproject_position(Vector3(a.x, mid_y, front_z))
+		var last := camera.unproject_position(Vector3(b.x, mid_y, front_z))
+		var distance := screen.distance_to(Geometry2D.get_closest_point_to_segment(screen, first, last))
+		if distance >= best:
+			continue
+		best = distance
+		target = surface
+		var origin := camera.project_ray_origin(screen)
+		var ray := camera.project_ray_normal(screen)
+		var hit: Variant = Plane(Vector3.BACK, front_z).intersects_ray(origin, ray)
+		requested_x = (a.x + b.x) * 0.5 if hit == null else float(hit.x)
+	if target.is_empty():
+		return false
+	var limits := _upper_center_range(target, extent.x)
+	var closest := requested_x
+	var distance_to_fit := INF
+	for span: Vector2 in _upper_open_ranges(target, extent):
+		var x := clampf(requested_x, span.x, span.y)
+		if absf(x - requested_x) < distance_to_fit:
+			distance_to_fit = absf(x - requested_x)
+			closest = x
+	var fraction := 0.5
+	if limits.y - limits.x > 0.00001:
+		fraction = clampf(inverse_lerp(limits.x, limits.y, closest), 0.0, 1.0)
+	var fits := _upper_can_place(_drag_box, target, fraction)
+	_drag_surface = {"surface": target, "x": fraction, "fit": true}
+	_drag_at = _upper_home(_drag_box, target, fraction).origin
+	_drag_to = _drag_from if fits else Vector2i(-1, -1)
+	_drag_cascade = []
+	_reflow(true)
+	_drag_box.set_swap_highlight(true, fits)
+	Input.set_default_cursor_shape(Input.CURSOR_DRAG if fits else Input.CURSOR_FORBIDDEN)
+	shelf_hint.emit("Отпустите, чтобы поставить на полку" if fits else "Здесь коробка не помещается")
+	return true
+
+
+
 func _wall_span(box: GameBox, surface: String) -> Array[Vector3]:
 	var ext := _wall_item_extent(box)
 	var edge := -W * 0.5 + 0.05 + WALL_SHELF_DEPTH
@@ -2018,6 +2469,12 @@ func _rotate_figure(direction: int) -> void:
 	var id := _shelf_id(_selected_box)
 	var previous := float(_cabinet.figure_yaw.get(id, 0.0))
 	_cabinet.figure_yaw[id] = wrapf(previous + direction * PI / 12.0, -PI, PI)
+	var anchor: Dictionary = _cabinet.get("figure_surfaces", {}).get(id, {})
+	var surface := str(anchor.get("surface", ""))
+	if _upper_spans.has(surface) and not _upper_can_place(_selected_box, surface, float(anchor.x), anchor.get("fit", false) != true):
+		_cabinet.figure_yaw[id] = previous
+		shelf_hint.emit("В этом положении фигурке тесно")
+		return
 	if not _cabinet.get("figure_surfaces", {}).has(id):
 		for cell in _rows.size():
 			if (_rows[cell] as Array).has(_selected_box) and (_figure_cabinet_extent(_selected_box).z > CELL_D + 0.0005 or _row_overflows(_rows[cell], cell)):
@@ -2049,13 +2506,15 @@ func _init_custom_shelf() -> void:
 	# Новые игры (из обновления, свои, из мастерской) в шкаф сами не встают — прилетают к игроку
 	# (hub/rooms/arrivals.gd); до выбора места стоят на нижней полке левой стены.
 	var seen: Variant = Arrivals.seen_ids()
+	if seen == null:
+		# Первый запуск: всё, что есть, — получено; кроме игр с пометкой "new" в HubGames — они прилетают.
+		Arrivals.mark_seen(boxes.filter(func(box: GameBox) -> bool: return not box.game.get("new", false)).map(func(box: GameBox) -> String: return _shelf_id(box)))
+		seen = Arrivals.seen_ids()
 	var fresh: Array = []
 	for box: GameBox in boxes:
 		var id := _shelf_id(box)
 		if seen != null and not (seen as Array).has(id) and not box.is_figurine() and not box.is_cups() and not box.dim:
 			fresh.append(box)
-	if seen == null:
-		Arrivals.mark_seen(boxes.map(func(box: GameBox) -> String: return _shelf_id(box)))
 	var result := ShelfConfig.load_state(defaults, _shelf_ids(), _shelf_sizes(), ShelfConfig.FILE,
 		fresh.map(func(box: GameBox) -> String: return _shelf_id(box)))
 	if result.ok:
@@ -2081,6 +2540,7 @@ func _apply_shelf_state(state: Dictionary) -> void:
 
 
 func _rebuild_shelf_geometry() -> void:
+	_rebuild_upper_shelves()
 	_hover = null
 	for box: GameBox in boxes:
 		box.stop_shelf_motion()
@@ -2188,8 +2648,8 @@ func _rebuild_shelf_geometry() -> void:
 		* Vector3(left + full_width - 0.07, base_y + full_height + BOARD * 0.5, z + 0.02)
 	)
 	_reflow(false)
-	if is_instance_valid(panels):
-		panels.move_launcher(shelf_top_right)
+	if is_instance_valid(_shelf_cube):
+		_shelf_cube.move_launcher(shelf_top_right)
 
 
 ## Нижняя левая ячейка заполнена стопкой, как в исходном шкафу; декор уступает место настоящей игре.
@@ -2267,6 +2727,9 @@ func request_shelf_geometry(geometry: Dictionary) -> String:
 	var result := ShelfConfig.solve(proposed, _editor_preferences, _shelf_sizes(), _box_modes, old_cols)
 	if not result.ok:
 		return str(result.message)
+	for segment: Array in Upper.read(result.config):
+		if minf(Upper.point(segment[0]).y, Upper.point(segment[1]).y) < _upper_floor(result.config):
+			return "Сначала освободите место над шкафом: там проходит полка."
 	_apply_shelf_state(result)
 	if _edge_drag.is_empty():
 		_frame_shelf()
@@ -2283,6 +2746,20 @@ func _frame_shelf() -> void:
 		return
 	if _looking_left:
 		_cam_home = Transform3D(Basis.IDENTITY, Vector3(0.19, 1.44, -1.15)).looking_at(Vector3(-2.70, 1.33, -0.43))
+		return
+	if _upper_edit:
+		var bottom := _upper_floor(_cabinet)
+		var size := get_viewport().get_visible_rect().size
+		var usable_width := maxf(size.x - 80.0 - 280.0, size.x * 0.4)
+		var half_height := maxf(
+			(Upper.TOP - bottom) * 0.62,
+			(Upper.HALF_WIDTH * Upper.UNIT + 0.06) * size.y / usable_width
+		)
+		var center := Vector3(200.0 * half_height / size.y, (Upper.TOP + bottom) * 0.5, Upper.FRONT)
+		var distance := half_height / tan(deg_to_rad(CAMERA_FOV) * 0.5)
+		_cam_home = Transform3D(Basis.IDENTITY, center + Vector3.BACK * distance)
+		camera.transform = _cam_home
+		camera.fov = CAMERA_FOV
 		return
 	var width: float = ShelfConfig.full_width(_cabinet) * SHELF_SCALE
 	var height: float = ShelfConfig.full_height(_cabinet) * SHELF_SCALE
@@ -2301,6 +2778,15 @@ func _frame_shelf() -> void:
 	var aim: Vector3 = (
 		_shelf_root.global_transform * Vector3(SHELF_X, 0.06 + height / (2 * SHELF_SCALE), BACK + 0.18)
 	)
+	if not _upper_lines.is_empty():
+		var top := height
+		var reach := 0.0
+		for line: PackedVector2Array in _upper_lines:
+			for p: Vector2 in line:
+				top = maxf(top, minf(H, p.y + 0.38))
+				reach = maxf(reach, absf(p.x - aim.x))
+		aim.y = (top + 0.06) * 0.5
+		distance = maxf(distance, maxf(top * 0.61 / tangent, (reach + 0.22) / (aspect * tangent)))
 	camera.global_position = aim + Vector3(0, 0.03, distance)
 	camera.look_at(aim)
 	_cam_home = camera.transform
@@ -2308,6 +2794,8 @@ func _frame_shelf() -> void:
 
 ## Масштаб меняет угол обзора, сохраняя точку съёмки и перспективу комнаты.
 func _shelf_camera_fov() -> float:
+	if _upper_edit:
+		return CAMERA_FOV
 	if _looking_left and not board_focused():
 		return 56.0
 	if board_focused():
@@ -2388,7 +2876,7 @@ func open_shelf_editor() -> void:
 	_editor_on = true
 	_undo_stack = []
 	_undo_last = _editor_state()
-	panels.input_locked = true
+	_shelf_cube.input_locked = true
 	_editor_ui = load("res://hub/shelf_editor.gd").new()
 	_editor_ui.set("room", self)
 	add_child(_editor_ui)
@@ -2410,12 +2898,16 @@ func finish_shelf_editor(save: bool) -> void:
 		return
 	Prefs.save()
 	_editor_on = false
-	panels.input_locked = false
+	_upper_edit = false
+	_upper_start = INVALID_UPPER_POINT
+	_upper_selected.clear()
+	_shelf_cube.input_locked = false
 	_edge_overlay.visible = false
 	_editor_ui.queue_free()
 	_editor_ui = null
 	_frame_shelf()
 	Input.set_default_cursor_shape(Input.CURSOR_ARROW)
+	shelf_hint.emit(HINT)
 	editor_mode_changed.emit(false)
 
 
@@ -2435,6 +2927,15 @@ func _cycle_box_pose() -> void:
 		return
 	var anchor: Dictionary = _cabinet.get("figure_surfaces", {}).get(id, {})
 	var surface := str(anchor.get("surface", ""))
+	if _upper_spans.has(surface):
+		if not _upper_can_place(_selected_box, surface, float(anchor.x), anchor.get("fit", false) != true):
+			_box_modes[id] = old
+			shelf_hint.emit("В этом положении коробке тесно на полке.")
+			return
+		_reflow(true)
+		_update_pose_button()
+		_finish_pose_change()
+		return
 	if WALL_SHELVES.has(surface):
 		var target := _shelf_root.to_global(_wall_home(_selected_box, anchor).origin)
 		if not _wall_item_fits(_selected_box, surface, target.z):
@@ -2555,7 +3056,8 @@ func _lift(b: GameBox) -> void:
 	if remote_view or b.is_figurine():
 		return
 	var anchor: Dictionary = _cabinet.get("figure_surfaces", {}).get(_shelf_id(b), {})
-	if WALL_SHELVES.has(anchor.get("surface", "")):
+	var surface := str(anchor.get("surface", ""))
+	if WALL_SHELVES.has(surface) or _upper_spans.has(surface):
 		return
 	_lift_backup = {"config": _cabinet.duplicate(true), "placements": _shelf_ids(), "poses": _box_modes.duplicate(true)}
 	_adopt_neighbor_order()
@@ -3032,6 +3534,9 @@ func _edge_at(screen: Vector2) -> Dictionary:
 func _draw_shelf_edges() -> void:
 	if not _editor_on:
 		return
+	if _upper_edit:
+		_draw_upper_grid()
+		return
 	for edge: Dictionary in _shelf_edges():
 		var hot: bool = (
 			(not _edge_hover.is_empty() and edge.kind == _edge_hover.kind and edge.index == _edge_hover.index)
@@ -3122,7 +3627,7 @@ func _resize_shelf_edge(screen: Vector2) -> void:
 ## Отдельный слой декора: не перехватывает лучи коробок и редактора.
 func _ball_make() -> void:
 	_ball = Node3D.new()
-	_ball.position = BALL_HOME
+	_ball.position = BALL_HOME if ball_on or not ball_left_on else BALL_HOME_LEFT
 	add_child(_ball)
 	var skin := MeshInstance3D.new()
 	var sphere := SphereMesh.new()
@@ -3160,22 +3665,20 @@ func _ball_make() -> void:
 func ball_visible() -> bool:
 	if not is_instance_valid(_ball) or not is_instance_valid(camera):
 		return true
-	var at := _ball.global_position
-	if camera.is_position_behind(at):
-		return false
-	if not get_viewport().get_visible_rect().grow(-6.0).has_point(camera.unproject_position(at)):
-		return false
-	var eye := to_local(camera.global_position)
-	var near := _ball.position + (eye - _ball.position).normalized() * BALL_R * 1.2  # ближняя к камере точка мяча
-	for block: Array in _ball_blocks():
-		var box := AABB(block[0], block[1] - block[0])
-		if box.grow(-0.01).has_point(_ball.position) or box.intersects_segment(eye, near):
-			return false
-	# Предметы с кликабельной формой (лампа, кубик, телевизор…) — лучом от камеры до мяча.
-	var query := PhysicsRayQueryParameters3D.create(camera.global_position, to_global(near), 8)
+	var eye := camera.global_position
+	var center := _ball.global_position
+	var basis := camera.global_transform.basis
+	var query := PhysicsRayQueryParameters3D.create(eye, center, 8)
 	query.exclude = [_ball_body.get_rid()]
-	var hit := get_world_3d().direct_space_state.intersect_ray(query)
-	return hit.is_empty() or str(hit.collider.get_meta("room_prop", "")) in ["poster", "board", "wall_lights"]  # гирлянды тонкие — мяч за ними виден
+	for offset: Vector3 in [Vector3.ZERO, basis.x, -basis.x, basis.y, -basis.y]:
+		var sample := center + offset * BALL_R * 0.85
+		if camera.is_position_behind(sample) or not get_viewport().get_visible_rect().has_point(camera.unproject_position(sample)):
+			continue
+		query.to = sample + (eye - sample).normalized() * BALL_R * 0.35
+		var hit := get_world_3d().direct_space_state.intersect_ray(query)
+		if hit.is_empty() or str(hit.collider.get_meta("room_prop", "")) in ["poster", "board", "wall_lights"]:
+			return true
+	return false
 
 
 ## Мяч потерялся из виду — снова появляется на своём месте и падает в кадр.
@@ -3188,6 +3691,10 @@ func _ball_view_on() -> bool:
 	return ball_left_on if _looking_left else ball_on
 
 
+func _ball_active() -> bool:
+	return _ball_view_on() or (ball_left_on and _ball.position.x < -1.45) or (ball_on and _ball.position.x >= -1.45)
+
+
 func _ball_home() -> Vector3:
 	return BALL_HOME_LEFT if _looking_left else BALL_HOME
 
@@ -3198,7 +3705,7 @@ func _ball_axis() -> Vector3:
 
 
 func _ball_reset() -> void:
-	_ball.position = _ball_home()
+	_ball.position = _ball_home() if _ball_view_on() else (BALL_HOME_LEFT if ball_left_on else BALL_HOME)
 	_ball_v = Vector3.ZERO
 	_ball_asleep = false
 
@@ -3226,9 +3733,10 @@ func set_ball_enabled(on: bool) -> void:
 func _apply_ball_on() -> void:
 	if not is_instance_valid(_ball):
 		return
-	_ball.visible = _ball_view_on()
-	_ball_body.collision_layer = 8 if _ball_view_on() and not _ball_camera_paused else 0
-	if not _ball_view_on() and _ball_held:
+	var enabled := _ball_active()
+	_ball.visible = enabled
+	_ball_body.collision_layer = 8 if enabled and not _ball_camera_paused else 0
+	if not enabled and _ball_held:
 		_ball_held = false
 		Input.set_default_cursor_shape(Input.CURSOR_ARROW)
 
@@ -3298,7 +3806,10 @@ func _ball_throw() -> void:
 
 
 func _ball_step(delta: float) -> void:
-	if not is_instance_valid(_ball) or not _ball_view_on():
+	if not is_instance_valid(_ball):
+		return
+	_apply_ball_on()
+	if not _ball_active():
 		return
 	if _ball_camera_paused:
 		var returned := camera.transform.basis.z.dot(_cam_home.basis.z) > 0.998 and camera.position.distance_to(_cam_home.origin) < 0.08
@@ -3307,11 +3818,12 @@ func _ball_step(delta: float) -> void:
 			return
 		_ball_camera_paused = false
 		_ball_body.collision_layer = 8
-	# Камера у каждого своя (размер окна, приближение) — раз в 5 с проверяем, виден ли мяч; нет — он возвращается.
 	_ball_check += delta
-	if _ball_check >= BALL_CHECK:
+	if _ball_check >= 0.2:
+		_ball_hidden_time = 0.0 if _ball_held or ball_visible() else _ball_hidden_time + _ball_check
 		_ball_check = 0.0
-		if not _ball_held and not ball_visible():
+		if _ball_hidden_time >= BALL_CHECK:
+			_ball_hidden_time = 0.0
 			_ball_reset()
 	# камера сдвинулась (редактор шкафа, размер окна) — спящий мяч мог остаться за кадром: будим
 	var view_key := "%s|%s|%s" % [camera.global_transform, camera.fov, get_viewport().get_visible_rect().size]
@@ -3413,6 +3925,10 @@ func _ball_step(delta: float) -> void:
 				var exits := [[Vector3.UP, high.y - at.y], [Vector3.BACK, high.z - at.z], [Vector3.LEFT, at.x - low.x], [Vector3.RIGHT, high.x - at.x]]
 				exits.sort_custom(func(a: Array, b: Array) -> bool: return float(a[1]) < float(b[1]))
 				contacts.append([exits[0][0], float(exits[0][1]) + BALL_R])
+		for depth: float in _upper_faces:
+			var contact := Upper.ball_contact(_upper_faces[depth], at, BALL_R, depth)
+			if not contact.is_empty():
+				contacts.append(contact)
 		var hit := 0.0
 		for contact: Array in contacts:
 			var normal: Vector3 = contact[0]
@@ -3870,7 +4386,7 @@ func _baskets() -> Array:
 func _box_at(screen_pos: Vector2) -> GameBox:
 	var from := camera.project_ray_origin(screen_pos)
 	var to := from + camera.project_ray_normal(screen_pos) * 20.0
-	var q := PhysicsRayQueryParameters3D.create(from, to, 1)  # только коробки (окошки игр — на своём слое)
+	var q := PhysicsRayQueryParameters3D.create(from, to, 1)  # только коробки; куб на отдельном слое
 	var hit := get_world_3d().direct_space_state.intersect_ray(q)
 	if hit.is_empty():
 		return null
@@ -3881,6 +4397,15 @@ func _box_at(screen_pos: Vector2) -> GameBox:
 func _input(event: InputEvent) -> void:
 	if remote_view:
 		return
+	if _upper_edit and _upper_start != INVALID_UPPER_POINT:
+		var escape: bool = event is InputEventKey and event.pressed and event.keycode == KEY_ESCAPE
+		var released: bool = event is InputEventMouseButton and not event.pressed and event.button_index == MOUSE_BUTTON_LEFT
+		if escape or released:
+			if released and _pointer_clear():
+				_upper_finish_line(event.position)
+			_upper_start = INVALID_UPPER_POINT
+			get_viewport().set_input_as_handled()
+			return
 	if _ball_held:
 		if event is InputEventMouseButton and event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
 			_ball_throw()
@@ -4015,6 +4540,13 @@ func _pointer_clear() -> bool:
 	return control == null or control.mouse_filter == Control.MOUSE_FILTER_IGNORE
 
 func _unhandled_input(event: InputEvent) -> void:
+	if _upper_edit and event is InputEventMouse:
+		_upper_pointer(event)
+		get_viewport().set_input_as_handled()
+		return
+	if not remote_view and _drag_box == null and _shelf_cube.handle_pointer(event):
+		get_viewport().set_input_as_handled()
+		return
 	if _editor_on and _pointer_clear() and _edge_drag.is_empty() and _drag_box == null and not _editor_box_press \
 			and poster_dragging == null and not board_dragging and event is InputEventMouseButton and event.pressed:
 		if event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN]:
@@ -4035,7 +4567,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		_poster_press = null  # короткий клик по плакату ничего не делает
 		get_viewport().set_input_as_handled()
 		return
-	if not remote_view and focused == null and not (panels and panels.is_open) and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
+	if not remote_view and focused == null and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT:
 		var poster := _poster_at(event.position)
 		if poster != null:
 			if _editor_on:
@@ -4060,7 +4592,7 @@ func _unhandled_input(event: InputEvent) -> void:
 		return
 	# Доска кликается и в своей комнате, и в комнате друга (там на неё и клеят). Свою можно перевесить:
 	# в редакторе шкафа — сразу перетаскиванием, вне редактора — удержанием.
-	if (focused == null or remote_view) and not (panels and panels.is_open) and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and _room_prop_at(event.position) == "board":
+	if (focused == null or remote_view) and event is InputEventMouseButton and event.pressed and event.button_index == MOUSE_BUTTON_LEFT and _room_prop_at(event.position) == "board":
 		var pressed_board := _board_at(event.position)
 		if pressed_board != null and not board_focused():
 			sticker_board = pressed_board
@@ -4112,8 +4644,6 @@ func _unhandled_input(event: InputEvent) -> void:
 				else:
 					_clear_shelf_selection()
 		get_viewport().set_input_as_handled()
-		return
-	if panels and panels.is_open:
 		return
 	if focused == null and event is InputEventMouseButton and event.pressed and event.button_index in [MOUSE_BUTTON_WHEEL_UP, MOUSE_BUTTON_WHEEL_DOWN] and _room_prop_at(event.position).begins_with("fidget"):
 		_fidget_spin(1 if event.button_index == MOUSE_BUTTON_WHEEL_DOWN else -1)
@@ -4198,6 +4728,7 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func _notification(what: int) -> void:
 	if what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		_upper_start = INVALID_UPPER_POINT
 		_cancel_drag()
 		if not _edge_drag.is_empty():
 			var state: Dictionary = _edge_drag.state
@@ -4247,7 +4778,9 @@ func _reflow(animate: bool) -> void:
 			b.set_wall_shelf_finish(on_wall and bool(_wall_shelf_lights.get(str(anchor.get("surface", "")), {}).get("on", false)))
 			if on_wall:
 				home = _wall_home(b, anchor)
-			elif b.is_figurine():
+			elif _upper_spans.has(anchor.get("surface", "")):
+				home = _upper_placed_home(b, anchor)
+			elif b.is_figurine() and not str(anchor.get("surface", "")).begins_with(Upper.PREFIX):
 				home.basis = _box_basis(b)
 				if not anchor.is_empty():
 					home.origin = _figure_surface_position(b, str(anchor.surface), float(anchor.x))
@@ -4436,8 +4969,8 @@ func _start_drag() -> void:
 	if b.is_figurine():
 		shelf_hint.emit("Ведите фигурку на полку, шкаф, телевизор или тумбу. Отпустите, чтобы поставить")
 	# Предмет вне шкафа при захвате остаётся на своём месте.
-	if b.is_figurine() or WALL_SHELVES.has((_cabinet.get("figure_surfaces", {}).get(_shelf_id(b), {}) as Dictionary).get("surface", "")):
-		var anchor: Dictionary = _cabinet.get("figure_surfaces", {}).get(_shelf_id(b), {})
+	var anchor: Dictionary = _cabinet.get("figure_surfaces", {}).get(_shelf_id(b), {})
+	if b.is_figurine() or WALL_SHELVES.has(anchor.get("surface", "")) or _upper_spans.has(anchor.get("surface", "")):
 		if _drag_surface.is_empty() and not anchor.is_empty():
 			_drag_surface = anchor.duplicate()
 			_drag_at = b.home.origin
@@ -4459,7 +4992,7 @@ func _drag_update(screen: Vector2) -> void:
 	if _drag_box == null:
 		return
 	_drag_surface = {}
-	if _wall_drop(screen):
+	if _upper_drop(screen) or _wall_drop(screen):
 		return
 	if _wall_drag_only():
 		var span := _wall_span(_drag_box, "wall_lower")
@@ -4835,12 +5368,6 @@ func _process(delta: float) -> void:
 		if _board_hold >= BOX_HOLD:
 			_board_press = false
 			_begin_board_drag(get_viewport().get_mouse_position())
-	if (
-		is_instance_valid(panels)
-		and panels.is_open
-		and (_drag_box != null or _pressed_box != null or _selected_box != null)
-	):
-		_cancel_drag()
 	if is_instance_valid(_pose_button):
 		_update_pose_button()
 	if _editor_on:
@@ -4864,7 +5391,7 @@ func _process(delta: float) -> void:
 			drag_z = float(info.back) + CELL_D - 0.024 - ext.z * 0.5 + DRAG_LIFT
 		if floating.is_figurine():
 			drag_z = float(info.back) + CELL_D - 0.024 - ext.z * 0.5
-		var at := _drag_at if carried else _lift_floor + Vector3(0, ext.y * 0.5 + 0.012 + sin(_t * 2.4) * 0.004, 0)
+		var at := _drag_at if carried else _lift_floor + Vector3(0, ext.y * 0.5 + 0.012 + (0.0 if Prefs.reduce_motion else sin(_t * 2.4) * 0.004), 0)
 		if not carried:
 			drag_z += LIFT_OUT
 		var want := Vector3(
@@ -4885,9 +5412,9 @@ func _process(delta: float) -> void:
 	# лёгкое «дыхание» камеры и параллакс от мыши
 	var vp := get_viewport()
 	var m := vp.get_mouse_position() / Vector2(vp.get_visible_rect().size) - Vector2(0.5, 0.5)
-	if not Prefs.parallax:
-		m = Vector2.ZERO  # параллакс выключен в настройках
-	var sway := Vector3(sin(_t * 0.35) * 0.008, sin(_t * 0.5) * 0.006, 0)
+	if not Prefs.parallax or _upper_edit:
+		m = Vector2.ZERO
+	var sway := Vector3.ZERO if Prefs.reduce_motion or _upper_edit else Vector3(sin(_t * 0.35) * 0.008, sin(_t * 0.5) * 0.006, 0)
 	var inside_front_wall := camera.position.z < ROOM_FRONT - 0.12
 	camera.set_cull_mask_value(20, inside_front_wall)
 	var target := _cam_home
@@ -4900,7 +5427,8 @@ func _process(delta: float) -> void:
 	# лавовая лампа
 	for i in _lava.size():
 		var b: MeshInstance3D = _lava[i]
-		b.position.y = _lava_base - 0.1 + fposmod(_t * (0.035 + i * 0.008) + i * 0.07, 0.22)
+		var drift := 0.0 if Prefs.reduce_motion else _t * (0.035 + i * 0.008)
+		b.position.y = _lava_base - 0.1 + fposmod(drift + i * 0.07, 0.22)
 	# мигающая надпись на экране и чуть мерцающая вывеска
 	if _blink:
 		_blink.visible = fmod(_t, 1.2) < 0.8
@@ -4941,6 +5469,7 @@ func _with_wood(config: Dictionary) -> Dictionary:
 	var out := config.duplicate()
 	out.wood = shelf_wood.to_html(false)
 	out.shelves = wall_shelf_wood.to_html(false)
+	out.cube_hidden = cube_hidden
 	if is_instance_valid(_room_theme) and _room_theme.get("modes") is Array:
 		out.lights = (_room_theme.get("modes") as Array).duplicate()
 	return out
@@ -4984,8 +5513,7 @@ func show_remote(snapshot: Dictionary, follow: bool = true) -> bool:
 			"geometry": _editor_preference_geometry.duplicate(true), "camera": _cam_home
 		}
 		remote_view = true
-		panels.deselect()
-		panels.input_locked = true
+		_shelf_cube.input_locked = true
 	# Друг на другой версии: наших игр/фигурок, которых нет у него, в его шкафу не показываем
 	# (вернутся домой — return_home покажет всё); появились у него после обновления — показываем снова.
 	for box: GameBox in boxes.duplicate():
@@ -5028,6 +5556,8 @@ func show_remote(snapshot: Dictionary, follow: bool = true) -> bool:
 	apply_room(friend_room if Rooms.has(friend_room) else Rooms.saved_id(), false)
 	_show_wood(friend_wood)
 	_show_wall_shelves(friend_shelves)
+	_shelf_cube.set_launcher_hidden(bool(clean.config.get("cube_hidden", false)))
+	clean.config.erase("cube_hidden")
 	if friend_lights is Array and is_instance_valid(_room_theme) and _room_theme.get("modes") is Array:
 		_room_theme.set("modes", Array(friend_lights, TYPE_INT, "", null))  # огни как у друга, не сохраняя
 	_remote_zoom = float(clean.get("camera", {}).get("zoom", 1.0))
@@ -5070,7 +5600,7 @@ func return_home() -> void:
 	_cancel_drag()
 	_reset_view()
 	remote_view = false
-	panels.input_locked = false
+	_shelf_cube.input_locked = false
 	for box: GameBox in _local_room.remote_boxes:
 		boxes.erase(box)
 		box.free()
@@ -5090,6 +5620,7 @@ func return_home() -> void:
 	own.load("user://room_props.cfg")
 	_show_wood(Color.html(str(own.get_value("cabinet", "color", "2a1d42"))))
 	_show_wall_shelves(Color.html(str(own.get_value("cabinet", "shelves", "2a1d42"))))
+	_shelf_cube.set_launcher_hidden(cube_hidden)
 	if is_instance_valid(_room_theme) and _room_theme.has_method("load_modes"):
 		_room_theme.call("load_modes")
 	var selected: String = _local_room.public.selected

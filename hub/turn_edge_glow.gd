@@ -60,7 +60,7 @@ func _process(delta: float) -> void:
 	_t += delta
 	modulate.a = _on
 	_mat.set_shader_parameter("rect_size", size)
-	_mat.set_shader_parameter("strength", pulse(_t))
+	_mat.set_shader_parameter("strength", BASE if Prefs.reduce_motion else pulse(_t))
 
 
 func _active() -> bool:

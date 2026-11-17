@@ -5,6 +5,8 @@ extends RefCounted
 const Definition := preload("res://games/custom/logic/cg_def.gd")
 const Interp := preload("res://games/custom/logic/cg_interp.gd")
 const TurnOrder := preload("res://games/custom/logic/cg_turn_order.gd")
+const CardPiles := preload("res://hub/card_piles.gd")
+const CardReveal := preload("res://hub/card_reveal.gd")
 var definition: Dictionary = {}
 var state: Dictionary = {}
 var players: Array = []
@@ -197,7 +199,7 @@ func card_visible(id: String, seat: int) -> bool:
 	var zone := zone_def(key)
 	var card: Dictionary = state.cards[id]
 	var reveal: Dictionary = state.get("reveals", {}).get(id, {})
-	var temporary: bool = not reveal.is_empty() and (int(reveal.get("seat", -1)) == -1 or int(reveal.get("seat", -1)) == seat)
+	var temporary := CardReveal.visible_to(reveal, seat)
 	return temporary or bool(card.face_up) or (seat >= 0 and owns_zone(key, seat) and zone.get("owner", "shared") != "shared" and zone.get("view", "row") != "pile") or card.visible_to.has(seat)
 
 func move_card(id: String, destination: String, position: String = "top") -> bool:
@@ -208,16 +210,18 @@ func move_card(id: String, destination: String, position: String = "top") -> boo
 	if source.is_empty():
 		last_error = "Карта потеряла свою зону."
 		return false
-	state.zones[source].erase(id)
+	var source_cards: Array = state.zones[source]
+	var target: Array = state.zones[destination]
+	var target_index := -1
+	if position == "bottom":
+		target_index = 0
+	elif position == "random":
+		target_index = rng.randi_range(0, target.size() - int(source == destination))
+	if not CardPiles.transfer(source_cards, source_cards.find(id), target, target_index):
+		last_error = "Карта потеряла свою зону."
+		return false
 	if source != destination:
 		state.cards[id].erase("pos")
-	var target: Array = state.zones[destination]
-	if position == "bottom":
-		target.push_front(id)
-	elif position == "random":
-		target.insert(rng.randi_range(0, target.size()), id)
-	else:
-		target.append(id)
 	_refill_token(id, source)
 	return true
 
@@ -545,7 +549,7 @@ func get_view(seat: int) -> Dictionary:
 	var shown: Array = []
 	for id: String in state.get("reveals", {}):
 		var reveal: Dictionary = state.reveals[id]
-		if int(reveal.seat) == -1 or int(reveal.seat) == seat:
+		if CardReveal.visible_to(reveal, seat):
 			shown.append(id)
 	return {"players": players.duplicate(true), "seat": seat, "zones": zones, "vars": vars, "dice": dice, "dice_sets": dice_sets, "phase": phase,
 		"hints": hints, "show_cards": shown, "sound_event": state.get("sound_event", {}).duplicate(true),
@@ -581,11 +585,8 @@ func tick(delta: float) -> bool:
 				state.timed_out = true
 				return false
 			changed = true
-	for id: String in state.get("reveals", {}).keys():
-		state.reveals[id].seconds = maxf(0.0, float(state.reveals[id].seconds) - delta)
-		if float(state.reveals[id].seconds) <= 0:
-			state.reveals.erase(id)
-			changed = true
+	if CardReveal.tick(state.get("reveals", {}), delta):
+		changed = true
 	if state.get("pending", {}).get("kind") != "wait":
 		if changed:
 			state.revision = int(state.revision) + 1

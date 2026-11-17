@@ -81,6 +81,8 @@ func _ready() -> void:
 	_material.set_shader_parameter("opacity", 0.0)
 	_surface.material = _material
 	add_child(_surface)
+	if _mode == Mode.SHEEN:
+		Prefs.changed.connect(_sync)
 	_host.resized.connect(_sync)
 	_host.theme_changed.connect(_sync)
 	_host.visibility_changed.connect(_sync)
@@ -150,8 +152,9 @@ func _sync() -> void:
 	_material.set_shader_parameter("corners", corners)
 	_material.set_shader_parameter("padding", padding)
 	if _mode == Mode.SHEEN:
-		_surface.visible = allowed
-		_material.set_shader_parameter("opacity", 1.0 if allowed else 0.0)
+		var show_sheen := allowed and not Prefs.reduce_motion
+		_surface.visible = show_sheen
+		_material.set_shader_parameter("opacity", 1.0 if show_sheen else 0.0)
 		set_process(false)
 	else:
 		set_process(allowed)

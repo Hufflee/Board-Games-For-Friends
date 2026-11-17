@@ -24,6 +24,10 @@ static var _theme: Theme
 static var _theme_dark := false
 
 
+static func red_text() -> Color:
+	return Color("ef7a6e") if dark() else RED
+
+
 static func dark() -> bool:
 	return Prefs.theme_mode == "dark"
 
@@ -38,7 +42,7 @@ static func ink() -> Color:
 
 
 static func muted() -> Color:
-	return Color(ink(), 0.62)
+	return Color(ink(), 0.64)
 
 
 static func font(kind: String = "regular") -> Font:
@@ -95,7 +99,7 @@ static func theme() -> Theme:
 		t.set_color("font_disabled_color", kind, Color(ink(), 0.4))
 	t.set_type_variation("PrimaryButton", "Button")
 	for state in ["normal", "hover", "pressed"]:
-		t.set_stylebox(state, "PrimaryButton", box(RED.lightened(0.12 if state == "hover" else 0.0), 12, 3, 0 if state == "pressed" else 4, 12, state != "pressed"))
+		t.set_stylebox(state, "PrimaryButton", box(RED.darkened(0.12).lightened(0.04 if state == "hover" else 0.0), 12, 3, 0 if state == "pressed" else 4, 12, state != "pressed"))
 	for state in ["font_color", "font_hover_color", "font_pressed_color", "font_focus_color"]:
 		t.set_color(state, "PrimaryButton", PAPER)
 	t.set_type_variation("SelectedButton", "Button")
@@ -244,3 +248,18 @@ class FilmFX extends ColorRect:
 		var paint := ShaderMaterial.new()
 		paint.shader = preload("res://games/stillion/ui/st_film.gdshader")
 		material = paint
+		Prefs.changed.connect(_sync_motion)
+		_sync_motion()
+
+	func _sync_motion() -> void:
+		var paint := material as ShaderMaterial
+		paint.set_shader_parameter("reduce_motion", Prefs.reduce_motion)
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[ink(), paper(), "текст панели", false],
+		[muted(), paper(), "подпись", false],
+		[PAPER, RED.darkened(0.12), "главная кнопка", false],
+	]

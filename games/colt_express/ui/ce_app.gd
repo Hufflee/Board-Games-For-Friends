@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Меню, лобби и стол «Кольт Экспресс». Запуск через хаб или main.tscn.
 ## Вид — CEStyle (вестерн-плакат, docs/styleboard_colt_express_western.png): строка «что делать»
 ## над поездом, поезд, строка бандитов, внизу рука / выбор / кадр действия, справа раунд и очередь карт.
@@ -448,6 +450,8 @@ func _choice_card(title: String, caption: String, on: bool, locked: bool) -> But
 	card.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
 	for state in ["normal", "hover", "pressed", "hover_pressed", "disabled"]:
 		var box := CEStyle.inset(10)
+		if on:
+			box.bg_color = CEStyle.c("panel")
 		var selected: bool = state in ["pressed", "hover_pressed"] or (state == "disabled" and on)
 		if selected:
 			box.bg_color = Color(CEStyle.c("brass"), 0.18)
@@ -475,7 +479,7 @@ func _choice_card(title: String, caption: String, on: bool, locked: bool) -> But
 	texts.add_child(name_label)
 	if caption != "":
 		texts.add_child(_label(caption, 13, "regular", "muted"))
-	var badge := _label("ВКЛ" if on else "ВЫКЛ", 13, "bold", "brass" if on else "muted")
+	var badge := _label("ВКЛ" if on else "ВЫКЛ", 13, "bold", "ink" if on else "muted")
 	badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	if caption != "":
 		row.add_child(badge)
@@ -533,6 +537,7 @@ func _show_table() -> void:
 	banner_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	banner_text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	banner_text.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	TextUI.full_on_hover(banner_text)
 	brow.add_child(banner_text)
 	# поезд
 	var frame := _poster(0)
@@ -855,15 +860,17 @@ func _update_roster(active: int) -> void:
 		row.add_child(names)
 		var title := _label(_character_name(id) + (" · вы" if me else ""), 15, "bold")
 		title.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(title)
 		names.add_child(title)
 		var player := _label(_player(seat), 13, "regular", "muted")
 		player.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(player)
 		names.add_child(player)
 		var stats := VBoxContainer.new()
 		stats.add_theme_constant_override("separation", -3)
 		row.add_child(stats)
 		var ammo: int = b.get("ammo", 0)
-		var pips := _label("●".repeat(mini(ammo, 6)) + "○".repeat(maxi(0, 6 - ammo)) if ammo <= 6 else "● × %d" % ammo, 12, "regular", "muted")
+		var pips := _label("●".repeat(mini(ammo, 6)) + "○".repeat(maxi(0, 6 - ammo)) if ammo <= 6 else "● × %d" % ammo, CEStyle.CAP, "regular", "muted")
 		pips.horizontal_alignment = HORIZONTAL_ALIGNMENT_RIGHT
 		pips.tooltip_text = "Пули в барабане: %d" % ammo
 		pips.mouse_filter = Control.MOUSE_FILTER_PASS
@@ -893,7 +900,7 @@ func _add_pile(phase: String) -> void:
 			return
 		var last: Dictionary = queue.back()
 		title = "Сыграно в раунде"
-		caption = "%d карт · сверху последняя%s" % [queue.size(), " (закрытая)" if last.get("kind", "") == "hidden" else ""]
+		caption = "%s · сверху последняя%s" % [TextUI.plural(queue.size(), "карта", "карты", "карт"), " (закрытая)" if last.get("kind", "") == "hidden" else ""]
 		if last.get("kind", "") != "hidden":
 			face = _action_texture(last)
 		below = queue.size() - 1
@@ -1294,9 +1301,10 @@ func _preview_action(entry: Dictionary) -> void:
 	col.add_child(_card_image(entry.texture, Vector2(140, 124)))
 	var title := CEStyle.heading(_caption(entry.card), 16)
 	title.clip_text = true
+	TextUI.full_on_hover(title)
 	title.custom_minimum_size.x = 140
 	col.add_child(title)
-	var hint := _wrap(_label(_action_hint(entry.card.kind), 12, "regular", "muted"))
+	var hint := _wrap(_label(_action_hint(entry.card.kind), CEStyle.CAP, "regular", "muted"))
 	hint.custom_minimum_size = Vector2(140, 0)
 	hint.max_lines_visible = 3
 	col.add_child(hint)

@@ -1,5 +1,7 @@
 class_name SteamInvite
 extends CanvasLayer
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Приглашения Steam внутри игры — без оверлея Steam (он не появляется, если игру запустили
 ## не из библиотеки Steam). Окно со списком друзей и кнопкой «Пригласить», а входящее приглашение —
 ## всплывающая плашка «Принять / Отклонить». Оформление нейтральное, кнопки берут тему текущей игры.
@@ -194,6 +196,7 @@ func _on_steam_lobbies_changed() -> void:
 		nm.custom_minimum_size.x = 220
 		nm.clip_text = true
 		nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(nm)
 		row.add_child(nm)
 		row.add_child(_label("%d/%d" % [f.members, f.capacity], 14))
 		var b := Button.new()

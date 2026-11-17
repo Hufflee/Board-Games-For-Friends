@@ -225,7 +225,7 @@ func rebuild_mini() -> void:
 		_mini.add_theme_stylebox_override("panel", plate)
 		_mini_label = Label.new()
 		_mini_label.add_theme_font_size_override("font_size", 14)
-		_mini_label.add_theme_color_override("font_color", c_head_ink)
+		_mini_label.add_theme_color_override("font_color", c_ink)
 		_mini.add_child(_mini_label)
 	_mini_text()
 	var measured := _mini.get_combined_minimum_size()
@@ -364,9 +364,13 @@ func _restyle() -> void:
 	row.add_child(fold)
 	var close := _on_head(small_button("✕", "Свернуть" if close_minimizes else "Закрыть"))
 	close.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	close.pressed.connect(set_mode.bind(Mode.CLOSED))
+	close.pressed.connect(_close_button_pressed)
 	row.add_child(close)
 	_rebuild_tabs()
+
+
+func _close_button_pressed() -> void:
+	set_mode(Mode.CLOSED)
 
 
 func _rebuild_tabs() -> void:

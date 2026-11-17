@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Общий 2D-финал: одна звезда для победителей, короны, аватарки и доступ к исходному столу.
 ## Подключается TopBar автоматически; не меняет состояние партии и маршруты приложений.
 
@@ -72,6 +74,9 @@ func _ready() -> void:
 	var inspect := _button("Показать стол", "ShowTable")
 	inspect.pressed.connect(func(): show_results(false))
 	_buttons.add_child(inspect)
+	var stats := _button("Статистика", "VictoryStats")
+	stats.pressed.connect(func(): preload("res://hub/final_stats_screen.gd").open(table, Net.view.get("final_stats", {})))
+	_buttons.add_child(stats)
 	if Net.is_host():
 		var lobby := _button("В лобби", "VictoryLobby")
 		lobby.pressed.connect(Net.end_game)
@@ -119,6 +124,9 @@ func _button(text: String, id: String) -> Button:
 	return button
 
 func sync(view: Dictionary) -> void:
+	var stats := _buttons.get_node_or_null("VictoryStats") as Button
+	if stats != null:
+		stats.visible = view.has("final_stats")
 	if game == "the_mind" and is_instance_valid(_buttons):
 		var blind := _buttons.get_node_or_null("ContinueBlind") as Button
 		if blind != null:
@@ -293,6 +301,7 @@ func _add_person(seat: int, winner: bool) -> void:
 	nick.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	nick.max_lines_visible = 2
 	nick.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	TextUI.full_on_hover(nick)
 	nick.add_theme_font_size_override("font_size", 18 if winner else 14)
 	nick.add_theme_color_override("font_color", Color("fff5da") if winner else Color("b4b2ad"))
 	if winner:

@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Общий 2D-стол JSON-игры: раскладка, адресные действия, карты и d6 из общих компонентов.
 
 const Style := preload("res://games/custom/ui/cg_style.gd")
@@ -251,14 +253,17 @@ func _rebuild() -> void:
 		for key: String in _view.zones:
 			if key.ends_with("@%d" % i):
 				hand_count += _view.zones[key].size()
-		caption += " · %d карт" % hand_count
+		caption += " · " + TextUI.plural(hand_count, "карта", "карты", "карт")
 		if _view.get("ready_seats", []).has(i):
 			caption += " · готов"
 		var seat_button := Style.button(caption)
 		seat_button.size_flags_horizontal = SIZE_EXPAND_FILL
 		seat_button.clip_text = true
-		seat_button.disabled = not bool(_view.get("hotseat", false))
+		seat_button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		if not bool(_view.get("hotseat", false)):
+			TextUI.display_only(seat_button)
 		seat_button.pressed.connect(func(): Net.send_action("view_seat", {"seat": i}))
+		TextUI.full_on_hover(seat_button)
 		roster.add_child(seat_button)
 		TurnNameGlow.apply(seat_button, _active_seat(i))
 	var phases: Dictionary = _view.get("cg_meta", {}).get("phase_titles", {})
@@ -402,8 +407,11 @@ func _layout_players(rect: Rect2) -> void:
 		var button := Style.button(("● " if _active_seat(index) else "") + str(_view.players[index].name) + (" · готов" if _view.get("ready_seats", []).has(index) else ""))
 		button.size_flags_horizontal = SIZE_EXPAND_FILL
 		button.clip_text = true
-		button.disabled = not _view.get("hotseat", false)
+		button.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		if not _view.get("hotseat", false):
+			TextUI.display_only(button)
 		button.pressed.connect(func(): Net.send_action("view_seat", {"seat": index}))
+		TextUI.full_on_hover(button)
 		grid.add_child(button)
 
 func _player_text(seat: int) -> String:
@@ -443,6 +451,7 @@ func _player_panel(seat: int, rect: Rect2, compact: bool = false) -> void:
 	text.position = Vector2(16, 8)
 	text.size = Vector2(maxf(8, rect.size.x - 32), maxf(8, rect.size.y - 16))
 	text.clip_text = true
+	TextUI.full_on_hover(text)
 	text.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	panel.add_child(text)
 
@@ -536,7 +545,7 @@ class TrackView extends Control:
 			draw_circle(at, 13, tone)
 			draw_arc(at, 13, 0, TAU, 24, tone.lightened(0.5), 2, true)
 			var letter: String = initials[seat] if seat < initials.size() else "?"
-			draw_string(ThemeDB.fallback_font, at + Vector2(-13, 5), letter, HORIZONTAL_ALIGNMENT_CENTER, 26, 14, Color("140c24") if tone.get_luminance() > 0.5 else Color.WHITE)
+			draw_string(CGStyle.head_font(), at + Vector2(-13, 5), letter, HORIZONTAL_ALIGNMENT_CENTER, 26, 14, Color("140c24") if tone.get_luminance() > 0.5 else Color.WHITE)
 
 ## Планшет игрока: картинка, рамка его цвета, ячейки — его личные зоны (карты кладутся прямо на планшет)
 ## и счётчики его ресурсов. Зоны с планшета не рисуются отдельно (см. _board_zones).

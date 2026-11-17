@@ -46,7 +46,7 @@ func _run() -> void:
 		await _drag(sc, Vector2(sc.x, t.size.y - 60), 12, 0.02)
 		await _wait(0.6)
 		_check(Net.rules.selected[0] == "", "карта утащена обратно в руку")
-		_check(t._hand.size() == Net.rules.hands[0].size(), "в руке снова %d карт" % t._hand.size())
+		_check(t._hand.size() == Net.rules.hands[0].size(), "число карт в руке восстановилось (%d)" % t._hand.size())
 		await _shot("4_back")
 		var card2: Control = t._hand.values()[0]
 		var c2 := card2.get_global_rect().get_center()

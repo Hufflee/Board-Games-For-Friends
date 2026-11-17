@@ -13,6 +13,7 @@ uniform float vignette_amount : hint_range(0.0, 0.3) = 0.08;
 uniform float dust_amount : hint_range(0.0, 0.15) = 0.05;
 // Отрицательное значение — живое время; положительное удобно для проверки кадров.
 uniform float preview_time = -1.0;
+uniform bool reduce_motion = false;
 
 float hash21(vec2 p) {
 	vec3 q = fract(vec3(p.xyx) * 0.1031);
@@ -21,15 +22,15 @@ float hash21(vec2 p) {
 }
 
 void fragment() {
-	float time = preview_time < 0.0 ? TIME : preview_time;
+	float time = reduce_motion ? 0.0 : (preview_time < 0.0 ? TIME : preview_time);
 	float frame = floor(time * film_fps);
 	vec2 pixel = SCREEN_UV / SCREEN_PIXEL_SIZE;
 	vec2 cell = floor(pixel / grain_pixels);
 	float fine = hash21(cell + vec2(frame * 47.0, frame * 19.0)) - 0.5;
 	float soft = hash21(floor(pixel / 3.0) + vec2(frame * 13.0, frame * 31.0)) - 0.5;
 	float grain = (fine * 0.85 + soft * 0.15) * grain_amount;
-	float flicker = (hash21(vec2(frame, 7.0)) - 0.5) * flicker_amount;
-	float ripple = sin(pixel.y * 0.048 - time * 5.2) * ripple_amount * 0.5;
+	float flicker = reduce_motion ? 0.0 : (hash21(vec2(frame, 7.0)) - 0.5) * flicker_amount;
+	float ripple = reduce_motion ? 0.0 : sin(pixel.y * 0.048 - time * 5.2) * ripple_amount * 0.5;
 	vec2 edge = (SCREEN_UV - 0.5) * 1.4142;
 	float vignette = smoothstep(0.3, 0.95, dot(edge, edge)) * vignette_amount;
 	// Редкие маленькие пылинки меняются вместе с плёнкой, без полос во всю высоту.

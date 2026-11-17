@@ -1,4 +1,6 @@
 shader_type canvas_item;
+
+uniform bool reduce_motion = false;
 // Фон: тёплая бумага для рисования, мягкие цветные пятна и (painted = true) акварельные кляксы
 // с тёмным краем, как у высохшей краски, и мелкими брызгами вокруг.
 
@@ -69,7 +71,7 @@ vec3 splat(vec2 uv, vec2 c0, float r0, float seed, vec3 col, vec3 acc) {
 void fragment() {
 	vec2 uv = UV;
 	uv.x *= 16.0 / 9.0;
-	float t = TIME * 0.035;
+	float t = (reduce_motion ? 0.0 : TIME) * 0.035;
 	vec3 c = base;
 	vec2 far = parallax * 0.012;  // мягкие пятна — далеко, сдвигаются чуть-чуть
 	uv -= far;

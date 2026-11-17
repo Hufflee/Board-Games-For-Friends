@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Лобби «Оттенков и подсказок»: игроки и их цвета фишек, круги ведущих, вариант для новичков, старт, чат.
 
 var app: Node
@@ -62,7 +64,7 @@ func _rebuild() -> void:
 		_body.add_child(HCStyle.label("Тест на одном компьютере: передавайте мышь по кругу — программа сама подставит, чей ход.", HCStyle.CAP, HCStyle.SAGE))
 
 	# игроки
-	_body.add_child(HCStyle.caption("Игроки · от 2 до %d · вдвоём — кооператив: %d раундов, цель %d очков" % [Net.MAX_PLAYERS, HCRules.COOP_ROUNDS, HCRules.COOP_GOAL]))
+	_body.add_child(HCStyle.caption("Игроки · от 2 до %d · вдвоём — кооператив: %d раундов, цель %s" % [Net.MAX_PLAYERS, HCRules.COOP_ROUNDS, TextUI.plural(HCRules.COOP_GOAL, "очко", "очка", "очков")]))
 	var members: Array = data["members"]
 	var grid := GridContainer.new()
 	grid.columns = 2

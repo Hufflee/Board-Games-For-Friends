@@ -24,6 +24,15 @@ APPDATA = ROOT / "build" / "appdata_update"
 PORT = 8766
 
 
+NEW_BASE = "99.0.0"  # заведомо новее любой версии проекта
+
+
+def bump(v: str, n: int) -> str:
+	"""0.9.1.2 + 1 → 0.9.1.3 (последняя часть номера, сколько бы частей ни было)."""
+	parts = v.split(".")
+	return ".".join(parts[:-1] + [str(int(parts[-1]) + n)])
+
+
 def sha(p: Path) -> str:
 	return hashlib.sha256(p.read_bytes()).hexdigest()
 
@@ -41,8 +50,7 @@ def manifest(name: str, base: dict, patches: list, version: str) -> None:
 def run(stage: str, url: str = "", extra: dict | None = None) -> bool:
 	env = dict(os.environ, PW_UPDATER="1", UPD_STAGE=stage, UPD_DIR=str(WORK), APPDATA=str(APPDATA))
 	base_ver = next(l.split('"')[1] for l in (ROOT / "project.godot").read_text(encoding="utf-8").splitlines() if l.startswith("config/version="))
-	major, minor, patch = map(int, base_ver.split('.'))
-	env.update(UPD_TEST_BASE=base_ver, UPD_TEST_PATCH1=f"{major}.{minor}.{patch+1}", UPD_TEST_PATCH2=f"{major}.{minor}.{patch+2}")
+	env.update(UPD_TEST_BASE=base_ver, UPD_TEST_PATCH1=bump(base_ver, 1), UPD_TEST_PATCH2=bump(base_ver, 2), UPD_TEST_NEWBASE=NEW_BASE)
 	if url:
 		env["PW_UPDATE_URL"] = f"http://127.0.0.1:{PORT}/{url}"
 	env.update(extra or {})
@@ -63,17 +71,16 @@ def main() -> None:
 	ok = run("prep")
 	# База — та же, что у проекта (0.8.8 из project.godot), поэтому предлагаются патчи.
 	base_ver = next(l.split('"')[1] for l in (ROOT / "project.godot").read_text(encoding="utf-8").splitlines() if l.startswith("config/version="))
-	major, minor, patch = map(int, base_ver.split('.'))
-	v1, v2 = f"{major}.{minor}.{patch+1}", f"{major}.{minor}.{patch+2}"
+	v1, v2 = bump(base_ver, 1), bump(base_ver, 2)
 	(WORK / "fake-base.zip").write_bytes(b"not used")
 	base = entry(base_ver, "fake-base.zip")
 	manifest("latest.json", base, [entry(v1, f"patch-{v1}.pck"), entry(v2, f"patch-{v2}.pck")], v2)
 	manifest("latest_bad.json", base, [entry(v2, f"patch-{v2}.pck", "0" * 64)], v2)
-	# Новая база 0.9.0: zip с «exe» и «dll» в папке (проверка снятия общего префикса).
-	with zipfile.ZipFile(WORK / "PartyWorld-0.9.0-Windows.zip", "w") as z:
+	# Новая база: zip с «exe» и «dll» в папке (проверка снятия общего префикса).
+	with zipfile.ZipFile(WORK / f"PartyWorld-{NEW_BASE}-Windows.zip", "w") as z:
 		z.writestr("PartyWorld/PartyWorld.exe", "new exe")
 		z.writestr("PartyWorld/steam_api64.dll", "new dll")
-	manifest("latest_base.json", entry("0.9.0", "PartyWorld-0.9.0-Windows.zip"), [], "0.9.0")
+	manifest("latest_base.json", entry(NEW_BASE, f"PartyWorld-{NEW_BASE}-Windows.zip"), [], NEW_BASE)
 	inst = WORK / "install"
 	inst.mkdir()
 	(inst / "PartyWorld.exe").write_text("old exe")

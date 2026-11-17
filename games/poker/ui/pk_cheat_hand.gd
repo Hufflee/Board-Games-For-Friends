@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Рука Cheat Poker, просмотр по наведению, перетаскивание и открытые заявки.
 
 const Cards := preload("res://games/poker/logic/pk_cheat_cards.gd")
@@ -259,6 +261,7 @@ func _build_reveal(entries: Array, animate: bool) -> void:
 		player.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 		player.custom_minimum_size.x = width
 		player.clip_text = true
+		TextUI.full_on_hover(player)
 		col.add_child(player)
 		var face := _face(int(entry.id), Vector2(width, width * 1.5), false)
 		col.add_child(face)
@@ -357,6 +360,7 @@ func _choose_target(id: int) -> void:
 	col.add_child(Style.heading(Cards.title(id), 16))
 	var choice := OptionButton.new()
 	choice.clip_text = true
+	TextUI.full_on_hover(choice)
 	choice.get_popup().max_size.y = 352
 	choice.custom_minimum_size.x = TARGET_SIZE.x - 32
 	for option: Dictionary in options:
@@ -462,6 +466,7 @@ func _card_text(face: Control, node_name: String, value: String, font: Font, ink
 	label.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	label.clip_text = true
+	TextUI.full_on_hover(label)
 	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	label.add_theme_font_override("font", font)

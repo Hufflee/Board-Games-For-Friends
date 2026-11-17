@@ -10,6 +10,7 @@ const ART := "res://games/green_team_wins/art/"
 const H1 := 24
 const BODY := 18
 const CAP := 14
+const ANSWER := 24
 
 const LIGHT := {
 	"bg": Color("5ccfdf"),
@@ -112,7 +113,7 @@ static func style_button(button: Button, kind: String = "secondary", size: int =
 	for state in ["normal", "hover", "pressed", "disabled"]:
 		button.add_theme_stylebox_override(state, button_box(kind, state))
 	button.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-	var ink := c("green_ink") if kind == "primary" else (c("muted") if kind == "quiet" else c("ink"))
+	var ink := c("green_ink") if kind == "primary" else c("ink")
 	for key in ["font_color", "font_hover_color", "font_focus_color"]:
 		button.add_theme_color_override(key, ink)
 	button.add_theme_color_override("font_pressed_color", c("green_ink") if kind in ["option", "primary"] else ink)
@@ -175,3 +176,11 @@ static func draw_backdrop(ci: CanvasItem, rect: Rect2) -> void:
 					ci.draw_circle(p, rng.randf_range(5, 9), col)
 			x += step
 		y += step
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[c("ink"), c("bg"), "текст на фоне", false],
+		[c("green_ink"), c("green"), "главная кнопка", false],
+	]

@@ -2,6 +2,7 @@ class_name WinGraph
 extends Control
 ## Ломаная последних 100 партий: каждая победа +1, каждое поражение −1.
 var history: Array = []
+var ranked := false
 
 
 func _ready() -> void:
@@ -24,9 +25,9 @@ func _draw() -> void:
 			HubStyle.MUTED
 		)
 		return
-	var values := PlayerStatsStore.graph_values(history)
-	var lo: int = mini(-1, int(values.min()))
-	var hi: int = maxi(1, int(values.max()))
+	var values := _values()
+	var lo: int = 0 if ranked else mini(-1, int(values.min()))
+	var hi: int = 100 if ranked else maxi(1, int(values.max()))
 	var area := Rect2(48, 18, maxf(1, size.x - 70), maxf(1, size.y - 52))
 	var tick: int = maxi(1, int(ceil(float(hi - lo) / 8.0)))
 	for value in range(lo, hi + 1):
@@ -40,13 +41,13 @@ func _draw() -> void:
 			1
 		)
 		draw_string(font, Vector2(4, y + 5), str(value), HORIZONTAL_ALIGNMENT_LEFT, -1, 13, HubStyle.MUTED)
-	var previous := Vector2(area.position.x, area.end.y - float(-lo) / float(hi - lo) * area.size.y)
+	var previous := Vector2(area.position.x, area.end.y - float(int(values[0]) - lo) / float(hi - lo) * area.size.y)
 	for i in range(1, values.size()):
 		var point := Vector2(
 			area.position.x + float(i) / history.size() * area.size.x,
 			area.end.y - float(int(values[i]) - lo) / float(hi - lo) * area.size.y
 		)
-		var color: Color = HubStyle.CYAN if history[i - 1].won else HubStyle.PINK
+		var color: Color = HubStyle.CYAN if ranked or history[i - 1].won else HubStyle.PINK
 		draw_line(previous, point, Color(color, 0.12), 7, true)
 		draw_line(previous, point, color, 2.5, true)
 		if history.size() <= 40:
@@ -73,8 +74,19 @@ func _gui_input(event: InputEvent) -> void:
 			0,
 			history.size() - 1
 		)
-		var values := PlayerStatsStore.graph_values(history)
+		var values := _values()
+		if ranked:
+			tooltip_text = "Партия %d · обошли %d%% соперников" % [index + 1, int(values[index + 1])]
+			return
 		tooltip_text = (
 			"Партия %d · %s · баланс %+d"
 			% [index + 1, "победа" if history[index].won else "поражение", int(values[index + 1])]
 		)
+
+func _values() -> Array:
+	if not ranked:
+		return PlayerStatsStore.graph_values(history)
+	var values := [int(history[0].rating)]
+	for item: Dictionary in history:
+		values.append(int(item.rating))
+	return values

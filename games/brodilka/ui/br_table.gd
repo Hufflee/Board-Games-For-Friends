@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Стол «Большой бродилки»: поле (зум колесом, перетаскивание мышью, камера сама едет к фишке хода),
 ## фишки шагают по клеткам; справа — игроки и журнал; снизу — кнопка фазы и карты Лавки; в центре —
 ## окно выбора, вытянутая карта и кубики. Состояние — из Net.view, действия — Net.send_action.
@@ -166,11 +168,12 @@ func _ready() -> void:
 		var what: String = spec[0]
 		b.pressed.connect(func(): _cam_button(what))
 		cam.add_child(b)
-	var hint := BRStyle.label("Тащи поле мышью · колесо — зум", BRStyle.CAP, BRStyle.PARCH)
-	hint.add_theme_color_override("font_outline_color", BRStyle.WOOD_DARK)
-	hint.add_theme_constant_override("outline_size", 5)
-	hint.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	cam.add_child(hint)
+	var hint_panel := PanelContainer.new()
+	hint_panel.add_theme_stylebox_override("panel", BRStyle.box(BRStyle.parch(), 8, BRStyle.WOOD, 2, 0.0))
+	hint_panel.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	hint_panel.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	hint_panel.add_child(BRStyle.label("Тащи поле мышью · колесо — зум", BRStyle.CAP, BRStyle.INK))
+	cam.add_child(hint_panel)
 	_board.add_child(cam)
 
 	# правая колонка: кнопки, игроки, журнал
@@ -204,7 +207,7 @@ func _ready() -> void:
 	var tp := BRStyle.panel(10)
 	var tcol := BRStyle.vbox(6)
 	tp.add_child(tcol)
-	tcol.add_child(BRStyle.label("ТАДАМ · действуют на всех", BRStyle.CAP, BRStyle.MUTED, HORIZONTAL_ALIGNMENT_LEFT, "bold"))
+	tcol.add_child(BRStyle.label("ТАДАМ · действуют на всех", BRStyle.CAP, BRStyle.muted(), HORIZONTAL_ALIGNMENT_LEFT, "bold"))
 	_tadam_row = BRStyle.hbox(8)
 	_tadam_row.alignment = BoxContainer.ALIGNMENT_CENTER
 	tcol.add_child(_tadam_row)
@@ -213,7 +216,7 @@ func _ready() -> void:
 	lp.size_flags_vertical = Control.SIZE_EXPAND_FILL
 	var lcol := BRStyle.vbox(6)
 	lp.add_child(lcol)
-	lcol.add_child(BRStyle.label("ЖУРНАЛ", BRStyle.CAP, BRStyle.MUTED, HORIZONTAL_ALIGNMENT_LEFT, "bold"))
+	lcol.add_child(BRStyle.label("ЖУРНАЛ", BRStyle.CAP, BRStyle.muted(), HORIZONTAL_ALIGNMENT_LEFT, "bold"))
 	_log_text = RichTextLabel.new()
 	_log_text.bbcode_enabled = true
 	_log_text.scroll_following = true
@@ -755,7 +758,7 @@ func _update_players() -> void:
 		row.add_theme_stylebox_override("panel", sb)
 		row.mouse_filter = Control.MOUSE_FILTER_STOP
 		row.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-		row.tooltip_text = "Показать персонажа на поле"
+		row.tooltip_text = "%s\nПоказать персонажа на поле" % str(p["name"])
 		var seat := s
 		row.gui_input.connect(func(e: InputEvent):
 			if e is InputEventMouseButton and e.pressed and e.button_index == MOUSE_BUTTON_LEFT:
@@ -773,6 +776,7 @@ func _update_players() -> void:
 		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		var nm := BRStyle.label(str(p["name"]), BRStyle.CAP if compact else BRStyle.BODY, BRStyle.INK, HORIZONTAL_ALIGNMENT_LEFT, "bold")
 		nm.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		TextUI.full_on_hover(nm)
 		TurnNameGlow.apply(nm, cur)
 		if compact:
 			nm.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -787,7 +791,7 @@ func _update_players() -> void:
 			st.append("пропуск хода")
 		if not compact:
 			st.append("клетка %d" % int(p["pos"]))
-		info.add_child(BRStyle.label(" · ".join(st), BRStyle.CAP, BRStyle.MUTED))
+		info.add_child(BRStyle.label(" · ".join(st), BRStyle.CAP, BRStyle.muted()))
 		col.add_child(info)
 		h.add_child(col)
 		for c in p["shop"]:
@@ -811,16 +815,18 @@ func _update_log() -> void:
 
 
 ## Наведение на карту — она показывается крупно рядом (как в Gloom). Берётся текстура самой карты.
-func _hoverable(tr: TextureRect) -> void:
+func _hoverable(tr: Control, art: Texture2D = null) -> void:
 	tr.mouse_entered.connect(func():
-		if preload("res://hub/card_magnifier.gd").offer(tr): return
-		if tr.texture == null:
+		if tr is TextureRect and preload("res://hub/card_magnifier.gd").offer(tr):
+			return
+		var texture: Texture2D = (tr as TextureRect).texture if tr is TextureRect else art
+		if texture == null:
 			return
 		var h := minf(size.y * 0.6, 440.0)
 		var sz := Vector2(h * 0.72, h)
 		var r := Rect2(tr.global_position, tr.size * tr.get_global_transform().get_scale())  # карты на поле масштабированы
 		var x := r.end.x + 14 if r.get_center().x < size.x * 0.5 else r.position.x - sz.x - 14
-		_preview.texture = tr.texture
+		_preview.texture = texture
 		_preview.size = sz
 		_preview.position = Vector2(clampf(x, 8, size.x - sz.x - 8), clampf(r.get_center().y - sz.y * 0.5, 8, size.y - sz.y - 8))
 		_preview.visible = true)
@@ -1009,7 +1015,7 @@ func _update_bar() -> void:
 	head.add_child(dot)
 	head.add_child(BRStyle.label(who, BRStyle.BODY, BRStyle.INK, HORIZONTAL_ALIGNMENT_CENTER, "bold"))
 	if phase == "roll":
-		head.add_child(BRStyle.label("· " + _dice_text(str(_v.get("dice", ""))), BRStyle.BODY, BRStyle.MUTED))
+		head.add_child(BRStyle.label("· " + _dice_text(str(_v.get("dice", ""))), BRStyle.BODY, BRStyle.muted()))
 	_bar_box.add_child(head)
 	var row := BRStyle.hbox(8)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
@@ -1022,7 +1028,7 @@ func _update_bar() -> void:
 			if c.kind != "active":
 				continue
 			var cb := BRStyle.button("%s%s" % [c.name, (" · %d" % int(c.cost)) if int(c.cost) > 0 else ""], BRStyle.CAP)
-			cb.tooltip_text = c.text
+			_hoverable(cb, BRStyle.shop_card_tex(BRData.shop_image(int(my_shop[i]))))
 			cb.disabled = used.has(c.id) or int(_v["players"][me]["coins"]) < int(c.cost) or not _card_usable(me, c.id)
 			var idx := i
 			var id: String = c.id
@@ -1034,7 +1040,7 @@ func _update_bar() -> void:
 	else:
 		var p: Dictionary = _v.get("prompt", {})
 		var wait_seat := int(p["seat"]) if not p.is_empty() else turn
-		row.add_child(BRStyle.label("Ждём: %s…" % _name(wait_seat), BRStyle.BODY, BRStyle.MUTED))
+		row.add_child(BRStyle.label("Ждём: %s…" % _name(wait_seat), BRStyle.BODY, BRStyle.muted()))
 	_bar_box.add_child(row)
 	_place_bar.call_deferred()
 
@@ -1106,7 +1112,7 @@ func _open_dialog(text: String, options: Array, on_pick: Callable, local: bool, 
 	col.custom_minimum_size.x = 420
 	_dialog.add_child(col)
 	if _hotseat():
-		col.add_child(BRStyle.label("Выбирает: " + _name(_actor()), BRStyle.CAP, BRStyle.MUTED, HORIZONTAL_ALIGNMENT_CENTER))
+		col.add_child(BRStyle.label("Выбирает: " + _name(_actor()), BRStyle.CAP, BRStyle.muted(), HORIZONTAL_ALIGNMENT_CENTER))
 	if kind == "draw":
 		text += "
 (кнопкой ниже или щелчком по колоде на поле)"
@@ -1211,7 +1217,7 @@ func _show_results() -> void:
 		if int(e["seat"]) == w and str(e["text"]).begins_with("ПОБЕДА"):
 			why = str(e["text"]).trim_prefix("ПОБЕДА — ")
 	if why != "":
-		col.add_child(BRStyle.label(why, BRStyle.BODY, BRStyle.MUTED, HORIZONTAL_ALIGNMENT_CENTER))
+		col.add_child(BRStyle.label(why, BRStyle.BODY, BRStyle.muted(), HORIZONTAL_ALIGNMENT_CENTER))
 	var row := BRStyle.hbox(12)
 	row.alignment = BoxContainer.ALIGNMENT_CENTER
 	if Net.is_host():
@@ -1301,6 +1307,7 @@ class Pawn:
 		_tex.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		_tex.modulate = IDLE_TINT
 		add_child(_tex)
+		Prefs.changed.connect(_bob)
 		move_child(_nick, -1)  # ник — поверх картинки
 
 	## Поверх других фишек — порядком на поле, а не z_index (тот поднял бы фишку и над окнами интерфейса).
@@ -1312,7 +1319,7 @@ class Pawn:
 		if _bob_tween:
 			_bob_tween.kill()
 		_tex.position.y = 0
-		if not active:
+		if not active or Prefs.reduce_motion:
 			return
 		_bob_tween = create_tween().set_loops()
 		_bob_tween.tween_property(_tex, "position:y", -14.0, 0.45).set_trans(Tween.TRANS_SINE)

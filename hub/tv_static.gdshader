@@ -1,4 +1,6 @@
 shader_type spatial;
+
+uniform bool reduce_motion = false;
 // Коробка «Coming soon»: по граням бегает белый шум, как на выключенном канале ЭЛТ-телевизора.
 // Коробка остаётся объёмной: шум — в свечении, у рёбер (как у soft_box) нормаль загибается.
 
@@ -43,7 +45,7 @@ void fragment() {
 	NORMAL = normalize((VIEW_MATRIX * MODEL_MATRIX * vec4(bent, 0.0)).xyz);
 	// зерно в мировых единицах по двум осям грани — одинаковое на всех гранях
 	vec2 uv = (a.x > 0.5) ? lp.zy : ((a.y > 0.5) ? lp.xz : lp.xy);
-	float tm = mod(TIME, 600.0);  // время по кругу: номер кадра не растёт до огромных значений
+	float tm = mod((reduce_motion ? 0.0 : TIME), 600.0);  // время по кругу: номер кадра не растёт до огромных значений
 	float frame = floor(tm * speed);
 	vec2 cell = floor(uv * grain * 10.0);
 	float v = hash(cell + vec2(mod(frame * 13.1, 977.0), mod(frame * 7.7, 983.0)));

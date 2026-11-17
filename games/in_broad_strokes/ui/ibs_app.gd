@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Лобби и стол «В общих чертах». Запуск из хаба.
 ## Вид — IBSStyle (калька / синька, docs/styleboard_in_broad_strokes_tracing.png): сверху пометка от руки
 ## «что делать», слева планшеты, под ними инструменты художника, справа роль, слово (только художникам),
@@ -176,7 +178,7 @@ func _lobby() -> void:
 	var lc := VBoxContainer.new()
 	lc.add_theme_constant_override("separation", 8)
 	left.add_child(lc)
-	lc.add_child(IBSStyle.heading("Игроки · %d из 8" % members.size(), 26))
+	lc.add_child(IBSStyle.heading("Игроки · %d из 8" % members.size(), IBSStyle.H1))
 	var grid := GridContainer.new()
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 16)
@@ -198,7 +200,7 @@ func _lobby() -> void:
 	var rc := VBoxContainer.new()
 	rc.add_theme_constant_override("separation", 10)
 	right.add_child(rc)
-	rc.add_child(IBSStyle.heading("Словарь", 26))
+	rc.add_child(IBSStyle.heading("Словарь", IBSStyle.H1))
 	var dict_row := HBoxContainer.new()
 	dict_row.add_theme_constant_override("separation", 10)
 	rc.add_child(dict_row)
@@ -210,7 +212,7 @@ func _lobby() -> void:
 		dict_row.add_child(card)
 	rc.add_child(HSeparator.new())
 	# кто угадывает первым: случайно или выбранный игрок; дальше — по разу каждый за круг (владелец, 15.11)
-	rc.add_child(IBSStyle.heading("Первым угадывает", 26))
+	rc.add_child(IBSStyle.heading("Первым угадывает", IBSStyle.H1))
 	var critic_row := HFlowContainer.new()
 	critic_row.add_theme_constant_override("h_separation", 8)
 	critic_row.add_theme_constant_override("v_separation", 8)
@@ -223,7 +225,7 @@ func _lobby() -> void:
 		critic_options.append([i, str(members[i].get("name", "Игрок %d" % (i + 1)))])
 	for option: Array in critic_options:
 		var seat_value: int = option[0]
-		var pick := _button(option[1], 15, "tool")
+		var pick := _button(option[1], IBSStyle.CAP, "tool")
 		pick.toggle_mode = true
 		pick.button_pressed = chosen_critic == seat_value
 		pick.disabled = not host
@@ -231,7 +233,7 @@ func _lobby() -> void:
 		critic_row.add_child(pick)
 	_label(rc, "Дальше искусствовед выбирается случайно, и каждый побудет им по разу, прежде чем кто-то станет снова.", IBSStyle.CAP, "regular", "muted")
 	rc.add_child(HSeparator.new())
-	rc.add_child(IBSStyle.heading("Как играть", 26))
+	rc.add_child(IBSStyle.heading("Как играть", IBSStyle.H1))
 	for line in ["Искусствовед не видит слово — его видят художники.", "Художник проводит на листе две прямые или одну кривую.", "Листы накладываются друг на друга — картинка растёт.", "После каждого слоя — две попытки угадать."]:
 		_label(rc, "— " + line, IBSStyle.BODY)
 	var foot := HBoxContainer.new()
@@ -244,7 +246,7 @@ func _lobby() -> void:
 	LeaveGuard.wire(back, "Выйти из лобби?", "Вы вернётесь в хаб.", _leave)
 	var error := IBSStyle.label("", IBSStyle.CAP, "regular", "red")
 	if host:
-		var start := _button("Начать игру", 20, "primary")
+		var start := _button("Начать игру", IBSStyle.BODY, "primary")
 		start.custom_minimum_size = Vector2(320, 56)
 		start.disabled = members.size() < 2
 		start.pressed.connect(func() -> void: error.text = Net.start_game())
@@ -287,8 +289,8 @@ func _dict_card(title: String, caption: String, on: bool, locked: bool) -> Butto
 	texts.offset_left = 12
 	texts.offset_right = -12
 	card.add_child(texts)
-	texts.add_child(IBSStyle.label(("✓ " if on else "") + title, 17, "bold", "ink"))
-	texts.add_child(IBSStyle.label(caption, 13, "regular", "muted"))
+	texts.add_child(IBSStyle.label(("✓ " if on else "") + title, IBSStyle.BODY, "bold", "ink"))
+	texts.add_child(IBSStyle.label(caption, IBSStyle.CAP, "regular", "muted"))
 	return card
 
 
@@ -304,7 +306,7 @@ func _table() -> void:
 		Prefs.theme_mode = "light" if Prefs.dark_theme() else "dark"
 		Prefs.save()
 		Prefs.changed.emit(), "quiet")
-	var back := _button("Выйти", 14, "quiet")
+	var back := _button("Выйти", IBSStyle.CAP, "quiet")
 	top.actions.add_child(back)
 	LeaveGuard.wire(back, "Выйти из игры?", "Вы вернётесь в хаб.", _leave)
 	var margin := MarginContainer.new()
@@ -321,8 +323,10 @@ func _table() -> void:
 	left.add_theme_constant_override("separation", 4)
 	left.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	main.add_child(left)
-	hint = IBSStyle.heading("", 26, "accent")
-	hint.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	hint = IBSStyle.heading("", IBSStyle.H1, "accent")
+	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	hint.max_lines_visible = 2
+	TextUI.full_on_hover(hint)
 	hint.custom_minimum_size.y = 40
 	left.add_child(hint)
 	board = Board.new()
@@ -475,7 +479,7 @@ func _update_hint() -> void:
 		"guess":
 			text = "Ваш ход: что нарисовано? Попыток: %d" % state.attempts if mine else "%s угадывает · попыток: %d" % [_name(state.critic), state.attempts]
 		"judge":
-			text = "Засчитать «%s»? Это форма загаданного слова?" % state.guess if mine else "%s проверяет ответ «%s»" % [_name(state.artist), state.guess]
+			text = "Проверьте, подходит ли ответ" if mine else "%s проверяет ответ «%s»" % [_name(state.artist), state.guess]
 		"result":
 			text = ("Угадано: «%s»!" if _result_correct else "Не угадали: было «%s»") % state.word
 		"end":
@@ -547,11 +551,11 @@ func _update_side() -> void:
 		var dots := HBoxContainer.new()
 		dots.add_theme_constant_override("separation", 6)
 		for i in 2:
-			dots.add_child(IBSStyle.label("●" if i < state.attempts else "○", 18, "regular", "accent"))
+			dots.add_child(IBSStyle.label("●" if i < state.attempts else "○", IBSStyle.BODY, "regular", "accent"))
 		dots.add_child(IBSStyle.label("попыток на этот слой: %d" % state.attempts, IBSStyle.CAP, "regular", "muted"))
 		side.add_child(dots)
 	side.add_child(HSeparator.new())
-	side.add_child(IBSStyle.heading("Попытки " + ("ваши" if critic else _name(state.critic)), 24))
+	side.add_child(IBSStyle.heading("Попытки " + ("ваши" if critic else _name(state.critic)), IBSStyle.H1))
 	if history.is_empty():
 		_label(side, "Пока не было", IBSStyle.BODY, "regular", "muted")
 	for h in history:
@@ -578,14 +582,17 @@ func _update_action() -> void:
 	elif mine and phase == "draw":
 		var go := _main("Совместить слои", func() -> void: _send("draw", {"strokes": board.draft}))
 		go.disabled = board.draft.is_empty()
-		go.tooltip_text = "Сначала проведите линию" if board.draft.is_empty() else ""
+		go.tooltip_text = "Сначала проведите линию" if go.disabled else ""
+		var why := IBSStyle.label(go.tooltip_text, IBSStyle.CAP, "regular", "muted")
+		why.custom_minimum_size.y = 20
+		action_slot.add_child(why)
 	elif mine and phase == "guess":
 		var field := LineEdit.new()
 		field.placeholder_text = "Ваш ответ"
 		field.max_length = 80
 		field.text = _guess_text
 		field.custom_minimum_size.y = 48
-		field.add_theme_font_size_override("font_size", 20)
+		field.add_theme_font_size_override("font_size", IBSStyle.BODY)
 		action_slot.add_child(field)
 		var go := _main("Угадать", func() -> void: _guess(field.text))
 		go.disabled = field.text.strip_edges().is_empty()
@@ -596,16 +603,21 @@ func _update_action() -> void:
 		field.call_deferred("grab_focus")
 		_add(action_slot, "Пас — ждать следующий слой", func() -> void: _send("pass"))
 	elif mine and phase == "judge":
-		_main("Засчитать «%s»" % state.guess, func() -> void: _send("accept"))
+		var answer := IBSStyle.heading("«%s»" % state.guess, IBSStyle.BODY, "ink")
+		answer.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		answer.max_lines_visible = 2
+		action_slot.add_child(answer)
+		TextUI.full_on_hover(answer)
+		_main("Засчитать ответ", func() -> void: _send("accept"))
 		_add(action_slot, "Не то слово", func() -> void: _send("reject"))
 	elif Net.is_host() and phase == "result":
 		_main("Следующее слово", func() -> void: _send("next"))
 	elif phase == "end":
-		action_slot.add_child(IBSStyle.heading("Угадано слов: %d" % state.score, 30))
+		action_slot.add_child(IBSStyle.heading("Угадано слов: %d" % state.score, IBSStyle.H1))
 		if Net.is_host():
 			_main("В лобби", Net.end_game)
 	if Net.is_host() and phase in ["draw", "guess", "judge"]:
-		var give := _button("Сдаться — удерживайте", 15, "danger")
+		var give := _button("Сдаться — удерживайте", IBSStyle.CAP, "danger")
 		action_slot.add_child(give)
 		LeaveGuard.wire(give, "Сдаться?", "Слово откроется, команда потратит дополнительный лист.", func() -> void: _send("give_up"))
 
@@ -618,9 +630,10 @@ func _guess(value: String) -> void:
 
 
 func _main(caption: String, callback: Callable) -> Button:
-	var b := _button(caption, 20, "primary")
+	var b := _button(caption, IBSStyle.BODY, "primary")
 	b.custom_minimum_size.y = 52
 	b.clip_text = true
+	TextUI.full_on_hover(b)
 	b.pressed.connect(callback)
 	action_slot.add_child(b)
 	return b

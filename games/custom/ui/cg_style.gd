@@ -1,5 +1,7 @@
 class_name CGStyle
 extends RefCounted
+
+const ContrastUI = preload("res://hub/ui_contrast.gd")
 ## Общий 2D-стиль стола и оболочки редактора: шрифты хаба, фиолетовый и бирюзовый.
 
 const HEAD := preload("res://hub/art/fonts/RussoOne-Regular.ttf")
@@ -31,11 +33,12 @@ static func set_game_look(look: Variant) -> void:
 		return
 	var main := Color(str(look.main))
 	var deep := main.get_luminance() < 0.5
+	var surface := main.lightened(0.09) if deep else main.darkened(0.08)
 	_look = {
 		"dark": deep,
 		"bg": main,
-		"panel": main.lightened(0.09) if deep else main.darkened(0.08),
-		"ink": Color("f4eff8").lerp(main, 0.1) if deep else Color("1f1a26").lerp(main, 0.2),
+		"panel": surface,
+		"ink": ContrastUI.pick(surface, [Color("f4eff8"), Color("1f1a26"), Color.WHITE, Color.BLACK]),
 		"accent": Color(str(look.accent)),
 	}
 
@@ -367,3 +370,10 @@ class CardFace extends Control:
 		var text := str(data.get("text", ""))
 		if not text.is_empty():
 			draw_multiline_string(CGStyle.BODY, Vector2(10, size.y * 0.72), text, HORIZONTAL_ALIGNMENT_LEFT, size.x - 20, 16, 3, ink)
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[ink(), panel(), "текст панели", false],
+	]

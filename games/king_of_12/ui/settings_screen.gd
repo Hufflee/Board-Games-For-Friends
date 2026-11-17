@@ -199,6 +199,16 @@ func _ready() -> void:
 	par.button_pressed = Prefs.parallax
 	par.toggled.connect(func(on): Prefs.set_value("parallax", on))
 	graphics.add_child(par)
+	var motion := WrappedTooltipCheckBox.new()
+	motion.text = "Меньше движения"
+	motion.tooltip_text = ("Убирает украшения, которые двигаются сами: блеск на главных кнопках, "
+		+ "мерцание плёнки в «Стиллионе», постоянное покачивание и пульсацию. Кубики, фишки и карты "
+		+ "по-прежнему двигаются — так видно, что происходит в игре.")
+	motion.add_theme_font_size_override("font_size", 17)
+	_ink(motion)
+	motion.button_pressed = Prefs.reduce_motion
+	motion.toggled.connect(func(on: bool): Prefs.set_value("reduce_motion", on))
+	graphics.add_child(motion)
 	var preview := HBoxContainer.new()
 	preview.add_child(_label("Просмотр карт:", K12UI.BODY))
 	var preview_mode := OptionButton.new()
@@ -519,3 +529,13 @@ func _section(text: String) -> Label:
 func _on_sfx_volume(value: float) -> void:
 	Prefs.set_value("sfx_volume", value)
 	Sfx.play("chip", 0, 0.05, 0.15)
+
+class WrappedTooltipCheckBox extends CheckBox:
+	func _make_custom_tooltip(description: String) -> Object:
+		var label := Label.new()
+		label.add_theme_font_override("font", get_theme_font("font", &"TooltipLabel"))
+		label.theme_type_variation = &"TooltipLabel"
+		label.custom_minimum_size.x = 360
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.text = description
+		return label

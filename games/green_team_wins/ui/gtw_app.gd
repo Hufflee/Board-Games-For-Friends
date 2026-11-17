@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Лобби и стол Green Team Wins. Запуск из хаба.
 ## Вид — GTWStyle (пати-викторина, docs/styleboard_green_team_wins_party.png): слева крупная карта и её
 ## русский перевод (при наведении — ещё крупнее), под ней игроки цветом команды; справа — варианты
@@ -130,7 +132,7 @@ func _panel(pad: int = 16, fill := "panel") -> PanelContainer:
 
 
 ## Фишка игрока цветом команды: зелёная / оранжевая.
-func _chip(text: String, team: String, size: int = 15) -> PanelContainer:
+func _chip(text: String, team: String, size: int = GTWStyle.CAP) -> PanelContainer:
 	var chip := PanelContainer.new()
 	var box := StyleBoxFlat.new()
 	box.bg_color = GTWStyle.c(team)
@@ -158,8 +160,8 @@ func _menu(_reason: String = "") -> void:
 	col.custom_minimum_size.x = 460
 	col.add_theme_constant_override("separation", 12)
 	center.add_child(col)
-	col.add_child(GTWStyle.heading("Green Team Wins", 40))
-	_label(col, "Отвечай как большинство — будь в зелёной команде", GTWStyle.BODY, "regular", "muted")
+	col.add_child(GTWStyle.heading("Green Team Wins", GTWStyle.H1))
+	_label(col, "Отвечай как большинство — будь в зелёной команде", GTWStyle.BODY, "regular", "ink")
 	col.add_child(RoomPanel.make("green_team_wins", _room_button, _room_label))
 	_add(col, "Проверка на одном компьютере", func() -> void:
 		Net.host_offline("green_team_wins")
@@ -188,7 +190,7 @@ func _lobby() -> void:
 	var page := VBoxContainer.new()
 	page.add_theme_constant_override("separation", 16)
 	margin.add_child(page)
-	page.add_child(GTWStyle.heading("Green Team Wins", 40))
+	page.add_child(GTWStyle.heading("Green Team Wins", GTWStyle.H1))
 	_label(page, "Лобби · 3–12 игроков · 15 вопросов", GTWStyle.BODY, "regular", "muted")
 	var body := HBoxContainer.new()
 	body.add_theme_constant_override("separation", 16)
@@ -202,7 +204,7 @@ func _lobby() -> void:
 	var lc := VBoxContainer.new()
 	lc.add_theme_constant_override("separation", 8)
 	left.add_child(lc)
-	lc.add_child(GTWStyle.heading("Игроки · %d из 12" % members.size(), 22))
+	lc.add_child(GTWStyle.heading("Игроки · %d из 12" % members.size(), GTWStyle.H1))
 	var grid := GridContainer.new()
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 16)
@@ -224,11 +226,11 @@ func _lobby() -> void:
 	var rc := VBoxContainer.new()
 	rc.add_theme_constant_override("separation", 12)
 	right_panel.add_child(rc)
-	rc.add_child(GTWStyle.heading("Как играть", 22))
+	rc.add_child(GTWStyle.heading("Как играть", GTWStyle.H1))
 	for line in ["Все отвечают на вопрос тайно и одновременно.", "Ответили как большинство — вы в зелёной команде.", "Попасть в зелёные — 1 очко, удержаться — 2.", "Свои ответы хост объединяет по смыслу."]:
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 10)
-		var dot := _chip("✓", "green", 14)
+		var dot := _chip("✓", "green", GTWStyle.CAP)
 		dot.size_flags_vertical = Control.SIZE_SHRINK_BEGIN
 		row.add_child(dot)
 		var l := _label(row, line, GTWStyle.BODY)
@@ -244,7 +246,7 @@ func _lobby() -> void:
 	LeaveGuard.wire(back, "Выйти из лобби?", "Вы вернётесь в хаб.", _leave)
 	var error := GTWStyle.label("", GTWStyle.CAP, "regular", "orange")
 	if host:
-		var start := _button("Начать игру", 22, "primary")
+		var start := _button("Начать игру", GTWStyle.H1, "primary")
 		start.custom_minimum_size = Vector2(320, 60)
 		start.disabled = members.size() < 3
 		start.pressed.connect(func() -> void: error.text = Net.start_game())
@@ -265,11 +267,8 @@ func _table() -> void:
 	top.info.add_theme_font_override("font", GTWStyle.font("title"))
 	_add(top.actions, "Правила", _rules, "quiet")
 	_add(top.actions, "Настройки", _settings, "quiet")
-	_add(top.actions, "Тема", func() -> void:
-		Prefs.theme_mode = "light" if Prefs.dark_theme() else "dark"
-		Prefs.save()
-		Prefs.changed.emit(), "quiet")
-	var back := _button("Выйти", 14, "quiet")
+	top.actions.add_child(ThemeToggle.make(_bar_button, GTWStyle.CAP))
+	var back := _button("Выйти", GTWStyle.CAP, "quiet")
 	top.actions.add_child(back)
 	LeaveGuard.wire(back, "Выйти из игры?", "Вы вернётесь в хаб.", _leave)
 	var margin := MarginContainer.new()
@@ -444,12 +443,12 @@ func _build_card() -> void:
 	card_box.add_child(text)
 	var tr := _translation()
 	var lines: Array[Label] = [_label(text, "ПО-РУССКИ", GTWStyle.CAP, "bold", "muted"),
-		_label(text, tr.question if not tr.question.is_empty() else "Перевод этой карты ещё не добавлен.", 22, "bold")]
+		_label(text, tr.question if not tr.question.is_empty() else "Перевод этой карты ещё не добавлен.", GTWStyle.H1, "bold")]
 	for i in tr.options.size():
 		lines.append(_label(text, "%d. %s" % [i + 1, tr.options[i]], GTWStyle.BODY, "regular", "muted"))
 	if _option_count() == 0:
-		lines.append(_label(text, "Впишите своё слово вместо пропуска", GTWStyle.CAP, "regular", "muted"))
-	lines.append(_label(text, "Ответьте как большинство — и будете в зелёной команде", GTWStyle.CAP, "regular", "muted"))
+		lines.append(_label(text, "Впишите своё слово вместо пропуска", GTWStyle.CAP, "regular", "ink"))
+	lines.append(_label(text, "Ответьте как большинство — и будете в зелёной команде", GTWStyle.CAP, "regular", "ink"))
 	for line in lines:
 		line.custom_minimum_size.x = 220
 
@@ -459,7 +458,7 @@ func _build_players() -> void:
 	for s in state.names.size():
 		var mark := ""
 		if state.phase == "answer":
-			mark = "  ✓" if s in state.answered else "  …"
+			mark = " · ответил ✓" if s in state.answered else " · пишет"
 		elif state.gain.size() > s and int(state.gain[s]) > 0 and state.phase != "group":
 			mark = "  +%d" % state.gain[s]
 		var me := " · вы" if s == state.seat else ""
@@ -488,7 +487,7 @@ func _answer_ui() -> void:
 		return
 	right.add_child(GTWStyle.heading("Ваш ответ", GTWStyle.H1))
 	_label(right, "Ответили %d из %d · выбор тайный, откроется у всех сразу" % [state.answered.size(), state.names.size()], GTWStyle.CAP, "regular", "muted")
-	var go := _button("", 22, "primary")
+	var go := _button("", GTWStyle.H1, "primary")
 	go.custom_minimum_size.y = 60
 	if _option_count() == 0:
 		edit = LineEdit.new()
@@ -497,7 +496,7 @@ func _answer_ui() -> void:
 		edit.placeholder_text = "Ваше слово"
 		edit.custom_minimum_size.y = 64
 		edit.add_theme_font_override("font", GTWStyle.font("bold"))
-		edit.add_theme_font_size_override("font_size", 24)
+		edit.add_theme_font_size_override("font_size", GTWStyle.ANSWER)
 		var field := GTWStyle.panel(14)
 		field.shadow_offset = Vector2.ZERO
 		edit.add_theme_stylebox_override("normal", field)
@@ -528,11 +527,11 @@ func _answer_ui() -> void:
 			num.add_theme_stylebox_override("panel", nb)
 			num.custom_minimum_size = Vector2(44, 44)
 			num.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-			var nl := GTWStyle.label(value, 22, "title")
+			var nl := GTWStyle.label(value, GTWStyle.H1, "title")
 			nl.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 			num.add_child(nl)
 			row.add_child(num)
-			var b := _button("  " + (options[i] if i < options.size() else "Вариант " + value), 22, "option")
+			var b := _button("  " + (options[i] if i < options.size() else "Вариант " + value), GTWStyle.H1, "option")
 			b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 			b.custom_minimum_size.y = 72
 			b.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -556,8 +555,7 @@ func _update_go(go: Button) -> void:
 	if value.is_empty():
 		go.text = "Впишите слово" if _option_count() == 0 else "Выберите вариант"
 	else:
-		go.text = "Ответить: " + (_answer_text(value) if _option_count() > 0 else value)
-	go.clip_text = true
+		go.text = "Отправить ответ"
 
 
 func _submit(value: String) -> void:
@@ -628,12 +626,12 @@ func _groups_ui() -> void:
 		col.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		var head := HBoxContainer.new()
 		head.mouse_filter = Control.MOUSE_FILTER_IGNORE
-		var title := GTWStyle.label(_group_title(seats), 22, "bold")
+		var title := GTWStyle.label(_group_title(seats), GTWStyle.H1, "bold")
 		title.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		title.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		head.add_child(title)
 		var votes := seats.size()
-		head.add_child(GTWStyle.label("%d голос%s" % [votes, "" if votes % 10 == 1 and votes != 11 else ("а" if votes % 10 in [2, 3, 4] and not votes in [12, 13, 14] else "ов")], 16, "bold", "muted"))
+		head.add_child(GTWStyle.label(TextUI.plural(votes, "голос", "голоса", "голосов"), GTWStyle.BODY, "bold", "muted"))
 		col.add_child(head)
 		var who := HFlowContainer.new()
 		who.mouse_filter = Control.MOUSE_FILTER_IGNORE
@@ -647,7 +645,8 @@ func _groups_ui() -> void:
 				text += " «%s»" % raw
 			if not grouping and int(state.gain[s]) > 0:
 				text += " +%d" % state.gain[s]
-			var chip := _chip(text, "green" if (not grouping and state.green[s]) else "orange", 15)
+			var scored: bool = not grouping and state.green[s]
+			var chip := _chip(("✓ " if scored else "· ") + text, "green" if scored else "orange", GTWStyle.CAP)
 			chip.mouse_filter = Control.MOUSE_FILTER_IGNORE
 			who.add_child(chip)
 		if card != null:
@@ -706,7 +705,7 @@ func _end_ui() -> void:
 	var winners: Array[String] = []
 	for s: int in state.results:
 		winners.append(state.names[s])
-	right.add_child(GTWStyle.heading("Победа!", 32))
+	right.add_child(GTWStyle.heading("Победа!", GTWStyle.H1))
 	_label(right, ", ".join(winners), 26, "bold")
 	right.add_child(HSeparator.new())
 	var order: Array = range(state.names.size())
@@ -757,9 +756,9 @@ func _show_preview(_anchor: Control = null) -> void:
 	row.add_child(text)
 	var tr := _translation()
 	# у меток с переносом обязательно ширина: без неё перенос «по букве» раздувает окно в высоту
-	var lines: Array[Label] = [_label(text, "ПЕРЕВОД", GTWStyle.CAP, "bold", "muted"), _label(text, tr.question, 24, "bold")]
+	var lines: Array[Label] = [_label(text, "ПЕРЕВОД", GTWStyle.CAP, "bold", "muted"), _label(text, tr.question, GTWStyle.ANSWER, "bold")]
 	for i in tr.options.size():
-		lines.append(_label(text, "%d. %s" % [i + 1, tr.options[i]], 20))
+		lines.append(_label(text, "%d. %s" % [i + 1, tr.options[i]], GTWStyle.BODY))
 	for line in lines:
 		line.mouse_filter = Control.MOUSE_FILTER_IGNORE
 		line.custom_minimum_size.x = 300

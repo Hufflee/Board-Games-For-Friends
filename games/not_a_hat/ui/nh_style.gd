@@ -16,6 +16,7 @@ const MUTED := Color("6d6d6d")
 const ACCENT := Color("ffd23f")
 const OK := Color("2fae4f")
 const BAD := Color("e0393e")
+const BAD_TEXT := Color("c92f34")
 const H1 := 30
 const BODY := 17
 const CAP := 14
@@ -266,3 +267,11 @@ class Backdrop:
 				x += step
 			y += step * 0.75
 			row += 1
+
+
+## Пары цветов для проверки интерфейса.
+static func contrast_pairs() -> Array:
+	return [
+		[INK, PAPER, "текст карты", false],
+		[BAD_TEXT, PAPER, "штраф", false],
+	]

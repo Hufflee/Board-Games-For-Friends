@@ -241,7 +241,11 @@ func _build_seats(prev: Dictionary) -> void:
 		TurnNameGlow.apply(ptag, active)
 		trow.add_child(ptag)
 		var pen: int = (_v["penalties"][s] as Array).size()
-		var pl := NHStyle.label("✖" .repeat(pen) + "·".repeat(maxi(0, int(_v["max_penalty"]) - pen)), NHStyle.CAP, NHStyle.BAD if pen > 0 else NHStyle.MUTED, HORIZONTAL_ALIGNMENT_LEFT, true)
+		var marks := "✖".repeat(pen) + "·".repeat(maxi(0, int(_v["max_penalty"]) - pen))
+		var penalty_ink := NHStyle.BAD_TEXT if pen > 0 else NHStyle.MUTED
+		if active:
+			penalty_ink = NHStyle.INK
+		var pl := NHStyle.label(marks, NHStyle.CAP, penalty_ink, HORIZONTAL_ALIGNMENT_LEFT, true)
 		pl.tooltip_text = "Штрафы: %d из %d" % [pen, int(_v["max_penalty"])]
 		pl.mouse_filter = Control.MOUSE_FILTER_PASS
 		trow.add_child(pl)
@@ -483,6 +487,9 @@ func _build_panel() -> void:
 				no.pressed.connect(func(): _send("nh_respond", {"accept": false}))
 				row.add_child(no)
 				col.add_child(row)
+				var effects := NHStyle.label("Принять и передарить прежний · Отказаться и вскрыть: ошибившемуся штраф", NHStyle.CAP, NHStyle.INK, HORIZONTAL_ALIGNMENT_CENTER)
+				effects.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+				col.add_child(effects)
 			else:
 				col.add_child(_line("%s думает: принять подарок от %s?" % [_name(r), _name(g)], true))
 		"reveal":
@@ -574,7 +581,7 @@ func _fill_picker() -> void:
 		b.vertical_icon_alignment = VERTICAL_ALIGNMENT_TOP
 		b.text = name
 		b.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-		b.add_theme_font_size_override("font_size", 11)
+		b.add_theme_font_size_override("font_size", 13)
 		b.add_theme_constant_override("icon_max_width", 30)
 		b.custom_minimum_size = Vector2(92, 74)
 		b.tooltip_text = name

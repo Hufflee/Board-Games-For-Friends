@@ -1,4 +1,6 @@
 extends Control
+
+const TextUI = preload("res://hub/ui_text.gd")
 ## Лобби и стол «Первый контакт». Запуск из хаба.
 ## Вид — FCStyle (папирус и язык корабля, docs/styleboard_first_contact_papyrus.png): строка «что делать»
 ## над полем, поле 5×5 из вырезанных предметов с подписями игры, справа — бирюзовая панель знаков,
@@ -51,6 +53,7 @@ class ItemTile:
 	var picked := false
 	var target_color := Color.TRANSPARENT
 	var owned_color := Color.TRANSPARENT
+	var faction := -1
 	var example := false
 	var forbidden := false
 	var voters := ""
@@ -103,12 +106,13 @@ class ItemTile:
 		draw_texture_rect(tex, img, false, Color(1, 1, 1, fade))
 		var f := FCStyle.font("title")
 		var name: String = FCStyle.ITEM_NAMES[item] if item < FCStyle.ITEM_NAMES.size() else "?"
-		var fs := 15
-		var tw := f.get_string_size(name, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		while tw > size.x - 12 and fs > 10:
-			fs -= 1
-			tw = f.get_string_size(name, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x
-		draw_string(f, Vector2((size.x - tw) / 2, size.y - 10), name, HORIZONTAL_ALIGNMENT_LEFT, -1, fs, Color(FCStyle.c("ink"), fade if fade < 1 else 1.0))
+		var title := TextParagraph.new()
+		title.width = size.x - 12
+		title.alignment = HORIZONTAL_ALIGNMENT_CENTER
+		title.max_lines_visible = 2
+		title.break_flags = TextServer.BREAK_MANDATORY | TextServer.BREAK_WORD_BOUND | TextServer.BREAK_ADAPTIVE
+		title.add_string(name, f, 12)
+		title.draw(get_canvas_item(), Vector2(6, size.y - title.get_size().y - 4), Color(FCStyle.c("ink"), fade))
 		var bold := FCStyle.font("bold")
 		if example:
 			var tag := "ПРИМЕР"
@@ -123,7 +127,7 @@ class ItemTile:
 			draw_string(bold, Vector2(size.x - 20, 20), "✓", HORIZONTAL_ALIGNMENT_LEFT, -1, 15, FCStyle.c("ochre_ink"))
 		if owned_color.a > 0:
 			draw_circle(Vector2(size.x - 14, 14), 11, owned_color)
-			draw_string(bold, Vector2(size.x - 20, 20), "★", HORIZONTAL_ALIGNMENT_LEFT, -1, 14, FCStyle.c("alien_ink"))
+			draw_string(bold, Vector2(size.x - 20, 20), str(faction + 1), HORIZONTAL_ALIGNMENT_LEFT, -1, 14, FCStyle.c("alien_ink"))
 		if forbidden:
 			draw_line(Vector2(10, 10), Vector2(size.x - 10, size.y - 10), Color(FCStyle.c("muted"), 0.6), 3)
 			draw_line(Vector2(size.x - 10, 10), Vector2(10, size.y - 10), Color(FCStyle.c("muted"), 0.6), 3)
@@ -277,7 +281,7 @@ func _lobby() -> void:
 	var lc := VBoxContainer.new()
 	lc.add_theme_constant_override("separation", 8)
 	left.add_child(lc)
-	lc.add_child(FCStyle.heading("Игроки · %d из 7" % members.size(), 20))
+	lc.add_child(FCStyle.heading("Игроки · %d из 7" % members.size(), FCStyle.BODY))
 	for member: Dictionary in members:
 		lc.add_child(PlayerTag.make(member, members, FCStyle.BODY, FCStyle.c("ink")))
 	if host:
@@ -295,12 +299,12 @@ func _lobby() -> void:
 	var rc := VBoxContainer.new()
 	rc.add_theme_constant_override("separation", 10)
 	right.add_child(rc)
-	rc.add_child(FCStyle.heading("Настройки", 20))
+	rc.add_child(FCStyle.heading("Настройки", FCStyle.BODY))
 	# команды по правилам: инопланетян 1–3, землян не больше 4 (владелец, 15.11)
 	var low_alien := Rules.min_aliens(members.size())
 	var high_alien := Rules.max_aliens(members.size())
 	var aliens_now := clampi(int(Net.settings.get("fc_aliens", 0)), low_alien, high_alien)
-	rc.add_child(FCStyle.label("Инопланетян в команде", 16, "bold"))
+	rc.add_child(FCStyle.label("Инопланетян в команде", FCStyle.BODY, "bold"))
 	var alien_row := HBoxContainer.new()
 	alien_row.add_theme_constant_override("separation", 8)
 	rc.add_child(alien_row)
@@ -329,7 +333,7 @@ func _lobby() -> void:
 	foot.add_child(back)
 	LeaveGuard.wire(back, "Выйти из лобби?", "Вы вернётесь в хаб.", _leave)
 	if host:
-		var start := _button("Начать игру", 20, "primary")
+		var start := _button("Начать игру", FCStyle.BODY, "primary")
 		start.custom_minimum_size = Vector2(320, 56)
 		start.disabled = members.size() < 2
 		start.pressed.connect(func() -> void: error.text = Net.start_game())
@@ -377,9 +381,9 @@ func _toggle_card(title: String, caption: String, on: bool, locked: bool) -> But
 	texts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	texts.add_theme_constant_override("separation", -2)
 	row.add_child(texts)
-	texts.add_child(FCStyle.label(title, 16, "bold", "ink" if not locked or on else "muted"))
-	texts.add_child(FCStyle.label(caption, 13, "regular", "muted"))
-	var badge := FCStyle.label("ВКЛ" if on else "ВЫКЛ", 13, "bold", "ochre" if on else "muted")
+	texts.add_child(FCStyle.label(title, FCStyle.BODY, "bold", "ink" if not locked or on else "muted"))
+	texts.add_child(FCStyle.label(caption, FCStyle.CAP, "regular", "muted"))
+	var badge := FCStyle.label("ВКЛ" if on else "ВЫКЛ", FCStyle.CAP, "bold", "ochre" if on else "muted")
 	badge.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	row.add_child(badge)
 	return card
@@ -397,7 +401,7 @@ func _table() -> void:
 		Prefs.theme_mode = "light" if Prefs.dark_theme() else "dark"
 		Prefs.save()
 		Prefs.changed.emit(), "quiet")
-	var back := _button("Выйти", 14, "quiet")
+	var back := _button("Выйти", FCStyle.CAP, "quiet")
 	top.actions.add_child(back)
 	LeaveGuard.wire(back, "Выйти из игры?", "Вы вернётесь в хаб.", _leave)
 	var margin := MarginContainer.new()
@@ -421,12 +425,13 @@ func _table() -> void:
 	banner.add_child(brow)
 	banner_chip = PanelContainer.new()
 	banner_chip.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	banner_chip.add_child(FCStyle.label("", 15, "bold", "ochre_ink"))
+	banner_chip.add_child(FCStyle.label("", FCStyle.BODY, "bold", "ochre_ink"))
 	brow.add_child(banner_chip)
 	banner_text = FCStyle.label("", FCStyle.BODY, "bold")
 	banner_text.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	banner_text.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	banner_text.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	TextUI.full_on_hover(banner_text)
 	brow.add_child(banner_text)
 	var board := _panel(12)
 	board.size_flags_vertical = Control.SIZE_EXPAND_FILL
@@ -444,11 +449,11 @@ func _table() -> void:
 		board_area.add_child(tile)
 		tiles.append(tile)
 	for col in 5:
-		var l := FCStyle.label(LETTERS[col], 15, "bold", "muted")
+		var l := FCStyle.label(LETTERS[col], FCStyle.BODY, "bold", "muted")
 		l.name = "Col%d" % col
 		board_area.add_child(l)
 	for row in 5:
-		var l := FCStyle.label(str(row + 1), 15, "bold", "muted")
+		var l := FCStyle.label(str(row + 1), FCStyle.BODY, "bold", "muted")
 		l.name = "Row%d" % row
 		board_area.add_child(l)
 	var right := VBoxContainer.new()
@@ -576,11 +581,11 @@ func _set_banner(chip: String, text: String, kind: String) -> void:
 	box.set_content_margin_all(4)
 	box.content_margin_left = 10
 	box.content_margin_right = 10
-	box.bg_color = FCStyle.c("ochre") if kind == "mine" else (FCStyle.c("alien") if kind == "alien" else FCStyle.c("tile"))
+	box.bg_color = FCStyle.c("ochre") if kind == "mine" else (Color("086a62") if kind == "alien" else FCStyle.c("tile"))
 	banner_chip.add_theme_stylebox_override("panel", box)
 	var l: Label = banner_chip.get_child(0)
 	l.text = chip.to_upper()
-	l.add_theme_color_override("font_color", FCStyle.c("ochre_ink") if kind == "mine" else (FCStyle.c("alien_ink") if kind == "alien" else FCStyle.c("muted")))
+	l.add_theme_color_override("font_color", FCStyle.c("ochre_ink") if kind == "mine" else (Color("eafffb") if kind == "alien" else FCStyle.c("muted")))
 	banner_chip.visible = chip != ""
 	banner_text.text = text
 
@@ -655,7 +660,8 @@ func _update_tiles() -> void:
 			if i in state.targets[faction]:
 				tile.target_color = faction_colors[faction % faction_colors.size()]
 		tile.forbidden = i in state.forbidden
-		tile.owned_color = faction_colors[int(state.owned[i]) % faction_colors.size()] if state.owned.has(i) else Color.TRANSPARENT
+		tile.faction = int(state.owned.get(i, -1))
+		tile.owned_color = faction_colors[tile.faction % faction_colors.size()] if tile.faction >= 0 else Color.TRANSPARENT
 		tile.example = i in state.examples and state.phase == "teach"
 		tile.voters = votes_on.get(i, "")
 		tile.mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND if can_pick and not state.owned.has(i) else Control.CURSOR_ARROW
@@ -673,28 +679,28 @@ func _update_ship() -> void:
 		glyphs.append(_glyph(sign))
 	var caption := ""
 	var line := ""
-	if not glyphs.is_empty():
-		caption = "ПОДСКАЗКА · " + (_name(state.humans + state.active_alien) if state.active_alien >= 0 else "")
-		line = "   ".join(glyphs)
-	elif state.alien and state.phase == "clue" and state.seat == state.turn:
+	# черновик инопланетянина главнее: подсказка прошлого хода остаётся в view до новой и перекрывала набор
+	if state.alien and state.phase == "clue" and state.seat == state.turn:
 		caption = "ВАША ПОДСКАЗКА"
 		var draft: Array[String] = []
 		for code in signs:
 			draft.append("‾" if code == 0 else ("‾" if code < 0 else "") + Rules.GLYPHS[state.language[absi(code) - 1]])
 		line = "   ".join(draft) + "  ▏"
+	elif not glyphs.is_empty():
+		caption = "ПОДСКАЗКА · " + (_name(state.humans + state.active_alien) if state.active_alien >= 0 else "")
+		line = "   ".join(glyphs)
 	elif not state.teaching.is_empty():
 		caption = "ПОСЛЕДНИЙ ЗНАК"
 		line = Rules.GLYPHS[state.teaching.back().symbol]
 	else:
 		caption = "ЯЗЫК КОРАБЛЯ"
 		line = "· · ·"
-	col.add_child(FCStyle.label(caption, 13, "bold", "alien"))
-	var big := FCStyle.label(line, 40, "regular", "alien")
+	col.add_child(FCStyle.label(caption, FCStyle.CAP, "bold", "ship_text"))
+	var big := FCStyle.label(line, FCStyle.H1, "regular", "ship_text")
 	big.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(big)
 	if line.contains("‾"):
-		var hint := FCStyle.label("‾ — отрицание: «не …»", 13, "regular", "alien")
-		hint.modulate.a = 0.75
+		var hint := FCStyle.label("‾ — отрицание: «не …»", FCStyle.CAP, "regular", "ship_text")
 		col.add_child(hint)
 
 
@@ -704,7 +710,7 @@ func _update_side(mine: bool) -> void:
 		_sign_keyboard()
 		return
 	# словарь знаков: каждый показанный знак → примеры и ваша догадка
-	side.add_child(FCStyle.heading("Словарь знаков", 20))
+	side.add_child(FCStyle.heading("Словарь знаков", FCStyle.BODY))
 	var notes_by_glyph := {}
 	for feature in state.notes:
 		notes_by_glyph[int(state.notes[feature])] = Rules.FEATURES[int(feature)]
@@ -719,50 +725,50 @@ func _update_side(mine: bool) -> void:
 			items.append("признак «%s»" % Rules.FEATURES[entry.feature])
 		shown[symbol] = items
 	if shown.is_empty():
-		_label(side, "Знаков пока не было. Покажите инопланетянам примеры — они ответят знаком.", 13, "regular", "muted")
+		_label(side, "Знаков пока не было. Покажите инопланетянам примеры — они ответят знаком.", FCStyle.CAP, "regular", "muted")
 	for symbol: int in shown:
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 10)
 		side.add_child(row)
-		var g := FCStyle.label(Rules.GLYPHS[symbol], 26, "regular", "alien")
+		var g := FCStyle.label(Rules.GLYPHS[symbol], FCStyle.H1, "regular", "alien_text")
 		g.custom_minimum_size.x = 32
 		row.add_child(g)
 		var texts := VBoxContainer.new()
 		texts.add_theme_constant_override("separation", -3)
 		texts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(texts)
-		texts.add_child(FCStyle.label((notes_by_glyph[symbol] + "?") if notes_by_glyph.has(symbol) else "?", 15, "bold"))
-		var ex := FCStyle.label(", ".join(shown[symbol]), 13, "regular", "muted")
+		texts.add_child(FCStyle.label((notes_by_glyph[symbol] + "?") if notes_by_glyph.has(symbol) else "?", FCStyle.BODY, "bold"))
+		var ex := FCStyle.label(", ".join(shown[symbol]), FCStyle.CAP, "regular", "muted")
 		ex.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		texts.add_child(ex)
 	if not state.alien and state.seat >= 0 and state.phase != "end":
 		_note_picker()
 	if state.phase in ["result", "end"] and not state.votes.is_empty():
 		side.add_child(HSeparator.new())
-		side.add_child(FCStyle.heading("Голоса", 18))
+		side.add_child(FCStyle.heading("Голоса", FCStyle.BODY))
 		for seat in state.votes:
 			var choices: Array[String] = []
 			for slot: int in state.votes[seat]:
 				var matched: bool = state.owned.get(slot, -1) == state.active_alien
 				choices.append(_item_name(slot) + (" ✓" if matched else " — мимо"))
-			_label(side, "%s: %s" % [_name(int(seat)), ", ".join(choices)], 14)
+			_label(side, "%s: %s" % [_name(int(seat)), ", ".join(choices)], FCStyle.CAP)
 	side.add_child(HSeparator.new())
-	side.add_child(FCStyle.heading("Земляне", 18))
+	side.add_child(FCStyle.heading("Земляне", FCStyle.BODY))
 	for i in state.humans:
 		var row := HBoxContainer.new()
-		var n := FCStyle.label(_name(i) + (" · вы" if i == state.seat else ""), 15, "bold" if i == state.seat else "regular")
+		var n := FCStyle.label(_name(i) + (" · вы" if i == state.seat else ""), FCStyle.BODY, "bold" if i == state.seat else "regular")
 		n.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(n)
 		var status := "%d ✦" % state.favor[i]
 		if state.phase == "vote" and i not in state.answered:
 			status = "голосует…"
-		row.add_child(FCStyle.label(status, 15, "bold", "ochre" if status.ends_with("✦") else "muted"))
+		row.add_child(FCStyle.label(status, FCStyle.BODY, "bold", "ochre" if status.ends_with("✦") else "muted"))
 		side.add_child(row)
 	if state.low:
-		_label(side, "Жетоны запаса: %d" % maxi(0, state.energy), 14, "regular", "muted")
+		_label(side, "Жетоны запаса: %d" % maxi(0, state.energy), FCStyle.CAP, "regular", "muted")
 	if state.phase == "end":
 		side.add_child(HSeparator.new())
-		_label(side, ("Победил инопланетянин " + _name(state.winner)) if state.winner >= 0 else "Запас жетонов исчерпан", 16, "bold")
+		_label(side, ("Победил инопланетянин " + _name(state.winner)) if state.winner >= 0 else "Запас жетонов исчерпан", FCStyle.BODY, "bold")
 		var winners: Array[String] = []
 		var best := Vector2i(-1, -1)
 		for i in state.humans:
@@ -772,14 +778,14 @@ func _update_side(mine: bool) -> void:
 				winners.clear()
 			if value == best:
 				winners.append(_name(i))
-		_label(side, "Лучшие земляне: " + ", ".join(winners), 16, "bold")
+		_label(side, "Лучшие земляне: " + ", ".join(winners), FCStyle.BODY, "bold")
 
 
 ## Клавиатура инопланетянина: знак крупно + признак мелко (инопланетянин знает язык).
 func _sign_keyboard() -> void:
 	var teach: bool = state.phase == "teach"
-	side.add_child(FCStyle.label("ЗНАКИ КОРАБЛЯ", 13, "bold", "alien"))
-	_label(side, "Нажмите знак признака, общего для примеров" if teach else "Нажмите знаки по порядку; ‾ — отрицание следующего знака", 13, "regular", "muted")
+	side.add_child(FCStyle.label("ЗНАКИ КОРАБЛЯ", FCStyle.CAP, "bold", "alien_text"))
+	_label(side, "Нажмите знак признака, общего для примеров" if teach else "Нажмите знаки по порядку; ‾ — отрицание следующего знака", FCStyle.CAP, "regular", "muted")
 	var grid := GridContainer.new()
 	grid.columns = 2
 	grid.add_theme_constant_override("h_separation", 6)
@@ -787,11 +793,12 @@ func _sign_keyboard() -> void:
 	side.add_child(grid)
 	for feature in Rules.FEATURES.size():
 		var b := Button.new()
-		FCStyle.style_button(b, "alien", 13)
+		FCStyle.style_button(b, "alien", FCStyle.CAP)
 		b.text = "%s  %s" % [Rules.GLYPHS[state.language[feature]], Rules.FEATURES[feature]]
 		b.alignment = HORIZONTAL_ALIGNMENT_LEFT
 		b.custom_minimum_size = Vector2(158, 36)
 		b.clip_text = true
+		TextUI.full_on_hover(b)
 		b.add_theme_font_override("font", FCStyle.font("regular"))
 		b.tooltip_text = Rules.FEATURES[feature]
 		if teach:
@@ -810,7 +817,7 @@ func _sign_keyboard() -> void:
 		row.add_theme_constant_override("separation", 8)
 		side.add_child(row)
 		var neg := Button.new()
-		FCStyle.style_button(neg, "alien", 15)
+		FCStyle.style_button(neg, "alien", FCStyle.BODY)
 		neg.text = "‾ Отрицание"
 		neg.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		neg.pressed.connect(func() -> void:
@@ -827,7 +834,7 @@ func _sign_keyboard() -> void:
 ## Заметка землянина: «знак = признак» — догадки сохраняются у хоста.
 func _note_picker() -> void:
 	side.add_child(HSeparator.new())
-	side.add_child(FCStyle.heading("Записать догадку", 16))
+	side.add_child(FCStyle.heading("Записать догадку", FCStyle.BODY))
 	var row := HBoxContainer.new()
 	row.add_theme_constant_override("separation", 6)
 	side.add_child(row)
@@ -836,7 +843,7 @@ func _note_picker() -> void:
 		symbol.add_item(value)
 	symbol.custom_minimum_size.x = 64
 	row.add_child(symbol)
-	row.add_child(FCStyle.label("=", 17, "bold", "muted"))
+	row.add_child(FCStyle.label("=", FCStyle.BODY, "bold", "muted"))
 	var feature := OptionButton.new()
 	for i in Rules.FEATURES.size():
 		feature.add_item(Rules.FEATURES[i])
@@ -854,7 +861,17 @@ func _note_picker() -> void:
 		for known in state.notes:
 			if int(state.notes[known]) == glyph:
 				feature.select(int(known))
-	_add(side, "Записать", func() -> void: _send("note", {"feature": feature.selected, "symbol": symbol.selected}))
+	var buttons := HBoxContainer.new()
+	buttons.add_theme_constant_override("separation", 6)
+	side.add_child(buttons)
+	var write := _add(buttons, "Записать", func() -> void: _send("note", {"feature": feature.selected, "symbol": symbol.selected}))
+	write.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	write.tooltip_text = "Если этот знак уже записан с другим признаком — запись заменится"
+	# стереть догадку к выбранному знаку (признак, под которым он записан)
+	_add(buttons, "Стереть", func() -> void:
+		for known in state.notes:
+			if int(state.notes[known]) == symbol.selected:
+				_send("note", {"feature": int(known), "symbol": -1}), "quiet")
 
 
 ## Одна главная кнопка фазы под правой колонкой.
@@ -899,6 +916,7 @@ func _main_button(caption: String, callback: Callable) -> Button:
 	var b := _button(caption, FCStyle.BODY, "primary")
 	b.custom_minimum_size.y = 52
 	b.clip_text = true
+	TextUI.full_on_hover(b)
 	b.pressed.connect(callback)
 	action_slot.add_child(b)
 	return b
@@ -936,10 +954,10 @@ func _peek(index: int) -> void:
 	image.custom_minimum_size = Vector2(240, 170)
 	image.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	col.add_child(image)
-	var title := FCStyle.heading(FCStyle.ITEM_NAMES[tile.item], 22)
+	var title := FCStyle.heading(FCStyle.ITEM_NAMES[tile.item], FCStyle.H1)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(title)
-	var slot := FCStyle.label(_slot_name(index), 14, "bold", "muted")
+	var slot := FCStyle.label(_slot_name(index), FCStyle.CAP, "bold", "muted")
 	slot.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	col.add_child(slot)
 	screen.add_child(panel)
