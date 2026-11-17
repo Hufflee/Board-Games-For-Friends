@@ -41,6 +41,10 @@ window/size/viewport_width=1280
 window/size/viewport_height=720
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+window/size/borderless.bgs_social=true
+window/size/always_on_top.bgs_social=true
+window/size/transparent.bgs_social=true
+window/per_pixel_transparency/allowed.bgs_social=true
 
 [physics]
 
@@ -49,3 +53,5 @@ window/stretch/aspect="expand"
 [rendering]
 
 rendering_device/driver.windows="d3d12"
+renderer/rendering_method.bgs_social="gl_compatibility"
+viewport/transparent_background.bgs_social=true

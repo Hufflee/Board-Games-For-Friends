@@ -400,18 +400,24 @@ func _close_button_pressed() -> void:
 
 
 func _fill_header() -> void:
-	if get_tree().root.has_meta(&"bgs_social"):
-		var invite := small_button("Пригласить", "Приглашение в пати Steam")
-		invite.pressed.connect(func(): SteamInvite.open_panel(100))
-		header_extra.add_child(invite)
-		var friends := small_button("Лобби друзей", "Открытые лобби друзей Steam")
-		friends.pressed.connect(func(): get_tree().current_scene.call("show_friends", friends))
-		header_extra.add_child(friends)
 	var add := small_button("+", "Написать лично или команде")
 	_add_button = add
 	add.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 	add.pressed.connect(_toggle_menu)
 	header_extra.add_child(add)
+	if get_tree().root.has_meta(&"bgs_social"):
+		# BGSocial: значок «друзья» между «+» и «свернуть» — список «Пригласить» / «Лобби друзей».
+		var people := small_button("", "Друзья: пригласить в пати, лобби друзей")
+		people.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		var icon := PeopleIcon.new()
+		icon.color = c_head_muted
+		icon.mouse_filter = Control.MOUSE_FILTER_IGNORE
+		icon.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+		people.add_child(icon)
+		people.mouse_entered.connect(func(): icon.color = c_head_ink; icon.queue_redraw())
+		people.mouse_exited.connect(func(): icon.color = c_head_muted; icon.queue_redraw())
+		people.pressed.connect(_toggle_friends_menu.bind(people))
+		header_extra.add_child(people)
 
 
 func _build_body() -> void:
@@ -685,6 +691,53 @@ func _toggle_menu() -> void:
 	add_child(_menu)
 	_menu.reset_size()
 	_menu.position = Vector2(maxf(0.0, size.x - _menu.size.x - px(6)), head_height() + 2)
+
+
+## Список «Пригласить» / «Лобби друзей» под значком «друзья» (BGSocial).
+func _toggle_friends_menu(anchor: Button) -> void:
+	if is_instance_valid(_menu):
+		_close_menu()
+		return
+	_menu = PanelContainer.new()
+	_menu.add_theme_stylebox_override("panel", flat(c_head, px(9), px(6), c_line))
+	_menu.z_index = 3
+	var col := VBoxContainer.new()
+	col.add_theme_constant_override("separation", px(2))
+	_menu.add_child(col)
+	var invite := _menu_item("Пригласить", c_ink)
+	invite.tooltip_text = "Приглашение в пати Steam"
+	invite.pressed.connect(func():
+		_close_menu()
+		get_tree().current_scene.call("invite_friends"))
+	col.add_child(invite)
+	var friends := _menu_item("Лобби друзей", c_ink)
+	friends.tooltip_text = "Открытые лобби друзей Steam"
+	friends.pressed.connect(func():
+		_close_menu()
+		get_tree().current_scene.call("show_friends", anchor))
+	col.add_child(friends)
+	add_child(_menu)
+	_menu.reset_size()
+	var x := anchor.global_position.x - global_position.x + anchor.size.x - _menu.size.x
+	_menu.position = Vector2(clampf(x, 0.0, maxf(0.0, size.x - _menu.size.x)), head_height() + 2)
+
+
+## Значок «друзья»: два контура людей (передний и выглядывающий из-за него), линии цвета полосы.
+class PeopleIcon extends Control:
+	var color := Color.WHITE
+
+	func _draw() -> void:
+		var s := minf(size.x, size.y) * 0.62
+		var o := (size - Vector2(s, s)) / 2.0
+		var w := maxf(1.2, s * 0.09)
+		# задний — справа: голова и плечо, частично скрытые передним
+		draw_arc(o + Vector2(0.66, 0.30) * s, 0.17 * s, -PI * 0.62, PI * 0.72, 20, color, w, true)
+		draw_arc(o + Vector2(0.70, 0.98) * s, 0.27 * s, -PI * 0.5, 0.0, 12, color, w, true)
+		draw_line(o + Vector2(0.97, 0.98) * s, o + Vector2(0.74, 0.98) * s, color, w, true)
+		# передний — слева: голова и плечи
+		draw_arc(o + Vector2(0.36, 0.33) * s, 0.18 * s, 0.0, TAU, 28, color, w, true)
+		draw_arc(o + Vector2(0.36, 1.0) * s, 0.31 * s, PI, TAU, 24, color, w, true)
+		draw_line(o + Vector2(0.05, 1.0) * s, o + Vector2(0.67, 1.0) * s, color, w, true)
 
 
 func _menu_item(text: String, color: Color) -> Button:

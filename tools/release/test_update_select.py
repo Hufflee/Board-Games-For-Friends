@@ -9,7 +9,7 @@
   0.8.12 — в "lines" (патч 0.9.1.3 для неё — отдельный файл).
 Версии и имена файлов — из настоящей цепочки build/releases/0.8.12/chain.json, файлы — поддельные.
 Клиенты: новый (hub/update/update_client.gd) и старые из git — exe 0.8.12 (ab48f7c2) и патчи
-0.9.0.2–0.9.1.1 (HEAD). Godot — headless, звук выключен, свой APPDATA. Код выхода 1 при ошибке.
+0.9.0.2–0.9.1.1 (b976a1d9). Godot — headless, звук выключен, свой APPDATA. Код выхода 1 при ошибке.
 Отчёт: build/update_select/report.md (что клиент собирается скачать, с настоящими размерами).
 """
 from __future__ import annotations
@@ -32,6 +32,7 @@ APPDATA = ROOT / "build" / "appdata_update_select"
 REAL = ROOT / "build" / "releases" / "0.8.12"
 LOCAL = "http://127.0.0.1:8767/"
 OLD_EXE_COMMIT = "ab48f7c2"  # Release 0.8.12 — клиент внутри exe 0.8.12
+OLD_PATCH_COMMIT = "b976a1d9"  # Release 0.9.1.1 — клиент из патчей 0.9.0.2–0.9.1.1
 FULL = "PartyWorld-0.9.1.2-Windows.zip"
 
 
@@ -152,7 +153,7 @@ def main() -> None:
 		shutil.rmtree(target, ignore_errors=True)
 		target.mkdir(parents=True)
 	versions, _ = build_manifests()
-	for name, rev in (("0.8.12", OLD_EXE_COMMIT), ("0.9.0.2", "HEAD")):
+	for name, rev in (("0.8.12", OLD_EXE_COMMIT), ("0.9.0.2", OLD_PATCH_COMMIT)):
 		src = subprocess.run(["git", "show", f"{rev}:hub/update/update_client.gd"], cwd=ROOT, capture_output=True, check=True).stdout
 		(WORK / f"client_{name}.gd").write_bytes(src)
 	sc = scenarios(versions)

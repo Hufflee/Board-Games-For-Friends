@@ -30,6 +30,7 @@ func run() -> void:
 	check(gloom.ratings[0].rating == 100 and gloom.ratings[1].rating == 50 and gloom.ratings[2].rating == 0, "В Gloom меньше очков соответствует более высокому месту.")
 	var coop := Stats.make("the_gang", {"phase": "game_over", "players": players, "won": true}, players, rows, null)
 	check(coop.ratings[0] == {"kind": "coop", "rating": 100, "result": "win"}, "Успех кооператива считается отдельно.")
+	DirAccess.remove_absolute(ProjectSettings.globalize_path("user://test_bgs_stats.json"))  # от прошлого запуска
 	var stats := PlayerStatsStore.new("user://test_bgs_stats.json")
 	var snapshot := {"id": "bgs/1", "game": "green_team", "seat": 0, "totals": {"kind": "rank", "rating": 50}}
 	check(stats.consume(snapshot) and not stats.consume(snapshot), "Повтор итога не учитывается дважды.")
@@ -82,15 +83,15 @@ func run() -> void:
 		current_scene = social
 		await create_timer(0.5).timeout
 		var panel: Control = social.get("_panel")
-		check(root.always_on_top and root.size.x <= 160 and not panel.is_open(), "Social запускается компактным поверх окон.")
+		check(root.always_on_top and root.borderless and not panel.is_open(), "Social запускается кнопкой поверх окон, окно без рамки.")
 		panel.toggle()
 		await create_timer(0.5).timeout
-		check(root.size.x >= 600 and panel.is_open(), "Кнопка разворачивает чат и мини-игры.")
+		check(panel.is_open(), "Кнопка разворачивает чат и мини-игры.")
 		if OS.has_environment("BGS_SHOT"):
 			await RenderingServer.frame_post_draw
 			root.get_texture().get_image().save_png(OS.get_environment("BGS_SHOT"))
 		panel.set_mode(1)
 		await create_timer(0.5).timeout
-		check(root.size.x <= 160 and not panel.is_open(), "Кнопка сворачивает окно обратно.")
+		check(not panel.is_open(), "Кнопка сворачивает панель обратно.")
 	print("BGS: %d проверок, %d ошибок" % [checks, errors])
 	quit(1 if errors else 0)
