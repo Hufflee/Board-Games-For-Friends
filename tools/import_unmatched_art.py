@@ -18,6 +18,7 @@ GARDENS_SOURCE = 'Maps_PNP_А4.pdf'
 GARDENS_SIZE = (1337, 866)
 GARDENS_PAGE = 11
 REFERENCE_CARDS = {
+	'bigfoot': (1, 67, 4), 'robin_hood': (1, 69, 0),
     'alice': (1, 67, 3), 'arthur': (1, 67, 7), 'medusa': (1, 67, 8), 'sinbad': (1, 69, 1),
     'yennenga': (2, 27, 3), 'achilles': (2, 27, 4),
     'bloody_mary': (2, 27, 5), 'sun_wukong': (2, 27, 6), 'actions': (1, 70, 0),
@@ -27,6 +28,7 @@ HEIGHT = 249.449
 X = {1: (13.465, 207.638, 401.811), 2: (18.425, 208.346, 398.268)}
 Y = {1: (809.291, 545.669, 282.047), 2: (806.457, 545.669, 284.882)}
 DECKS = {
+	'bigfoot': (1, 7, 3), 'robin_hood': (1, 61, 0),
     'alice': (1, 1, 0),
     'arthur': (1, 41, 0),
     'medusa': (1, 47, 3),
@@ -37,8 +39,18 @@ DECKS = {
     'sun_wukong': (2, 21, 0),
 }
 BACK_PAGES = {
+	'bigfoot': 10, 'robin_hood': 62,
     'alice': 2, 'arthur': 42, 'medusa': 50, 'sinbad': 56,
     'yennenga': 2, 'achilles': 10, 'bloody_mary': 16, 'sun_wukong': 22,
+}
+# Печатный порядок PnP отличается от стабильных ID уже автоматизированных колод.
+PNP_ORDER = {
+    'bigfoot': [*range(24, 27), *range(27, 30), *range(22, 24), *range(20, 22),
+                *range(17, 20), *range(14, 17), *range(11, 14), *range(9, 11),
+                *range(6, 9), *range(3, 6), *range(0, 3)],
+    'robin_hood': [*range(27, 30), *range(24, 27), *range(22, 24), *range(20, 22),
+                  *range(18, 20), *range(14, 18), *range(12, 14), *range(9, 12),
+                  *range(6, 9), *range(3, 6), *range(0, 3)],
 }
 # Прямоугольники измерены на превью страниц, приведённых к 538 × 761.
 TOKENS = {
@@ -93,13 +105,15 @@ def import_tokens(temporary):
 
 
 def import_cards(temporary):
-    manifest = {}
+    manifest_path = ART / 'cards' / 'sources.json'
+    manifest = json.loads(manifest_path.read_text(encoding='utf-8')) if manifest_path.exists() else {}
     for hero, (volume, first_page, offset) in DECKS.items():
         folder = ART / 'cards' / hero
         folder.mkdir(parents=True, exist_ok=True)
         manifest[hero] = []
         for index in range(30):
-            sheet, cell = divmod(offset + index, 9)
+            source_index = PNP_ORDER.get(hero, range(30))[index]
+            sheet, cell = divmod(offset + source_index, 9)
             page = first_page + sheet * 2
             png = temporary / f'cards{volume}_{page}.png'
             if not png.exists():
@@ -111,7 +125,7 @@ def import_cards(temporary):
                 card.save(encoded, quality=CARD_QUALITY, method=6)
                 encoded.replace(folder / filename)
             manifest[hero].append({'file': filename, 'page': page, 'cell': cell + 1})
-    (ART / 'cards' / 'sources.json').write_text(
+    manifest_path.write_text(
         json.dumps(manifest, indent=2) + '\n', encoding='utf-8',
     )
 

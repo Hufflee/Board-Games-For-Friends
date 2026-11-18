@@ -22,6 +22,7 @@ func _run() -> void:
 		return
 	var table: Control = packed.instantiate()
 	root.add_child(table)
+	table.wire_party_menu()
 	if table.get("_board") == null:
 		quit(1)
 		return
@@ -43,7 +44,7 @@ func _run() -> void:
 		var texture := Art.back(hero)
 		if texture != null:
 			unique_backs[FileAccess.get_sha256("res://games/unmatched/art/backs/%s.webp" % hero)] = true
-	_check(unique_backs.size() == 8, "Все восемь героев имеют разные читаемые рубашки")
+	_check(unique_backs.size() == Roster.HEROES.size(), "Все герои имеют разные читаемые рубашки")
 	var preview_material: ShaderMaterial = table._preview.material
 	var back_material: ShaderMaterial = table._attack.material
 	_check(preview_material.shader == back_material.shader and float(preview_material.get_shader_parameter("outline_width")) == 0.0, "Крупный просмотр сохраняет сглаживание без контура")
@@ -56,8 +57,9 @@ func _run() -> void:
 	table._attack.get_parent().mouse_entered.emit()
 	_check(table._preview.texture == null, "Вначале нет приватного просмотра")
 	var entry: Dictionary = table._hand._fan._cards["m-1"].get_meta("hand_entry")
-	table._hand._open_preview(entry)
-	_check(table._preview.texture == entry.texture and not table._hand._preview.visible, "Наведение из руки открывает общую панель")
+	table._hand._fan._on_hover(table._hand._fan._cards["m-1"], true, entry)
+	_check(table._preview.texture == entry.texture and not table._hand._preview.visible,
+		"Наведение из руки открывает просмотр сразу, без ожидания кадра или таймера")
 	table._hand._close_preview()
 	_check(table._preview.texture == null, "Просмотр закрывается")
 	var submitted: Array = []
@@ -97,6 +99,8 @@ func _run() -> void:
 	_check(table._hand.drop_zone.size.x > 0.0 and table._fight_frame.get_global_rect().end.x <= 1280.0, "Стол и зона сброса помещаются в 1280×720")
 	table._top.toggle_menu()
 	await _frames()
+	var options: Array = Array(table._top.actions.get_children()).filter(func(item): return item is Button and item.text == "Настройки")
+	_check(options.size() == 1, "На верхней полосе есть кнопка настроек")
 	var top_button: Button = table._top._chat_btn
 	_check(is_equal_approx(top_button.size.y, table._top._esc_btn.size.y)
 		and table._top._esc_btn.alignment == HORIZONTAL_ALIGNMENT_CENTER,
@@ -126,6 +130,14 @@ func _run() -> void:
 		await _shot("deck_dark")
 		table._piles._close()
 	await _check_info(table, true, capture)
+	var scheme := Catalog.deck_for("alice", 0)[10]
+	table._show_scheme({"id": 1, "card": scheme})
+	await _frames()
+	if capture:
+		await _shot("scheme_center")
+	await create_timer(1.40).timeout
+	_check(_same_texture(table._preview.texture, Art.face(scheme)) and table._preview_source == "scheme",
+		"Приём перелетает из центра в слот просмотра")
 	await _check_actions_and_combat(table, capture)
 	await _check_helmet(table, capture)
 	await _check_hand_discard(table)
@@ -199,6 +211,8 @@ func _check_actions_and_combat(table: Control, capture: bool) -> void:
 	var visual_span: float = table._combat_show._defense.position.x + table._combat_show._defense.size.x - table._combat_show._attack.position.x
 	_check(absf(visual_span / table.size.x - 0.60) < 0.035 and table._combat_show._shade.modulate.a > 0.9,
 		"Карты занимают около 60% ширины и фон затемнён")
+	_check(table._combat_show._defense.get_global_rect().end.x < table._preview_column.global_position.x,
+		"Открытая защита не перекрывает просмотр карты")
 	if capture:
 		await _shot("combat_reveal")
 	match_game.tick(Match.REVEAL_SECONDS)

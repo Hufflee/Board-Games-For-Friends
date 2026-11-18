@@ -64,7 +64,7 @@ func _ready() -> void:
 	_fan = PrivateHand.new()
 	_fan.card_size = HAND_CARD
 	_fan.edge_peek = true
-	_fan.preview_delay = 0.375
+	_fan.preview_delay = 0.0
 	_fan.drop_action = _drop
 	_fan.chosen.connect(_toggle)
 	_fan.order_changed.connect(func(order: Array): _orders[int(_view.get("hand", -1))] = order)

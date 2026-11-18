@@ -8,7 +8,9 @@ const Roster := preload("res://games/unmatched/logic/um_roster.gd")
 const Hand := preload("res://games/unmatched/logic/um_hand.gd")
 const Piles := preload("res://games/unmatched/logic/um_piles.gd")
 const SharedPiles := preload("res://hub/card_piles.gd")
+const Maps := preload("res://games/unmatched/logic/um_maps.gd")
 const DEFAULT_HEROES := ["alice", "achilles", "medusa", "yennenga"]
+const DUPLICATE_HEROES := "Выбраны одинаковые персонажи, игра не может быть начата"
 const REVEAL_SECONDS := 3.85
 const DURING_SECONDS := 0.95
 const BEFORE_IMPACT_SECONDS := 2.0
@@ -25,18 +27,26 @@ var phase: String:
 var _reveal_time := 0.0
 var _journal: Array[String] = []
 var _logged_combat: Dictionary = {}
+var _scheme_notice: Dictionary = {}
+var _seen_free_scheme := 0
 var _draft_count := 0
 var _draft_pool: Array = []
 var _draft_offers: Array = []
 var _draft_choices := PackedStringArray()
 
 
-static func create(field: String, heroes: PackedStringArray, participants: Array, seed_value: int, hero_mode: String = "free") -> RefCounted:
+static func controllers_for(total: int, double_player: int = 1) -> PackedInt32Array:
+	if total != 3:
+		return PackedInt32Array(range(total))
+	var owner := clampi(double_player, 0, 2)
+	var others: Array = Array(range(3)).filter(func(index: int) -> bool: return index != owner)
+	return PackedInt32Array([others[0], owner, others[1], owner])
+
+
+static func create(field: String, heroes: PackedStringArray, participants: Array, seed_value: int, hero_mode: String = "free", double_player: int = 1) -> RefCounted:
 	if participants.size() not in [2, 3, 4]:
 		return null
-	var owners := PackedInt32Array(range(participants.size()))
-	if participants.size() == 3:
-		owners = [0, 1, 2, 1]
+	var owners := controllers_for(participants.size(), double_player)
 	var selected: PackedStringArray = heroes
 	if selected.size() != owners.size():
 		selected = PackedStringArray(DEFAULT_HEROES.slice(0, owners.size()))
@@ -48,7 +58,17 @@ static func create(field: String, heroes: PackedStringArray, participants: Array
 		selected = PackedStringArray(pool.slice(0, owners.size()))
 	elif hero_mode in ["pick2", "pick3"]:
 		selected = PackedStringArray(DEFAULT_HEROES.slice(0, owners.size()))
-	var setup: Setup = Setup.create(field, selected, owners, rng)
+	var setup: Setup
+	if field == "random":
+		var arenas := Maps.NAMES.keys().filter(func(id): return Maps.supports(id, owners.size()))
+		SharedPiles.shuffle(arenas, rng)
+		for arena: String in arenas:
+			setup = Setup.create(arena, selected, owners, rng)
+			if setup != null:
+				field = arena
+				break
+	elif Maps.supports(field, owners.size()):
+		setup = Setup.create(field, selected, owners, rng)
 	if setup == null:
 		return null
 	var session := new(field, setup, participants)
@@ -57,6 +77,13 @@ static func create(field: String, heroes: PackedStringArray, participants: Array
 		session._draft_pool = Roster.HEROES.keys()
 		session._offer_heroes()
 	return session
+
+
+static func has_duplicate_heroes(heroes: Array) -> bool:
+	for hero: String in heroes:
+		if heroes.count(hero) > 1:
+			return true
+	return false
 
 
 func _init(field: String, setup: Setup, participants: Array) -> void:
@@ -115,6 +142,7 @@ func act(viewer: int, kind: String, action: Dictionary) -> bool:
 	var active := rules.seat
 	var ok := false
 	var scheme_name := ""
+	var played_scheme: Dictionary = {}
 	match kind:
 		"place":
 			ok = action.get("cell") is int and game.place(viewer, action.cell)
@@ -138,6 +166,10 @@ func act(viewer: int, kind: String, action: Dictionary) -> bool:
 			ok = action.get("fighter") is int and action.get("cell") is int and rules.move_in_maneuver(viewer, action.fighter, action.cell)
 		"end_maneuver":
 			ok = rules.end_maneuver(viewer)
+		"door":
+			ok = action.get("fighter") is int and action.get("door") is int and rules.toggle_maneuver_door(viewer, action.fighter, action.door)
+		"battlefield_item":
+			ok = action.get("fighter") is int and action.get("item") is int and rules.use_battlefield_item(viewer, action.fighter, action.item)
 		"discard":
 			ok = action.get("key") is String and rules.discard_to_limit(viewer, action.key)
 		"attack":
@@ -149,6 +181,7 @@ func act(viewer: int, kind: String, action: Dictionary) -> bool:
 				for card: Dictionary in game.hands[active]:
 					if card.key == action.key:
 						scheme_name = card.name
+						played_scheme = card
 						break
 				ok = rules.play_scheme(viewer, action.fighter, action.key)
 		"combat":
@@ -158,11 +191,24 @@ func act(viewer: int, kind: String, action: Dictionary) -> bool:
 		"effect":
 			ok = action.get("request") is int and rules.choose_effect(viewer, action.request, action.get("answer"))
 	if ok:
+		rules._run_effects()
+		var free_scheme: Dictionary = rules.free_scheme_notice
+		if int(free_scheme.get("id", 0)) > _seen_free_scheme:
+			_seen_free_scheme = free_scheme.id
+			_scheme_notice = {"id": int(_scheme_notice.get("id", 0)) + 1, "card": free_scheme.card}
+			_log("Бесплатный приём · %s." % free_scheme.card.name)
 		match kind:
+			"battlefield_item":
+				var item := Maps.Battlefields.card(action.item)
+				_scheme_notice = {"id": int(_scheme_notice.get("id", 0)) + 1, "card": item}
+				_log("Предмет поля · %s." % item.name)
 			"maneuver":
 				_log("%s выполняет манёвр." % Roster.HEROES[game.heroes[active]].name)
+			"door":
+				_log("Хеорот · дверь %s." % ("закрыта" if action.door in game.board.closed_doors else "открыта"))
 			"scheme":
 				_log("Приём: %s." % scheme_name)
+				_scheme_notice = {"id": int(_scheme_notice.get("id", 0)) + 1, "card": played_scheme.duplicate(true)}
 		_record_combat()
 	return ok
 
@@ -227,19 +273,35 @@ func get_view(viewer: int, selected_hand: int = -1) -> Dictionary:
 				has_attack = has_attack or Catalog.can_play(card, Catalog.Kind.ATTACK, selected.is_hero)
 			if has_attack:
 				for target: Dictionary in figures:
-					if target.seat % 2 != rules.seat % 2 and game.board.in_attack_range(figure.cell, target.cell, selected.ranged):
+					if target.seat % 2 != rules.seat % 2 and rules.attack_in_range(Vector2i(figure.seat, figure.fighter), target.cell):
 						targets_for_fighter.append(target.cell)
 			attacks[figure.fighter] = targets_for_fighter
 			schemes[figure.fighter] = schemes_for_fighter
+	var doors: Array = []
+	for door in game.board.doors.size():
+		var center := Vector2.ZERO
+		for edge: Vector2i in game.board.doors[door]:
+			center += (game.board.position_for(edge.x) + game.board.position_for(edge.y)) * 0.5
+		var allowed: Array[int] = []
+		if controlled:
+			for fighter in game.fighters[rules.seat].size():
+				if door in rules.maneuver_doors(viewer, fighter):
+					allowed.append(fighter)
+		doors.append({"id": door, "at": center / game.board.doors[door].size(),
+			"closed": door in game.board.closed_doors, "allowed": allowed})
 	return {
 		"phase": phase, "phase_title": "Победа команды %s" % ("А" if rules.winner == 0 else "Б") if rules.winner >= 0 else Roster.HEROES[game.heroes[setup.get("seat", rules.seat)]].name,
-		"step": _step(setup), "arena": arena, "fighters": figures, "targets": targets, "positions": positions,
+		"step": _step(setup), "arena": arena, "fighters": figures, "targets": targets, "positions": positions, "doors": doors,
 		"active": rules.seat, "viewer": viewer, "actor": actor(), "phase_id": rules.phase, "actions_left": rules.actions_left,
 		"actor_name": players[actor()].name if actor() >= 0 else "",
 		"can_act": controlled and setup.is_empty(), "moves": moves, "attacks": attacks, "schemes": schemes,
 		"boost_allowed": controlled and rules.can_boost_maneuver(),
+		"maneuver_in_transit": controlled and rules.phase == Rules.Phase.MANEUVER and rules._maneuver_in_transit(),
 		"setup": setup if not setup.is_empty() and game.controllers[setup.seat] == viewer else {},
-		"hand": hand, "piles": Piles.public_view(game.decks, game.discards, game.heroes), "effect": effect,
+		"hand": hand, "piles": Piles.public_view(game.decks, game.discards, game.heroes, game.hands), "effect": effect,
+		"scheme_notice": _scheme_notice,
+		"battlefield_items": (rules.battlefield_items + rules.used_items).duplicate(true),
+		"misery_notice": rules.misery_opened.duplicate(true),
 		"combat": _public_combat(combat), "combat_outcome": _combat_outcome(), "clock": false, "turn": rules.seat,
 		"players": players.duplicate(true), "winners": winners, "team": game.heroes.size() == 4,
 		"journal": _journal.duplicate(),
@@ -345,7 +407,7 @@ func _combat_outcome() -> Dictionary:
 		var fighter: Vector2i = loss.fighter
 		losses.append({"name": _fighter_name(fighter.x, game.fighters[fighter.x][fighter.y]), "amount": loss.amount})
 	return {"id": combat.id, "hit": combat.attacker_won, "losses": losses, "board_after": combat.get("board_after", false),
-		"values": [combat.attack_value, combat.defense_value]}
+		"values": combat.get("card_values", [combat.attack_value, combat.defense_value])}
 
 
 func _record_combat() -> void:

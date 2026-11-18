@@ -1,7 +1,15 @@
 extends RefCounted
-## Напечатанные характеристики героев двух томов. Комплект проверяется в tests/test_unmatched.gd.
+## Напечатанные характеристики героев. Комплект проверяется в tests/test_unmatched.gd.
 
 const HEROES := {
+	"robin_hood": {"name": "Робин Гуд", "health": 13, "move": 2, "ranged": true,
+		"sidekick": {"id": "outlaw", "name": "Разбойник", "health": 1, "count": 4, "ranged": false}},
+	"chupacabra": {"volume": 3, "name": "Чупакабра", "health": 14, "move": 3, "ranged": false},
+	"pandora": {"volume": 3, "name": "Пандора", "health": 14, "move": 2, "ranged": false,
+		"sidekick": {"id": "kakodaemon", "name": "Какодемон", "health": 1, "count": 2, "ranged": false, "reserve": true}},
+	"blackbeard": {"volume": 3, "name": "Чёрная Борода", "health": 13, "move": 2, "ranged": true,
+		"sidekick": {"id": "sea_dog", "name": "Морской пёс", "health": 1, "count": 2, "ranged": false}},
+	"loki": {"volume": 3, "name": "Локи", "health": 16, "move": 2, "ranged": false},
 	"alice": {"volume": 1, "name": "Алиса", "health": 13, "move": 2, "ranged": false,
 		"sidekick": {"id": "jabberwock", "name": "Бармаглот", "health": 8, "count": 1, "ranged": false}},
 	"arthur": {"volume": 1, "name": "Король Артур", "health": 18, "move": 2, "ranged": false,
@@ -17,4 +25,6 @@ const HEROES := {
 		"sidekick": {"id": "clone", "name": "Двойник", "health": 1, "count": 3, "ranged": false, "reserve": true}},
 	"yennenga": {"volume": 2, "name": "Йенненга", "health": 15, "move": 2, "ranged": true,
 		"sidekick": {"id": "archer", "name": "Лучник", "health": 2, "count": 2, "ranged": true}},
+	"bigfoot": {"name": "Бигфут", "health": 16, "move": 3, "ranged": false,
+		"sidekick": {"id": "jackalope", "name": "Кролень", "health": 6, "count": 1, "ranged": false}},
 }

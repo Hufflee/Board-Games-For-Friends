@@ -159,7 +159,8 @@ func _on_hover(card: K12TableCard, on: bool, entry: Dictionary) -> void:
 		if preload("res://hub/card_magnifier.gd").offer(card):
 			return
 		var token := _preview_token
-		await get_tree().create_timer(preview_delay).timeout
+		if preview_delay > 0.0:
+			await get_tree().create_timer(preview_delay).timeout
 		if is_instance_valid(card) and token == _preview_token and _hover == card.card and not card.dragging:
 			preview_requested.emit(entry)
 

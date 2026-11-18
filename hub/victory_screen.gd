@@ -500,6 +500,14 @@ func _layout_leader(card: Control) -> void:
 ## Фон самой игры, без поля и карт: отдельный экземпляр того же задника, что под столом.
 func _game_backdrop() -> Control:
 	match game:
+		"unmatched":
+			var backdrop := TextureRect.new()
+			var art := preload("res://games/unmatched/ui/um_card_art.gd")
+			var arena := str(Net.view.get("arena", "marmoreal"))
+			backdrop.texture = art.backdrop(arena)
+			backdrop.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+			backdrop.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
+			return backdrop
 		"blood_on_the_clocktower":
 			var backdrop := Control.new()
 			preload("res://games/blood_on_the_clocktower/ui/bc_art.gd").backdrop(backdrop)

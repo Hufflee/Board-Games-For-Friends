@@ -35,6 +35,8 @@ const COINS := "res://hub/art/coins/"
 const COIN_VARIANTS := COINS + "variants/codex_2026-10-23/"
 ## Монеты-картинки: [орёл, решка]. Остальные стили рисуются кодом.
 const TEXTURES := {
+	"unmatched": [COINS + "unmatched_front.png", COINS + "unmatched_back.png"],
+	"unmatched_secret": [COINS + "unmatched_secret_front.png", COINS + "unmatched_secret_back.png"],
 	"the_mind": [COINS + "unspoken_coin.png", COINS + "unspoken_coin.png"],
 	"the_mind_dark": [COINS + "unspoken_dark_coin.png", COINS + "unspoken_dark_coin.png"],
 	"the_mind_secret": [COINS + "unspoken_secret_coin.png", COINS + "unspoken_secret_coin.png"],
@@ -183,7 +185,7 @@ const GAME_COINS := [["phantom_ink", false], ["four_souls", false], ["stillion",
 	["ready_set_bet", true], ["word_slam", true], ["wavelength", true], ["not_a_hat", false],
 	["hues_and_cues", true], ["brodilka", false], ["gloom", false], ["the_gang", false], ["things_in_rings", false],
 	["poker", false], ["khorom", true], ["the_mind", true], ["blood_on_the_clocktower", false], ["machi_koro", false],
-	["colt_express", true], ["first_contact", true], ["green_team_wins", true], ["in_broad_strokes", true]]
+	["colt_express", true], ["first_contact", true], ["green_team_wins", true], ["in_broad_strokes", true], ["unmatched", false]]
 static var _tex_cache := {}
 
 var _vel := Vector2.ZERO
@@ -672,6 +674,10 @@ func _draw() -> void:
 				_draw_coin_region(tex, COIN_REGIONS[_style][0 if heads else 1], tint)
 			else:
 				draw_texture_rect(tex, Rect2(Vector2(-R, -R), Vector2(R, R) * 2.0), false, tint)
+			if _style == "unmatched_secret":
+				var glow := _tex(COINS + ("unmatched_secret_front_glow.png" if heads else "unmatched_secret_back_glow.png"))
+				if glow != null:
+					draw_texture_rect(glow, Rect2(Vector2(-R, -R), Vector2.ONE * R * 2.0), false)
 		draw_set_transform(Vector2.ZERO)
 		return
 	# ребро — видно, когда монета повёрнута

@@ -17,11 +17,24 @@ const COLORS := {
 		["e7d2a7", "f5e7c9", "2b5068", "d3dfd7", "bd8e49", "213a4c", "345a70", "fff0d1", "e4dac1"],
 		["253344", "253c53", "2b5068", "1b2c42", "ca9b55", "f8ebce", "edc378", "372b1e", "304756"],
 	],
+	"heorot": [
+		["d7dcd4", "ecdfc9", "394b47", "d2d9cb", "b48450", "263630", "5f4937", "fff0d9", "d4c8b3"],
+		["1d2f31", "293b3b", "40544d", "202f2f", "bb9662", "f2ead8", "e0b477", "372d23", "3b4d46"],
+	],
+	"raptor_paddock": [
+		["dedbc0", "ede6ca", "4e5537", "d7dac0", "a88450", "333b28", "586244", "f9eed1", "d7c9a8"],
+		["282e22", "353e2c", "4f5a3c", "292e21", "b99a63", "f1e8d0", "dac185", "35301f", "434d37"],
+	],
+	"venice": [
+		["e0d7c5", "f1e3cc", "434f57", "d0d7d5", "ba8c53", "28353e", "465e6a", "fff1d9", "d9ceb9"],
+		["202f39", "293e49", "445563", "202e38", "c09a66", "f6e9d4", "dfb27a", "392c23", "384c56"],
+	],
 }
 
 
 static func palette(arena: String, dark: bool) -> Dictionary:
-	var colors: Array = COLORS.get(arena, COLORS.marmoreal)[int(dark)]
+	var theme_id := preload("res://games/unmatched/ui/um_card_art.gd").arena_theme(arena)
+	var colors: Array = COLORS[theme_id][int(dark)]
 	var result := {}
 	var keys := ["bg", "panel", "band", "well", "rim", "ink", "accent", "on", "track"]
 	for i in keys.size():

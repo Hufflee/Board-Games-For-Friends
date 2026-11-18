@@ -4,7 +4,13 @@ extends RefCounted
 const Board := preload("res://games/unmatched/logic/um_board.gd")
 const PRINT_AREA := Rect2(39, 48, 714, 464)
 const PRINT_SIZE := Vector2(792, 560)
-const MAPS := {
+const Workshop := preload("res://games/unmatched/logic/um_workshop_maps.gd")
+const Battlefields := preload("res://games/unmatched/logic/um_battlefields.gd")
+const BASE_NAMES := {"marmoreal": "Мармореал", "sarpedon": "Сарпедон", "gardens": "Висячие сады"}
+const IMAGES := {"marmoreal": "vol1_a", "sarpedon": "vol1_b"}
+# Временно исключены: на этих аренах нет места для начальной расстановки помощников.
+const HIDDEN_ARENAS := ["phone_booth", "bathroom_stall"]
+const BASE_MAPS := {
 	"marmoreal": {
 		"spaces": [
 			[139, 95, "gy"], [228, 86, "g"], [314, 86, "g"], [399, 109, "gev"],
@@ -85,6 +91,22 @@ const MAPS := {
 }
 
 
+static var MAPS: Dictionary = BASE_MAPS.merged(Workshop.MAPS)
+static var NAMES: Dictionary = _names()
+
+
+static func _names() -> Dictionary:
+	var names := BASE_NAMES.duplicate()
+	for id: String in Workshop.MAPS:
+		if id not in HIDDEN_ARENAS:
+			names[id] = Workshop.MAPS[id].name
+	return names
+
+
+static func supports(arena: String, seats: int) -> bool:
+	return NAMES.has(arena) and MAPS[arena].starts.size() >= seats
+
+
 static func create(arena: String) -> RefCounted:
 	if not MAPS.has(arena):
 		return null
@@ -94,7 +116,12 @@ static func create(arena: String) -> RefCounted:
 	for entry: Array in map.spaces:
 		var zones: Array = Array(str(entry[2]).split("", false))
 		var point := Vector2(entry[0], entry[1])
-		var at: Vector2 = point / map.size if map.has("size") else normalize(point)
+		var dimensions: Variant = map.get("size")
+		var at := normalize(point)
+		if dimensions is Array:
+			at = point / Vector2(dimensions[0], dimensions[1])
+		elif dimensions is Vector2:
+			at = point / dimensions
 		spaces.append({"at": at, "zones": zones})
 		links.append(PackedInt32Array())
 	for edge: Array in map.edges:
@@ -102,7 +129,26 @@ static func create(arena: String) -> RefCounted:
 		links[edge[1]].append(edge[0])
 	var high_ground: Array[Vector2i] = []
 	high_ground.assign(map.get("high_ground", []))
-	return Board.new(spaces, links, PackedInt32Array(map.starts), high_ground)
+	var movement_links: Array[PackedInt32Array] = links.duplicate(true)
+	for edge: Array in map.get("one_way", []):
+		movement_links[edge[1]].erase(edge[0])
+	for edge: Array in map.get("move_only", []):
+		movement_links[edge[0]].append(edge[1])
+		movement_links[edge[1]].append(edge[0])
+	var board := Board.new(spaces, links, PackedInt32Array(map.starts), high_ground, movement_links)
+	board.item_pool = Battlefields.POOLS.get(arena, []).duplicate()
+	board.item_slots = Battlefields.SLOTS.get(arena, []).duplicate(true)
+	if arena == "pandemonium":
+		board.dangerous_paths = [Vector2i(2, 20), Vector2i(3, 20), Vector2i(4, 5),
+			Vector2i(17, 19), Vector2i(8, 24), Vector2i(8, 25), Vector2i(14, 15)]
+	if arena == "heorot":
+		# У каждой из трёх дверей один наружный вход и две дорожки внутрь.
+		board.doors = [[Vector2i(17, 19), Vector2i(17, 26)], [Vector2i(3, 20), Vector2i(3, 21)],
+			[Vector2i(12, 24), Vector2i(12, 25)]]
+	if arena == "santa_s_workshop":
+		board.conveyor = PackedInt32Array([21, 27, 13, 12, 11, 10])
+		board.conveyor_exit = PackedInt32Array([5, 6, 7, 8, 23, 24, 33])
+	return board
 
 
 static func normalize(point: Vector2) -> Vector2:

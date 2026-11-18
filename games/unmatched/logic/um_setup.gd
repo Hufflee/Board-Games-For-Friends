@@ -31,6 +31,10 @@ static func create(arena: String, roster: PackedStringArray, owners: PackedInt32
 		var owner: int = owners[seat]
 		if field.start_for(seat) < 0 or not Roster.HEROES.has(hero) or selected.has(hero) or owner < 0:
 			return null
+		if field.cell_count() == 2:
+			var helpers: Dictionary = Roster.HEROES[hero].get("sidekick", {})
+			if not helpers.is_empty() and not helpers.get("reserve", false):
+				return null
 		if teams.has(owner) and teams[owner] != seat % 2:
 			return null
 		teams[owner] = seat % 2

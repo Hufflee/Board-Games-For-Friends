@@ -1252,7 +1252,7 @@ func _apply_unmatched_hero(peer: int, place: int, hero: String) -> void:
 	if place < 0 or place >= count or not UnmatchedMatch.Roster.HEROES.has(hero):
 		return
 	if mode != "offline":
-		var owner := 1 if total == 3 and place == 3 else place
+		var owner: int = UnmatchedMatch.controllers_for(total, int(settings.get("um_double_player", 1)))[place]
 		if owner >= join_order.size() or join_order[owner] != peer:
 			return
 	elif peer != 1:
@@ -1260,8 +1260,6 @@ func _apply_unmatched_hero(peer: int, place: int, hero: String) -> void:
 	var chosen: Array = Array(settings.get("um_heroes", []))
 	if chosen.size() != count:
 		chosen = UnmatchedMatch.DEFAULT_HEROES.slice(0, count)
-	if hero in chosen and chosen[place] != hero:
-		return
 	chosen[place] = hero
 	settings["um_heroes"] = chosen
 	_broadcast_lobby()
@@ -1269,6 +1267,23 @@ func _apply_unmatched_hero(peer: int, place: int, hero: String) -> void:
 
 func player_total() -> int:
 	return members.size() + maxi(0, bots)
+
+
+func set_unmatched_double_player(index: int) -> void:
+	if is_host():
+		if party_game == "unmatched" and not in_game and player_total() == 3:
+			set_setting("um_double_player", clampi(index, 0, 2))
+	else:
+		_claim_unmatched_double_player.rpc_id(1)
+
+
+@rpc("any_peer", "reliable")
+func _claim_unmatched_double_player() -> void:
+	if not is_host():
+		return
+	var index := join_order.find(multiplayer.get_remote_sender_id())
+	if index >= 0:
+		set_unmatched_double_player(index)
 
 
 func lobby_code() -> String:
@@ -1751,8 +1766,11 @@ func start_game() -> String:
 		var chosen: Variant = settings.get("um_heroes", PackedStringArray())
 		if not (chosen is Array or chosen is PackedStringArray):
 			chosen = []
+		if settings.get("um_hero_mode", "free") == "free" and UnmatchedMatch.has_duplicate_heroes(Array(chosen)):
+			seat_peers.clear()
+			return UnmatchedMatch.DUPLICATE_HEROES
 		unmatched = UnmatchedMatch.create(str(settings.get("um_arena", "marmoreal")), PackedStringArray(chosen), players,
-			randi(), str(settings.get("um_hero_mode", "free")))
+			randi(), str(settings.get("um_hero_mode", "free")), int(settings.get("um_double_player", 1)))
 		if unmatched == null:
 			seat_peers.clear()
 			return "Выберите доступное поле и разных героев для всех мест."

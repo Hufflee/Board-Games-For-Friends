@@ -39,10 +39,15 @@ func _initialize() -> void:
 	check(board.in_attack_range(2, 3, true), "Дальняя атака по соседу из другой зоны")
 	check(board.attack_bonus(1, 2) == 1 and board.attack_bonus(2, 1) == 0, "Возвышенность действует по стрелке")
 	check_art()
+	check_workshop_maps()
 	check_catalog()
 	check_setup()
 	check_turn()
 	check_combat()
+	check_reported_cards()
+	check_volume_three()
+	check_heorot()
+	check_bigfoot()
 	check_follow_up()
 	check_scheme()
 	check_private_effects()
@@ -70,7 +75,7 @@ func check_catalog() -> void:
 			if card.has("follow_up"):
 				follow_ups[card.definition] = true
 		check(Catalog.deck_for(hero, 3)[0].key != deck[0].key, "Ключ включает место")
-	check(definitions.size() == 107 and follow_ups.size() == 4, "Уникальные записи и дополнительные атаки")
+	check(definitions.size() == 175 and follow_ups.size() == 4, "Уникальные записи и дополнительные атаки")
 	for id: String in definitions:
 		check(Effects.COMBAT.has(id) != Effects.SCHEMES.has(id), "Одно определение эффекта для %s" % id)
 	check(Catalog.deck_for("unknown", 0).is_empty(), "Неизвестный герой не получает карты")
@@ -219,6 +224,230 @@ func check_combat() -> void:
 	rules.choose_combat_card(12, {"request": request.id, "hand": 1, "cards": []})
 	check(rules.resolve_combat() and setup.fighters[1][0].health == 15 and setup.hands[0].size() == 2
 		and rules.seat == 1, "Атака без защиты наносит урон, эффект берёт карту до передачи хода")
+
+
+func check_volume_three() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 63
+	var setup: RefCounted = Setup.create("marmoreal", ["pandora", "bloody_mary"], [11, 12], rng)
+	var rules := Rules.new(setup)
+	rules.misery_pile = [3, 0]
+	rules.start_turn()
+	var request: Dictionary = rules.effect_view(11)
+	check(rules.miseries == [0] and request.get("options", []) == ["reveal"], "Ящик открывает одно несчастье обязательно")
+	check(rules.choose_effect(11, request.get("id", -1), "reveal") and rules.miseries == [0, 3]
+		and setup.fighters[0][0].health == 12, "Три пера закрывают ящик и наносят урон по числу открытых карт")
+	rules._finish_turn()
+	check(rules.miseries.is_empty() and rules.misery_pile.size() == 2, "Открытые несчастья возвращаются в колоду в конце хода")
+	rules.clear_choices()
+	setup = Setup.create("marmoreal", ["blackbeard", "bloody_mary"], [11, 12], rng)
+	while not setup.pending().is_empty():
+		var step: Dictionary = setup.pending()
+		setup.place(11, step.cells[0])
+	rules = Rules.new(setup)
+	rules.start_turn()
+	request = rules.effect_view(11)
+	check(rules.choose_effect(11, request.get("id", -1), "pay") and rules.doubloons == 1 and rules.actions_left == 3,
+		"Чёрная Борода обменивает дублон на дополнительное действие")
+	rules.clear_choices()
+	setup = Setup.create("marmoreal", ["loki", "bloody_mary"], [11, 12], rng)
+	setup.fighters[0][0].space = 4
+	setup.fighters[1][0].space = 5
+	var trick := Catalog.deck_for("loki", 0)[25]
+	setup.hands[0] = [trick]
+	setup.hands[1] = []
+	rules = Rules.new(setup)
+	rules.begin_attack(11, 0, 1, 0, trick.key)
+	request = rules.attack_view(12).get("choice", {})
+	rules.choose_combat_card(12, {"request": request.get("id", -1), "hand": 1, "cards": []})
+	check(rules.resolve_combat() and trick in setup.hands[1] and trick not in setup.discards[0],
+		"Разыгранная Хитрость Локи переходит в руку противника")
+	rules._discard_key(1, trick.key)
+	rules._run_effects()
+	request = rules.effect_view(11)
+	check(rules.choose_effect(11, request.get("id", -1), "deck") and setup.decks[0].back() == trick,
+		"Локи возвращает сброшенную Хитрость на верх своей колоды")
+	rules.clear_choices()
+	setup = Setup.create("marmoreal", ["chupacabra", "bloody_mary"], [11, 12], rng)
+	setup.fighters[0][0].space = 4
+	setup.fighters[1][0].space = 5
+	setup.hands[0] = [Catalog.deck_for("chupacabra", 0)[27]]
+	setup.hands[1] = []
+	rules = Rules.new(setup)
+	check(rules.begin_attack(11, 0, 1, 0, setup.hands[0][0].key), "Чупакабра начинает атаку")
+	request = rules.attack_view(12).get("choice", {})
+	rules.choose_combat_card(12, {"request": request.get("id", -1), "hand": 1, "cards": []})
+	check(rules.resolve_combat() and rules.last_combat.damage == 0, "Неудачная атака Чупакабры завершена")
+	request = rules.effect_view(11)
+	check(request.get("options", []) == ["draw"] and request.optional and rules.effect_view(12).is_empty(),
+		"Голод Чупакабры предлагает добор даже после атаки без урона")
+	check(rules.choose_effect(11, request.get("id", -1), null) and setup.hands[0].is_empty()
+		and rules.phase == Rules.Phase.ACTION, "Добор Чупакабры можно пропустить")
+	rules.clear_choices()
+
+
+func check_workshop_maps() -> void:
+	check(Maps.MAPS.size() == 39, "Загружены все 39 полей Workshop")
+	for key: String in Maps.MAPS:
+		var field: RefCounted = Maps.create(key)
+		check(field != null and field.valid() and Maps.supports(key, 2) == (key not in Maps.HIDDEN_ARENAS),
+			"Поле %s содержит связанный набор клеток и правильно доступно" % key)
+		var image_name: String = Maps.IMAGES.get(key, key)
+		check(FileAccess.file_exists("res://games/unmatched/art/boards/%s.webp" % image_name), "Изображение поля %s доступно" % key)
+	check(not Maps.supports("sherwood", 4) and Maps.supports("venice", 4), "Ограничения полей учитывают стартовые клетки")
+	var santa: RefCounted = Maps.create("santa_s_workshop")
+	check(santa.adjacent(19, 0) and 19 in santa.reachable(0, 1, 0, {})
+		and 0 not in santa.reachable(19, 1, 0, {}), "Оранжевые стрелки Санты ограничивают движение, но не смежность")
+	var manor: RefCounted = Maps.create("baskerville_manor")
+	check(16 in manor.reachable(0, 1, 0, {}) and not manor.adjacent(0, 16), "Тайный ход доступен для движения, но не атаки")
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 562
+	var setup: RefCounted = Setup.create("santa_s_workshop", ["bloody_mary", "sun_wukong"], [11, 12], rng)
+	setup.fighters[0][0].space = 11
+	setup.fighters[1][0].space = 10
+	var rules := Rules.new(setup)
+	rules._finish_turn()
+	var request: Dictionary = rules.effect_view(12)
+	var options: Array = request.get("options", [])
+	check(not options.is_empty() and rules.seat == 0, "Владелец последнего бойца выбирает свободное место до смены хода")
+	if not options.is_empty():
+		check(rules.choose_effect(12, request.id, options.front()) and setup.fighters[0][0].space == 10
+			and setup.fighters[1][0].space == options.front() and rules.seat == 1, "Конвейер двигает всю очередь на одну клетку")
+	rules.clear_choices()
+
+
+func check_heorot() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7
+	var setup: RefCounted = Setup.create("heorot", ["bigfoot", "bloody_mary"], [11, 12], rng)
+	setup.place(11, setup.pending().cells[0])
+	var field: RefCounted = setup.board
+	check(field.doors.size() == 3 and field.closed_doors.is_empty(), "Три двери Хеорота начинают открытыми")
+	setup.fighters[0][0].space = 3
+	setup.fighters[0][1].space = 20
+	setup.fighters[1][0].space = 16
+	var rules := Rules.new(setup)
+	check(not rules.toggle_maneuver_door(11, 0, 1), "Дверь нельзя переключать вне манёвра")
+	check(rules.begin_maneuver(11) and not rules.toggle_maneuver_door(12, 0, 1), "Чужой манёвр не даёт управления дверью")
+	check(rules.move_in_maneuver(11, 0, 20) and not rules.end_maneuver(11), "Боец взаимодействует с дверью на проходе через союзника")
+	check(rules.toggle_maneuver_door(11, 0, 1) and not field.adjacent(3, 20)
+		and not field.adjacent(3, 21) and not field.same_zone(3, 20) and not field.in_attack_range(3, 20, true),
+		"Закрытая дверь разрывает обе дорожки, смежность, зону и дальнюю атаку")
+	check(rules.toggle_maneuver_door(11, 0, 1) and field.adjacent(3, 20) and field.same_zone(3, 20)
+		and 28 in rules.maneuver_cells(11, 0) and rules._maneuver_remaining(0) == 1,
+		"Открывание тратит один шаг и восстанавливает обе дорожки")
+	check(rules.move_in_maneuver(11, 0, 28) and rules.maneuver_cells(11, 0).is_empty()
+		and rules.end_maneuver(11), "Манёвр заканчивается на свободной клетке после расхода шагов")
+	rules.clear_choices()
+
+
+func check_bigfoot() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 19
+	var setup: RefCounted = Setup.create("heorot", ["bigfoot", "bloody_mary"], [11, 12], rng)
+	setup.place(11, setup.pending().cells[0])
+	var rules := Rules.new(setup)
+	var deck := Catalog.deck_for("bigfoot", 0)
+	setup.fighters[0][0].space = 24
+	setup.fighters[0][1].space = 25
+	setup.fighters[1][0].space = 18
+	setup.hands[0] = deck.slice(0, 7)
+	rules.actions_left = 0
+	rules._end_action()
+	var request := rules.effect_view(11)
+	check(request.get("options", []) == ["draw"] and request.optional and rules.effect_view(12).is_empty(),
+		"Бигфут выбирает добор за чистую зону в конце своего хода")
+	check(rules.choose_effect(11, request.get("id", -1), "draw") and setup.hands[0].size() == 8
+		and rules.phase == Rules.Phase.DISCARD, "Добор Бигфута происходит перед сбросом до семи")
+	check(rules.discard_to_limit(11, setup.hands[0][0].key) and rules.seat == 1,
+		"Добор срабатывает один раз, после сброса ход передаётся")
+	rules.clear_choices()
+	setup.fighters[0][0].space = 3
+	setup.fighters[0][1].space = 20
+	setup.fighters[1][0].space = 21
+	setup.hands[0] = [deck[16]]
+	rules = Rules.new(setup)
+	check(not rules.play_scheme(11, 0, deck[16].key) and rules.play_scheme(11, 1, deck[16].key),
+		"Приём «Рога Шакалопа» доступен только помощнику")
+	request = rules.effect_view(11)
+	check(29 in request.get("options", []) and 21 not in request.get("options", []),
+		"Шакалоп проходит сквозь врага и заканчивает движение на свободной клетке")
+	check(rules.choose_effect(11, request.get("id", -1), 29)
+		and setup.fighters[0][1].walk == PackedInt32Array([20, 21, 29]), "Маршрут Шакалопа действительно проходит через противника")
+	request = rules.effect_view(11)
+	check(Vector2i(1, 0) in request.get("options", []) and Vector2i(0, 0) not in request.get("options", []),
+		"Рога выбирают бойца, смежного с новой клеткой Шакалопа")
+	check(rules.choose_effect(11, request.get("id", -1), Vector2i(1, 0)) and setup.fighters[1][0].health == 14,
+		"Рога нанесли два урона выбранному бойцу")
+	rules.clear_choices()
+	setup.fighters[0][0].space = 3
+	setup.fighters[1][0].space = 20
+	rules = Rules.new(setup)
+	rules.actions_left = 0
+	rules._end_action()
+	check(rules.effect_view(11).is_empty() and rules.seat == 1, "Враг в зоне блокирует способность Бигфута")
+	rules.clear_choices()
+	setup.fighters[0][0].space = 20
+	setup.fighters[0][1].space = 27
+	setup.fighters[1][0].space = 21
+	setup.hands[0] = [deck[10]]
+	setup.hands[1] = []
+	rules = Rules.new(setup)
+	check(rules.begin_attack(11, 0, 1, 0, deck[10].key), "Бигфут разыгрывает «Свирепость»")
+	request = rules.attack_view(12).get("choice", {})
+	rules.choose_combat_card(12, {"request": request.get("id", -1), "hand": 1, "cards": []})
+	check(rules.resolve_combat() and setup.fighters[0][1].health == 5 and setup.fighters[1][0].health == 9,
+		"Победная «Свирепость» наносит дополнительный урон и противнику, и соседнему Шакалопу")
+	rules.clear_choices()
+
+
+func check_reported_cards() -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 27
+	var setup: RefCounted = Setup.create("marmoreal", ["alice", "bloody_mary"], [11, 12], rng)
+	setup.place(11, setup.pending().cells[0])
+	setup.choose_size(11, false)
+	setup.fighters[0][0].space = 4
+	setup.fighters[1][0].space = 5
+	var alice := Catalog.deck_for("alice", 0)
+	var mary := Catalog.deck_for("bloody_mary", 1)
+	var gates := alice[22]
+	var top := alice[2]
+	var mirror := mary[14]
+	setup.hands[0] = [gates]
+	setup.hands[1] = [mirror]
+	setup.decks[0] = [top]
+	var rules := Rules.new(setup)
+	check(rules.begin_attack(11, 0, 1, 0, gates.key), "Враг у ворот разыгрывается атакой")
+	var request: Dictionary = rules.attack_view(12).choice
+	rules.choose_combat_card(12, {"request": request.get("id", -1), "hand": 1, "cards": [mirror.key]})
+	rules.resolve_combat()
+	request = rules.effect_view(12)
+	check(request.get("modifier_choice", false) and request.get("options", []) == [-1, 1],
+		"Разбитое зеркало предлагает уменьшение и увеличение")
+	check(rules.choose_effect(12, request.get("id", -1), -1)
+		and rules.last_combat.get("defense_value") == mirror.value - 1, "Разбитое зеркало принимает уменьшение")
+	check(setup.decks[0].is_empty() and setup.discards[0].has(top)
+		and rules.last_combat.get("attack_value") == gates.value + top.boost, "Враг у ворот сбрасывает вершину и добавляет усиление")
+	setup = Setup.create("marmoreal", ["arthur", "bloody_mary"], [11, 12], rng)
+	setup.place(11, setup.pending().cells[0])
+	setup.fighters[0][0].space = 4
+	setup.fighters[0][1].space = 5
+	setup.fighters[1][0].space = 6
+	var storm := Catalog.deck_for("arthur", 0)[15]
+	setup.hands[0] = [storm]
+	rules = Rules.new(setup)
+	check(rules.play_scheme(11, 1, storm.key), "Мерлин разыгрывает Управляя штормом")
+	for target: Vector2i in [Vector2i(0, 0), Vector2i(1, 0)]:
+		request = rules.effect_view(11)
+		var previous: int = setup.fighters[target.x][target.y].space
+		check(target in request.get("options", []) and rules.choose_effect(11, request.get("id", -1), target),
+			"Одним приёмом можно выбрать бойца каждой стороны")
+		request = rules.effect_view(11)
+		var cells: Array = request.get("options", [])
+		check(not cells.is_empty() and rules.choose_effect(11, request.get("id", -1), cells.front())
+			and setup.fighters[target.x][target.y].space != previous, "Боец перемещается на выбранную клетку")
+	rules.clear_choices()
 
 
 func check_follow_up() -> void:
@@ -399,7 +628,7 @@ func check_common_actions() -> void:
 func check_art() -> void:
 	var text := FileAccess.get_file_as_string("res://games/unmatched/art/cards/sources.json")
 	var catalog: Variant = JSON.parse_string(text)
-	check(catalog is Dictionary and catalog.size() == 8, "В каталоге восемь колод")
+	check(catalog is Dictionary and catalog.size() == Roster.HEROES.size(), "В каталоге есть колода каждого героя")
 	if not catalog is Dictionary:
 		return
 	for hero: String in Roster.HEROES:

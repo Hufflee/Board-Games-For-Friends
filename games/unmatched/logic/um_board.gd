@@ -6,13 +6,23 @@ const Paths := preload("res://hub/board_paths.gd")
 
 var _spaces: Array[Dictionary] = []
 var _links: Array[PackedInt32Array] = []
+var _movement_links: Array[PackedInt32Array] = []
 var _high_ground: Dictionary = {}
 var _starts: PackedInt32Array = []
+var doors: Array = []
+var closed_doors: Array[int] = []
+var item_pool: Array = []
+var item_slots: Array = []
+var dangerous_paths: Array[Vector2i] = []
+var conveyor := PackedInt32Array()
+var conveyor_exit := PackedInt32Array()
 
 
-func _init(spaces: Array[Dictionary], links: Array[PackedInt32Array], starts: PackedInt32Array, high_ground: Array[Vector2i]) -> void:
+func _init(spaces: Array[Dictionary], links: Array[PackedInt32Array], starts: PackedInt32Array,
+		high_ground: Array[Vector2i], movement_links: Array[PackedInt32Array] = []) -> void:
 	_spaces = spaces.duplicate(true)
 	_links = links.duplicate(true)
+	_movement_links = (_links if movement_links.is_empty() else movement_links).duplicate(true)
 	_starts = starts.duplicate()
 	for edge in high_ground:
 		_high_ground[edge] = true
@@ -61,7 +71,55 @@ func start_for(seat: int) -> int:
 
 
 func adjacent(from: int, to: int) -> bool:
-	return valid_space(from) and valid_space(to) and to in _links[from]
+	return valid_space(from) and valid_space(to) and to in _links[from] and not _door_blocks(from, to)
+
+
+func door_is_adjacent(door: int, space: int) -> bool:
+	if door < 0 or door >= doors.size():
+		return false
+	return doors[door].any(func(edge: Vector2i) -> bool: return space in [edge.x, edge.y])
+
+
+func toggle_door(door: int) -> void:
+	if door in closed_doors:
+		closed_doors.erase(door)
+	else:
+		closed_doors.append(door)
+
+
+func _door_blocks(from: int, to: int) -> bool:
+	var edge := Vector2i(mini(from, to), maxi(from, to))
+	for door: int in closed_doors:
+		if edge in doors[door]:
+			return true
+	return false
+
+
+func _without_closed_doors(links: Array[PackedInt32Array]) -> Array[PackedInt32Array]:
+	if closed_doors.is_empty():
+		return links
+	var available: Array[PackedInt32Array] = links.duplicate(true)
+	for door: int in closed_doors:
+		for edge: Vector2i in doors[door]:
+			available[edge.x].erase(edge.y)
+			available[edge.y].erase(edge.x)
+	return available
+
+
+func _distance_in(links: Array[PackedInt32Array], first: int, second: int) -> int:
+	var queue := PackedInt32Array([first])
+	var distances := {first: 0}
+	var index := 0
+	while index < queue.size():
+		var cell := queue[index]
+		if cell == second:
+			return distances[cell]
+		for next: int in links[cell]:
+			if not distances.has(next):
+				distances[next] = distances[cell] + 1
+				queue.append(next)
+		index += 1
+	return -1
 
 
 func same_zone(first: int, second: int) -> bool:
@@ -70,7 +128,7 @@ func same_zone(first: int, second: int) -> bool:
 	var other: Array = _spaces[second].zones
 	for zone: String in _spaces[first].zones:
 		if zone in other:
-			return true
+			return closed_doors.is_empty() or _distance_in(_links, first, second) == _distance_in(_without_closed_doors(_links), first, second)
 	return false
 
 
@@ -84,19 +142,23 @@ func attack_bonus(from: int, to: int) -> int:
 
 ## Проходит через союзников, но останавливается только на свободных местах.
 ## В occupied ключ — место, значение — команда фигуры на нём.
-func reachable(from: int, distance: int, team: int, occupied: Dictionary, through_enemies: bool = false, previous: Dictionary = {}) -> PackedInt32Array:
+func reachable(from: int, distance: int, team: int, occupied: Dictionary, through_enemies: bool = false, previous: Dictionary = {}, stop_on_allies: bool = false) -> PackedInt32Array:
 	var can_cross := func(space: int) -> bool:
 		return through_enemies or not occupied.has(space) or int(occupied[space]) == team
 	var can_stop := func(space: int) -> bool:
-		return not occupied.has(space)
-	return Paths.reachable(_links, from, distance, can_cross, can_stop, previous)
+		return not occupied.has(space) or (stop_on_allies and int(occupied[space]) == team)
+	return Paths.reachable(_without_closed_doors(_movement_links), from, distance, can_cross, can_stop, previous)
 
 
-func route(from: int, to: int, distance: int, team: int, occupied: Dictionary, through_enemies: bool = false) -> PackedInt32Array:
+func route(from: int, to: int, distance: int, team: int, occupied: Dictionary, through_enemies: bool = false, stop_on_allies: bool = false) -> PackedInt32Array:
 	var previous := {}
-	if to not in reachable(from, distance, team, occupied, through_enemies, previous):
+	if to not in reachable(from, distance, team, occupied, through_enemies, previous, stop_on_allies):
 		return []
 	var cells := PackedInt32Array([to])
 	while cells[0] != from:
 		cells.insert(0, previous[cells[0]])
 	return cells
+
+
+func movement_neighbors(from: int) -> PackedInt32Array:
+	return _without_closed_doors(_movement_links)[from].duplicate() if valid_space(from) else PackedInt32Array()

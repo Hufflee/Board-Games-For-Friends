@@ -7,12 +7,14 @@ const Roster := preload("res://games/unmatched/logic/um_roster.gd")
 const Match := preload("res://games/unmatched/logic/um_match.gd")
 const Style := preload("res://games/unmatched/ui/um_style.gd")
 const Art := preload("res://games/unmatched/ui/um_card_art.gd")
+const BoardView := preload("res://games/unmatched/ui/um_board_view.gd")
 const HERO_MODES := ["free", "random", "pick2", "pick3"]
 
 var _screen: Control
 var _playing := false
 var _message := ""
 var _handoff_actor := -1
+var _hero_preview: TextureRect
 
 
 func _ready() -> void:
@@ -30,6 +32,7 @@ func _ready() -> void:
 
 
 func _switch(screen: Control) -> void:
+	_hero_preview = null
 	if is_instance_valid(_screen):
 		remove_child(_screen)
 		_screen.queue_free()
@@ -42,12 +45,14 @@ func _show_lobby() -> void:
 	_playing = false
 	var settings: Dictionary = Net.settings if Net.is_host() else Net.lobby_view.get("settings", {})
 	var arena := str(settings.get("um_arena", "marmoreal"))
+	if arena in Match.Maps.HIDDEN_ARENAS:
+		arena = "random"
 	var colors := Style.palette(arena, Prefs.dark_theme())
 	theme = Style.make_theme(colors)
 	var root := Control.new()
 	_switch(root)
 	var background := TextureRect.new()
-	background.texture = Art.texture("res://games/unmatched/art/backgrounds/%s.webp" % arena)
+	background.texture = Art.backdrop(arena)
 	background.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	background.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_COVERED
 	background.mouse_filter = MOUSE_FILTER_IGNORE
@@ -58,22 +63,33 @@ func _show_lobby() -> void:
 	shade.mouse_filter = MOUSE_FILTER_IGNORE
 	root.add_child(shade)
 	shade.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
-	var center := CenterContainer.new()
+	var center := MarginContainer.new()
+	for side: String in ["left", "top", "right", "bottom"]:
+		center.add_theme_constant_override("margin_%s" % side, 24)
 	root.add_child(center)
 	center.set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
+	var layout := HBoxContainer.new()
+	layout.add_theme_constant_override("separation", 24)
+	center.add_child(layout)
 	var panel := PanelContainer.new()
+	panel.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	panel.custom_minimum_size.y = minf(536.0, size.y - 48.0)
 	panel.add_theme_stylebox_override("panel", Style.frame(colors.panel, colors.rim, 20))
-	center.add_child(panel)
+	layout.add_child(panel)
 	var col := K12UI.vbox(12)
-	col.custom_minimum_size.x = 430
-	panel.add_child(col)
+	col.custom_minimum_size.x = 280
+	var scroll := ScrollContainer.new()
+	scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+	panel.add_child(scroll)
+	scroll.add_child(col)
+	col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	var title := Label.new()
 	title.text = "Unmatched"
 	title.add_theme_font_override("font", Style.TITLE)
 	title.add_theme_font_size_override("font_size", 52)
 	col.add_child(title)
 	var subtitle := Label.new()
-	subtitle.text = "Битва легенд · Том 1 и том 2"
+	subtitle.text = "Битва легенд · Тома 1–3"
 	subtitle.add_theme_font_size_override("font_size", 18)
 	col.add_child(subtitle)
 	if not Net.in_session():
@@ -85,6 +101,9 @@ func _show_lobby() -> void:
 			func(t: String, z: int): return K12UI.label(t, z, K12UI.MUTED, HORIZONTAL_ALIGNMENT_CENTER)))
 	else:
 		_build_lobby(col)
+		var members: Array = Net.lobby_view.get("members", [])
+		var total := Net.player_total() if Net.is_host() else members.size()
+		layout.add_child(_lobby_preview(arena, settings, total, colors))
 	if not _message.is_empty():
 		var message := K12UI.label(_message, K12UI.BODY)
 		message.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
@@ -101,15 +120,44 @@ func _build_lobby(col: VBoxContainer) -> void:
 		var names := PackedStringArray()
 		for member: Dictionary in members:
 			names.append(member.name)
-		col.add_child(K12UI.label("  ·  ".join(names), K12UI.BODY))
+		col.add_child(K12UI.label("  ·  ".join(names), K12UI.BODY, get_theme_color("font_color", "Label")))
 	var lobby_settings: Dictionary = Net.settings if Net.is_host() else Net.lobby_view.get("settings", {})
 	var field := OptionButton.new()
-	var arenas := ["marmoreal", "sarpedon", "gardens"]
-	for name: String in ["Мармореал", "Сарпедон", "Висячие сады"]:
-		field.add_item(name)
-	field.select(maxi(0, arenas.find(lobby_settings.get("um_arena", "marmoreal"))))
+	field.name = "ArenaChoice"
+	field.fit_to_longest_item = false
+	field.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+	field.custom_minimum_size.x = 280
+	field.get_popup().add_theme_color_override("font_disabled_color",
+		Color("bca8b5") if Prefs.dark_theme() else Color("775f70"))
+	var arena: String = lobby_settings.get("um_arena", "marmoreal")
+	if arena in Match.Maps.HIDDEN_ARENAS:
+		arena = "random"
+		if Net.is_host():
+			Net.set_setting.call_deferred("um_arena", arena)
+	var seats := 4 if total > 2 else 2
+	var incompatible := arena != "random" and not Match.Maps.supports(arena, seats)
+	field.add_item("Случайное")
+	field.set_item_metadata(0, "random")
+	field.select(0)
+	var arena_keys: Array = Match.Maps.NAMES.keys()
+	arena_keys.sort_custom(func(a: String, b: String) -> bool:
+		var first := Match.Maps.Battlefields.complexity(a)
+		var second := Match.Maps.Battlefields.complexity(b)
+		return Match.Maps.NAMES[a] < Match.Maps.NAMES[b] if first == second else first < second)
+	for capacity: int in [2, 4]:
+		field.add_separator("Поля на %d человека" % capacity)
+		for key: String in arena_keys:
+			if Match.Maps.supports(key, 4) != (capacity == 4):
+				continue
+			var mechanic := Match.Maps.Battlefields.mechanic(key)
+			field.add_item(Match.Maps.NAMES[key] + (" · " + mechanic if not mechanic.is_empty() else ""))
+			var index := field.item_count - 1
+			field.set_item_metadata(index, key)
+			field.set_item_disabled(index, capacity < seats)
+			if arena == key:
+				field.select(index)
 	field.disabled = not Net.is_host()
-	field.item_selected.connect(func(index: int): Net.set_setting("um_arena", arenas[index]))
+	field.item_selected.connect(func(index: int): Net.set_setting("um_arena", field.get_item_metadata(index)))
 	col.add_child(field)
 	var hero_mode := OptionButton.new()
 	for title: String in ["На выбор игрока", "Случайный", "Выбор из двух", "Выбор из трёх"]:
@@ -128,10 +176,30 @@ func _build_lobby(col: VBoxContainer) -> void:
 			Net.set_setting("um_heroes", [])
 			Net.set_bots(index + 1))
 		col.add_child(count)
-	if current_mode == "free":
-		_build_hero_selectors(col, members, total, lobby_settings)
+	if total == 3:
+		var double_player := OptionButton.new()
+		double_player.name = "DoublePlayerChoice"
+		for index in 3:
+			double_player.add_item(str(members[index].name) if index < members.size() else "Игрок %d" % (index + 1))
+		double_player.select(clampi(int(lobby_settings.get("um_double_player", 1)), 0, 2))
+		double_player.disabled = not Net.is_host()
+		double_player.item_selected.connect(Net.set_unmatched_double_player)
+		col.add_child(_lobby_row("Два героя в одной команде", double_player))
+		if Net.mode != "offline":
+			var claim := K12UI.button("Я играю за двоих", K12UI.BODY)
+			claim.pressed.connect(func(): Net.set_unmatched_double_player(0))
+			col.add_child(claim)
+	var duplicate_heroes := current_mode == "free" and _build_hero_selectors(col, members, total, lobby_settings)
+	if duplicate_heroes:
+		var warning := K12UI.label(Match.DUPLICATE_HEROES, K12UI.BODY)
+		warning.add_theme_color_override("font_color", Color("ff646f") if Prefs.dark_theme() else Color("9d1634"))
+		warning.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		col.add_child(warning)
 	if Net.is_host():
 		var start := K12UI.primary("Начать партию", K12UI.BODY)
+		start.disabled = duplicate_heroes or incompatible
+		if incompatible:
+			start.tooltip_text = "Для этой партии выберите поле на 4 человека"
 		Style.primary(start, Style.palette(str(lobby_settings.get("um_arena", "marmoreal")), Prefs.dark_theme()))
 		start.pressed.connect(func():
 			_message = Net.start_game()
@@ -139,28 +207,100 @@ func _build_lobby(col: VBoxContainer) -> void:
 				_show_lobby.call_deferred())
 		col.add_child(start)
 	else:
-		col.add_child(K12UI.label("Ожидаем начала партии", K12UI.BODY))
+		col.add_child(K12UI.label("Ожидаем начала партии", K12UI.BODY, get_theme_color("font_color", "Label")))
 
 
-func _build_hero_selectors(col: VBoxContainer, members: Array, total: int, settings: Dictionary) -> void:
+func _lobby_preview(arena: String, settings: Dictionary, total: int, colors: Dictionary) -> VBoxContainer:
+	var preview := K12UI.vbox(8)
+	preview.name = "LobbyPreview"
+	preview.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	preview.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	var title := K12UI.label(Match.Maps.NAMES.get(arena, "Случайное поле"), K12UI.BODY, colors.ink)
+	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	preview.add_child(title)
+	if Match.Maps.NAMES.has(arena):
+		var board := BoardView.new()
+		board.mouse_filter = MOUSE_FILTER_IGNORE
+		board.outline_color = colors.rim
+		board.custom_minimum_size = Vector2(0, 392)
+		preview.add_child(board)
+		board.present(arena, [], {})
+	else:
+		preview.add_child(K12UI.label("Поле определится при старте", K12UI.BODY, colors.ink, HORIZONTAL_ALIGNMENT_CENTER))
+	var mode: String = settings.get("um_hero_mode", "free")
+	if mode != "free":
+		var note := "Персонажи определятся при старте" if mode == "random" else "Выбор персонажей откроется при старте"
+		preview.add_child(K12UI.label(note, K12UI.BODY, colors.ink, HORIZONTAL_ALIGNMENT_CENTER))
+		return preview
+	var seats := 4 if total == 3 else clampi(total, 2, 4)
+	var selected: Array = Array(settings.get("um_heroes", []))
+	if selected.size() != seats:
+		selected = Match.DEFAULT_HEROES.slice(0, seats)
+	var heroes := HBoxContainer.new()
+	heroes.add_theme_constant_override("separation", 8)
+	preview.add_child(heroes)
+	for hero: String in selected:
+		var face := TextureRect.new()
+		face.texture = Art.reference_face(hero)
+		face.tooltip_text = Roster.HEROES.get(hero, {}).get("name", "")
+		face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		face.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		face.size_flags_horizontal = SIZE_EXPAND_FILL
+		face.custom_minimum_size.y = 232
+		face.focus_mode = Control.FOCUS_ALL
+		Art.round_corners(face)
+		heroes.add_child(face)
+		face.mouse_entered.connect(_show_hero_preview.bind(face))
+		face.mouse_exited.connect(_hide_hero_preview)
+		face.focus_entered.connect(_show_hero_preview.bind(face))
+		face.focus_exited.connect(_hide_hero_preview)
+	return preview
+
+
+func _show_hero_preview(source: TextureRect) -> void:
+	if not is_instance_valid(_hero_preview):
+		_hero_preview = TextureRect.new()
+		_hero_preview.name = "HeroCardZoom"
+		_hero_preview.z_index = 100
+		_hero_preview.mouse_filter = MOUSE_FILTER_IGNORE
+		_hero_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+		_hero_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+		Art.round_corners(_hero_preview)
+		_screen.add_child(_hero_preview)
+	_hero_preview.texture = source.texture
+	var height := minf(size.y - 48.0, 560.0)
+	var width := height * source.texture.get_width() / source.texture.get_height()
+	_hero_preview.size = Vector2(width, height)
+	var x := source.global_position.x - width - 16.0
+	if x < 24.0:
+		x = source.get_global_rect().end.x + 16.0
+	_hero_preview.position = Vector2(clampf(x, 24.0, size.x - width - 24.0), (size.y - height) * 0.5)
+	_hero_preview.show()
+
+
+func _hide_hero_preview() -> void:
+	if is_instance_valid(_hero_preview):
+		_hero_preview.hide()
+
+
+func _build_hero_selectors(col: VBoxContainer, members: Array, total: int, settings: Dictionary) -> bool:
 	var seats := 4 if total == 3 else clampi(total, 2, 4)
 	var selected: Array = Array(settings.get("um_heroes", []))
 	if selected.size() != seats:
 		selected = Match.DEFAULT_HEROES.slice(0, seats)
 	for place in seats:
 		var choose := OptionButton.new()
-		var roster: Array = []
+		var roster: Array = Roster.HEROES.keys()
 		for hero: String in Roster.HEROES:
-			if hero == selected[place] or not hero in selected:
-				roster.append(hero)
-				choose.add_item(Roster.HEROES[hero].name)
+			choose.add_item(Roster.HEROES[hero].name)
 		choose.select(roster.find(selected[place]))
-		var owner := 1 if total == 3 and place == 3 else place
+		var owner: int = Match.controllers_for(total, int(settings.get("um_double_player", 1)))[place]
 		var local_owner: bool = Net.mode == "offline" or (owner < members.size() and members[owner].get("peer", 0) == multiplayer.get_unique_id())
 		choose.disabled = not local_owner
 		choose.item_selected.connect(func(index: int): Net.set_unmatched_hero(place, roster[index]))
 		var name := str(members[owner].name) if owner < members.size() else "Игрок %d" % (owner + 1)
 		col.add_child(_lobby_row("%s · %s" % ["А" if place % 2 == 0 else "Б", name], choose))
+	return Match.has_duplicate_heroes(selected)
 
 
 func _lobby_row(title: String, control: Control) -> HBoxContainer:
@@ -169,9 +309,14 @@ func _lobby_row(title: String, control: Control) -> HBoxContainer:
 	var caption := Label.new()
 	caption.text = title
 	caption.size_flags_horizontal = SIZE_EXPAND_FILL
+	caption.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	caption.custom_minimum_size.x = 96
 	caption.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	row.add_child(caption)
-	control.custom_minimum_size.x = 184
+	control.custom_minimum_size.x = 160
+	if control is OptionButton:
+		control.fit_to_longest_item = false
+		control.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	row.add_child(control)
 	return row
 

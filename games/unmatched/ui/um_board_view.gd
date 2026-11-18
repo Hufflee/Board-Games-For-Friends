@@ -3,16 +3,22 @@ extends Control
 
 signal target_pressed(cell: int)
 signal character_hovered(hero: String)
+signal door_pressed(door: int)
+signal item_pressed(id: int)
+signal item_hovered(id: int)
 
 const Art := preload("res://games/unmatched/ui/um_card_art.gd")
 const Style := preload("res://games/unmatched/ui/um_style.gd")
 const Maps := preload("res://games/unmatched/logic/um_maps.gd")
-const IMAGES := {"marmoreal": "vol1_a", "sarpedon": "vol1_b", "gardens": "gardens"}
 
 var _arena := ""
 var _board: Texture2D
 var _figures: Array = []
 var _targets: Dictionary = {}
+var _doors: Array = []
+var _items: Array = []
+var _item_textures := {}
+var _hovered_item := -1
 var _portraits: Dictionary = {}
 var _zoom := 1.0
 var _offset := Vector2.ZERO
@@ -35,12 +41,18 @@ func _ready() -> void:
 	clip_contents = true
 	set_process(false)
 	mouse_exited.connect(_show_character.bind(""))
+	mouse_exited.connect(_show_item.bind(-1))
 	resized.connect(func():
 		clamp_offset()
 		queue_redraw())
 
 
-func present(arena: String, figures: Array, targets: Dictionary, show_effect_losses: bool = false) -> void:
+func present(arena: String, figures: Array, targets: Dictionary, show_effect_losses: bool = false, doors: Array = [], items: Array = []) -> void:
+	_doors = doors
+	_items = items
+	for item: Dictionary in _items:
+		if not _item_textures.has(item.id):
+			_item_textures[item.id] = Art.face(Maps.Battlefields.card(item.id))
 	if arena != _arena:
 		_arena = arena
 		_motions.clear()
@@ -49,9 +61,9 @@ func present(arena: String, figures: Array, targets: Dictionary, show_effect_los
 		_zoom = 1.0
 		_offset = Vector2.ZERO
 		_board = null
-		if IMAGES.has(arena):
-			var source := Art.texture("res://games/unmatched/art/boards/%s.webp" % IMAGES[arena])
-			if arena == "gardens":
+		if Maps.MAPS.has(arena):
+			var source := Art.texture("res://games/unmatched/art/boards/%s.webp" % Maps.IMAGES.get(arena, arena))
+			if Maps.MAPS[arena].has("size"):
 				_board = source
 			elif source != null:
 				var atlas := AtlasTexture.new()
@@ -74,8 +86,9 @@ func present(arena: String, figures: Array, targets: Dictionary, show_effect_los
 		if not previous.has(key):
 			continue
 		var old: Dictionary = previous[key]
-		if show_effect_losses and old.hp > fighter.hp:
-			_effect_losses.append({"at": fighter.at, "amount": old.hp - fighter.hp, "elapsed": 0.0})
+		if show_effect_losses and old.hp != fighter.hp:
+			_effect_losses.append({"at": fighter.at, "amount": absi(old.hp - fighter.hp),
+				"healing": fighter.hp > old.hp, "elapsed": 0.0})
 		var path: Array = fighter.get("walk", []).duplicate() if fighter.get("walk_serial", 0) != old.get("walk_serial", 0) else []
 		if path.size() < 2 or path[0] != old.at or path[-1] != fighter.at:
 			if old.at == fighter.at:
@@ -147,6 +160,26 @@ func _draw() -> void:
 	var field := _field_rect()
 	draw_texture_rect(_board, field, false)
 	draw_rect(field.grow(0.75), outline_color, false, 1.5, true)
+	for item: Dictionary in _items:
+		var rect := _item_rect(item, field)
+		var spent: bool = item.get("spent", false)
+		var texture: Texture2D = _item_textures.get(item.id)
+		if texture != null:
+			draw_texture_rect(texture, rect, false, Color(1, 1, 1, 0.25 if spent else 1.0))
+		var tint := Color("efcf7b") if item.get("enabled", false) else Color("8f8583")
+		draw_rect(rect.grow(1), tint, false, 2.0, true)
+		if spent:
+			draw_line(rect.position, rect.end, tint, 2.0, true)
+	for door: Dictionary in _doors:
+		var center := field.position + (door.at as Vector2) * field.size
+		var radius := _door_radius(field.size.x)
+		var edge := Color("ffe49d") if door.enabled else Color("c99a70")
+		draw_circle(center, radius, Color("472521") if door.closed else Color("25352e"), true, -1.0, true)
+		draw_arc(center, radius, 0.0, TAU, 28, edge, 2.0, true)
+		var panel := Rect2(center - Vector2(radius * 0.43, radius * 0.61), Vector2(radius * 0.86, radius * 1.22))
+		draw_rect(panel, edge, false, 1.5, true)
+		if not door.closed:
+			draw_line(panel.position, panel.get_center(), edge, 1.5, true)
 	if drop_highlight:
 		draw_rect(field, Color(0.28, 0.77, 0.37, 0.30))
 		draw_rect(field, Color(0.63, 0.94, 0.63, 0.85), false, 2.0, true)
@@ -168,14 +201,16 @@ func _draw() -> void:
 			var lift := 0.0 if Prefs.reduce_motion else sin(PI * fraction)
 			_draw_fighter(field.position + position * field.size, field.size.x, fighter, lift)
 	for loss in _effect_losses:
-		var text := "−%d ОЗ" % loss.amount
+		var healing: bool = loss.get("healing", false)
+		var text := ("+%d ОЗ" if healing else "−%d ОЗ") % loss.amount
 		var point: Vector2 = field.position + loss.at * field.size
 		point -= Vector2(18, 25 + (0.0 if Prefs.reduce_motion else loss.elapsed * 18.0))
 		point.y = maxf(20.0, point.y)
 		var font := Style.body_font()
 		var alpha := clampf((1.10 - loss.elapsed) * 3.0, 0.0, 1.0)
 		draw_string_outline(font, point, text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, 5, Color(Color("301c23"), alpha))
-		draw_string(font, point, text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16, Color(Color("ffb39f"), alpha))
+		draw_string(font, point, text, HORIZONTAL_ALIGNMENT_LEFT, -1.0, 16,
+			Color(Color("a9edb3") if healing else Color("ffb39f"), alpha))
 
 
 func _draw_fighter(center: Vector2, width: float, fighter: Dictionary, lift: float = 0.0) -> void:
@@ -189,6 +224,9 @@ func _draw_fighter(center: Vector2, width: float, fighter: Dictionary, lift: flo
 		draw_arc(center, radius + 4.0, 0.0, TAU, 40, Color("ff626e"), 3.0, true)
 	if fighter.get("selected", false):
 		draw_arc(center, radius + 5.0, 0.0, TAU, 40, Color("f8e2a7"), 3.0, true)
+	if fighter.get("under_attack", false):
+		draw_arc(center, radius + 11.0, 0.0, TAU, 40, Color("401b31"), 7.0, true)
+		draw_arc(center, radius + 11.0, 0.0, TAU, 40, Color("ff626e"), 4.0, true)
 	draw_circle(center, radius, tint, true, -1, true)
 	var key := str(fighter.token)
 	if not _portraits.has(key):
@@ -253,6 +291,11 @@ func _gui_input(event: InputEvent) -> void:
 		queue_redraw()
 	elif event is InputEventMouseMotion:
 		var field := _field_rect()
+		for item: Dictionary in _items:
+			if _item_rect(item, field).has_point(event.position):
+				_show_item(item.id)
+				return
+		_show_item(-1)
 		for fighter: Dictionary in _figures:
 			var center := field.position + (fighter.at as Vector2) * field.size
 			var radius := field.size.x * (0.038 if fighter.get("hero", false) else 0.027)
@@ -268,8 +311,34 @@ func _show_character(hero: String) -> void:
 		character_hovered.emit(hero)
 
 
+func _door_radius(width: float) -> float:
+	return clampf(width * 0.018, 9.0, 18.0)
+
+
+func _item_rect(item: Dictionary, field: Rect2) -> Rect2:
+	var dimensions := Vector2.ONE * clampf(field.size.x * 0.062, 28.0, 62.0)
+	return Rect2(field.position + (item.at as Vector2) * field.size - dimensions * 0.5, dimensions)
+
+
+func _show_item(id: int) -> void:
+	if _hovered_item == id:
+		return
+	_hovered_item = id
+	tooltip_text = "" if id < 0 else "%s\n%s" % [Maps.Battlefields.ITEMS[id][0], Maps.Battlefields.ITEMS[id][1]]
+	item_hovered.emit(id)
+
+
 func _pick(at: Vector2) -> void:
 	var field := _field_rect()
+	for item: Dictionary in _items:
+		if item.get("enabled", false) and _item_rect(item, field).has_point(at):
+			item_pressed.emit(item.id)
+			return
+	for door: Dictionary in _doors:
+		var center := field.position + (door.at as Vector2) * field.size
+		if door.enabled and at.distance_to(center) <= _door_radius(field.size.x):
+			door_pressed.emit(door.id)
+			return
 	for cell: int in _targets:
 		var center := field.position + (_targets[cell] as Vector2) * field.size
 		if at.distance_to(center) < field.size.x * 0.037:

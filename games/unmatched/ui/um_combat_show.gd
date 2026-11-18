@@ -79,11 +79,16 @@ func present(combat: Dictionary, outcome: Dictionary, from_attack: Rect2, from_d
 	_view_id = id
 	_board_focus = combat.get("board_focus", false)
 	_dock = dock
+	_shade.offset_right = minf(0.0, dock.position.x - global_position.x - size.x)
 	if id > _last_seen and (combat.get("attack", {}) as Dictionary).has("face"):
 		_last_seen = id
 		_queue.append({"id": id, "combat": combat, "from_attack": from_attack, "from_defense": from_defense})
 	var result := int(outcome.get("id", 0))
 	var immediate: Dictionary = combat.get("immediate", {})
+	var new_defense: Dictionary = combat.get("defense", {})
+	if id == _current and _reveal_finished and not _impact_started and new_defense.has("face") and new_defense != _printed[1]:
+		_printed[1] = new_defense
+		_defense.texture = Art.face(new_defense)
 	if int(immediate.get("id", 0)) > _last_immediate:
 		_last_immediate = immediate.id
 		if not _immediate.has(id):
@@ -134,10 +139,11 @@ func _next() -> void:
 	var defense: Dictionary = combat.get("defense", {})
 	_printed = [combat.attack, defense]
 	var gap := size.x * 0.039
-	var width := minf((size.x * 0.60 - gap) * 0.5, size.y * 0.69 / CARD_RATIO)
+	var left_space := maxf(180.0, _dock.position.x - global_position.x)
+	var width := minf(minf((size.x * 0.60 - gap) * 0.5, size.y * 0.69 / CARD_RATIO), (left_space - gap - 32.0) * 0.5)
 	_card_size = Vector2(width, width * CARD_RATIO)
-	var left := size * 0.5 + Vector2(-_card_size.x - gap * 0.5, -_card_size.y * 0.5)
-	var right := size * 0.5 + Vector2(gap * 0.5, -_card_size.y * 0.5)
+	var left := Vector2((left_space - width * 2.0 - gap) * 0.5, TopBar.HEIGHT + 24.0)
+	var right := left + Vector2(width + gap, 0.0)
 	_center_positions = [left, right]
 	_prepare(_attack, next.from_attack, left, Art.back(combat.attack_hero))
 	_prepare(_defense, next.from_defense, right, Art.back(combat.defense_hero))
@@ -208,10 +214,9 @@ func _advance() -> void:
 func _move_for_board(compact: bool) -> void:
 	_compact = compact
 	_note.hide()
-	var scale_factor := minf(0.36, (_dock.size.x - 32.0) / (_card_size.x * 2.0 + 24.0))
-	scale_factor = maxf(scale_factor, 0.18)
+	var scale_factor := minf(0.36, 176.0 / (_card_size.x * 2.0 + 24.0))
 	var transform_to_local := get_global_transform_with_canvas().affine_inverse()
-	var right_center := transform_to_local * Vector2(_dock.get_center().x, _dock.end.y - 24.0 - _card_size.y * scale_factor * 0.5)
+	var right_center := transform_to_local * Vector2(_dock.position.x + 106.0, _dock.end.y - 24.0 - _card_size.y * scale_factor * 0.5)
 	var duration := 0.01 if Prefs.reduce_motion else 0.24
 	_layout_tween = create_tween().set_parallel(true)
 	for side in 2:
@@ -369,8 +374,8 @@ func _show_losses(losses: Array) -> void:
 func _show_note(message: String) -> void:
 	_note.text = message
 	_note.modulate.a = 1.0
-	_note.position = Vector2(0.0, size.y * 0.5 + _card_size.y * 0.5 + 14.0)
-	_note.size = Vector2(size.x, 0.0)
+	_note.position = Vector2(_center_positions[0].x, _center_positions[0].y + _card_size.y + 14.0)
+	_note.size = Vector2(_center_positions[1].x + _card_size.x - _center_positions[0].x, 0.0)
 	_note.show()
 
 

@@ -19,7 +19,7 @@ const Rules := preload("res://games/unmatched/logic/um_rules.gd")
 const Catalog := preload("res://games/unmatched/logic/um_catalog.gd")
 const CombatShow := preload("res://games/unmatched/ui/um_combat_show.gd")
 const HeroChoice := preload("res://games/unmatched/ui/um_hero_choice.gd")
-const ARENAS := {"marmoreal": "Мармореал", "sarpedon": "Сарпедон", "gardens": "Висячие сады"}
+const Maps := preload("res://games/unmatched/logic/um_maps.gd")
 
 var _state := {}
 var _arena := ""
@@ -34,6 +34,8 @@ var _selection_label: Label
 var _fight_frame: PanelContainer
 var _stage: VBoxContainer
 var _preview_column: VBoxContainer
+var _shown_scheme := 0
+var _shown_misery := 0
 var _preview: TextureRect
 var _preview_hint: Label
 var _piles: VBoxContainer
@@ -76,7 +78,7 @@ func present(view: Dictionary) -> void:
 	if not is_node_ready():
 		return
 	var arena := str(view.get("arena", "marmoreal"))
-	if arena not in ARENAS:
+	if arena not in Maps.NAMES:
 		arena = "marmoreal"
 	if arena != _arena or Prefs.dark_theme() != _dark:
 		_apply_palette(arena, Prefs.dark_theme())
@@ -91,6 +93,11 @@ func present(view: Dictionary) -> void:
 	else:
 		_board.present(_arena, view.get("fighters", []), view.get("targets", {}))
 	_piles.present(view.get("piles", []))
+	_show_scheme(view.get("scheme_notice", {}))
+	var misery: Dictionary = view.get("misery_notice", {})
+	if int(misery.get("id", 0)) > _shown_misery:
+		_shown_misery = misery.id
+		_set_preview(Art.face(misery.card), "misery")
 	if view.has("handoff") and not view.handoff:
 		_hand.accept_handoff()
 	var hand: Dictionary = view.get("hand", {})
@@ -160,6 +167,13 @@ func _build() -> void:
 	_board = Board.new()
 	_board.size_flags_vertical = SIZE_EXPAND_FILL
 	_board.target_pressed.connect(_board_clicked)
+	_board.door_pressed.connect(func(door: int): action_requested.emit("door", {"fighter": _fighter, "door": door}))
+	_board.item_pressed.connect(func(id: int): action_requested.emit("battlefield_item", {"fighter": _fighter, "item": id}))
+	_board.item_hovered.connect(func(id: int) -> void:
+		if id < 0:
+			_clear_preview("field_item")
+		else:
+			_set_preview(Art.face(Maps.Battlefields.card(id)), "field_item"))
 	field.add_child(_board)
 	_board.character_hovered.connect(func(hero: String):
 		if hero.is_empty():
@@ -275,6 +289,9 @@ func _build_action_aid() -> void:
 
 
 func wire_party_menu() -> void:
+	var settings := _top_button("Настройки", 14)
+	settings.pressed.connect(_show_settings)
+	_top.actions.add_child(settings)
 	var rules_button := _top_button("Правила", 14)
 	_top.actions.add_child(rules_button)
 	rules_button.pressed.connect(_show_rules)
@@ -284,6 +301,20 @@ func wire_party_menu() -> void:
 	var back := _top_button("Выйти", 14)
 	_top.actions.add_child(back)
 	LeaveGuard.hold(back, func(): exit_requested.emit())
+
+
+func _show_settings() -> void:
+	var settings := preload("res://games/king_of_12/ui/settings_screen.gd").new()
+	settings.theme = theme
+	settings.ink = _colors.ink
+	settings.make_panel = func() -> PanelContainer:
+		var panel := PanelContainer.new()
+		panel.add_theme_stylebox_override("panel", Style.frame(_colors.panel, _colors.rim, 16))
+		return panel
+	settings.make_title = func(title: String) -> Label: return _label(title, 22, true)
+	settings.make_primary = func(title: String) -> Button: return _button(title)
+	settings.z_index = 100
+	add_child(settings)
 
 
 func _show_rules() -> PopupPanel:
@@ -298,7 +329,17 @@ func _show_rules() -> PopupPanel:
 		+ "Атака: выберите бойца и подсвеченного противника. Защитник выбирает карту или принимает бой без защиты.\n\n"
 		+ "В конце хода сбросьте лишние карты до семи. За каждую попытку добора из пустой колоды все ваши бойцы получают по 2 урона.\n"
 		+ "Чтобы победить, повергните всех героев команды соперника.")
-	return _open_info("Правила Unmatched", rules, Vector2i(620, 410))
+	var height := 410
+	if _arena == "heorot":
+		rules.text += "\n\nДвери Хеорота начинают открытыми. Во время манёвра выберите бойца и нажмите на соседнюю дверь. Закрытие бесплатно, открытие стоит один шаг. Закрытая дверь перекрывает дорожки, разрывает смежность и разделяет зону, если через неё проходил кратчайший путь."
+		height = 476
+	elif Maps.Battlefields.POOLS.has(_arena):
+		rules.text += "\n\nПредметы одноразовые. Чтобы использовать предмет-приём, поставьте на его клетку своего бойца и нажмите на жетон или его название. Это расходует действие. Боевой предмет можно присоединить при выборе карты атаки или защиты. Его прибавка применяется во время боя и отменяется вместе с эффектами карты. Наведите курсор на жетон, чтобы прочитать его."
+		height = 476
+	elif _arena == "pandemonium":
+		rules.text += "\n\nОпасные пути Пандемониума: первое пересечение красной дорожки каждым бойцом в течение хода наносит ему 1 урон. Это действует также при перемещениях от эффектов. Помещение на клетку без перемещения не пересекает дорожки."
+		height = 476
+	return _open_info("Правила Unmatched", rules, Vector2i(620, height))
 
 
 func _show_journal() -> PopupPanel:
@@ -362,6 +403,11 @@ func _present_actions(view: Dictionary) -> void:
 	_selection_label.text = ""
 	var combatant: Vector2i = view.combat.get("defender", Vector2i(-1, -1))
 	var defending: bool = not view.hand.choice.is_empty() and view.hand.choice.get("pass_label") == "Без защиты"
+	if defending and combatant.x in view.hand.get("owned", []):
+		_status.text = "Атакуют: %s" % view.combat.get("defense_name", "")
+		_status.add_theme_color_override("font_color", Color("ff858d") if _dark else Color("9d1634"))
+	else:
+		_status.remove_theme_color_override("font_color")
 	if view.get("handoff", false):
 		_actions.visible = false
 	elif not view.setup.is_empty():
@@ -382,6 +428,11 @@ func _present_actions(view: Dictionary) -> void:
 	elif view.can_act:
 		match view.phase_id:
 			Rules.Phase.ACTION:
+				for item: Dictionary in view.get("battlefield_items", []):
+					if item.get("spent", false) or Maps.Battlefields.ITEMS[item.id][2] > 0:
+						continue
+					if own.any(func(figure: Dictionary) -> bool: return figure.fighter == _fighter and figure.cell == item.cell):
+						_add_action(Maps.Battlefields.ITEMS[item.id][0], "battlefield_item", {"fighter": _fighter, "item": item.id})
 				if _maneuver_preview:
 					for cell: int in view.moves.get(_fighter, []):
 						active_targets[cell] = view.positions[cell]
@@ -408,13 +459,19 @@ func _present_actions(view: Dictionary) -> void:
 				var cards: Array = view.hand.cards
 				if view.hand.hand == view.active and view.get("boost_allowed", false):
 					_add_card_options(cards.filter(func(card: Dictionary) -> bool: return card.boost >= 0), "Усилить", "boost", {})
-				_add_action("Завершить манёвр", "end_maneuver", {})
+				if not view.get("maneuver_in_transit", false):
+					_add_action("Завершить манёвр", "end_maneuver", {})
 				for cell: int in view.moves.get(_fighter, []):
 					active_targets[cell] = view.positions[cell]
+				if view.get("maneuver_in_transit", false):
+					_add_board_hint("Продолжите движение на свободную клетку")
+				elif not view.get("doors", []).is_empty():
+					_add_board_hint("Дверь · закрыть бесплатно, открыть за 1 шаг")
 			Rules.Phase.DISCARD:
 				if view.hand.hand == view.active:
 					_add_card_options(view.hand.cards, "Сбросить", "discard", {})
 	for figure: Dictionary in figures:
+		figure["under_attack"] = defending and figure.seat == combatant.x and figure.fighter == combatant.y
 		var can_select: bool = view.can_act and view.phase_id in [Rules.Phase.ACTION, Rules.Phase.MANEUVER]
 		figure["selected"] = (figure.seat == combatant.x and figure.fighter == combatant.y) if defending else (
 			can_select and figure.seat == view.active and figure.fighter == _fighter)
@@ -422,7 +479,14 @@ func _present_actions(view: Dictionary) -> void:
 			_selection_label.text = "%s · %s" % [figure.name, "герой" if figure.hero else "помощник"]
 		figure["attackable"] = view.phase_id == Rules.Phase.ACTION and figure.cell in view.attacks.get(_fighter, [])
 	_target_cells = active_targets
-	_board.present(_arena, figures, active_targets, view.combat.get("board_focus", false))
+	var doors: Array = view.get("doors", []).duplicate(true)
+	for door: Dictionary in doors:
+		door["enabled"] = not view.get("handoff", false) and _fighter in door.allowed
+	var items: Array = view.get("battlefield_items", []).duplicate(true)
+	for item: Dictionary in items:
+		item["enabled"] = not item.get("spent", false) and Maps.Battlefields.ITEMS[item.id][2] == 0 and view.can_act and view.phase_id == Rules.Phase.ACTION and effect.is_empty() and own.any(
+			func(figure: Dictionary) -> bool: return figure.fighter == _fighter and figure.cell == item.cell)
+	_board.present(_arena, figures, active_targets, view.combat.is_empty() or view.combat.get("board_focus", false), doors, items)
 	_actions.visible = _actions.get_child_count() > 0
 	_action_slot.visible = _actions.visible
 	_sync_action_row()
@@ -618,6 +682,9 @@ func _effect_actions(effect: Dictionary) -> void:
 
 
 func _option_label(option: Variant, cards: Array) -> String:
+	var labels: Dictionary = _state.get("effect", {}).get("labels", {})
+	if labels.has(option):
+		return labels[option]
 	for card: Dictionary in cards:
 		if option is String and card.key == option:
 			return card.name
@@ -625,9 +692,19 @@ func _option_label(option: Variant, cards: Array) -> String:
 		for fighter: Dictionary in _state.fighters:
 			if fighter.seat == option.x and fighter.fighter == option.y:
 				return fighter.name
-	const LABELS := {"confirm": "Готово", "-1": "Остановиться", "draw": "Добор", "heal": "Лечение",
-		"place": "Размещение", "deck": "Колода", "discard": "Сброс", "action": "Действие", "archer": "Лучник",
+	const LABELS := {"confirm": "Готово", "draw": "Добор", "heal": "Лечение",
+		"use": "Использовать", "item_first": "Сначала предмет", "item_last": "Сначала карта",
+		"reveal": "Открыть ещё", "pay": "Потратить дублон", "strength": "Увеличить значение карты",
+		"place": "Размещение", "hand": "В руку", "deck": "Колода", "discard": "Сброс", "action": "Действие", "archer": "Лучник",
 		"swap": "Поменять местами", "damage": "Получить урон", "reflect": "Отразить", "sacrifice": "Нанести 2 урона"}
+	if option is int and _state.effect.get("modifier_choice", false):
+		return "+1 к значению" if option > 0 else "−1 к значению"
+	if option is int and _state.effect.get("seat_choice", false):
+		var piles: Array = _state.get("piles", [])
+		if option >= 0 and option < piles.size():
+			return Roster.HEROES[piles[option].hero].name
+	if option == -1:
+		return "Остановиться"
 	return LABELS.get(str(option), str(option))
 
 
@@ -791,6 +868,36 @@ func _set_preview(texture: Texture2D, source: String) -> void:
 	_preview_hint.visible = texture == null
 
 
+func _show_scheme(notice: Dictionary) -> void:
+	var id := int(notice.get("id", 0))
+	if id <= _shown_scheme:
+		return
+	_shown_scheme = id
+	var texture := Art.face(notice.card)
+	if texture == null:
+		return
+	var card := TextureRect.new()
+	card.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
+	card.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
+	card.texture = texture
+	card.mouse_filter = MOUSE_FILTER_IGNORE
+	card.z_index = 84
+	Art.round_corners(card)
+	add_child(card)
+	card.size = Vector2(244.0, 339.0)
+	card.position = (size - card.size) * 0.5
+	await get_tree().create_timer(0.9, false).timeout
+	var slot := _preview.get_global_rect()
+	var travel := create_tween().set_parallel()
+	var duration := 0.01 if Prefs.reduce_motion else 0.33
+	travel.tween_property(card, "global_position", slot.position, duration).set_ease(Tween.EASE_IN_OUT)
+	travel.tween_property(card, "size", slot.size, duration)
+	await travel.finished
+	if id == _shown_scheme:
+		_set_preview(texture, "scheme")
+	card.queue_free()
+
+
 func _clear_preview(source: String) -> void:
 	if _preview_source == source:
 		_set_preview(null, "")
@@ -811,8 +918,8 @@ func _apply_palette(arena: String, dark: bool) -> void:
 	var tint: Color = _colors.bg
 	tint.a = 0.42 if dark else 0.52
 	_shade.color = tint
-	_backdrop.texture = Art.texture("res://games/unmatched/art/backgrounds/%s.webp" % arena)
-	_arena_title.text = ARENAS[arena]
+	_backdrop.texture = Art.backdrop(arena)
+	_arena_title.text = Maps.NAMES[arena]
 	_fight_frame.add_theme_stylebox_override("panel", Style.frame(_colors.panel, _colors.rim, 12))
 	var top_colors := _colors.duplicate()
 	top_colors.track = _colors.band

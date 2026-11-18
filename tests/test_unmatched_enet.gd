@@ -1,6 +1,8 @@
 extends SceneTree
 ## Два процесса ENet. Переменные UM_ROLE=host/client и UM_PORT одинаков для обоих.
 
+const Match := preload("res://games/unmatched/logic/um_match.gd")
+
 var net: Node
 var failures := 0
 var checks := 0
@@ -30,6 +32,16 @@ func _host(port: int) -> void:
 		return
 	if not check(await _wait(func() -> bool: return net.members.size() == 2), "Клиент подключился"):
 		return
+	net.set_bots(1)
+	net.set_unmatched_double_player(0)
+	if not check(await _wait(func() -> bool: return net.settings.get("um_double_player", -1) == 1), "Клиент выбрал управление двумя героями"):
+		return
+	if not check(await _wait(func() -> bool:
+		return net.settings.get("um_heroes", []).size() == 4 and net.settings.um_heroes[3] == "robin_hood"), "Клиент изменил своего второго героя"):
+		return
+	check(Match.controllers_for(3, net.settings.um_double_player) == PackedInt32Array([0, 1, 2, 1]),
+		"Оба героя удалённого участника в одной команде")
+	net.set_bots(0)
 	net.set_setting("um_heroes", ["bloody_mary", "sun_wukong"])
 	net.set_setting("um_arena", "sarpedon")
 	if not check(await _wait(func() -> bool:
@@ -66,6 +78,14 @@ func _host(port: int) -> void:
 func _client(port: int) -> void:
 	if not check(net.join_enet("127.0.0.1", port) == OK, "Клиент начал подключение"):
 		return
+	if not check(await _wait(func() -> bool:
+		return net.lobby_view.get("settings", {}).get("um_double_player", -1) == 0), "Клиент увидел выбор участника за двоих"):
+		return
+	net.set_unmatched_double_player(1)
+	if not check(await _wait(func() -> bool:
+		return net.lobby_view.get("settings", {}).get("um_double_player", -1) == 1), "Выбор клиента подтверждён хостом"):
+		return
+	net.set_unmatched_hero(3, "robin_hood")
 	if not check(await _wait(func() -> bool:
 		return net.lobby_view.get("settings", {}).get("um_heroes", []) == ["bloody_mary", "sun_wukong"]), "Клиент получил настройки персонажей"):
 		return
