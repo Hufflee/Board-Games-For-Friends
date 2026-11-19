@@ -302,6 +302,7 @@ func get_view(viewer: int, selected_hand: int = -1) -> Dictionary:
 		"scheme_notice": _scheme_notice,
 		"battlefield_items": (rules.battlefield_items + rules.used_items).duplicate(true),
 		"misery_notice": rules.misery_opened.duplicate(true),
+		"active_miseries": rules.miseries.map(rules.misery_card),
 		"combat": _public_combat(combat), "combat_outcome": _combat_outcome(), "clock": false, "turn": rules.seat,
 		"players": players.duplicate(true), "winners": winners, "team": game.heroes.size() == 4,
 		"journal": _journal.duplicate(),

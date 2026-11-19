@@ -15,6 +15,7 @@ var _scroll: ScrollContainer
 var _empty: Label
 var _cards: GridContainer
 var _piles: Array = []
+var _miseries: Array = []
 var _opened := -1
 var _opened_stack := "discard"
 var _preview_rng := RandomNumberGenerator.new()
@@ -105,6 +106,21 @@ func _update_rows() -> void:
 		(row.get_child(2) as Button).text = "Сброс %d" % pile.discard.size()
 
 
+func present_miseries(cards: Array) -> void:
+	var changed := _miseries != cards
+	_miseries = cards.duplicate(true)
+	if _opened == -2:
+		if _miseries.is_empty():
+			_close()
+		elif changed:
+			_fill_browser()
+
+
+func open_miseries() -> void:
+	if not _miseries.is_empty():
+		_open(-2, "miseries")
+
+
 func _hero_name(seat: int) -> String:
 	return str(Roster.HEROES.get(_piles[seat].hero, {}).get("name", "Игрок %d" % (seat + 1)))
 
@@ -123,11 +139,12 @@ func _fill_browser() -> void:
 	preview_closed.emit()
 	var is_deck := _opened_stack == "deck"
 	var title := "Колода" if is_deck else "Сброс"
-	_heading.text = "%s · %s" % [title, _hero_name(_opened)]
+	_heading.text = "Активные бедствия этого хода" if _opened == -2 else "%s · %s" % [title, _hero_name(_opened)]
 	for child in _cards.get_children():
 		_cards.remove_child(child)
 		child.queue_free()
-	var cards: Array = _piles[_opened].get(_opened_stack, []).duplicate()
+	var cards: Array = _miseries.duplicate() if _opened == -2 else _piles[_opened].get(_opened_stack, []).duplicate()
+	_cards.columns = 2 if _opened == -2 else 3
 	if is_deck:
 		Piles.shuffle(cards, _preview_rng)
 	_empty.text = "Колода пуста" if is_deck else "Сброс пуст"
@@ -136,7 +153,7 @@ func _fill_browser() -> void:
 	_scroll.scroll_vertical = 0
 	for card: Dictionary in cards:
 		var tile := Button.new()
-		tile.custom_minimum_size = Vector2(72, 100)
+		tile.custom_minimum_size = Vector2(128, 90) if _opened == -2 else Vector2(72, 100)
 		var poster := TextureRect.new()
 		poster.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 		poster.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED

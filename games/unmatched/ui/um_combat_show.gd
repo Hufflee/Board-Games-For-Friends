@@ -29,6 +29,7 @@ var _board_focus := false
 var _compact := false
 var _layout_tween: Tween
 var _dock: Rect2
+var _slots: Array[Rect2] = []
 var _center_positions: Array[Vector2] = []
 var _show_post_board := false
 var _impact_done := false
@@ -79,6 +80,7 @@ func present(combat: Dictionary, outcome: Dictionary, from_attack: Rect2, from_d
 	_view_id = id
 	_board_focus = combat.get("board_focus", false)
 	_dock = dock
+	_slots = [from_attack, from_defense]
 	_shade.offset_right = minf(0.0, dock.position.x - global_position.x - size.x)
 	if id > _last_seen and (combat.get("attack", {}) as Dictionary).has("face"):
 		_last_seen = id
@@ -89,6 +91,11 @@ func present(combat: Dictionary, outcome: Dictionary, from_attack: Rect2, from_d
 	if id == _current and _reveal_finished and not _impact_started and new_defense.has("face") and new_defense != _printed[1]:
 		_printed[1] = new_defense
 		_defense.texture = Art.face(new_defense)
+		_value_labels[1].hide()
+	if id == _current and _reveal_finished and new_defense.is_empty():
+		_printed[1] = {}
+		_defense.hide()
+		_value_labels[1].hide()
 	if int(immediate.get("id", 0)) > _last_immediate:
 		_last_immediate = immediate.id
 		if not _immediate.has(id):
@@ -214,9 +221,7 @@ func _advance() -> void:
 func _move_for_board(compact: bool) -> void:
 	_compact = compact
 	_note.hide()
-	var scale_factor := minf(0.36, 176.0 / (_card_size.x * 2.0 + 24.0))
 	var transform_to_local := get_global_transform_with_canvas().affine_inverse()
-	var right_center := transform_to_local * Vector2(_dock.position.x + 106.0, _dock.end.y - 24.0 - _card_size.y * scale_factor * 0.5)
 	var duration := 0.01 if Prefs.reduce_motion else 0.24
 	_layout_tween = create_tween().set_parallel(true)
 	for side in 2:
@@ -224,7 +229,8 @@ func _move_for_board(compact: bool) -> void:
 		if _impact_done:
 			card.rotation = 0.0
 			card.modulate.a = 1.0
-		var compact_center := right_center + Vector2((_card_size.x * scale_factor + 8.0) * (-0.5 if side == 0 else 0.5), 0.0)
+		var scale_factor := minf(_slots[side].size.x / _card_size.x, _slots[side].size.y / _card_size.y)
+		var compact_center := transform_to_local * _slots[side].get_center()
 		var position := compact_center - _card_size * 0.5 if compact else _center_positions[side]
 		_layout_tween.tween_property(card, "position", position, duration)
 		_layout_tween.tween_property(card, "scale", Vector2.ONE * (scale_factor if compact else 1.0), duration)
@@ -361,6 +367,7 @@ func _fade_combat() -> void:
 	_burst = 0.0
 	queue_redraw()
 	hide()
+	cards_revealed.emit()
 	_next()
 
 

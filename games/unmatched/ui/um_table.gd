@@ -36,6 +36,7 @@ var _stage: VBoxContainer
 var _preview_column: VBoxContainer
 var _shown_scheme := 0
 var _shown_misery := 0
+var _miseries_button: Button
 var _preview: TextureRect
 var _preview_hint: Label
 var _piles: VBoxContainer
@@ -85,6 +86,10 @@ func present(view: Dictionary) -> void:
 	_top.info.text = str(view.get("phase_title", "Unmatched"))
 	_status.text = str(view.get("step", ""))
 	_status.tooltip_text = ""
+	var misery: Dictionary = view.get("misery_notice", {})
+	if int(misery.get("id", 0)) > _shown_misery:
+		_shown_misery = misery.id
+		_set_preview(Art.face(misery.card), "misery")
 	if view.has("phase_id"):
 		if view.phase_id != Rules.Phase.ACTION or view.get("handoff", false) or view.active != _last_place:
 			_staged_attack = ""
@@ -93,11 +98,10 @@ func present(view: Dictionary) -> void:
 	else:
 		_board.present(_arena, view.get("fighters", []), view.get("targets", {}))
 	_piles.present(view.get("piles", []))
+	_piles.present_miseries(view.get("active_miseries", []))
+	_miseries_button.visible = not view.get("active_miseries", []).is_empty()
+	_miseries_button.text = "Бедствия %d" % view.get("active_miseries", []).size()
 	_show_scheme(view.get("scheme_notice", {}))
-	var misery: Dictionary = view.get("misery_notice", {})
-	if int(misery.get("id", 0)) > _shown_misery:
-		_shown_misery = misery.id
-		_set_preview(Art.face(misery.card), "misery")
 	if view.has("handoff") and not view.handoff:
 		_hand.accept_handoff()
 	var hand: Dictionary = view.get("hand", {})
@@ -197,6 +201,10 @@ func _build() -> void:
 	var title := _label("Бой", 20, true)
 	title.size_flags_horizontal = SIZE_EXPAND_FILL
 	header.add_child(title)
+	_miseries_button = _button("Бедствия")
+	_miseries_button.hide()
+	_miseries_button.pressed.connect(func(): _piles.open_miseries())
+	header.add_child(_miseries_button)
 	_status = _label("", 12)
 	_status.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	header.add_child(_status)
@@ -615,7 +623,8 @@ func _add_card_options(cards: Array, title: String, kind: String, data: Dictiona
 func _add_board_hint(text: String) -> void:
 	var hint := _label(text, 14)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	hint.size_flags_horizontal = SIZE_EXPAND_FILL
+	var text_width := hint.get_theme_font("font").get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
+	hint.custom_minimum_size.x = minf(text_width, minf(360.0, _action_slot.size.x * 0.52))
 	_ink_on_backdrop(hint)
 	_actions.add_child(hint)
 
@@ -653,6 +662,11 @@ func _effect_actions(effect: Dictionary) -> void:
 	options.get_popup().id_focused.connect(preview_choice)
 	if effect.has("shown") and not shows_in_choice and not cards.is_empty():
 		if cards.size() == 1:
+			if effect.get("misery_peek", false):
+				var peek := _button("Следующее бедствие: %s" % cards[0].name)
+				peek.pressed.connect(func(): _set_preview(Art.face(cards[0]), "option"))
+				peek.mouse_entered.connect(func(): _set_preview(Art.face(cards[0]), "option"))
+				_actions.add_child(peek)
 			_set_preview(Art.face(cards[0]), "option")
 		else:
 			var review := OptionButton.new()
@@ -703,7 +717,7 @@ func _option_label(option: Variant, cards: Array) -> String:
 		var piles: Array = _state.get("piles", [])
 		if option >= 0 and option < piles.size():
 			return Roster.HEROES[piles[option].hero].name
-	if option == -1:
+	if option is int and option == -1:
 		return "Остановиться"
 	return LABELS.get(str(option), str(option))
 
@@ -747,7 +761,10 @@ func _build_battle(parent: HBoxContainer) -> void:
 		slot.add_child(hint)
 		hint.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 		slot.mouse_entered.connect(func():
-			if not bool(face.get_meta("sealed", false)):
+			if _combat_show.visible and _combat_show._compact and _combat_show._reveal_finished:
+				var shown := _combat_show._attack if attacking else _combat_show._defense
+				_set_preview(shown.texture, "fight")
+			elif not bool(face.get_meta("sealed", false)):
 				_set_preview(face.texture, "fight"))
 		slot.mouse_exited.connect(_clear_preview.bind("fight"))
 		if attacking:
@@ -790,7 +807,10 @@ func _build_preview(parent: HBoxContainer) -> void:
 func _update_combat(combat: Dictionary) -> void:
 	var attack: Dictionary = combat.get("attack", {})
 	var defense: Dictionary = combat.get("defense", {})
-	if combat.has("id") and not _combat_show.faces_visible(combat.id):
+	if _combat_show.visible and combat.get("id", -1) == _combat_show._current:
+		attack = {}
+		defense = {}
+	elif combat.has("id") and not _combat_show.faces_visible(combat.id):
 		if not attack.is_empty():
 			attack = {"sealed": true}
 		if not defense.is_empty():

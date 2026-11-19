@@ -11,7 +11,7 @@ config_version=5
 [application]
 
 config/name="BoardGame Shelf"
-config/version="0.9.1.3"
+config/version="0.9.1.4"
 run/main_scene="res://hub/boot/boot.tscn"
 config/use_custom_user_dir=true
 config/custom_user_dir_name="Godot/app_userdata/Настольные игры с друзьями"

@@ -636,21 +636,6 @@ func resolve_combat(pace_animation: bool = false) -> bool:
 	var revealed := _combat_cards.revealed()
 	var attack: Dictionary = revealed.attack
 	var defense: Dictionary = revealed.defense
-	var opening_defense := _combat_effect(defense, _attack_pair[1].x)
-	if attack.definition == "loki:23" and not defense.is_empty() and not opening_defense.get("cancel", false) and not opening_defense.get("god_mischief", false):
-		var source := _attack_pair[0]
-		var defender := _attack_pair[1]
-		var shown: Array = game.hands[defender.x]
-		var allowed := _combat_keys(defender.x, Catalog.Kind.DEFENSE, game.fighters[defender.x][defender.y].is_hero)
-		phase = Phase.EFFECT_CHOICE
-		_offer_choice(source.x, allowed, false, "Выберите карту, которую разыграет противник",
-			func(key: String) -> void:
-				for card: Dictionary in shown:
-					if card.key == key:
-						_revealed_override = {"attack": attack, "defense": card}
-						_begin_resolved_combat(attack, card, pace_animation)
-						break, shown)
-		return true
 	return _begin_resolved_combat(attack, defense, pace_animation)
 
 
@@ -738,7 +723,7 @@ func _combat_item_during(combat: Dictionary, side: int, before: bool) -> void:
 func _show_immediate(combat: Dictionary, side: int) -> void:
 	var effect: Dictionary = combat.immediate_effects[side]
 	var swap: bool = effect.get("swap_patroclus", false) and _patroclus_alive(_attack_pair[side].x)
-	var board: bool = swap or effect.has("archer_attack") or effect.has("discard_or_revive")
+	var board: bool = swap or effect.has("archer_attack") or effect.has("discard_or_revive") or effect.has("replace_enemy_card")
 	if not _pace_combat or not (board or effect.has("cancel") or effect.has("discard_or_ignore")
 			or effect.has("ransom_hand") or effect.has("ransom_random") or effect.has("god_mischief")):
 		_combat_immediate(combat, side)
@@ -832,6 +817,34 @@ func _combat_immediate(combat: Dictionary, side: int) -> void:
 			func(key: String) -> void:
 				_discard_key(opponent.x, key)
 				combat.ignore_defense = false)
+	if side == 0 and effect.get("replace_enemy_card", false) and not combat.cards[1].is_empty():
+		_replace_defense(combat)
+
+
+## Защита уже выполнила «Немедленно». Новая карта не повторяет пройденный этап.
+func _replace_defense(combat: Dictionary) -> void:
+	var defender := _attack_pair[1]
+	game.hands[defender.x].append(combat.cards[1])
+	var shown: Array = game.hands[defender.x]
+	var allowed := _combat_keys(defender.x, Catalog.Kind.DEFENSE, game.fighters[defender.x][defender.y].is_hero)
+	if allowed.is_empty():
+		_set_replacement_defense(combat, {})
+		return
+	_offer_choice(_attack_pair[0].x, allowed, false, "Поиск неприятностей · выберите карту защиты противника",
+		func(key: String) -> void:
+			for card: Dictionary in shown:
+				if card.key == key:
+					_take_combat_card(defender.x, key)
+					_set_replacement_defense(combat, card)
+					return, shown)
+
+
+func _set_replacement_defense(combat: Dictionary, card: Dictionary) -> void:
+	combat.cards[1] = card
+	combat.effects[1] = _combat_effect(card, _attack_pair[1].x)
+	combat.values[1] = card.get("value", 0)
+	combat.canceled[1] = false
+	_revealed_override = {"attack": combat.cards[0], "defense": card}
 
 
 func _discard_or_archer(owner: int, opponent: int, archer: int, cells: Array) -> void:
@@ -1557,6 +1570,7 @@ func _steal_rich(opponent: int, owner: int) -> void:
 				_draw(owner, 1)
 			else:
 				_offer_hand_discard(opponent, false, "Сбросьте карту", func(key: String) -> void: _discard_key(opponent, key)))
+	_effect_request["labels"] = {"discard": "Сбросить карту", "draw": "Робин Гуд берёт ещё 1 карту"}
 
 
 func _offer_damage_target(owner: int, origin: int, only_enemies: bool, adjacent: bool, damage: int, optional: bool = false) -> void:
@@ -2168,8 +2182,13 @@ func _continue_miseries(owner: int, see_top: bool) -> void:
 		_damage(Vector2i(owner, 0), miseries.size())
 	elif not misery_pile.is_empty():
 		var shown := [misery_card(misery_pile.back())] if see_top else []
-		_offer_choice(owner, ["reveal"], true, "Ящик Пандоры · открыто %d, перьев %d" % [miseries.size(), feathers],
+		var prompt := "Ящик Пандоры · открыто %d, перьев %d" % [miseries.size(), feathers]
+		if see_top:
+			prompt = "Надежда · посмотрите следующее бедствие и решите, открывать ли его"
+		_offer_choice(owner, ["reveal"], true, prompt,
 			func(_answer: String) -> void: _reveal_misery(owner), shown)
+		if see_top:
+			_effect_request["misery_peek"] = true
 
 
 func _summon_helper(owner: int, cells: Array) -> void:

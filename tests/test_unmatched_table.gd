@@ -138,6 +138,7 @@ func _run() -> void:
 	await create_timer(1.40).timeout
 	_check(_same_texture(table._preview.texture, Art.face(scheme)) and table._preview_source == "scheme",
 		"Приём перелетает из центра в слот просмотра")
+	await _check_reported(table, capture)
 	await _check_actions_and_combat(table, capture)
 	await _check_helmet(table, capture)
 	await _check_hand_discard(table)
@@ -146,6 +147,67 @@ func _run() -> void:
 	await process_frame
 	print("Unmatched table: %d проверок, %d ошибок." % [_checks, _errors])
 	quit(int(_errors > 0))
+
+
+func _check_reported(table: Control, capture: bool) -> void:
+	var session: RefCounted = Match.create("marmoreal", ["pandora", "bloody_mary"], [{"name": "А"}, {"name": "Б"}], 6)
+	session.rules.clear_choices()
+	session.rules._turn_spaces.clear()
+	session.rules.miseries.clear()
+	session.rules.misery_pile = [2, 4]
+	session.rules.phase = 0
+	session.rules.start_turn()
+	var state: Dictionary = session.get_view(0)
+	table.present(state)
+	await _frames()
+	_check(_same_texture(table._preview.texture, Art.face(session.rules.misery_card(2))),
+		"Надежда показывает Боль, а не перезаписывает её изображением Надежды")
+	_check(state.active_miseries.size() == 1 and state.active_miseries[0].key == "misery:4"
+		and table._miseries_button.visible, "Активные бедствия не содержат подсмотренную закрытую карту")
+	table._set_preview(Art.face(Catalog.deck_for("loki", 0)[0]), "hand")
+	table._miseries_button.pressed.emit()
+	await _frames()
+	_check(table._piles._cards.get_child_count() == 1 and table._piles._heading.text == "Активные бедствия этого хода",
+		"Бедствия доступны отдельной кнопкой после просмотра другой карты")
+	if capture:
+		await _shot("active_miseries_dark")
+	table._piles._close()
+	var peek: Button = table._actions.get_child(0)
+	peek.pressed.emit()
+	_check(_same_texture(table._preview.texture, Art.face(session.rules.misery_card(2))), "Кнопка возвращает просмотр следующего бедствия Надежды")
+	if capture:
+		await _shot("hope_dark")
+		root.get_node("Prefs").theme_mode = "light"
+		table.present(state)
+		await _frames()
+		await _shot("hope_light")
+		root.get_node("Prefs").theme_mode = "dark"
+		table.present(state)
+	var replies: Array = []
+	var receive := func(kind: String, argument: Dictionary): replies.append([kind, argument])
+	table.action_requested.connect(receive)
+	for word: String in ["reflect", "draw", "discard", "reveal", "use", "pay", "strength", "item_first", "item_last", "confirm"]:
+		state.effect = {"id": 840, "seat": 0, "options": [word], "optional": true, "prompt": "Проверка эффекта"}
+		table.present(state)
+		await _frames()
+		var options: OptionButton = table._actions.get_child(0)
+		_check(not options.get_item_text(0).is_empty() and options.get_item_text(0) != "<null>", "Непустая подпись варианта %s" % word)
+		(table._actions.get_child(1) as Button).pressed.emit()
+		_check(replies.back()[1].answer == word, "Кнопка отправляет выбранный вариант %s" % word)
+	state.effect = {"id": 841, "seat": 0, "options": [1], "optional": true, "cells": true,
+		"prompt": "Размещение помощника · выберите подсвеченную клетку"}
+	table.present(state)
+	await _frames()
+	var skip: Button = table._actions.get_child(1)
+	_check(skip.global_position.x < table._action_slot.global_position.x + 370
+		and skip.get_global_rect().end.x < table._fight_frame.global_position.x, "Пропустить находится слева рядом с подсказкой")
+	skip.pressed.emit()
+	_check(replies.back()[1].answer == null and replies.back()[1].request == 841, "Пропуск отправляет null только как ответ, а не подпись")
+	table.action_requested.disconnect(receive)
+	state.active_miseries = []
+	table.present(state)
+	_check(not table._miseries_button.visible, "После завершения хода список активных бедствий очищается")
+	session.close()
 
 
 func _check_actions_and_combat(table: Control, capture: bool) -> void:
@@ -317,6 +379,12 @@ func _check_helmet(table: Control, capture: bool) -> void:
 	await create_timer(0.88).timeout
 	_check(table._combat_show._attack.scale.x < 0.5 and table._combat_show._shade.modulate.a < 0.1,
 		"При выборе Патрокла карты уменьшены и поле освещено")
+	_check(table._attack.texture == null and table._defense.texture == null, "Под анимированными картами нет статических дубликатов")
+	_check(table._combat_show._attack.get_global_rect().get_center().distance_to(table._attack.get_global_rect().get_center()) < 2.0
+		and table._combat_show._defense.get_global_rect().get_center().distance_to(table._defense.get_global_rect().get_center()) < 2.0,
+		"Уменьшенные карты занимают ячейки Атака и Защита")
+	table._attack.get_parent().mouse_entered.emit()
+	_check(table._preview.texture != null, "Наведение на перемещённую карту открывает большой просмотр")
 	_check(view.effect.get("options", []) == [Vector2i(1, 1)] and table._actions.get_child_count() == 2,
 		"Шлем предлагает Патрокла на поле и кнопку пропуска")
 	if capture:
