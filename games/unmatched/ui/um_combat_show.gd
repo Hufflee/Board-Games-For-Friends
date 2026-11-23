@@ -45,7 +45,7 @@ var _card_size: Vector2
 
 func _ready() -> void:
 	mouse_filter = MOUSE_FILTER_IGNORE
-	z_index = 85
+	z_index = 96
 	_shade = ColorRect.new()
 	_shade.color = Color(0.09, 0.06, 0.10, 0.58)
 	_shade.mouse_filter = MOUSE_FILTER_IGNORE
@@ -81,8 +81,8 @@ func present(combat: Dictionary, outcome: Dictionary, from_attack: Rect2, from_d
 	_board_focus = combat.get("board_focus", false)
 	_dock = dock
 	_slots = [from_attack, from_defense]
-	_shade.offset_right = minf(0.0, dock.position.x - global_position.x - size.x)
-	if id > _last_seen and (combat.get("attack", {}) as Dictionary).has("face"):
+	_shade.offset_right = 0.0
+	if id > _last_seen and not combat.get("pending_reveal", false) and (combat.get("attack", {}) as Dictionary).has("face"):
 		_last_seen = id
 		_queue.append({"id": id, "combat": combat, "from_attack": from_attack, "from_defense": from_defense})
 	var result := int(outcome.get("id", 0))
@@ -152,8 +152,8 @@ func _next() -> void:
 	var left := Vector2((left_space - width * 2.0 - gap) * 0.5, TopBar.HEIGHT + 24.0)
 	var right := left + Vector2(width + gap, 0.0)
 	_center_positions = [left, right]
-	_prepare(_attack, next.from_attack, left, Art.back(combat.attack_hero))
-	_prepare(_defense, next.from_defense, right, Art.back(combat.defense_hero))
+	_prepare(_attack, next.from_attack, left, Art.face(combat.attack) if combat.get("attack_face_up", false) else Art.back(combat.attack_hero))
+	_prepare(_defense, next.from_defense, right, Art.face(defense) if combat.get("defense_face_up", false) else Art.back(combat.defense_hero))
 	_defense.visible = not defense.is_empty()
 	var travel := create_tween().set_parallel(true)
 	travel.tween_property(_shade, "modulate:a", 1.0, 0.26)
@@ -165,6 +165,10 @@ func _next() -> void:
 	await travel.finished
 	for card: TextureRect in [_attack, _defense]:
 		if card.visible:
+			if card == _attack and combat.get("attack_face_up", false):
+				continue
+			if card == _defense and combat.get("defense_face_up", false):
+				continue
 			var printed: Dictionary = combat.attack if card == _attack else defense
 			await _flip(card, Art.face(printed))
 	_reveal_finished = true

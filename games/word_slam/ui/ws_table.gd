@@ -11,6 +11,7 @@ const TextUI = preload("res://hub/ui_text.gd")
 const PerudoDieView := preload("res://games/perudo/ui/d6_view.gd")
 const TEAM_NAMES := ["Синие", "Оранжевые"]
 const TEAM_COLORS := HCStyle.TEAM_COLORS
+const SHELF_CARD_SIZE := Vector2(104, 42)
 const CARD_GAP := 8.0
 const WordCard := preload("res://games/word_slam/ui/ws_word_card.gd")
 
@@ -28,7 +29,9 @@ var _word_key := ""
 var _shelves: Control  # область двух подставок; карточки — её дети
 var _shelf_titles: Array = []
 var _bottom: Control
-var _bottom_key := ""
+var _bottom_key: Array = []
+var _catalog_cols: HBoxContainer
+var _catalog_flows := {}  # категория → список кнопок внутри своей прокрутки
 var _side_teams: VBoxContainer
 var _feed: VBoxContainer
 var _overlay: Control
@@ -215,6 +218,8 @@ func _send(kind: String, arg: Dictionary = {}) -> void:
 # --- Состояние ---------------------------------------------------------------------
 
 func _on_state(v: Dictionary) -> void:
+	if not is_inside_tree() or is_queued_for_deletion():
+		return
 	var prev_phase: String = _v.get("phase", "")
 	var prev_guesses: int = _v.get("guesses", []).size()
 	_v = v
@@ -259,7 +264,10 @@ func _on_state(v: Dictionary) -> void:
 	_update_shelf_titles()
 	_sync_cards(prev_phase == "play" and phase in ["round_result", "game_over"])
 	_update_pointer()
-	var bkey := "%s/%d/%d/%s" % [phase, v["round_no"], _seat(), str(_am_storyteller())]
+	var show_catalog := _am_storyteller() and phase in ["word", "play"]
+	var bkey := [phase, v["round_no"], _seat(), show_catalog]
+	if show_catalog:
+		bkey.append_array([v.get("word_no", 0), v.get("catalog_order", {})])
 	if bkey != _bottom_key:
 		_bottom_key = bkey
 		_update_bottom()
@@ -327,7 +335,7 @@ func _update_side() -> void:
 				b.pressed.connect(func():
 					_as = ss
 					_word_key = ""
-					_bottom_key = ""
+					_bottom_key = []
 					_on_state(_v))
 				row.add_child(b)
 			_side_teams.add_child(row)
@@ -461,14 +469,11 @@ func _draw_shelves() -> void:
 		var active: bool = _am_storyteller() and _v.get("phase", "") == "play" and (i == _active_shelf if _solo() else i == _key())
 		_shelves.draw_style_box(HCStyle.box(Color(HCStyle.CARD, 0.75), 16, HCStyle.SAGE if active else HCStyle.LINE, 2 if active else 1, HCStyle.SHADOW, 12), r)
 		# «полка» — деревянная планка под каждым рядом
-		var per := _per_row()
-		for rr in 4:
-			var y := 30.0 + rr * 50.0 + WSCardFace.SIZE.y + 2
+		for rr in WSRules.HOLDER_ROWS:
+			var y := 30.0 + rr * 50.0 + SHELF_CARD_SIZE.y + 2
 			if y > r.end.y - 4:
 				break
 			_shelves.draw_rect(Rect2(r.position.x + 10, y, r.size.x - 20, 4), Color("e2d3bb"))
-		if per <= 0:
-			continue
 
 
 # --- Подставки: чья какая, закрытые карточки ----------------------------------------
@@ -514,7 +519,7 @@ func _card_key(sh: int, id: String) -> String:
 
 func _make_cover() -> Control:
 	var c := Control.new()
-	c.size = WSCardFace.SIZE
+	c.size = SHELF_CARD_SIZE
 	c.name = "Cover"
 	c.mouse_filter = Control.MOUSE_FILTER_PASS  # для подсказки
 	c.tooltip_text = "Карточка соперников — откроется в конце хода"
@@ -590,8 +595,8 @@ func _per_row() -> int:
 func _slot(shelf: int, i: int) -> Vector2:
 	var per := _per_row()
 	var w := _shelves.size.x * 0.5
-	var x := shelf * w + 18.0 + (i % per) * (WSCardFace.SIZE.x + CARD_GAP) + WSCardFace.SIZE.x * 0.5
-	var y := 30.0 + (i / per) * 50.0 + WSCardFace.SIZE.y * 0.5
+	var x := shelf * w + 18.0 + (i % per) * (SHELF_CARD_SIZE.x + CARD_GAP) + SHELF_CARD_SIZE.x * 0.5
+	var y := 30.0 + (i / per) * 50.0 + SHELF_CARD_SIZE.y * 0.5
 	return Vector2(x, y)
 
 
@@ -627,7 +632,7 @@ func _sync_cards(revealing: bool = false) -> void:
 			var key := _card_key(sh, id)
 			if not _cards.has(key):
 				var face_id := "?" if id.begins_with("?") else id
-				var c := WordCard.new("ws_" + key, true, WSCardFace.new(face_id), WSCardFace.SIZE)
+				var c := WordCard.new("ws_" + key, true, WSCardFace.new(face_id, SHELF_CARD_SIZE), SHELF_CARD_SIZE)
 				_shelves.add_child(c)
 				c.place(_slot(sh, k) + Vector2(0, -20))
 				c.modulate.a = 0.0
@@ -691,8 +696,8 @@ func _where(at: Vector2) -> Array:
 	var sh := 0 if at.x < _shelves.size.x * 0.5 else 1
 	var per := _per_row()
 	var w := _shelves.size.x * 0.5
-	var col := clampi(int((at.x - sh * w - 18.0) / (WSCardFace.SIZE.x + CARD_GAP)), 0, per - 1)
-	var row := clampi(int((at.y - 30.0) / 50.0), 0, 3)
+	var col := clampi(int((at.x - sh * w - 18.0) / (SHELF_CARD_SIZE.x + CARD_GAP)), 0, per - 1)
+	var row := clampi(int((at.y - 30.0) / 50.0), 0, WSRules.HOLDER_ROWS - 1)
 	return [sh, row * per + col]
 
 
@@ -811,7 +816,7 @@ func _push_rows() -> void:
 func _grab_from_deck(id: String) -> void:
 	if _own_has(id) or _cards.has(id) or get_tree().paused or not (_am_storyteller() and _v["phase"] == "play"):
 		return
-	var c := WordCard.new("ws_" + id, true, WSCardFace.new(id), WSCardFace.SIZE)
+	var c := WordCard.new("ws_" + id, true, WSCardFace.new(id, SHELF_CARD_SIZE), SHELF_CARD_SIZE)
 	c.draggable = true
 	_shelves.add_child(c)
 	c.begin_from_catalog(get_global_mouse_position())
@@ -867,63 +872,20 @@ func _update_pointer() -> void:
 # --- Низ: колода рассказчика / строка догадок -----------------------------------------
 
 func _update_bottom() -> void:
-	HCStyle.clear(_bottom)
-	_chips.clear()
+	for child in _bottom.get_children():
+		if child != _catalog_cols:
+			_bottom.remove_child(child)
+			child.queue_free()
 	_guess_edit = null
 	var phase: String = _v["phase"]
 	if _am_storyteller() and phase in ["word", "play"]:
-		var cols := HCStyle.hbox(10)
-		_bottom.add_child(cols)
-		for cat in WSData.CATEGORIES:
-			var col := HCStyle.vbox(4)
-			col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			var cap := HCStyle.caption(WSData.CATEGORY_NAMES[cat], WSCardFace.EDGES[cat].darkened(0.3))
-			col.add_child(cap)
-			var scroll := ScrollContainer.new()
-			scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
-			scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
-			var flow := HFlowContainer.new()
-			flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			flow.add_theme_constant_override("h_separation", 4)
-			flow.add_theme_constant_override("v_separation", 4)
-			scroll.add_child(flow)
-			col.add_child(scroll)
-			var order: Array = _v.get("catalog_order", {}).get(cat, [])
-			for id: String in order:
-				var b := Button.new()
-				b.text = WSRules.card_word(id)
-				b.add_theme_font_size_override("font_size", HCStyle.CAP)
-				b.add_theme_font_override("font", HCStyle.font("bold"))
-				var sb := HCStyle.box(WSCardFace.COLORS[cat], 8, WSCardFace.EDGES[cat], 1)
-				sb.content_margin_left = 8
-				sb.content_margin_right = 8
-				sb.content_margin_top = 4
-				sb.content_margin_bottom = 4
-				b.add_theme_stylebox_override("normal", sb)
-				var hsb := sb.duplicate() as StyleBoxFlat
-				hsb.border_color = HCStyle.INK
-				b.add_theme_stylebox_override("hover", hsb)
-				b.add_theme_stylebox_override("pressed", hsb)
-				var dsb := sb.duplicate() as StyleBoxFlat
-				# Непрозрачная смесь с фоном и без рамки: полупрозрачная заливка с невидимой рамкой
-				# давала на тёмном фоне светлые пиксели по сглаженному краю.
-				dsb.bg_color = HCStyle.SURFACE_2.lerp(WSCardFace.COLORS[cat], 0.55 if HCStyle.dark else 0.35)
-				dsb.bg_color.a = 1.0
-				dsb.set_border_width_all(0)
-				b.add_theme_stylebox_override("disabled", dsb)
-				b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
-				# текст — тёмный, как на самих карточках, в любой теме (светлый на пастели в тёмной теме не читался)
-				b.add_theme_color_override("font_color", HCStyle.INK_ART)
-				b.add_theme_color_override("font_hover_color", HCStyle.INK_ART)
-				b.add_theme_color_override("font_pressed_color", HCStyle.INK_ART)
-				b.add_theme_color_override("font_disabled_color", Color(HCStyle.INK_ART, 0.6 if HCStyle.dark else 0.35))
-				b.mouse_default_cursor_shape = Control.CURSOR_DRAG
-				b.button_down.connect(func(): _grab_from_deck(id))
-				flow.add_child(b)
-				_chips[id] = b
-			cols.add_child(col)
-		_refresh_chips()
+		if _catalog_cols == null:
+			_make_catalog()
+		_catalog_cols.show()
+		_sync_catalog()
 		return
+	if _catalog_cols != null:
+		_catalog_cols.hide()
 	var col := HCStyle.vbox(10)
 	_bottom.add_child(col)
 	if phase == "play" and not _am_storyteller():
@@ -945,6 +907,81 @@ func _update_bottom() -> void:
 		_guess_edit.grab_focus.call_deferred()
 	elif phase == "word":
 		col.add_child(HCStyle.label("Рассказчики смотрят слово и подсказки — раунд начнётся через 15 секунд или по «ВОРД!» — «СЛЭМ!»", HCStyle.BODY, HCStyle.MUTED, HORIZONTAL_ALIGNMENT_LEFT, "medium"))
+
+
+## Контейнеры прокрутки живут вместе со столом, в том числе при смене роли или фазы.
+func _make_catalog() -> void:
+	_catalog_cols = HCStyle.hbox(10)
+	_bottom.add_child(_catalog_cols)
+	for cat: String in WSData.CATEGORIES:
+		var col := HCStyle.vbox(4)
+		col.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		col.add_child(HCStyle.caption(WSData.CATEGORY_NAMES[cat], WSCardFace.EDGES[cat].darkened(0.3)))
+		var scroll := ScrollContainer.new()
+		scroll.size_flags_vertical = Control.SIZE_EXPAND_FILL
+		scroll.horizontal_scroll_mode = ScrollContainer.SCROLL_MODE_DISABLED
+		var flow := HFlowContainer.new()
+		flow.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		flow.add_theme_constant_override("h_separation", 4)
+		flow.add_theme_constant_override("v_separation", 4)
+		scroll.add_child(flow)
+		col.add_child(scroll)
+		_catalog_cols.add_child(col)
+		_catalog_flows[cat] = flow
+
+
+func _sync_catalog() -> void:
+	for cat: String in WSData.CATEGORIES:
+		var flow: HFlowContainer = _catalog_flows[cat]
+		var order: Array = _v.get("catalog_order", {}).get(cat, [])
+		for child in flow.get_children():
+			var id: String = child.get_meta("clue_id")
+			if not order.has(id):
+				_chips.erase(id)
+				flow.remove_child(child)
+				child.queue_free()
+		for index in order.size():
+			var id: String = order[index]
+			var button: Button = _chips.get(id)
+			if button == null:
+				button = _catalog_chip(cat, id)
+				_chips[id] = button
+				flow.add_child(button)
+			if button.get_index() != index:
+				flow.move_child(button, index)
+
+
+func _catalog_chip(cat: String, id: String) -> Button:
+	var b := Button.new()
+	b.set_meta("clue_id", id)
+	b.text = WSRules.card_word(id)
+	b.add_theme_font_size_override("font_size", HCStyle.CAP)
+	b.add_theme_font_override("font", HCStyle.font("bold"))
+	var sb := HCStyle.box(WSCardFace.COLORS[cat], 8, WSCardFace.EDGES[cat], 1)
+	sb.content_margin_left = 8
+	sb.content_margin_right = 8
+	sb.content_margin_top = 4
+	sb.content_margin_bottom = 4
+	b.add_theme_stylebox_override("normal", sb)
+	var hsb := sb.duplicate() as StyleBoxFlat
+	hsb.border_color = HCStyle.INK
+	b.add_theme_stylebox_override("hover", hsb)
+	b.add_theme_stylebox_override("pressed", hsb)
+	var dsb := sb.duplicate() as StyleBoxFlat
+	# Непрозрачная заливка без рамки убирает светлые пиксели по краю в тёмной теме.
+	dsb.bg_color = HCStyle.SURFACE_2.lerp(WSCardFace.COLORS[cat], 0.55 if HCStyle.dark else 0.35)
+	dsb.bg_color.a = 1.0
+	dsb.set_border_width_all(0)
+	b.add_theme_stylebox_override("disabled", dsb)
+	b.add_theme_stylebox_override("focus", StyleBoxEmpty.new())
+	# Тёмный текст читается на пастельной карточке в обеих темах.
+	b.add_theme_color_override("font_color", HCStyle.INK_ART)
+	b.add_theme_color_override("font_hover_color", HCStyle.INK_ART)
+	b.add_theme_color_override("font_pressed_color", HCStyle.INK_ART)
+	b.add_theme_color_override("font_disabled_color", Color(HCStyle.INK_ART, 0.6 if HCStyle.dark else 0.35))
+	b.mouse_default_cursor_shape = Control.CURSOR_DRAG
+	b.button_down.connect(func(): _grab_from_deck(id))
+	return b
 
 
 func _send_guess() -> void:

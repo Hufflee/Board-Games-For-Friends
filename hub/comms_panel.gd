@@ -17,10 +17,11 @@ const ContrastUI = preload("res://hub/ui_contrast.gd")
 const Board := preload("res://hub/minigames/mg_board.gd")
 const REACTIONS := ["Думаю…", "Блефую!", "Кидаю кость!", "Хитро!", "Ой…", "Мне повезёт!", "Удивительно!", "Эй, вы ещё здесь?"]
 const BallsView := preload("res://hub/minigames/mg_balls_view.gd")
+const RaceView := preload("res://hub/minigames/mg_race_view.gd")
 const Confetti := preload("res://hub/confetti.gd")
 const MinesView := preload("res://hub/minigames/mg_mines_view.gd")
 const BlackjackView := preload("res://hub/minigames/mg_blackjack_view.gd")
-const ICONS := {"chess": "♙", "checkers": "◉", "go": "○", "connect4": "●", "balls": "◎", "stars": "★", "blackjack": "♠", "mines": "▦"}
+const ICONS := {"chess": "♙", "checkers": "◉", "go": "○", "connect4": "●", "balls": "◎", "race": "⚑", "stars": "★", "blackjack": "♠", "mines": "▦"}
 const SIDE_NAMES := {"chess": ["белые", "чёрные"], "checkers": ["белые", "чёрные"], "go": ["чёрные", "белые"], "connect4": ["красные", "жёлтые"]}
 const EMOTE := Color("ffd479")
 const SYSTEM := Color("b8c7c0")
@@ -153,6 +154,13 @@ func _make_mini() -> Button:
 		made.add_theme_font_size_override("font_size", 14)
 	if made != null and made.theme == null and look != null:
 		made.theme = look  # окно живёт в своём слое и тему игры само не наследует
+	if made != null and look != null:
+		var normal := made.get_theme_stylebox("normal")
+		if normal is StyleBoxFlat and normal.bg_color.a <= 0.1:
+			# Тихая кнопка полосы прозрачна; передвижной нужна поверхность текущей игры.
+			for state_name in ["normal", "hover", "pressed", "disabled"]:
+				if look.has_stylebox(state_name, "Button"):
+					made.add_theme_stylebox_override(state_name, look.get_stylebox(state_name, "Button"))
 	return made
 
 
@@ -161,6 +169,10 @@ func _scene_theme() -> Theme:
 	var node: Node = _top_bar()
 	if node == null:
 		node = get_tree().current_scene
+		if node != null:
+			for child: Node in node.find_children("*", "Control", true, false):
+				if not child.is_queued_for_deletion() and child.is_visible_in_tree() and child.theme != null:
+					return child.theme
 	while node != null:
 		if node is Control and (node as Control).theme != null:
 			return (node as Control).theme
@@ -1425,6 +1437,7 @@ func _show_lobby() -> void:
 func _lobby_rooms(col: VBoxContainer) -> void:
 	col.add_child(_text("ОБЩИЕ КОМНАТЫ — ВСЕ ПРОТИВ ВСЕХ", 11, c_muted))
 	var tips := {"balls": "Толкайте шарики друг друга за край арены. Очки сбрасываются каждые 3 минуты",
+		"race": "Пять трасс со льдом и ветром. Соло — рекорд круга, с друзьями — гонка на три круга. Курсор — ехать, щелчок — рывок",
 		"stars": "Звёздочка появляется где угодно на экране — кто первым нажал, тому очко",
 		"blackjack": "Все против дилера: наберите ближе к 21, чем он, но не больше. На старте одна фишка"}
 	for game: String in _mg.ROOMS:
@@ -1595,8 +1608,8 @@ func _show_room(id: String, session: Dictionary) -> void:
 	var state: Dictionary = session.state
 	if _game_shown != id or _status == null or not is_instance_valid(_status):
 		var col := _game_column(id)
-		if game == "balls":
-			var view := BallsView.new()
+		if game in ["balls", "race"]:
+			var view: Control = RaceView.new() if game == "race" else BallsView.new()
 			view.name = "Field"
 			view.mg = _mg
 			view.id = id
@@ -1629,13 +1642,23 @@ func _show_room(id: String, session: Dictionary) -> void:
 		var foot := _text("", 12, c_muted)
 		foot.name = "Foot"
 		col.add_child(foot)
+		if game == "race":
+			col.get_node("Field").foot = foot
+			var change := small_button("Сменить трассу", "Другая случайная трасса; рекорды сохраняются")
+			change.name = "ChangeTrack"
+			change.pressed.connect(func(): _mg.room_act("race", {"change_track": true}))
+			col.add_child(change)
 		var leave := small_button("Выйти", "Выйти из комнаты (вернуться можно в любой момент)")
 		leave.pressed.connect(func(): _mg.close(id))
 		(col.get_node("Bar") as HBoxContainer).add_child(leave)
 	var me: int = _mg.my_peer()
 	var list: Array = state.get("list", [])
 	var foot_label := _game_box.get_node("Col/Foot") as Label
-	if game == "balls":
+	if game == "race":
+		(_game_box.get_node("Col/ChangeTrack") as Button).visible = str(state.get("phase", "")) == "solo" and list.size() == 1
+		# Поле само обновляет секундомер, круги и подписи между сетевыми снимками.
+		_status.text = "Входим в гонку…" if list.is_empty() else _status.text
+	elif game == "balls":
 		var mine := 0
 		var parts := []
 		for row: Array in _score_rows(list, 6):

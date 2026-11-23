@@ -66,7 +66,7 @@ func _run() -> void:
 	table.submitted.connect(func(answer: Dictionary): submitted.append(answer))
 	table._reply.pressed.emit()
 	_check(submitted == [{"request": 7, "hand": 1, "cards": []}], "Отказ от защиты отправляет заявку из стола")
-	var pile_button: Button = table._piles._rows.get_child(0).get_child(2)
+	var pile_button: Button = table._piles._rows.get_child(0).get_child(1).get_child(1)
 	var small_font := pile_button.get_theme_font("font") as FontVariation
 	var weight := TextServerManager.get_primary_interface().name_to_tag("wght")
 	_check(small_font != null and small_font.base_font.resource_path.ends_with("/Nunito-Variable.ttf")
@@ -79,7 +79,7 @@ func _run() -> void:
 	_check(table._piles._browser.get_global_rect().end.x < table._preview_column.get_global_rect().position.x + 12, "Сброс оставляет увеличенную карту открытой")
 	table._piles._close()
 	var capture := OS.get_environment("UM_TABLE_SHOTS") == "1" and DisplayServer.get_name() != "headless"
-	table._piles._rows.get_child(0).get_child(1).pressed.emit()
+	table._piles._rows.get_child(0).get_child(1).get_child(0).pressed.emit()
 	await _frames()
 	_check(table._piles._cards.get_child_count() == 24 and table._piles._scroll.get_v_scroll_bar().visible,
 		"Колода открывается с прокруткой всех оставшихся карт")
@@ -124,7 +124,7 @@ func _run() -> void:
 	if capture:
 		table._hand._open_preview(entry)
 		await _shot("sarpedon_dark")
-		table._piles._rows.get_child(1).get_child(1).pressed.emit()
+		table._piles._rows.get_child(1).get_child(1).get_child(0).pressed.emit()
 		await _frames()
 		table._piles._cards.get_child(0).mouse_entered.emit()
 		await _shot("deck_dark")
@@ -135,9 +135,16 @@ func _run() -> void:
 	await _frames()
 	if capture:
 		await _shot("scheme_center")
-	await create_timer(1.40).timeout
+	await create_timer(1.05).timeout
+	var centered := false
+	for child: Node in table.get_children():
+		if child is TextureRect and child.texture == Art.face(scheme) and child.size == Vector2(244, 339):
+			centered = child.position.is_equal_approx((table.size - child.size) * 0.5)
+	_check(centered, "Приём остаётся в центре дольше прежних 0,9 секунды")
+	await create_timer(0.85).timeout
 	_check(_same_texture(table._preview.texture, Art.face(scheme)) and table._preview_source == "scheme",
 		"Приём перелетает из центра в слот просмотра")
+	await _check_combat_retention(packed)
 	await _check_reported(table, capture)
 	await _check_actions_and_combat(table, capture)
 	await _check_helmet(table, capture)
@@ -147,6 +154,45 @@ func _run() -> void:
 	await process_frame
 	print("Unmatched table: %d проверок, %d ошибок." % [_checks, _errors])
 	quit(int(_errors > 0))
+
+
+func _check_combat_retention(packed: PackedScene) -> void:
+	var table: Control = packed.instantiate()
+	root.add_child(table)
+	var state := _example()
+	state.combat = {}
+	table.present(state)
+	await _frames()
+	var early_defense := {"id": 99, "attack": {"sealed": true}, "defense": Catalog.deck_for("sherlock", 1)[21],
+		"attack_hero": "genie", "defense_hero": "sherlock", "defense_face_up": true}
+	table._state.combat = early_defense
+	table._update_combat(early_defense)
+	_check(table._defense.texture == Art.face(early_defense.defense) and table._attack.get_meta("sealed"),
+		"Элементарно открыта до предсказания, атака остаётся закрытой")
+	var combat := {"id": 100, "attack": Catalog.deck_for("alice", 0)[2],
+		"defense": Catalog.deck_for("medusa", 1)[3], "attack_hero": "alice", "defense_hero": "medusa"}
+	table._state.combat = combat
+	table._update_combat(combat)
+	table._state.combat = {}
+	table._update_combat({})
+	_check(table._attack.texture != null and table._defense.texture != null, "После боя обе открытые карты остаются в ячейках")
+	await create_timer(2.8).timeout
+	_check(table._attack.texture != null and table._defense.texture != null, "Карты боя не исчезают до трёх дополнительных секунд")
+	await create_timer(0.4).timeout
+	_check(table._attack.texture == null and table._defense.texture == null, "Через три секунды ячейки освобождаются")
+	combat.id = 101
+	table._state.combat = combat
+	table._update_combat(combat)
+	table._state.combat = {}
+	table._update_combat({})
+	await create_timer(0.1).timeout
+	combat.id = 102
+	table._state.combat = combat
+	table._update_combat(combat)
+	await create_timer(3.1).timeout
+	_check(table._attack.texture != null, "Таймер предыдущего боя не стирает карты следующего")
+	table.queue_free()
+	await _frames()
 
 
 func _check_reported(table: Control, capture: bool) -> void:
@@ -273,6 +319,12 @@ func _check_actions_and_combat(table: Control, capture: bool) -> void:
 	var visual_span: float = table._combat_show._defense.position.x + table._combat_show._defense.size.x - table._combat_show._attack.position.x
 	_check(absf(visual_span / table.size.x - 0.60) < 0.035 and table._combat_show._shade.modulate.a > 0.9,
 		"Карты занимают около 60% ширины и фон затемнён")
+	_check(table._combat_show._shade.get_global_rect().encloses(table.get_global_rect()),
+		"Затемнение покрывает весь экран, включая правую панель и руку")
+	_check(table._combat_show.z_index > table._top.z_index, "Затемнение также находится поверх верхней полосы")
+	_check(table._combat_show._shade.get_index() < table._combat_show._attack.get_index()
+		and table._combat_show._shade.get_index() < table._combat_show._defense.get_index(),
+		"Карты атаки и защиты находятся над затемнением")
 	_check(table._combat_show._defense.get_global_rect().end.x < table._preview_column.global_position.x,
 		"Открытая защита не перекрывает просмотр карты")
 	if capture:

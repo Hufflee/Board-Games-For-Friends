@@ -18,6 +18,7 @@ var discards: Array[Array] = []
 var alice_large := false
 var _size_chosen := false
 var _seat := 0
+var fog: Array[int] = []
 
 
 static func create(arena: String, roster: PackedStringArray, owners: PackedInt32Array, rng: RandomNumberGenerator) -> RefCounted:
@@ -54,7 +55,10 @@ func _init(field: Board, roster: PackedStringArray, owners: PackedInt32Array, rn
 		var sidekicks: Dictionary = info.get("sidekick", {})
 		var group: Array = [_fighter(heroes[seat], info, true)]
 		for i in int(sidekicks.get("count", 0)):
-			group.append(_fighter(sidekicks.id, sidekicks, false))
+			var helper := _fighter(sidekicks.id, sidekicks, sidekicks.get("heroes", false))
+			if heroes[seat] == "witches":
+				helper["token"] = "witch_%d" % (i + 1)
+			group.append(helper)
 		fighters.append(group)
 		var deck := Catalog.deck_for(heroes[seat], seat)
 		Piles.shuffle(deck, rng)
@@ -69,6 +73,8 @@ func _init(field: Board, roster: PackedStringArray, owners: PackedInt32Array, rn
 func pending() -> Dictionary:
 	if _seat == heroes.size():
 		return {}
+	if heroes[_seat] == "invisible_man" and fog.size() < 3:
+		return {"seat": _seat, "fog": true, "cells": _placement_cells()}
 	for i in range(1, fighters[_seat].size()):
 		var figure: Dictionary = fighters[_seat][i]
 		if figure.space < 0 and not figure.reserve:
@@ -80,7 +86,10 @@ func place(viewer: int, cell: int) -> bool:
 	var request := pending()
 	if not request.has("cells") or viewer != controllers[_seat] or cell not in request.cells:
 		return false
-	fighters[_seat][request.fighter].space = cell
+	if request.get("fog", false):
+		fog.append(cell)
+	else:
+		fighters[_seat][request.fighter].space = cell
 	_enter_seat()
 	return true
 
@@ -107,10 +116,14 @@ func _enter_seat() -> void:
 				return
 		if heroes[_seat] == "alice" and not _size_chosen:
 			return
+		if heroes[_seat] == "invisible_man" and fog.size() < 3:
+			return
 		_seat += 1
 
 
 func _reserved(cell: int) -> bool:
+	if cell in fog:
+		return true
 	for seat in heroes.size():
 		if cell == board.start_for(seat):
 			return true

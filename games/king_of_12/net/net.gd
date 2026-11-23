@@ -71,7 +71,7 @@ var lobby_id := 0
 var members := {}  # peer_id -> {name}
 var join_order: Array[int] = []
 var bots := 0
-var settings := {"ibs_words": "simple", "ibs_critic": -1, "fc_aliens": 0, "fc_hard": false, "fc_opening": false, "ce_teams": false, "ce_cursed": false, "ce_marshal": false, "ce_prison": false, "ce_coach": false, "ce_time_car": false, "ce_horses": false, "ce_whiskey": false, "ce_sprites": false, "bc_edition": "tb", "bc_storyteller": 0, "mk_plus": false, "mk_sharp": false, "mk_limited": false, "cg_example": "card_race", "pk_mode": "classic", "pk_target": 0, "pk_open": false, "kh_rounds": 6, "kh_timer": 90, "tr_rings": ["Attribute", "Word", "Context"], "tr_knower": 0, "tr_coop": false, "tr_mode": "classic", "tr_timer": 0, "tr_want": [], "deck_mode": "first", "manual": [], "promo": "", "tournament": true, "reveal_speed": "normal", "perudo_dice": 5, "perudo_maputo": true, "wl_mode": "teams", "wl_local_teams": [], "dw_rooms": "3-7", "dw_monster": "random", "dw_hard": false, "dw_curses": true, "dw_time": 60, "hc_laps": 0, "hc_free": false, "hc_mode": "classic", "rsb_speed": "normal", "ws_mode": "teams", "ws_catalog": "basic", "ws_cards": "standard", "ws_names": true, "ws_time": 120, "turn_time": 60, "tt_expert": false, "pi_roles": [], "fs_dlc": false, "fs_timer": 0, "fs_character_choice": false, "st_bots": false, "st_lives": 2, "st_time": 10, "st_oral": false, "shuffle_seats": false, "cg_bots": false, "cg_lobby": {}}
+var settings := {"ibs_words": "simple", "ibs_critic": -1, "fc_aliens": 0, "fc_hard": false, "fc_opening": false, "ce_teams": false, "ce_cursed": false, "ce_marshal": false, "ce_prison": false, "ce_coach": false, "ce_time_car": false, "ce_horses": false, "ce_whiskey": false, "ce_sprites": false, "bc_edition": "tb", "bc_storyteller": 0, "mk_plus": false, "mk_sharp": false, "mk_limited": false, "cg_example": "card_race", "pk_mode": "classic", "pk_target": 0, "pk_open": false, "kh_rounds": 6, "kh_timer": 90, "tr_rings": ["Attribute", "Word", "Context"], "tr_knower": 0, "tr_coop": false, "tr_mode": "classic", "tr_timer": 0, "tr_want": [], "deck_mode": "first", "manual": [], "promo": "", "tournament": true, "reveal_speed": "normal", "perudo_dice": 5, "perudo_maputo": true, "wl_mode": "teams", "wl_local_teams": [], "dw_rooms": "3-7", "dw_monster": "random", "dw_hard": false, "dw_curses": true, "dw_time": 60, "hc_laps": 0, "hc_free": false, "hc_mode": "classic", "rsb_speed": "normal", "ws_mode": "teams", "ws_catalog": "basic", "ws_words": "shared", "ws_cards": "standard", "ws_names": true, "ws_time": 120, "turn_time": 60, "tt_expert": false, "pi_roles": [], "fs_dlc": false, "fs_timer": 0, "fs_character_choice": false, "st_bots": false, "st_lives": 2, "st_time": 10, "st_oral": false, "st_accelerating": false, "shuffle_seats": false, "cg_bots": false, "cg_lobby": {}}
 var disconnected := {}  # место -> имя вылетевшего игрока (может вернуться)
 var chat_log: Array = []
 var last_join := {}  # куда подключались в последний раз — для «Вернуться в партию»
@@ -1616,6 +1616,7 @@ func start_game() -> String:
 		stillion.max_lives = clampi(int(settings.get("st_lives", STRules.MAX_LIVES)), 1, 9)
 		stillion.answer_time = float(clampi(int(settings.get("st_time", STRules.ANSWER_TIME)), 3, 60))
 		stillion.oral = bool(settings.get("st_oral", false))
+		stillion.accelerating = bool(settings.get("st_accelerating", false))
 		stillion.hotseat = mode == "offline"
 		stillion.deck = _st_deck  # та же колода (по ссылке) — темы прошлых партий не повторяются
 		stillion.new_game(players, bool(settings.get("st_bots", false)))
@@ -1858,13 +1859,25 @@ func minigames_locked_now(peer: int) -> bool:
 
 
 func _minigame_turn_active(seat: int, seat_view: Dictionary) -> bool:
+	var game := str(seat_view.get("game", party_game))
+	var phase := str(seat_view.get("phase", ""))
+	var response_total := INF
+	if game == "four_souls" and phase == "priority" and not bool(seat_view.get("starting_pending", false)):
+		response_total = float(seat_view.get("response_window", INF))
+	elif game in ["gloom", "gloomier"] and phase == "react":
+		response_total = GL_REACT_MAX
+	elif (game == "not_a_hat" and phase == "respond") or (game == "colt_express" and phase == "reaction"):
+		response_total = turn_limit()
+	# Только короткие ответы: остаток длинного окна и длительность основного хода не учитываем.
+	if response_total > 0.0 and response_total <= 8.0:
+		return false
 	if mk != null:
 		return mk.current == seat and mk.phase in ["roll", "reroll", "harbor", "trawler", "choice", "build"]
 	if cg != null:
 		return not seat_view.get("legal", []).is_empty()
 	if bc != null:
 		return int(seat_view.get("next_voter", -1)) == seat or seat_view.has("request")
-	return TurnSeats.acting(str(seat_view.get("game", party_game)), seat_view).has(seat)
+	return TurnSeats.acting(game, seat_view).has(seat)
 
 
 func _input(event: InputEvent) -> void:
@@ -1960,15 +1973,13 @@ func _handle_action(peer: int, kind: String, arg) -> void:
 		if mode == "offline" and peer == 1:
 			if kind == "fc_seat":
 				var wanted := int(request.get("seat",-1))
-				# на примеры отвечает вся команда инопланетян — за одним компьютером управление можно отдать любому из них
-				var alien_answer: bool = first_contact.phase == "teach" and wanted >= first_contact.humans and wanted < first_contact.players.size()
-				if (wanted == first_contact.turn and first_contact.turn >= 0) or alien_answer:
+				if wanted == first_contact.turn and first_contact.turn >= 0:
 					fc_seat = wanted
 					_push_state()
 				return
 			seat = fc_seat
 		if first_contact.action(seat,kind,request,peer == 1):
-			if first_contact.turn != fc_seat and not (first_contact.phase == "teach" and fc_seat >= first_contact.humans):
+			if first_contact.turn != fc_seat:
 				fc_seat = -1
 			_push_state()
 		return
@@ -2663,11 +2674,13 @@ func _apply_state(v: Dictionary) -> void:
 	if bool(v.get("game_paused", false)) != bool(view.get("game_paused", false)):
 		pause_changed.emit.call_deferred()
 	_dbg("state phase=%s trick=%s" % [v.get("phase"), v.get("trick_no")])
+	var previous_view := view
 	view = v
 	if not is_host():
 		_deliver_client_start()
 	if not bool(v.get("spectator",false)): player_stats.consume(v.get("personal_stats",{}))
-	state_changed.emit(v)
+	preload("res://hub/local_ui_state.gd").network_update(get_tree(), previous_view, v,
+		func() -> void: state_changed.emit(v))
 
 
 ## Аватарка Steam игрока (или null, пока Steam её не загрузил / без Steam).
@@ -3518,7 +3531,7 @@ func _start_ws(players: Array) -> String:
 	hues = null
 	rsb = null
 	wslam = WSRules.new()
-	wslam.new_game(players, solo, count, intro, bool(settings.get("ws_names", true)), 0, str(settings.get("ws_catalog", "basic")))
+	wslam.new_game(players, solo, count, intro, bool(settings.get("ws_names", true)), 0, str(settings.get("ws_catalog", "basic")), str(settings.get("ws_words", "shared")))
 	auto_advance_time = 25.0
 	return ""
 

@@ -9,6 +9,7 @@ const CombatCards := preload("res://games/unmatched/logic/um_combat_cards.gd")
 const Choice := preload("res://hub/player_choice.gd")
 const Effects := preload("res://games/unmatched/logic/um_effects.gd")
 const Battlefields := preload("res://games/unmatched/logic/um_battlefields.gd")
+const Bard := preload("res://games/unmatched/logic/um_bard_rules.gd")
 
 enum Phase { ACTION, MANEUVER, DISCARD, FINISHED, COMBAT_CHOICE, COMBAT_REVEAL, EFFECT_CHOICE }
 
@@ -63,9 +64,19 @@ var _danger_crossed := {}
 var _free_scheme := false
 var _item_choice_pending := false
 var free_scheme_notice := {}
+var hyde := false
+var vanished := -1
+var wish_owner := -1
+var fog_at_turn_start := false
+var elementary_prediction := -1
+var _boost_cards: Array[Dictionary] = []
+var public_card_notice := {}
+var bard: Bard
+var _combat_holders := PackedInt32Array()
 
 func _init(setup: Setup) -> void:
 	game = setup
+	bard = Bard.new(self)
 	var pool: Array = game.board.item_pool.duplicate()
 	Piles.shuffle(pool, game.random)
 	for index in pool.size():
@@ -91,6 +102,16 @@ func attack_in_range(fighter: Vector2i, cell: int) -> bool:
 	var source := _fighter_at(fighter.x, fighter.y)
 	return not source.is_empty() and source.space != cell and (
 		fighter == _map_target or game.board.in_attack_range(source.space, cell, source.ranged))
+
+
+func attack_keys_for(fighter: Vector2i, cell: int) -> Array[String]:
+	var source := _fighter_at(fighter.x, fighter.y)
+	if source.is_empty() or not attack_in_range(fighter, cell): return []
+	var keys := _combat_keys(fighter.x, Catalog.Kind.ATTACK, source.is_hero)
+	if not game.board.adjacent(source.space, cell):
+		keys = keys.filter(func(key: String) -> bool:
+			return not game.hands[fighter.x].any(func(card: Dictionary) -> bool: return card.key == key and card.definition == "tomoe:12"))
+	return keys
 
 
 func use_battlefield_item(viewer: int, fighter: int, id: int) -> bool:
@@ -165,17 +186,15 @@ func _apply_battlefield_item(fighter: Vector2i, id: int) -> void:
 			var choices: Array = Array(range(game.heroes.size())).filter(func(place: int) -> bool: return place % 2 != fighter.x % 2)
 			_offer_seat_choice(fighter.x, choices, "Камера · выберите противника",
 				func(place: int) -> void:
-					_effect_steps.push_front(_draw.bind(fighter.x, 1))
-					var shown: Array = game.hands[place]
-					if not shown.is_empty():
-						_offer_choice(fighter.x, ["confirm"], false, "Посмотрите руку противника", func(_a: String) -> void: pass, shown))
+					_look_hand(fighter.x, place, _camera_view.bind(fighter.x, place)))
 		30:
 			_offer_seat_choice(fighter.x, Array(range(game.heroes.size())), "Зазум · выберите колоду",
 				func(place: int) -> void: _order_deck_top(fighter.x, place, game.decks[place].slice(maxi(0, game.decks[place].size() - 3)), []))
 
 
 func _item_discard(place: int) -> void:
-	_offer_hand_discard(place, false, "Генератор ЭМИ · сбросьте карту", func(key: String) -> void: _discard_key(place, key))
+	_offer_hand_discard(place, false, "Генератор ЭМИ · сбросьте карту",
+		func(key: String) -> void: _discard_key(place, key, place % 2 != seat % 2))
 
 
 func _order_deck_top(owner: int, place: int, remaining: Array, ordered: Array) -> void:
@@ -198,7 +217,7 @@ func _order_deck_top(owner: int, place: int, remaining: Array, ordered: Array) -
 func _offer_deck_scheme(owner: int) -> void:
 	var cards: Array = game.decks[owner].filter(func(card: Dictionary) -> bool:
 		return card.kind == Catalog.S and game.fighters[owner].any(func(figure: Dictionary) -> bool:
-			return figure.space >= 0 and Catalog.can_play(card, Catalog.S, figure.is_hero)))
+			return figure.space >= 0 and card_can_play(card, Catalog.S, figure.is_hero)))
 	var keys: Array = cards.map(func(card: Dictionary) -> String: return card.key)
 	if keys.is_empty():
 		Piles.shuffle(game.decks[owner], game.random)
@@ -209,7 +228,7 @@ func _offer_deck_scheme(owner: int) -> void:
 			var fighters: Array = []
 			for index in game.fighters[owner].size():
 				var figure: Dictionary = game.fighters[owner][index]
-				if figure.space >= 0 and Catalog.can_play(card, Catalog.S, figure.is_hero):
+				if figure.space >= 0 and card_can_play(card, Catalog.S, figure.is_hero):
 					fighters.append(Vector2i(owner, index))
 			_offer_choice(owner, fighters, false, "Выберите бойца для бесплатного приёма", func(fighter: Vector2i) -> void:
 				game.decks[owner].erase(card)
@@ -252,6 +271,8 @@ func begin_maneuver(viewer: int) -> bool:
 	_door_spent = 0
 	_boosted = false
 	phase = Phase.MANEUVER
+	bard.on_maneuver()
+	_run_effects()
 	return true
 
 
@@ -266,13 +287,22 @@ func boost_maneuver(viewer: int, key: String) -> bool:
 		return false
 	if game.heroes[seat] == "sinbad" and _is_voyage(game.hands[seat][index]):
 		boost += 1
-	Piles.discard(game.hands[seat], index, game.discards[seat])
+	var card: Dictionary = game.hands[seat][index]
+	Piles.discard(game.hands[seat], index, bard.discard_pile(seat))
 	_distance += boost
 	_boosted = true
+	if game.heroes[seat] == "houdini":
+		phase = Phase.EFFECT_CHOICE
+		_effect_steps.append(_houdini_maneuver_place.bind(seat))
+		_effect_steps.append(_resume_maneuver)
+		_houdini_boost(seat, card)
+		_run_effects()
 	return true
 
 
 func maneuver_cells(viewer: int, fighter: int) -> PackedInt32Array:
+	if bard.rooted.has(Vector2i(seat, fighter)):
+		return []
 	if not _can_act(viewer, Phase.MANEUVER) or fighter < 0 or fighter >= game.fighters[seat].size() or _moved.has(fighter):
 		return []
 	if fighter != _door_fighter and _maneuver_in_transit():
@@ -282,7 +312,8 @@ func maneuver_cells(viewer: int, fighter: int) -> PackedInt32Array:
 		return []
 	var remaining := _maneuver_remaining(fighter)
 	var occupied := _occupied()
-	var cells := game.board.reachable(figure.space, remaining, seat % 2, occupied)
+	game.board.fog_links = game.fog if game.heroes[seat] == "invisible_man" else []
+	var cells := game.board.reachable(figure.space, remaining, seat % 2, occupied, _can_pass_enemies(Vector2i(seat, fighter), {}))
 	if game.board.doors.is_empty():
 		return cells
 	var previous := {}
@@ -368,12 +399,15 @@ func _track_door_fighter(fighter: int) -> void:
 
 
 func maneuver_preview_cells(viewer: int, fighter: int) -> PackedInt32Array:
+	if bard.rooted.has(Vector2i(seat, fighter)):
+		return []
 	if not _can_act(viewer, Phase.ACTION):
 		return []
 	var figure := _fighter_at(seat, fighter)
 	if figure.is_empty():
 		return []
-	return game.board.reachable(figure.space, _movement_distance(), seat % 2, _occupied())
+	game.board.fog_links = game.fog if game.heroes[seat] == "invisible_man" else []
+	return game.board.reachable(figure.space, _movement_distance(), seat % 2, _occupied(), _can_pass_enemies(Vector2i(seat, fighter), {}))
 
 
 func _movement_distance() -> int:
@@ -391,7 +425,7 @@ func move_in_maneuver(viewer: int, fighter: int, cell: int) -> bool:
 	if cell not in maneuver_cells(viewer, fighter):
 		return false
 	var figure: Dictionary = game.fighters[seat][fighter]
-	var walk := game.board.route(figure.space, cell, _maneuver_remaining(fighter), seat % 2, _occupied(), false, not game.board.doors.is_empty())
+	var walk := game.board.route(figure.space, cell, _maneuver_remaining(fighter), seat % 2, _occupied(), _can_pass_enemies(Vector2i(seat, fighter), {}), not game.board.doors.is_empty())
 	if game.board.doors.is_empty() and game.board.dangerous_paths.is_empty():
 		_moved[fighter] = true
 	else:
@@ -402,6 +436,7 @@ func move_in_maneuver(viewer: int, fighter: int, cell: int) -> bool:
 
 
 func _walk_fighter(target: Vector2i, path: PackedInt32Array) -> void:
+	bard.capture_positions()
 	var figure := _fighter_at(target.x, target.y)
 	if figure.is_empty() or path.is_empty():
 		return
@@ -420,6 +455,12 @@ func _continue_walk(target: Vector2i, path: PackedInt32Array, index: int) -> voi
 		figure.space = path[index]
 		figure.walk.append(path[index])
 		index += 1
+		bard.scan_moves()
+		if not _effect_request.is_empty():
+			_effect_steps.push_front(_continue_walk.bind(target, path, index))
+			return
+		if figure.health <= 0:
+			return
 		var edge := Vector2i(mini(from, figure.space), maxi(from, figure.space))
 		if edge in game.board.dangerous_paths and not _danger_crossed.has(target):
 			_danger_crossed[target] = true
@@ -433,8 +474,17 @@ func can_boost_maneuver() -> bool:
 
 
 func hero_status(place: int) -> String:
+	var expanded := bard.status(place)
+	if not expanded.is_empty():
+		return expanded
 	var group: Array = game.fighters[place]
 	match game.heroes[place]:
+		"jekyll_hyde":
+			return "Мистер Хайд" if hyde else "Доктор Джекилл"
+		"invisible_man":
+			return "Исчез" if vanished == place else ("В тумане · защита +1" if group[0].space in game.fog else "")
+		"genie":
+			return "Значения карт: 4" if wish_owner == place else ""
 		"alice":
 			if not game.alice_size_selected():
 				return ""
@@ -472,6 +522,8 @@ func hero_status(place: int) -> String:
 func end_maneuver(viewer: int) -> bool:
 	if not _can_act(viewer, Phase.MANEUVER) or _maneuver_in_transit():
 		return false
+	if game.heroes[seat] == "jekyll_hyde" and hyde:
+		_damage(Vector2i(seat, 0), 1)
 	_end_action()
 	return true
 
@@ -484,7 +536,7 @@ func play_scheme(viewer: int, fighter: int, key: String) -> bool:
 	if figure.is_empty() or index < 0:
 		return false
 	var card: Dictionary = game.hands[seat][index]
-	if not Catalog.can_play(card, Catalog.Kind.SCHEME, figure.is_hero) or not Effects.SCHEMES.has(card.definition):
+	if not card_can_play(card, Catalog.Kind.SCHEME, figure.is_hero) or not Effects.SCHEMES.has(card.definition):
 		return false
 	var effect: Dictionary = Effects.SCHEMES[card.definition]
 	actions_left -= 1
@@ -519,6 +571,8 @@ func _finish_scheme(card: Dictionary, effect: Dictionary) -> void:
 						hero.health = mini(hero.max_health, hero.health + 1)
 		actions_left += int(effect.get("actions", 0))
 	_dispose_played(card, seat)
+	if game.heroes[seat] == "titania" and bard.enchantment == 4:
+		actions_left += 1
 	if not _effect_request.is_empty():
 		_effect_steps.push_front(_finish_combat_action)
 		return
@@ -533,23 +587,39 @@ func begin_attack(viewer: int, fighter: int, target_seat: int, target_fighter: i
 	var target := _fighter_at(target_seat, target_fighter)
 	if source.is_empty() or target.is_empty() or not attack_in_range(Vector2i(seat, fighter), target.space):
 		return false
-	var attacks := _combat_keys(seat, Catalog.Kind.ATTACK, source.is_hero)
+	var attacks := attack_keys_for(Vector2i(seat, fighter), target.space)
 	if attacks.is_empty() or (not key.is_empty() and key not in attacks):
 		return false
-	var defenses := _combat_keys(target_seat, Catalog.Kind.DEFENSE, target.is_hero)
 	_attack_pair = [Vector2i(seat, fighter), Vector2i(target_seat, target_fighter)]
+	_combat_holders = PackedInt32Array([seat, target_seat])
+	actions_left -= 1
+	_action_count += 1
+	phase = Phase.EFFECT_CHOICE
+	if game.heroes[target_seat] == "titania" and bard.enchantment == 3:
+		var other := Vector2i(target_seat, 1 - target_fighter)
+		if not _fighter_at(other.x, other.y).is_empty() and not bard.rooted.has(other) and not bard.rooted.has(_attack_pair[1]):
+			_effect_steps.push_front(_begin_attack_cards.bind(viewer, attacks, key))
+			_offer_choice(target_seat, ["swap"], true, "Чары ревности · поменяться с напарником и передать ему защиту?", func(_answer: String) -> void:
+				if bard.swap(_attack_pair[1], other): _attack_pair[1] = other)
+			return true
+	_begin_attack_cards(viewer, attacks, key)
+	return true
+
+
+func _begin_attack_cards(viewer: int, attacks: Array, key: String) -> void:
+	var target_seat := _attack_pair[1].x
+	var target := _fighter_at(target_seat, _attack_pair[1].y)
+	var defenses := _combat_keys(target_seat, Catalog.Kind.DEFENSE, target.is_hero)
 	if _map_target == _attack_pair[0]:
 		_map_target = Vector2i(-1, -1)
 	_combat_items.clear()
 	_combat_cards = CombatCards.new(_next_request, seat, target_seat, attacks, defenses)
 	_combat_serial += 1
+	elementary_prediction = -1
 	_next_request += 2
-	actions_left -= 1
-	_action_count += 1
 	phase = Phase.COMBAT_CHOICE
 	if not key.is_empty():
 		choose_combat_card(viewer, {"request": _next_request - 2, "hand": seat, "cards": [key]})
-	return true
 
 
 func attack_view(viewer: int) -> Dictionary:
@@ -564,6 +634,16 @@ func attack_view(viewer: int) -> Dictionary:
 		"attack_sealed": not _combat_cards.selected_attack_key().is_empty(),
 		"cards": {} if _item_choice_pending else (_revealed_override if not _revealed_override.is_empty() else _combat_cards.revealed()),
 	}
+	var attack_key := _combat_cards.selected_attack_key()
+	if not attack_key.is_empty() and phase == Phase.COMBAT_CHOICE:
+		for card: Dictionary in game.hands[_combat_holders[0]]:
+			if card.key == attack_key and card.definition == "tomoe:12":
+				view.cards = {"attack": card.duplicate(true)}
+				view["pending_reveal"] = true
+	if _item_choice_pending and elementary_prediction < 0:
+		var sealed := _combat_cards.revealed()
+		if sealed.get("defense", {}).get("definition", "") == "sherlock:22":
+			view.cards = {"defense": sealed.defense}
 	if phase == Phase.COMBAT_CHOICE and not request.is_empty() and game.controllers[request.hand] == viewer:
 		view["choice"] = request
 	return view
@@ -578,6 +658,15 @@ func choose_combat_card(viewer: int, answer: Dictionary) -> bool:
 	var side := 0 if submitted.hand == _attack_pair[0].x else 1
 	if not answer.cards.is_empty():
 		var card: Dictionary = game.hands[submitted.hand].filter(func(c: Dictionary) -> bool: return c.key == answer.cards[0])[0]
+		if card.definition == "sherlock:22":
+			_item_choice_pending = true
+			phase = Phase.EFFECT_CHOICE
+			_offer_choice(submitted.hand, Array(range(0, 11)), false, "Элементарно · предскажите напечатанную атаку",
+				func(value: int) -> void:
+					elementary_prediction = value
+					_item_choice_pending = false
+					_finish_card_submission())
+			return true
 		if _offer_combat_item(side, card):
 			return true
 	_finish_card_submission()
@@ -656,6 +745,7 @@ func _begin_resolved_combat(attack: Dictionary, defense: Dictionary, pace_animat
 
 
 func _resolve_combat_cards(attack: Dictionary, defense: Dictionary, pace_animation: bool, paid_parley: int) -> bool:
+	_boost_cards.clear()
 	during_events.clear()
 	immediate_cue = {}
 	_pace_combat = pace_animation
@@ -670,7 +760,7 @@ func _resolve_combat_cards(attack: Dictionary, defense: Dictionary, pace_animati
 	elif paid_parley == 1:
 		defense_effect = {}
 	var attack_canceled: bool = defense_effect.get("cancel", false) and not attack_effect.get("uncancelable", false)
-	var defense_canceled: bool = not attack_canceled and attack_effect.get("cancel", false)
+	var defense_canceled: bool = not attack_canceled and attack_effect.get("cancel", false) and not defense_effect.get("uncancelable", false)
 	# «Немедленно» защиты уже срабатывает до отмены атакующим (FAQ, стр. 69).
 	var defense_immediate := defense_effect.duplicate(true)
 	if not attack_canceled and not Effects.COMBAT.has(attack.definition):
@@ -723,7 +813,7 @@ func _combat_item_during(combat: Dictionary, side: int, before: bool) -> void:
 func _show_immediate(combat: Dictionary, side: int) -> void:
 	var effect: Dictionary = combat.immediate_effects[side]
 	var swap: bool = effect.get("swap_patroclus", false) and _patroclus_alive(_attack_pair[side].x)
-	var board: bool = swap or effect.has("archer_attack") or effect.has("discard_or_revive") or effect.has("replace_enemy_card")
+	var board: bool = swap or effect.has("archer_attack") or effect.has("discard_or_revive") or effect.has("replace_enemy_card") or effect.has("mist_immediate") or effect.has("bard_immediate")
 	if not _pace_combat or not (board or effect.has("cancel") or effect.has("discard_or_ignore")
 			or effect.has("ransom_hand") or effect.has("ransom_random") or effect.has("god_mischief")):
 		_combat_immediate(combat, side)
@@ -772,6 +862,8 @@ func _close_board_focus() -> void:
 
 
 func _combat_immediate(combat: Dictionary, side: int) -> void:
+	bard.immediate(combat, side)
+	_mist_immediate(combat, side)
 	var effect: Dictionary = combat.immediate_effects[side]
 	var fighter := _attack_pair[side]
 	var opponent := _attack_pair[1 - side]
@@ -815,7 +907,7 @@ func _combat_immediate(combat: Dictionary, side: int) -> void:
 		combat.ignore_defense = true
 		_offer_hand_discard(opponent.x, true, "Сбросьте карту, чтобы сохранить значение защиты",
 			func(key: String) -> void:
-				_discard_key(opponent.x, key)
+				_discard_key(opponent.x, key, true)
 				combat.ignore_defense = false)
 	if side == 0 and effect.get("replace_enemy_card", false) and not combat.cards[1].is_empty():
 		_replace_defense(combat)
@@ -854,7 +946,7 @@ func _discard_or_archer(owner: int, opponent: int, archer: int, cells: Array) ->
 			_offer_revive(owner, archer, cells))
 	_offer_hand_discard(opponent, true, "Сбросьте карту или противник вернёт Лучника",
 		func(key: String) -> void:
-			_discard_key(opponent, key)
+			_discard_key(opponent, key, true)
 			discarded[0] = true)
 
 
@@ -922,7 +1014,7 @@ func _combat_during(combat: Dictionary, side: int) -> void:
 		_offer_hand_discard(opponent.x, true, "Пари с Синдри · сбросьте карту, чтобы сохранить значение",
 			func(key: String) -> void:
 				paid[0] = true
-				_discard_key(opponent.x, key))
+				_discard_key(opponent.x, key, true))
 	if effect.get("laevateinn", false):
 		_reveal_loki_card(combat, side, opponent.x)
 	if effect.get("shapeshift", false):
@@ -940,9 +1032,13 @@ func _combat_during(combat: Dictionary, side: int) -> void:
 		combat.values = [second, first]
 		combat.modifiers = [0, 0]
 		_remember_during(combat, side, "Значения карт поменялись местами")
+	_mist_during(combat, side)
+	bard.during(combat, side)
 
 
 func _offer_boost(combat: Dictionary, side: int, source: int) -> void:
+	if combat.cards[side].is_empty():
+		return
 	var owner := _attack_pair[side].x
 	var cards := Piles.matching(game.hands[owner], func(card: Dictionary) -> bool: return card.boost >= 0)
 	var keys: Array = cards.map(func(card: Dictionary) -> String: return card.key)
@@ -952,6 +1048,8 @@ func _offer_boost(combat: Dictionary, side: int, source: int) -> void:
 				if card.key == key:
 					combat.modifiers[side] += card.boost
 					_discard_key(owner, key)
+					_boost_cards.append(card)
+					_houdini_boost(owner, card)
 					_remember_during(combat, source, "Сброшена 1 карта для усиления")
 					return)
 
@@ -978,6 +1076,13 @@ func finish_combat_impact() -> void:
 
 
 func _deal_combat_damage(combat: Dictionary) -> void:
+	for side in 2:
+		if combat.get("locked", {}).has(side):
+			combat.values[side] = combat.locked[side] + _fighter_combat_bonus(_attack_pair[side], side == 0)
+			combat.modifiers[side] = int(_arthur_boost.get("boost", 0)) if side == 0 and not combat.canceled[0] else 0
+		if _attack_pair[side].x == wish_owner and not combat.cards[side].is_empty():
+			combat.values[side] = 4
+			combat.modifiers[side] = 0
 	var attacker := _attack_pair[0]
 	var defender := _attack_pair[1]
 	var attack_value: int = combat.values[0] + combat.modifiers[0]
@@ -991,6 +1096,8 @@ func _deal_combat_damage(combat: Dictionary) -> void:
 	if combat.ignore_defense:
 		defense_value = 0
 	var damage := 0 if combat.effects[1].get("prevent_damage", false) else maxi(0, attack_value - defense_value)
+	if combat.effects[1].has("damage_cap"):
+		damage = mini(damage, int(combat.effects[1].damage_cap))
 	var attacker_won: bool = damage > 0 and not combat.reflect
 	var recipient := attacker if combat.reflect else defender
 	var health_before := {}
@@ -999,7 +1106,9 @@ func _deal_combat_damage(combat: Dictionary) -> void:
 			health_before[Vector2i(place, index)] = game.fighters[place][index].health
 	combat["health_before"] = health_before
 	_effect_steps.push_front(_after_combat_damage.bind(combat, damage, attack_value, defense_value, attacker_won))
+	bard._combat_damage = true
 	_damage_redirectable(recipient, damage)
+	bard._combat_damage = false
 
 
 func _after_combat_damage(combat: Dictionary, damage: int, attack_value: int, defense_value: int, attacker_won: bool) -> void:
@@ -1038,6 +1147,8 @@ func _after_combat_damage(combat: Dictionary, damage: int, attack_value: int, de
 
 
 func _uses_board_after(effect: Dictionary, won: bool) -> bool:
+	if effect.has("mist_after") or effect.has("bard_after"):
+		return true
 	for key: String in ["place", "move", "move_group"]:
 		if effect.has(key) and (won or not effect.has("win_move")):
 			return true
@@ -1050,19 +1161,20 @@ func _uses_board_after(effect: Dictionary, won: bool) -> bool:
 func _finish_combat(attack: Dictionary, defense: Dictionary, attack_effect: Dictionary, attacker_won: bool) -> void:
 	var attacker := _attack_pair[0]
 	var defender := _attack_pair[1]
+	bard.poem_opponent = defender if game.heroes[attacker.x] == "shakespeare" else attacker
 	var winning_fighter := attacker if attacker_won else defender
-	if game.heroes[winning_fighter.x] == "achilles" and winning_fighter.y == 0 and not _patroclus_alive(winning_fighter.x):
+	if not bard.turn_ended and game.heroes[winning_fighter.x] == "achilles" and winning_fighter.y == 0 and not _patroclus_alive(winning_fighter.x):
 		_draw(winning_fighter.x, 1)
 	if not defense.is_empty():
 		if attacker_won and not last_combat.defense_canceled and Effects.COMBAT.get(defense.definition, {}).get("return_defense_on_loss", false):
-			game.hands[defender.x].append(defense)
+			game.hands[_combat_holders[1]].append(defense)
 		else:
-			_dispose_played(defense, defender.x, attacker.x)
-	if attack_effect.get("follow_up", false) and (not attack_effect.get("needs_defense", false) or not defense.is_empty()):
+			_dispose_played(defense, _combat_holders[1], _combat_holders[0])
+	if not bard.turn_ended and attack_effect.get("follow_up", false) and (not attack_effect.get("needs_defense", false) or not defense.is_empty()):
 		_combat_items.clear()
 		if _begin_follow_up(attack, defense):
 			return
-	_dispose_played(_held_attack, attacker.x, defender.x)
+	_dispose_played(_held_attack, _combat_holders[0], _combat_holders[1])
 	_held_attack = {}
 	if not _arthur_boost.is_empty():
 		game.discards[attacker.x].append(_arthur_boost)
@@ -1070,16 +1182,22 @@ func _finish_combat(attack: Dictionary, defense: Dictionary, attack_effect: Dict
 	_combat_cards = null
 	immediate_cue = {}
 	_revealed_override = {}
-	if game.heroes[attacker.x] == "robin_hood":
+	if not bard.turn_ended and game.heroes[attacker.x] == "robin_hood":
 		_effect_steps.push_front(_finish_combat_ability)
 		_offer_move(attacker, attacker.x, defender, {"move": "self", "distance": 2})
 		return
-	_finish_combat_ability()
+	_effect_steps.append(_finish_combat_ability)
 
 
 func _finish_combat_ability() -> void:
 	var attacker := _attack_pair[0]
 	_attack_pair.clear()
+	if bard.turn_ended:
+		_finish_combat_action()
+		return
+	if bard.after_attack(attacker):
+		_effect_steps.push_back(_finish_combat_action)
+		return
 	if phase != Phase.FINISHED and game.heroes[attacker.x] == "chupacabra" and not _fighter_at(attacker.x, 0).is_empty():
 		_offer_choice(attacker.x, ["draw"], true, "Голод во плоти · возьмите 1 карту",
 			func(_answer: String) -> void: _draw(attacker.x, 1))
@@ -1123,7 +1241,9 @@ func choose_effect(viewer: int, request_id: int, answer: Variant) -> bool:
 	_effect_request = {}
 	_effect_apply = Callable()
 	if answer != null:
+		bard.capture_positions()
 		apply.call(answer)
+		bard.scan_moves()
 	_run_effects()
 	return true
 
@@ -1131,7 +1251,9 @@ func choose_effect(viewer: int, request_id: int, answer: Variant) -> bool:
 func _run_effects() -> void:
 	while not _effect_steps.is_empty() and _effect_request.is_empty() and combat_pause <= 0.0:
 		var step: Callable = _effect_steps.pop_front()
+		bard.capture_positions()
 		step.call()
+		bard.scan_moves()
 
 
 func _offer_choice(place: int, options: Array, optional: bool, prompt: String, apply: Callable, shown: Array = []) -> void:
@@ -1170,7 +1292,7 @@ func _offer_hand_discard(place: int, optional: bool, prompt: String, apply: Call
 
 
 func _effect_move(fighter: Vector2i, opponent: Vector2i, effect: Dictionary, won: bool) -> void:
-	if phase == Phase.FINISHED or (effect.get("win_move", false) and not won):
+	if phase == Phase.FINISHED or bard.turn_ended or (effect.get("win_move", false) and not won):
 		return
 	if effect.has("place"):
 		_offer_move(fighter, fighter.x, opponent, effect)
@@ -1214,8 +1336,10 @@ func _effect_move(fighter: Vector2i, opponent: Vector2i, effect: Dictionary, won
 
 
 func _offer_move(target: Vector2i, owner: int, opponent: Vector2i, effect: Dictionary) -> void:
+	if bard.rooted.has(target):
+		return
 	if not game.board.dangerous_paths.is_empty() and not effect.has("place"):
-		_offer_path_step(target, owner, effect.distance, effect.get("through_enemies", false))
+		_offer_path_step(target, owner, effect.distance, _can_pass_enemies(target, effect), effect.get("through_sidekicks", false))
 		return
 	var cells := _movement_cells(target, opponent, effect)
 	_offer_cells(owner, Array(cells), not effect.get("mandatory_move", false), "Выберите клетку",
@@ -1227,15 +1351,19 @@ func _offer_move(target: Vector2i, owner: int, opponent: Vector2i, effect: Dicti
 				figure["walk_serial"] = _walk_serial
 				figure.space = cell
 			else:
+				game.board.fog_links = game.fog if game.heroes[target.x] == "invisible_man" else []
 				_walk_fighter(target, game.board.route(figure.space, cell, effect.distance, target.x % 2,
-					_occupied(), effect.get("through_enemies", false))))
+					_movement_occupied(target, effect), _can_pass_enemies(target, effect))))
 
 
-func _offer_path_step(target: Vector2i, owner: int, remaining: int, through_enemies: bool) -> void:
+func _offer_path_step(target: Vector2i, owner: int, remaining: int, through_enemies: bool, through_sidekicks: bool = false) -> void:
+	if bard.rooted.has(target):
+		return
+	game.board.fog_links = game.fog if game.heroes[target.x] == "invisible_man" else []
 	var figure := _fighter_at(target.x, target.y)
 	if figure.is_empty() or remaining <= 0 or phase == Phase.FINISHED:
 		return
-	var occupied := _occupied()
+	var occupied := _movement_occupied(target, {"through_sidekicks": through_sidekicks})
 	var options: Array = []
 	for cell: int in game.board.movement_neighbors(figure.space):
 		if occupied.has(cell):
@@ -1249,7 +1377,7 @@ func _offer_path_step(target: Vector2i, owner: int, remaining: int, through_enem
 	_offer_cells(owner, options, not in_transit, "Выберите следующий шаг · осталось %d" % remaining,
 		func(cell: int) -> void:
 			var path := PackedInt32Array([figure.space, cell])
-			_effect_steps.push_front(_offer_path_step.bind(target, owner, remaining - 1, through_enemies))
+			_effect_steps.push_front(_offer_path_step.bind(target, owner, remaining - 1, through_enemies, through_sidekicks))
 			_walk_fighter(target, path))
 
 
@@ -1265,12 +1393,15 @@ func _offer_group_move(owner: int, remaining: Array, effect: Dictionary) -> void
 
 
 func _movement_cells(target: Vector2i, opponent: Vector2i, effect: Dictionary) -> PackedInt32Array:
+	if bard.rooted.has(target):
+		return []
+	game.board.fog_links = game.fog if game.heroes[target.x] == "invisible_man" else []
 	var figure := _fighter_at(target.x, target.y)
 	if figure.is_empty():
 		return []
-	var occupied := _occupied()
+	var occupied := _movement_occupied(target, effect)
 	if not effect.has("place"):
-		return game.board.reachable(figure.space, effect.distance, target.x % 2, occupied, effect.get("through_enemies", false))
+		return game.board.reachable(figure.space, effect.distance, target.x % 2, occupied, _can_pass_enemies(target, effect))
 	var enemy := _fighter_at(opponent.x, opponent.y)
 	var cells := PackedInt32Array()
 	for cell in game.board.cell_count():
@@ -1282,6 +1413,20 @@ func _movement_cells(target: Vector2i, opponent: Vector2i, effect: Dictionary) -
 			continue
 		cells.append(cell)
 	return cells
+
+
+func _can_pass_enemies(target: Vector2i, effect: Dictionary) -> bool:
+	return effect.get("through_enemies", false) or (game.heroes[target.x] == "titania" and bard.enchantment == 2)
+
+
+func _movement_occupied(target: Vector2i, effect: Dictionary) -> Dictionary:
+	var occupied := _occupied()
+	if effect.get("through_sidekicks", false):
+		for place in game.fighters.size():
+			for figure: Dictionary in game.fighters[place]:
+				if not figure.is_hero and figure.space >= 0:
+					occupied[figure.space] = target.x % 2
+	return occupied
 
 
 func _occupied() -> Dictionary:
@@ -1310,6 +1455,7 @@ func _begin_follow_up(attack: Dictionary, defense: Dictionary) -> bool:
 		follow_up["reprise_value"] = int(defense.get("value", 0))
 	follow_up.erase("follow_up")
 	var defenses := _combat_keys(defender.x, Catalog.Kind.DEFENSE, target.is_hero)
+	_combat_holders[1] = defender.x
 	immediate_cue = {}
 	_revealed_override = {}
 	_combat_cards = CombatCards.new(_next_request, attacker.x, defender.x, [], defenses, follow_up)
@@ -1372,20 +1518,23 @@ func _combat_value(fighter: Vector2i, opponent: Vector2i, card: Dictionary, oppo
 
 func _fighter_combat_bonus(fighter: Vector2i, attacking: bool) -> int:
 	var figure: Dictionary = game.fighters[fighter.x][fighter.y]
+	var expansion_bonus := bard.bonus(fighter, attacking)
+	if not attacking and game.heroes[fighter.x] == "invisible_man" and figure.space in game.fog:
+		return 1 + expansion_bonus
 	if attacking and figure.is_hero and game.heroes[fighter.x] == "achilles" and not _patroclus_alive(fighter.x):
-		return 2
+		return 2 + expansion_bonus
 	if attacking and game.heroes[fighter.x] == "pandora":
-		return _misery_attack
+		return _misery_attack + expansion_bonus
 	if figure.is_hero and game.heroes[fighter.x] == "alice":
 		if attacking and game.alice_large:
-			return 2
+			return 2 + expansion_bonus
 		elif not attacking and not game.alice_large:
-			return 1
-	return 0
+			return 1 + expansion_bonus
+	return expansion_bonus
 
 
 func _after_combat(fighter: Vector2i, opponent: Vector2i, effect: Dictionary, won: bool) -> void:
-	if phase == Phase.FINISHED:
+	if phase == Phase.FINISHED or bard.turn_ended:
 		return
 	var damage := int(effect.get("damage", 0)) + (int(effect.get("win_damage", 0)) if won else 0)
 	if damage > 0 and effect.has("self_damage"):
@@ -1461,7 +1610,7 @@ func _after_combat(fighter: Vector2i, opponent: Vector2i, effect: Dictionary, wo
 		_draw(fighter.x, int(effect.get("third_draw", 0)))
 	if effect.get("discard_enemy", false):
 		_offer_hand_discard(opponent.x, false, "Сбросьте карту",
-			func(key: String) -> void: _discard_key(opponent.x, key))
+			func(key: String) -> void: _discard_key(opponent.x, key, true))
 	if effect.get("random_discard", false):
 		_random_hand_discard(opponent.x, 1)
 	if effect.get("return_voyages", false):
@@ -1482,14 +1631,9 @@ func _after_combat(fighter: Vector2i, opponent: Vector2i, effect: Dictionary, wo
 						Piles.transfer(discard, index, game.hands[fighter.x])
 						return, discard)
 	if effect.get("look_discard_on_win", false) and won:
-		var shown: Array = game.hands[opponent.x]
-		var keys: Array = shown.map(func(card: Dictionary) -> String: return card.key)
-		_offer_choice(fighter.x, keys, false, "Выберите карту противника для сброса",
-			func(key: String) -> void: _discard_key(opponent.x, key), shown)
+		_look_hand(fighter.x, opponent.x, _choose_enemy_discard.bind(fighter.x, opponent.x))
 	if effect.get("look_enemy", false):
-		var shown: Array = game.hands[opponent.x]
-		if not shown.is_empty():
-			_offer_choice(fighter.x, ["confirm"], false, "Посмотрите руку противника", func(_answer: String) -> void: pass, shown)
+		_effect_steps.push_front(_look_hand.bind(fighter.x, opponent.x, _show_enemy_hand.bind(fighter.x, opponent.x)))
 	if won and effect.get("discard_to_deck_on_win", false):
 		var discard: Array = game.discards[fighter.x]
 		var keys: Array = discard.map(func(card: Dictionary) -> String: return card.key)
@@ -1501,9 +1645,13 @@ func _after_combat(fighter: Vector2i, opponent: Vector2i, effect: Dictionary, wo
 						return, discard)
 	_pirate_after(fighter, effect)
 	_loki_after(fighter, opponent, effect)
+	_mist_after(fighter, opponent, effect, won)
+	bard.after(fighter, opponent, effect, won)
 
 
 func _scheme_choice(fighter: Vector2i, effect: Dictionary) -> void:
+	bard.scheme(fighter, effect)
+	_mist_scheme(fighter, effect)
 	if effect.get("steal_rich", false):
 		_draw(fighter.x, 1)
 		if phase == Phase.FINISHED:
@@ -1569,7 +1717,7 @@ func _steal_rich(opponent: int, owner: int) -> void:
 			if answer == "draw":
 				_draw(owner, 1)
 			else:
-				_offer_hand_discard(opponent, false, "Сбросьте карту", func(key: String) -> void: _discard_key(opponent, key)))
+				_offer_hand_discard(opponent, false, "Сбросьте карту", func(key: String) -> void: _discard_key(opponent, key, true)))
 	_effect_request["labels"] = {"discard": "Сбросить карту", "draw": "Робин Гуд берёт ещё 1 карту"}
 
 
@@ -1638,7 +1786,7 @@ func _discard_requested(place: int, count: int) -> void:
 		return
 	_offer_hand_discard(place, false, "Сбросьте карту",
 		func(key: String) -> void:
-			_discard_key(place, key)
+			_discard_key(place, key, true)
 			_discard_requested(place, count - 1))
 
 
@@ -1688,9 +1836,7 @@ func _queen_tribute(combat: Dictionary, side: int, remaining: Array) -> void:
 
 
 func _pick_discard(owner: int, opponent: int) -> void:
-	var shown: Array = game.hands[opponent]
-	_offer_choice(owner, shown.map(func(card: Dictionary) -> String: return card.key), false,
-		"Выберите карту противника для сброса", func(key: String) -> void: _discard_key(opponent, key), shown)
+	_look_hand(owner, opponent, _choose_enemy_discard.bind(owner, opponent))
 
 
 func _pirate_after(fighter: Vector2i, effect: Dictionary) -> void:
@@ -1751,10 +1897,23 @@ func _combat_effect(card: Dictionary, holder: int) -> Dictionary:
 			"loki:03": return {"return_to_loki": true}
 			"loki:11": return {"heal_loki": true}
 			"loki:26": return {"trick_self_damage": true}
-	return Effects.COMBAT.get(card.get("definition"), {}).duplicate()
+	var effect: Dictionary = Effects.COMBAT.get(card.get("definition"), {}).duplicate()
+	if game.heroes[holder] == "sherlock" and card.get("fighter", Catalog.Fighter.ANY) != Catalog.Fighter.ANY:
+		effect["uncancelable"] = true
+	return effect
 
 
 func _dispose_played(card: Dictionary, holder: int, opponent: int = -1) -> void:
+	if card.is_empty():
+		return
+	if bard.returned.has(card.key):
+		var add_to_hand: bool = bard.returned[card.key]
+		bard.returned.erase(card.key)
+		if add_to_hand:
+			game.hands[holder].append(card)
+		return
+	if not _is_trick(card) and bard.dispose(card, holder):
+		return
 	if not _is_trick(card):
 		game.discards[holder].append(card)
 		return
@@ -1805,7 +1964,7 @@ func _loki_after(fighter: Vector2i, _opponent: Vector2i, effect: Dictionary) -> 
 	if effect.get("return_to_loki", false) and not game.discards[loki].is_empty():
 		Piles.transfer(game.discards[loki], game.discards[loki].size() - 1, game.hands[loki])
 	if effect.get("trick_self_damage", false):
-		_damage_redirectable(Vector2i(fighter.x, 0), 2)
+		_damage_hero(fighter.x, 2)
 
 
 func _svadilfari(holder: int) -> void:
@@ -1937,6 +2096,10 @@ func _find_excalibur(owner: int, pile: String) -> void:
 
 
 func _look_scheme(owner: int, opponent: int, effect: Dictionary) -> void:
+	_look_hand(owner, opponent, _apply_look_scheme.bind(owner, opponent, effect))
+
+
+func _apply_look_scheme(owner: int, opponent: int, effect: Dictionary) -> void:
 	var hand: Array = game.hands[opponent]
 	if hand.is_empty():
 		if effect.get("blazing_gaze", false):
@@ -1962,9 +2125,9 @@ func _memory_discard(owner: int, card: Dictionary) -> void:
 	_offer_choice(owner, ["discard", "damage"], false, "Сбросьте карту или получите урон",
 		func(answer: String) -> void:
 			if answer == "discard":
-				_discard_key(owner, card.key)
+				_discard_key(owner, card.key, true)
 			else:
-				_damage_redirectable(Vector2i(owner, 0), maxi(0, card.boost)), [card])
+				_damage_hero(owner, maxi(0, card.boost)), [card])
 
 
 func _clone_swap(owner: int) -> void:
@@ -2047,7 +2210,7 @@ func _finish_ride(fighter: Vector2i, cell: int, passed: Dictionary, path: Packed
 	_walk_fighter(fighter, path)
 
 
-func _discard_key(place: int, key: String) -> void:
+func _discard_key(place: int, key: String, caused_by_enemy: bool = false) -> void:
 	var hand: Array = game.hands[place]
 	for index in hand.size():
 		if hand[index].key == key:
@@ -2057,16 +2220,18 @@ func _discard_key(place: int, key: String) -> void:
 				var loki: int = game.heroes.find("loki")
 				_effect_steps.push_front(_reclaim_trick.bind(loki, card))
 			else:
-				Piles.discard(hand, index, game.discards[place])
+				Piles.discard(hand, index, bard.discard_pile(place))
+			if caused_by_enemy and card.definition == "houdini:09":
+				_draw(place, 1)
 			return
 
 
-func _random_hand_discard(place: int, count: int) -> Array:
+func _random_hand_discard(place: int, count: int, caused_by_enemy: bool = true) -> Array:
 	var cards: Array = []
 	for i in mini(count, game.hands[place].size()):
 		var card: Dictionary = game.hands[place][game.random.randi_range(0, game.hands[place].size() - 1)]
 		cards.append(card)
-		_discard_key(place, card.key)
+		_discard_key(place, card.key, caused_by_enemy)
 	return cards
 
 
@@ -2099,6 +2264,15 @@ func start_turn() -> void:
 		return
 	if not _turn_spaces.is_empty():
 		return
+	if vanished == seat:
+		phase = Phase.EFFECT_CHOICE
+		_offer_cells(seat, _empty_cells(), false, "Исчезновение · верните Невидимку на поле",
+			func(cell: int) -> void:
+				game.fighters[seat][0].space = cell
+				vanished = -1
+				phase = Phase.ACTION
+				start_turn())
+		return
 	for place in game.fighters.size():
 		for index in game.fighters[place].size():
 			_turn_spaces[Vector2i(place, index)] = game.fighters[place][index].space
@@ -2106,7 +2280,23 @@ func start_turn() -> void:
 		actions_left += 1
 	var hero := _fighter_at(seat, 0)
 	if not hero.is_empty():
+		bard.start_turn()
 		match game.heroes[seat]:
+			"dracula":
+				_offer_choice(seat, _opposing_targets(seat, hero.space), true, "Дракула · нанесите 1 урон соседнему противнику и возьмите карту",
+					func(target: Vector2i) -> void:
+						_damage_redirectable(target, 1)
+						_effect_steps.push_front(_draw.bind(seat, 1)))
+			"jekyll_hyde":
+				_offer_choice(seat, ["jekyll", "hyde"], true, "Выберите облик или сохраните текущий",
+					func(form: String) -> void: hyde = form == "hyde")
+			"genie":
+				_offer_hand_discard(seat, true, "Безграничная сила · сбросьте карту ради дополнительного действия",
+					func(key: String) -> void:
+						_discard_key(seat, key)
+						actions_left += 1)
+			"invisible_man":
+				fog_at_turn_start = hero.space in game.fog
 			"medusa":
 				_offer_damage_target(seat, hero.space, true, false, 1, true)
 			"sun_wukong":
@@ -2206,9 +2396,25 @@ func _summon_helper(owner: int, cells: Array) -> void:
 
 
 func _heal_hero(owner: int, amount: int) -> void:
+	if game.heroes[owner] == "witches":
+		_offer_choice(owner, bard.own_fighters(owner), false, "Выберите сестру для восстановления ОЗ", func(target: Vector2i) -> void: bard.heal(target, amount))
+		return
 	var hero := _fighter_at(owner, 0)
 	if not hero.is_empty():
 		hero.health = mini(hero.max_health, hero.health + amount)
+
+
+func _choose_hero_target(owner: int, apply: Callable) -> void:
+	var options: Array = bard.own_fighters(owner).filter(func(target: Vector2i) -> bool: return game.fighters[target.x][target.y].is_hero)
+	if options.size() == 1:
+		apply.call(options[0])
+	elif not options.is_empty():
+		_offer_choice(owner, options, false, "Выберите сестру, к которой применяется эффект", apply)
+
+
+func _damage_hero(owner: int, amount: int) -> void:
+	if amount > 0:
+		_choose_hero_target(owner, func(target: Vector2i) -> void: _damage_redirectable(target, amount))
 
 
 func _offer_summon(hero: Dictionary) -> void:
@@ -2239,14 +2445,17 @@ func _summon_cells(owner: int, helper: int, cells: Array) -> void:
 
 
 func _damage(fighter: Vector2i, damage: int) -> void:
+	if not bard.damage_allowed(fighter, damage, bard._combat_damage):
+		return
 	var figure := _fighter_at(fighter.x, fighter.y)
 	if figure.is_empty() or damage <= 0:
 		return
 	figure.health = maxi(0, figure.health - damage)
+	bard.damaged(fighter, damage)
 	if figure.health == 0:
 		figure.space = -1
 		if fighter.y == 1 and game.heroes[fighter.x] == "achilles" and phase != Phase.FINISHED:
-			_random_hand_discard(fighter.x, 2)
+			_random_hand_discard(fighter.x, 2, false)
 
 
 func _damage_redirectable(fighter: Vector2i, damage: int, first_archer: int = 1) -> void:
@@ -2287,7 +2496,7 @@ func _patroclus_alive(place: int) -> bool:
 func _combat_keys(place: int, kind: Catalog.Kind, is_hero: bool) -> Array[String]:
 	var keys: Array[String] = []
 	for card: Dictionary in game.hands[place]:
-		if Catalog.can_play(card, kind, is_hero):
+		if card_can_play(card, kind, is_hero):
 			keys.append(card.key)
 	return keys
 
@@ -2309,6 +2518,8 @@ func _end_action() -> void:
 		return
 	if actions_left > 0:
 		phase = Phase.ACTION
+		return
+	if bard.before_end_turn():
 		return
 	if game.heroes[seat] == "bigfoot" and _bigfoot_has_clear_zone():
 		phase = Phase.EFFECT_CHOICE
@@ -2369,7 +2580,7 @@ func _finish_turn() -> void:
 	var belt: PackedInt32Array = game.board.conveyor
 	if not belt.is_empty():
 		var last := _conveyor_rider(belt[-1])
-		if not last.is_empty():
+		if not last.is_empty() and not bard.rooted.has(Vector2i(last.seat, last.index)):
 			var occupied := _occupied()
 			var exits := Array(game.board.conveyor_exit).filter(func(cell: int) -> bool: return not occupied.has(cell))
 			if not exits.is_empty():
@@ -2385,22 +2596,32 @@ func _finish_turn() -> void:
 
 func _conveyor_rider(cell: int) -> Dictionary:
 	for place in game.fighters.size():
-		for fighter: Dictionary in game.fighters[place]:
+		for index in game.fighters[place].size():
+			var fighter: Dictionary = game.fighters[place][index]
 			if fighter.space == cell:
-				return {"seat": place, "figure": fighter}
+				return {"seat": place, "index": index, "figure": fighter}
 	return {}
 
 
-func _advance_conveyor() -> void:
+func _advance_conveyor(next: int = -1) -> void:
 	var belt: PackedInt32Array = game.board.conveyor
 	var occupied := _occupied()
-	for i in range(belt.size() - 2, -1, -1):
+	var start := belt.size() - 2 if next == -1 else next
+	for i in range(start, -1, -1):
 		if not occupied.has(belt[i]) or occupied.has(belt[i + 1]):
 			continue
-		var moved: Dictionary = _conveyor_rider(belt[i]).figure
+		var rider := _conveyor_rider(belt[i])
+		if bard.rooted.has(Vector2i(rider.seat, rider.index)):
+			continue
+		var moved: Dictionary = rider.figure
+		bard.capture_positions()
 		moved.space = belt[i + 1]
 		occupied[belt[i + 1]] = occupied[belt[i]]
 		occupied.erase(belt[i])
+		bard.scan_moves()
+		if not _effect_request.is_empty():
+			_effect_steps.push_front(_pass_turn if i == 0 else _advance_conveyor.bind(i - 1))
+			return
 	_pass_turn()
 
 
@@ -2409,6 +2630,8 @@ func _pass_turn() -> void:
 	if phase == Phase.FINISHED:
 		return
 	_map_target = Vector2i(-1, -1)
+	bard.pass_turn()
+	wish_owner = -1
 	_danger_crossed.clear()
 	if game.heroes[seat] == "pandora":
 		misery_pile.append_array(miseries)
@@ -2430,7 +2653,7 @@ func _pass_turn() -> void:
 func _check_victory() -> void:
 	var living := [false, false]
 	for place in game.heroes.size():
-		if game.fighters[place][0].health > 0:
+		if bard.alive_hero(place):
 			living[place % 2] = true
 	if not (living[0] and living[1]):
 		winner = (0 if living[0] else 1) if living[0] or living[1] else seat % 2
@@ -2438,6 +2661,8 @@ func _check_victory() -> void:
 
 
 func _has_fighters(place: int) -> bool:
+	if vanished == place and game.fighters[place][0].health > 0:
+		return true
 	for figure: Dictionary in game.fighters[place]:
 		if figure.space >= 0:
 			return true
@@ -2457,3 +2682,538 @@ func _hand_index(key: String) -> int:
 
 static func _is_voyage(card: Dictionary) -> bool:
 	return card.definition in ["sinbad:15", "sinbad:16", "sinbad:17", "sinbad:18", "sinbad:19", "sinbad:20", "sinbad:26"]
+
+
+func card_can_play(card: Dictionary, kind: Catalog.Kind, is_hero: bool) -> bool:
+	return Catalog.can_play(card, kind, is_hero, ("hyde" if hyde else "jekyll") if card.hero == "jekyll_hyde" else "")
+
+
+func _resume_maneuver() -> void:
+	_check_victory()
+	if phase != Phase.FINISHED:
+		phase = Phase.MANEUVER
+
+
+func _houdini_maneuver_place(owner: int) -> void:
+	if _moved.has(0) or _fighter_at(owner, 0).is_empty():
+		return
+	_offer_cells(owner, _empty_cells(), true, "Мастер побега · поместите Гудини на любую свободную клетку",
+		func(cell: int) -> void:
+			game.fighters[owner][0].space = cell
+			_moved[0] = true)
+
+
+func _empty_cells() -> Array:
+	var occupied := _occupied()
+	return Array(range(game.board.cell_count())).filter(func(cell: int) -> bool: return not occupied.has(cell))
+
+
+func _opposing_targets(owner: int, origin: int, adjacent: bool = true) -> Array:
+	var targets: Array = []
+	for place in game.heroes.size():
+		if place % 2 == owner % 2:
+			continue
+		for index in game.fighters[place].size():
+			var figure := _fighter_at(place, index)
+			if not figure.is_empty() and (origin < 0 or not adjacent or game.board.adjacent(origin, figure.space)):
+				targets.append(Vector2i(place, index))
+	return targets
+
+
+func _mist_immediate(combat: Dictionary, side: int) -> void:
+	var effect: Dictionary = combat.immediate_effects[side]
+	var fighter := _attack_pair[side]
+	var opponent := _attack_pair[1 - side]
+	match str(effect.get("mist_immediate", "")):
+		"lamp":
+			_heal_hero(fighter.x, 4)
+		"zero":
+			if not combat.has("locked"):
+				combat["locked"] = {}
+			combat.locked[1 - side] = 0
+		"command":
+			_replace_attack(combat, fighter.x)
+		"enemy_boost":
+			_offer_boost(combat, 1 - side, side)
+		"smoke":
+			var hero := _fighter_at(fighter.x, 0)
+			var helper := _fighter_at(fighter.x, 1)
+			if not hero.is_empty() and not helper.is_empty():
+				_offer_choice(fighter.x, ["swap"], true, "Дым и зеркала · поменяйте Гудини и Бесс местами",
+					func(_answer: String) -> void:
+						var previous: int = hero.space
+						hero.space = helper.space
+						helper.space = previous
+						_attack_pair[side].y = 1 - fighter.y)
+		"sleight":
+			var alternatives: Array = game.hands[fighter.x].filter(func(card: Dictionary) -> bool:
+				return card_can_play(card, Catalog.Kind.ATTACK, fighter.y == 0))
+			_offer_choice(fighter.x, alternatives.map(func(card: Dictionary) -> String: return card.key), true,
+				"Ловкость рук · верните карту и выберите другую атаку",
+				func(key: String) -> void:
+					var replacement: Dictionary = alternatives.filter(func(card: Dictionary) -> bool: return card.key == key)[0]
+					game.hands[fighter.x].append(combat.cards[side])
+					_take_combat_card(fighter.x, key)
+					_set_combat_replacement(combat, side, replacement, true), alternatives)
+
+
+func _set_combat_replacement(combat: Dictionary, side: int, card: Dictionary, immediately: bool) -> void:
+	combat.cards[side] = card
+	combat.effects[side] = _combat_effect(card, _attack_pair[side].x)
+	combat.immediate_effects[side] = combat.effects[side].duplicate()
+	combat.values[side] = card.value
+	combat.modifiers[side] = 0
+	combat.canceled[side] = false
+	if side == 0:
+		_held_attack = card
+	_revealed_override = {"attack": combat.cards[0], "defense": combat.cards[1]}
+	var target: int = 1 - side
+	var target_effect := _combat_effect(combat.cards[target], _attack_pair[target].x)
+	combat.canceled[target] = combat.effects[side].get("cancel", false) and not target_effect.get("uncancelable", false)
+	combat.effects[target] = {} if combat.canceled[target] else target_effect
+	if immediately:
+		_effect_steps.push_front(_show_immediate.bind(combat, side))
+
+
+func _replace_attack(combat: Dictionary, owner: int) -> void:
+	var attacker := _attack_pair[0]
+	game.hands[attacker.x].append(combat.cards[0])
+	var options: Array = game.hands[attacker.x].filter(func(card: Dictionary) -> bool:
+		return card_can_play(card, Catalog.Kind.ATTACK, attacker.y == 0))
+	_look_hand(owner, attacker.x, func() -> void:
+		_offer_choice(owner, options.map(func(card: Dictionary) -> String: return card.key), false,
+			"Выполняй мои приказания · выберите атаку противника",
+			func(key: String) -> void:
+				var card: Dictionary = options.filter(func(item: Dictionary) -> bool: return item.key == key)[0]
+				_take_combat_card(attacker.x, key)
+				_set_combat_replacement(combat, 0, card, false), options),
+		func() -> void:
+			_take_combat_card(attacker.x, combat.cards[0].key))
+
+
+func _mist_during(combat: Dictionary, side: int) -> void:
+	var effect: Dictionary = combat.effects[side]
+	var fighter := _attack_pair[side]
+	var opponent := _attack_pair[1 - side]
+	var figure: Dictionary = game.fighters[fighter.x][fighter.y]
+	var other: Dictionary = game.fighters[opponent.x][opponent.y]
+	match str(effect.get("mist_during", "")):
+		"eyes":
+			combat.modifiers[side] += maxi(0, combat.cards[1 - side].get("boost", 0))
+		"frenzy":
+			for helper: Dictionary in game.fighters[fighter.x].slice(1):
+				combat.modifiers[side] += int(game.board.same_zone(helper.space, other.space))
+		"beast", "forever":
+			_discard_for_power(combat, side, effect.mist_during == "forever")
+		"deduce":
+			_offer_choice(fighter.x, ["boost_value"], true, "Делать выводы · заменить значение противника его усилением",
+				func(_answer: String) -> void:
+					combat.values[1 - side] = maxi(0, combat.cards[1 - side].get("boost", 0))
+					combat.modifiers[1 - side] = 0
+					_remember_during(combat, side, "Значение противника заменено усилением"))
+		"elementary":
+			if elementary_prediction == int(combat.cards[0].value):
+				combat.effects[0] = {}
+				combat.canceled[0] = true
+				combat.ignore_attack = true
+				_remember_during(combat, side, "Элементарно · атака предсказана и игнорируется")
+		"duality":
+			if (hyde and side == 0) or (not hyde and side == 1):
+				combat.values[side] = 6
+		"fog_attack":
+			if fog_at_turn_start:
+				combat.values[side] = 5
+		"parlor":
+			combat.values[1 - side] = maxi(0, combat.cards[1 - side].get("boost", 0))
+			combat.modifiers[1 - side] = 0
+		"double_boost":
+			_boost_cards.clear()
+			_effect_steps.push_front(_offer_boost.bind(combat, side, side))
+			_offer_boost(combat, side, side)
+	if effect.has("mist_during") and _effect_request.is_empty():
+		_remember_during(combat, side, "Применён эффект карты")
+
+
+func _discard_for_power(combat: Dictionary, side: int, only_jekyll: bool) -> void:
+	var owner: int = _attack_pair[side].x
+	var cards: Array = game.hands[owner].filter(func(card: Dictionary) -> bool: return not only_jekyll or card.get("form", "") == "jekyll")
+	_offer_choice(owner, cards.map(func(card: Dictionary) -> String: return card.key), true, "Сбросьте карту ради +%d силы или завершите" % (2 if only_jekyll else 1),
+		func(key: String) -> void:
+			_discard_key(owner, key)
+			combat.modifiers[side] += 2 if only_jekyll else 1
+			_remember_during(combat, side, "Добавлена сила за сброшенную карту")
+			_discard_for_power(combat, side, only_jekyll), cards)
+	if not cards.is_empty():
+		_effect_request["hand_discard"] = true
+
+
+func _mist_after(fighter: Vector2i, opponent: Vector2i, effect: Dictionary, won: bool) -> void:
+	var owner := fighter.x
+	var hero: Dictionary = game.fighters[owner][0]
+	match str(effect.get("mist_after", "")):
+		"jekyll":
+			hyde = false
+		"hyde":
+			hyde = true
+		"science":
+			var damage := 0
+			for loss: Dictionary in last_combat.losses:
+				if loss.fighter == fighter:
+					damage += loss.amount
+			_draw(owner, damage)
+		"thirst":
+			if won and hero.space >= 0:
+				_offer_move(Vector2i(owner, 0), owner, opponent, {"place": "adjacent"})
+		"education":
+			_draw(opponent.x if won else owner, 1 if won else 2)
+		"study":
+			if won:
+				_look_hand(owner, opponent.x, _show_enemy_hand.bind(owner, opponent.x))
+		"partners":
+			var helper: Dictionary = game.fighters[owner][1]
+			if game.board.adjacent(hero.space, helper.space):
+				_heal_hero(owner, 1)
+				helper.health = mini(helper.max_health, helper.health + 1)
+		"covert":
+			_move_fog(owner, 2, [], func(index: int) -> void: _move_fog(opponent.x, 2, [index]))
+		"revenge":
+			if hero.space in game.fog:
+				var targets: Array[Vector2i] = []
+				for target: Vector2i in _opposing_targets(owner, -1):
+					if game.fighters[target.x][target.y].space in game.fog:
+						targets.append(target)
+				_damage_group(targets, 1)
+		"confound":
+			var paid := [false]
+			_effect_steps.push_front(func() -> void:
+				if not paid[0]:
+					_move_all_fog(owner, [0, 1, 2]))
+			_offer_hand_discard(opponent.x, true, "Сбить с толку · сбросьте карту, чтобы сохранить туман",
+				func(key: String) -> void:
+					paid[0] = true
+					_discard_key(opponent.x, key, true))
+		"elusive":
+			_move_fog(opponent.x, 3)
+		"notes":
+			_return_hand_top(owner, 2)
+		"lurking":
+			_offer_choice(owner, ["fog_place", "fog_move"], false, "Укрытие · переместитесь в туман или передвиньте жетон",
+				func(answer: String) -> void:
+					if answer == "fog_move":
+						_move_fog(owner, 3)
+					else:
+						_offer_cells(owner, game.fog.filter(func(cell: int) -> bool: return not _occupied().has(cell)), true, "Выберите свободную клетку тумана",
+							func(cell: int) -> void: hero.space = cell))
+		"slip":
+			_move_fog(owner, -1, [], func(index: int) -> void: hero.space = game.fog[index], true)
+		"surprise":
+			if hero.space in game.fog:
+				_move_fog(owner, -1, [], Callable(), false, game.fog.find(hero.space))
+		"wish_action", "wish_rage":
+			if effect.mist_after == "wish_action" and not won:
+				return
+			_pay_two(owner, func() -> void:
+				if effect.mist_after == "wish_action":
+					actions_left += 1
+				else:
+					_offer_damage_target(owner, hero.space, true, true, 2))
+		"sultans":
+			_look_hand(owner, opponent.x, _choose_enemy_discard.bind(owner, opponent.x))
+		"death", "careful":
+			if effect.mist_after == "death" or not won:
+				_offer_damage_target(owner, hero.space, effect.mist_after == "careful", true, 1, effect.mist_after == "death")
+		"more_wishes":
+			_draw(opponent.x, 1)
+			_draw(owner, 3)
+		"prestige":
+			var cards: Array = _boost_cards.filter(func(card: Dictionary) -> bool: return card in game.discards[owner])
+			_offer_choice(owner, cards.map(func(card: Dictionary) -> String: return card.key), false, "Престиж · верните карту усиления",
+				func(key: String) -> void:
+					for index in game.discards[owner].size():
+						if game.discards[owner][index].key == key:
+							Piles.transfer(game.discards[owner], index, game.hands[owner])
+							return, cards)
+		"show":
+			var figure: Dictionary = game.fighters[owner][fighter.y]
+			if figure.health <= 0:
+				figure.health = 4
+				_offer_cells(owner, _empty_cells(), false, "Всё часть представления · верните бойца на поле",
+					func(cell: int) -> void: figure.space = cell)
+		"trick":
+			var targets: Array = [Vector2i(owner, 0), Vector2i(owner, 1)]
+			targets = targets.filter(func(target: Vector2i) -> bool: return not _fighter_at(target.x, target.y).is_empty())
+			_offer_choice(owner, targets, true, "Мой очередной трюк · переместите одного бойца",
+				func(target: Vector2i) -> void: _offer_move(target, owner, opponent, {"distance": 1}))
+		"escape":
+			if won:
+				_offer_move(fighter, owner, opponent, {"place": "anywhere"})
+
+
+func _pay_two(owner: int, after: Callable) -> void:
+	if game.hands[owner].size() < 2:
+		return
+	_offer_choice(owner, ["pay"], true, "Сбросьте две карты ради эффекта",
+		func(_answer: String) -> void: _pay_two_cards(owner, 2, after))
+	_effect_request["labels"] = {"pay": "Сбросить две карты"}
+
+
+func _pay_two_cards(owner: int, remaining: int, after: Callable) -> void:
+	if remaining == 0:
+		after.call()
+		return
+	_offer_hand_discard(owner, false, "Сбросьте карту · осталось %d" % remaining,
+		func(key: String) -> void:
+			_discard_key(owner, key)
+			_pay_two_cards(owner, remaining - 1, after))
+
+
+func _move_all_fog(owner: int, remaining: Array) -> void:
+	if remaining.is_empty():
+		return
+	_move_fog(owner, -1, [], func(_index: int) -> void: _move_all_fog(owner, remaining.slice(1)), false, remaining[0])
+
+
+## Туман проходит сквозь бойцов, но два жетона не могут занимать одну клетку.
+func _move_fog(owner: int, distance: int, excluded: Array = [], after: Callable = Callable(), empty: bool = false, fixed: int = -1) -> void:
+	var options: Array = []
+	for index in game.fog.size():
+		if index not in excluded and (fixed < 0 or fixed == index):
+			options.append(game.fog[index])
+	_offer_cells(owner, options, true, "Выберите жетон тумана",
+		func(origin: int) -> void:
+			var index := game.fog.find(origin)
+			game.board.fog_links = []
+			var destinations: Array = Array(range(game.board.cell_count())) if distance < 0 else Array(game.board.reachable(origin, distance, owner % 2, {}, true))
+			if distance >= 0:
+				destinations.append(origin)
+			destinations = destinations.filter(func(cell: int) -> bool:
+				return (cell == origin or cell not in game.fog) and (not empty or not _occupied().has(cell)))
+			_offer_cells(owner, destinations, false, "Выберите место для тумана",
+				func(cell: int) -> void:
+					game.fog[index] = cell
+					if after.is_valid():
+						after.call(index)))
+
+
+func _return_hand_top(owner: int, remaining: int) -> void:
+	if remaining <= 0:
+		return
+	_offer_hand_discard(owner, false, "Положите карту поверх колоды · осталось %d" % remaining,
+		func(key: String) -> void:
+			for index in game.hands[owner].size():
+				if game.hands[owner][index].key == key:
+					Piles.transfer(game.hands[owner], index, game.decks[owner])
+					_return_hand_top(owner, remaining - 1)
+					return)
+
+
+func _show_enemy_hand(owner: int, target: int) -> void:
+	_offer_choice(owner, ["confirm"], false, "Посмотрите руку противника", func(_answer: String) -> void: pass, game.hands[target])
+
+
+func _camera_view(owner: int, target: int) -> void:
+	_effect_steps.push_front(_draw.bind(owner, 1))
+	if not game.hands[target].is_empty():
+		_show_enemy_hand(owner, target)
+
+
+func _choose_enemy_discard(owner: int, target: int) -> void:
+	var cards: Array = game.hands[target]
+	_offer_choice(owner, cards.map(func(card: Dictionary) -> String: return card.key), false, "Выберите карту противника для сброса",
+		func(key: String) -> void: _discard_key(target, key, true), cards)
+
+
+## Сначала право на отмену просмотра получает владелец секрета; чужая рука ещё не выдаётся.
+func _look_hand(owner: int, target: int, shown: Callable, canceled: Callable = Callable()) -> void:
+	var secrets: Array = game.hands[target].filter(func(card: Dictionary) -> bool: return card.definition == "houdini:26")
+	if secrets.is_empty():
+		shown.call()
+		return
+	var revealed := [false]
+	_effect_steps.push_front(func() -> void:
+		if not revealed[0]:
+			shown.call()
+		elif canceled.is_valid():
+			canceled.call())
+	_offer_choice(target, ["reveal"], true, "Фокусник никогда не раскрывает секретов · покажите карту, чтобы отменить просмотр",
+		func(_answer: String) -> void:
+			revealed[0] = true
+			_notice_card(secrets[0]))
+	_effect_request["labels"] = {"reveal": "Показать секрет"}
+
+
+func _mist_scheme(fighter: Vector2i, effect: Dictionary) -> void:
+	var owner := fighter.x
+	var hero: Dictionary = game.fighters[owner][0]
+	match str(effect.get("mist_scheme", "")):
+		"hunt":
+			var targets: Array = _opposing_targets(owner, hero.space)
+			_heal_hero(owner, targets.size())
+			for target: Vector2i in targets:
+				_damage_redirectable(target, 1)
+		"baptism":
+			_heal_hero(owner, 2)
+			var helper := _inactive_sidekick(owner)
+			if helper >= 0:
+				_offer_revive(owner, helper, _free_in_zone(hero.space))
+		"seduction":
+			var targets: Array = []
+			for place in game.heroes.size():
+				for index in game.fighters[place].size():
+					if not _fighter_at(place, index).is_empty():
+						targets.append(Vector2i(place, index))
+			_offer_choice(owner, targets, false, "Ненасытное соблазнение · выберите бойца",
+				func(target: Vector2i) -> void:
+					_effect_steps.push_front(_seduction_damage.bind(owner, target))
+					_offer_move(target, owner, Vector2i(-1, -1), {"distance": 2}))
+		"aid":
+			_heal_hero(owner, 1)
+			_draw(owner, 1)
+			var helper := _fighter_at(owner, 1)
+			if not helper.is_empty():
+				_offer_move(Vector2i(owner, 1), owner, Vector2i(owner, 0), {"place": "adjacent"})
+		"disguise":
+			_offer_seat_choice(owner, _enemy_places(owner), "Мастер маскировки · выберите героя противника",
+				func(target: int) -> void:
+					_choose_hero_target(target, func(chosen: Vector2i) -> void:
+						bard.swap(Vector2i(owner, 0), chosen)
+						_damage_redirectable(chosen, 1)))
+		"suspicion":
+			_offer_seat_choice(owner, _enemy_places(owner), "Подтвердить подозрение · выберите противника",
+				func(target: int) -> void:
+					_offer_choice(owner, Array(range(0, 11)), false, "Назовите напечатанное значение карты",
+						func(value: int) -> void: _suspicion(owner, target, value)))
+		"eliminate":
+			_offer_seat_choice(owner, _enemy_places(owner), "Избавьтесь от невозможного · выберите противника",
+				func(target: int) -> void: _look_hand(owner, target, _choose_enemy_discard.bind(owner, target)))
+		"evil":
+			var targets: Array[Vector2i] = []
+			for place in game.heroes.size():
+				for index in game.fighters[place].size():
+					if game.board.adjacent(hero.space, game.fighters[place][index].space):
+						targets.append(Vector2i(place, index))
+			_damage_group(targets, 2)
+		"case":
+			if not game.decks[owner].is_empty():
+				var top: Dictionary = game.decks[owner].back()
+				_notice_card(top)
+				_effect_steps.push_front(_draw.bind(owner, 1))
+				_offer_damage_target(owner, hero.space, false, true, maxi(0, top.boost))
+		"research":
+			_heal_hero(owner, 2)
+			var cards: Array = game.decks[owner].slice(maxi(0, game.decks[owner].size() - 3))
+			_offer_choice(owner, cards.map(func(card: Dictionary) -> String: return card.key), false, "Выберите карту из трёх верхних",
+				func(key: String) -> void: _research_take(owner, cards, key), cards)
+		"steps":
+			var targets: Array = _enemy_places(owner)
+			_effect_steps.push_front(func() -> void:
+				if not targets.is_empty():
+					_move_fog(targets[0], 2))
+			_offer_damage_target(owner, hero.space, false, true, 3 if hero.space in game.fog else 1)
+		"vanish":
+			_heal_hero(owner, 1)
+			hero.space = -1
+			vanished = owner
+			actions_left = 0
+		"terror":
+			if hero.space in game.fog:
+				_offer_choice(owner, _opposing_targets(owner, -1), false, "Господство террора · выберите противника",
+					func(target: Vector2i) -> void: _damage_redirectable(target, 2))
+		"rolling":
+			_move_fog(owner, -1)
+		"wishes":
+			_offer_choice(owner, ["wish_draw", "wish_four", "wish_discard"], false, "Три желания · выберите эффект",
+				_choose_wish.bind(owner))
+		"stage":
+			_draw(owner, 3)
+			_return_hand_top(owner, 1)
+
+
+func _choose_wish(answer: String, owner: int) -> void:
+	match answer:
+		"wish_draw": _draw(owner, 5)
+		"wish_four": wish_owner = owner
+		"wish_discard":
+			for target: int in _enemy_places(owner):
+				_effect_steps.push_front(_discard_requested.bind(target, 2))
+
+
+func _enemy_places(owner: int) -> Array:
+	return Array(range(game.heroes.size())).filter(func(place: int) -> bool: return place % 2 != owner % 2)
+
+
+func _seduction_damage(owner: int, target: Vector2i) -> void:
+	if target.x % 2 == owner % 2:
+		return
+	var figure := _fighter_at(target.x, target.y)
+	if figure.is_empty():
+		return
+	var count := 0
+	for helper: Dictionary in game.fighters[owner].slice(1):
+		count += int(game.board.adjacent(helper.space, figure.space))
+	_damage_redirectable(target, count)
+
+
+func _suspicion(owner: int, target: int, value: int) -> void:
+	var cards: Array = game.hands[target].filter(func(card: Dictionary) -> bool: return card.kind != Catalog.Kind.SCHEME and card.value == value)
+	if cards.is_empty():
+		_look_hand(owner, target, _show_enemy_hand.bind(owner, target))
+		return
+	_offer_choice(target, cards.map(func(card: Dictionary) -> String: return card.key), false, "Подтвердить подозрение · сбросьте карту названного значения",
+		func(key: String) -> void:
+			var card: Dictionary = cards.filter(func(item: Dictionary) -> bool: return item.key == key)[0]
+			_discard_key(target, key, true)
+			_damage_hero(target, maxi(0, card.boost)), cards)
+	_effect_request["hand_discard"] = true
+
+
+func _research_take(owner: int, cards: Array, key: String) -> void:
+	var remaining: Array = []
+	for card: Dictionary in cards:
+		game.decks[owner].erase(card)
+		if card.key == key:
+			game.hands[owner].append(card)
+		else:
+			remaining.append(card)
+	_order_research_bottom(owner, remaining)
+
+
+func _order_research_bottom(owner: int, remaining: Array) -> void:
+	if remaining.is_empty():
+		return
+	_offer_choice(owner, remaining.map(func(card: Dictionary) -> String: return card.key), false, "Выберите следующую карту на дно колоды",
+		func(key: String) -> void:
+			var card: Dictionary = remaining.filter(func(item: Dictionary) -> bool: return item.key == key)[0]
+			game.decks[owner].push_front(card)
+			remaining.erase(card)
+			_order_research_bottom(owner, remaining), remaining)
+
+
+func _houdini_boost(owner: int, card: Dictionary) -> void:
+	if card.hero != "houdini":
+		return
+	match str(card.definition):
+		"houdini:05": _heal_hero(owner, 2)
+		"houdini:09":
+			if owner == seat:
+				actions_left += 1
+		"houdini:11", "houdini:27": _draw(owner, 1)
+		"houdini:20":
+			_offer_choice(owner, _all_live_fighters(), false, "Усиление · нанесите бойцу 2 урона",
+				func(target: Vector2i) -> void: _damage_redirectable(target, 2))
+		"houdini:07":
+			_offer_seat_choice(owner, _enemy_places(owner), "Усиление · выберите руку противника",
+				func(target: int) -> void: _look_hand(owner, target, _choose_enemy_discard.bind(owner, target)))
+
+
+func _all_live_fighters() -> Array:
+	var targets: Array = []
+	for place in game.fighters.size():
+		for index in game.fighters[place].size():
+			if not _fighter_at(place, index).is_empty():
+				targets.append(Vector2i(place, index))
+	return targets
+
+
+func _notice_card(card: Dictionary) -> void:
+	public_card_notice = {"id": int(public_card_notice.get("id", 0)) + 1, "card": card.duplicate(true)}

@@ -1,11 +1,8 @@
 extends Control
 ## BGSocial — отдельное окно «Общение» с той же сетью, чатом и мини-играми, что у основного приложения.
-## Окно прозрачное, без рамки, поверх всех окон и размером с рабочую область экрана: видна только панель
-## (или кнопка «Общение»), её можно таскать по всему экрану. Клики мимо панели проходят в окна под ней —
-## область приёма мыши каждые 0,1 с пересобирается из прямоугольников панели, её меню и всплывашек.
+## Прозрачное окно обрезается до панели и её всплывашек. Раскладка остаётся в координатах
+## рабочего стола, чтобы сворачивание и перенос сохраняли место кнопки.
 ## Иконка в трее: клик — открыть/свернуть панель, меню — показать, спрятать, выйти.
-## Прозрачность включается настройками проекта с feature `bgs_social` (project.godot), поэтому
-## работает только в экспортированном BGSocial.exe; запуск из проекта `-- --social` — обычное окно.
 
 const ICON_PATH := "res://hub/art/brand/social.png"
 const REGION_EVERY := 0.1
@@ -18,6 +15,8 @@ var _lobbies: Array = []
 var _tray: StatusIndicator
 var _region_wait := 0.0
 var _region: PackedVector2Array = []
+var _desktop := Rect2i()
+var _window_rect := Rect2i()
 var _overlay := false  # открыт оверлей Steam — он рисуется на всё окно
 var _overlay_wait := 0.0  # ждём, что оверлей правда открылся (иначе — своё окно приглашений)
 
@@ -28,7 +27,9 @@ func _ready() -> void:
 	var window := get_window()
 	window.title = "BGSocial"
 	window.content_scale_mode = Window.CONTENT_SCALE_MODE_DISABLED
+	window.content_scale_size = Vector2i.ZERO
 	window.min_size = Vector2i(1, 1)
+	window.wrap_controls = false
 	window.mode = Window.MODE_WINDOWED
 	window.borderless = true
 	window.always_on_top = true
@@ -36,13 +37,18 @@ func _ready() -> void:
 	get_viewport().transparent_bg = true
 	window.close_requested.connect(get_tree().quit)
 	var desktop := DisplayServer.screen_get_usable_rect(window.current_screen)
+	_desktop = desktop
 	window.position = desktop.position
-	window.size = desktop.size
+	window.size = Vector2i(160, 60)
+	_window_rect = Rect2i()
 	var icon := _icon()
 	if icon != null:
 		DisplayServer.set_icon(icon.get_image())
 	_panel = Net.chat.panel()
 	await get_tree().process_frame
+	var stage := _panel.get_parent() as Control
+	stage.set_anchors_and_offsets_preset(Control.PRESET_TOP_LEFT)
+	stage.size = Vector2(desktop.size)
 	_panel.set_mode(1)
 	if Net.steam_ok and Net.steam.has_signal("overlay_toggled"):
 		Net.steam.overlay_toggled.connect(func(active: bool, _user: bool = false, _app: int = 0):
@@ -107,31 +113,53 @@ func _collect_extras() -> void:
 			_extras.append(r)
 	for w: Window in get_viewport().get_embedded_subwindows():
 		if w.visible:
-			_extras.append(Rect2(Vector2(w.position), Vector2(w.size)).grow(MARGIN))
+			_extras.append(Rect2(Vector2(w.position + _window_rect.position), Vector2(w.size)).grow(MARGIN))
 
 
-## Мышь принимают только панель и её всплывашки — остальное окно «дырявое». В Windows эта же область
-## обрезает и отрисовку, поэтому пока панель тащат или тянут за уголок, окно целиком — иначе она мелькает.
+## У большого прозрачного окна Windows могут оставаться неверные данные перекрытия
+## для Chromium (в том числе Steam). Нативное окно занимает только видимый интерфейс.
 func _update_region() -> void:
 	var rects: Array[Rect2] = []
 	if _panel.get("_dragging") or _panel.get("_resizing") or _overlay or _invite_open():
-		rects.append(Rect2(Vector2.ZERO, Vector2(get_window().size)))
+		rects.append(Rect2(Vector2.ZERO, Vector2(_desktop.size - Vector2i.ONE)))
 	else:
 		if _panel.visible:
 			rects.append(_panel.get_global_rect().grow(MARGIN))
 		rects.append_array(_extras)
-	var poly := _region_polygon(rects)
-	if poly == _region:
+	if rects.is_empty():
+		get_window().hide()
+		_region = PackedVector2Array()
 		return
-	_region = poly
+	var bounds := rects[0]
+	for rect: Rect2 in rects:
+		bounds = bounds.merge(rect)
+	bounds = bounds.intersection(Rect2(Vector2.ZERO, Vector2(_desktop.size)))
+	if not bounds.has_area():
+		return
+	var origin := Vector2i(bounds.position.floor())
+	var end := Vector2i(bounds.end.ceil())
+	var next := Rect2i(origin, end - origin)
 	var window := get_window()
-	if poly.is_empty():
-		# Пустой список отключил бы «дырявость» целиком — вместо этого прячем окно (остаётся трей).
-		window.visible = false
-		return
+	if next != _window_rect:
+		_window_rect = next
+		if window.mode != Window.MODE_WINDOWED and window.mode != Window.MODE_MINIMIZED:
+			window.mode = Window.MODE_WINDOWED
+		window.size = next.size
+		window.position = _desktop.position + next.position
+	# CanvasLayer не меняет global_position дочерних Control: раскладка и жесты остаются
+	# в координатах рабочего стола, а окно получает только их видимую часть.
+	for node: Node in get_tree().root.get_children():
+		if node is CanvasLayer:
+			(node as CanvasLayer).offset = -Vector2(next.position)
+	var local_rects: Array[Rect2] = []
+	for rect: Rect2 in rects:
+		local_rects.append(Rect2(rect.position - Vector2(next.position), rect.size))
+	var poly := _region_polygon(local_rects)
+	if poly != _region:
+		_region = poly
+		DisplayServer.window_set_mouse_passthrough(poly, window.get_window_id())
 	if not window.visible:
-		window.visible = true
-	DisplayServer.window_set_mouse_passthrough(poly, window.get_window_id())
+		window.show()
 
 
 ## Своё окно приглашений Steam (SteamInvite) открыто — оно по центру экрана с затемнением.
@@ -229,6 +257,7 @@ func show_friends(anchor: Button) -> void:
 		_friends.add_item("У друзей пока нет открытых лобби" if Net.steam_ok else "Войдите в Steam")
 		_friends.set_item_disabled(0, true)
 	var at := Vector2i(anchor.global_position + Vector2(0, anchor.size.y))
+	at -= _window_rect.position
 	if not get_window().gui_embed_subwindows:
 		at += get_window().position
 	_friends.popup(Rect2i(at, Vector2i(250, 0)))

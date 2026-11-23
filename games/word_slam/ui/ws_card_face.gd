@@ -3,7 +3,7 @@ extends Control
 ## Карточка слова рассказчика: пастельная «таблетка» цвета категории (как в оригинале:
 ## существительные — бежевые, глаголы — фиолетовые, прилагательные — салатовые, связки — голубые).
 
-const SIZE := Vector2(140, 42)  # 08.11: шире — три карточки занимают ряд подставки целиком (было 108×40)
+const SIZE := Vector2(140, 42)
 const COLORS := {"noun": Color("efe0c4"), "verb": Color("dccff0"), "adj": Color("d6ecc4"), "other": Color("cfe6f2")}
 const EDGES := {"noun": Color("c9a96e"), "verb": Color("9b80c8"), "adj": Color("86b65f"), "other": Color("6aa6c8")}
 
@@ -14,10 +14,10 @@ var pointed := 0.0:  # 0…1 — рассказчик указывает на к
 		queue_redraw()
 
 
-func _init(card_id: String = "") -> void:
+func _init(card_id: String = "", face_size: Vector2 = SIZE) -> void:
 	id = card_id
-	size = SIZE
-	custom_minimum_size = SIZE
+	size = face_size
+	custom_minimum_size = face_size
 	mouse_filter = Control.MOUSE_FILTER_IGNORE
 
 
@@ -41,4 +41,7 @@ static func draw_face(ci: CanvasItem, r: Rect2, card_id: String, glow: float = 0
 	ci.draw_style_box(HCStyle.box(COLORS[cat], 10, border, 2 if glow <= 0.0 else 3, HCStyle.SHADOW, 6), r)
 	var word := WSRules.card_word(card_id)
 	var fs := 18 if word.length() <= 9 else (16 if word.length() <= 12 else 14)
-	ci.draw_string(HCStyle.font("bold"), r.position + Vector2(0, r.size.y * 0.5 + fs * 0.36), word, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, fs, HCStyle.INK_ART)
+	var font := HCStyle.font("bold")
+	while fs > 12 and font.get_string_size(word, HORIZONTAL_ALIGNMENT_LEFT, -1, fs).x > r.size.x - 12.0:
+		fs -= 1
+	ci.draw_string(font, r.position + Vector2(0, r.size.y * 0.5 + fs * 0.36), word, HORIZONTAL_ALIGNMENT_CENTER, r.size.x, fs, HCStyle.INK_ART)

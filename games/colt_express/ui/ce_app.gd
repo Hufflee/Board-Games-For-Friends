@@ -505,7 +505,7 @@ func _show_table() -> void:
 	top.info.add_theme_font_override("font", CEStyle.font("title"))
 	_add_button(top.actions, "Правила", _rules, "quiet")
 	_add_button(top.actions, "Настройки", _settings, "quiet")
-	_add_button(top.actions, "Тема", _toggle_theme, "quiet")
+	top.actions.add_child(ThemeToggle.make(_bar_button, 14))
 	var exit := _button("Выйти", 14, "quiet")
 	top.actions.add_child(exit)
 	LeaveGuard.wire(exit, "Выйти из партии?", "Вы вернётесь в хаб.", _to_hub)

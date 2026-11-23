@@ -302,10 +302,7 @@ func _table() -> void:
 	top.info.add_theme_font_override("font", IBSStyle.font("bold"))
 	_add(top.actions, "Правила", _rules, "quiet")
 	_add(top.actions, "Настройки", _settings, "quiet")
-	_add(top.actions, "Тема", func() -> void:
-		Prefs.theme_mode = "light" if Prefs.dark_theme() else "dark"
-		Prefs.save()
-		Prefs.changed.emit(), "quiet")
+	top.actions.add_child(ThemeToggle.make(_bar_button, IBSStyle.CAP))
 	var back := _button("Выйти", IBSStyle.CAP, "quiet")
 	top.actions.add_child(back)
 	LeaveGuard.wire(back, "Выйти из игры?", "Вы вернётесь в хаб.", _leave)

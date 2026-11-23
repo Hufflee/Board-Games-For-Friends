@@ -6,7 +6,7 @@ const FLAGS := {"fool_used": "Первое спасение Шута потра�
 	"po_charged": "По готовит тройную атаку", "zombuul_dead": "Зомбул выглядит мёртвым",
 	"snake_poison": "Отравлен после обмена с Заклинателем змей", "barber_dead": "Ожидается обмен Парикмахера",
 	"gossip_true": "Истинная сплетня", "woke": "Просыпался из-за своей способности", "goon_used": "Первый выбор Громилы уже сработал"}
-const PEOPLE := {"poison_source": "Отравитель", "monk_source": "Защита Монаха", "advocate_source": "Защита Адвоката дьявола",
+const PEOPLE := {"sailor_target": "Выбор Моряка", "poison_source": "Отравитель", "monk_source": "Защита Монаха", "advocate_source": "Защита Адвоката дьявола",
 	"exorcist_source": "Экзорцист", "innkeeper_source": "Защита Трактирщика", "pukka_source": "Отравлен Пуккой",
 	"pukka_target": "Предыдущая жертва Пукки", "master": "Хозяин Дворецкого", "grandchild": "Внук/внучка",
 	"moon_target": "Выбор Лунного дитя", "twin": "Противоположный близнец", "witch_source": "Проклятие Ведьмы",

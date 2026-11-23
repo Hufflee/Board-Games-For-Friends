@@ -27,6 +27,7 @@ var clue: Array = []
 var last_votes := {}
 var alien_turn := 0
 var human_turn := 0
+var teacher_turn := 0
 var winner := -1
 var opening := false
 var previous_asks: Array = []
@@ -66,33 +67,44 @@ static func max_aliens(count: int) -> int:
 
 
 func action(seat: int, kind: String, arg: Dictionary, host: bool) -> bool:
+	if seat >= 0 and seat < humans and kind == "note_erase" and phase != "end":
+		var feature := int(arg.get("feature", -1))
+		var symbol := int(arg.get("symbol", -1))
+		var row: Dictionary = notes.get(seat, {})
+		if not row.has(feature) or int(row[feature]) != symbol:
+			return false
+		row.erase(feature)
+		notes[seat] = row
+		return true
 	if seat >= 0 and seat < humans and kind == "note":
 		var feature := int(arg.get("feature",-1))
 		var symbol := int(arg.get("symbol",-1))
 		if feature < 0 or feature >= FEATURES.size() or symbol < -1 or symbol >= GLYPHS.size() or phase == "end":
 			return false
 		var row: Dictionary = notes.get(seat,{})
-		# один знак — один признак: новая запись знака заменяет прежнюю (владелец, 15.11); -1 — стереть
-		if symbol >= 0:
-			for other in row.keys():
-				if int(row[other]) == symbol:
-					row.erase(other)
-		row[feature] = symbol
+		# К одному знаку можно записать несколько предположений (владелец, 22.11).
+		if symbol < 0:
+			row.erase(feature)
+		else:
+			row[feature] = symbol
 		notes[seat] = row
 		return true
 	if int(arg.get("serial",-1)) != serial or phase == "end":
 		return false
-	if phase == "opening" and seat == turn and kind == "opening":
-		var feature := int(arg.get("feature",-1))
-		if feature < 0 or feature >= FEATURES.size() or feature in previous_asks:
-			return false
-		previous_asks.append(feature)
-		teaching.append({"slots":[],"symbol":language[feature],"feature":feature})
+	if phase == "opening" and seat == turn and kind in ["opening", "skip_learning"]:
+		if kind == "opening":
+			var feature := int(arg.get("feature",-1))
+			if feature < 0 or feature >= FEATURES.size() or feature in previous_asks:
+				return false
+			previous_asks.append(feature)
+			teaching.append({"slots":[],"symbol":language[feature],"feature":feature})
 		turn += 1
 		if turn >= humans:
 			opening = false
 			phase = "ask"
 			turn = 0
+	elif phase == "ask" and seat == turn and kind == "skip_learning":
+		_advance_learning()
 	elif phase == "ask" and seat == turn and kind == "ask":
 		var selected: Variant = arg.get("slots")
 		if not selected is Array or selected.is_empty() or selected.size() > 5:
@@ -104,21 +116,14 @@ func action(seat: int, kind: String, arg: Dictionary, host: bool) -> bool:
 			unique[slot] = true
 		examples = selected.duplicate()
 		phase = "teach"
-		turn = humans
-	elif phase == "teach" and seat >= humans and seat < players.size() and kind == "teach":
+		turn = humans + teacher_turn
+	elif phase == "teach" and seat == turn and kind == "teach":
 		var feature := int(arg.get("feature",-1))
 		if feature < 0 or feature >= FEATURES.size():
 			return false
 		teaching.append({"slots":examples.duplicate(),"symbol":language[feature]})
-		human_turn += 1
-		phase = "ask" if human_turn < humans else "clue"
-		turn = human_turn if phase == "ask" else humans+alien_turn
-		# первый раунд — только обучение: подсказки и голосование начинаются со второго (владелец, 14.11)
-		if phase == "clue" and turn_no == 1:
-			turn_no += 1
-			human_turn = 0
-			phase = "ask"
-			turn = 0
+		teacher_turn = (teacher_turn + 1) % aliens
+		_advance_learning()
 	elif phase == "clue" and seat == turn and kind == "clue":
 		var signs: Variant = arg.get("signs")
 		if not signs is Array or signs.is_empty() or signs.size() > FEATURES.size():
@@ -171,6 +176,18 @@ func action(seat: int, kind: String, arg: Dictionary, host: bool) -> bool:
 	serial += 1
 	return true
 
+
+## Пропуск завершает только этот ход; первый круг по-прежнему посвящён обучению.
+func _advance_learning() -> void:
+	human_turn += 1
+	phase = "ask" if human_turn < humans else "clue"
+	turn = human_turn if phase == "ask" else humans + alien_turn
+	if phase == "clue" and turn_no == 1:
+		turn_no += 1
+		human_turn = 0
+		phase = "ask"
+		turn = 0
+
 func _resolve() -> void:
 	last_votes = ballots.duplicate(true)
 	for seat in ballots:
@@ -204,7 +221,7 @@ func timeout() -> bool:
 		"ask":
 			return action(turn, "ask", {"serial": serial, "slots": [free.pick_random()]}, false)
 		"teach":
-			return action(humans, "teach", {"serial": serial, "feature": randi_range(0, FEATURES.size() - 1)}, false)
+			return action(turn, "teach", {"serial": serial, "feature": randi_range(0, FEATURES.size() - 1)}, false)
 		"clue":
 			return action(turn, "clue", {"serial": serial, "signs": [randi_range(1, FEATURES.size())]}, false)
 		"vote":
@@ -227,7 +244,7 @@ func get_view(seat: int) -> Dictionary:
 				knowledge += 1
 		points.append(knowledge)
 	return {"phase":phase,"serial":serial,"turn":turn,"seat":seat,"round":turn_no,"humans":humans,
-		"alien":alien,"active_alien":alien_turn,"names":players.map(func(x: Dictionary) -> String: return str(x.get("name","Игрок"))),
+		"alien":alien,"aliens":aliens,"active_alien":alien_turn,"names":players.map(func(x: Dictionary) -> String: return str(x.get("name","Игрок"))),
 		"goal":goal,"energy":energy,"low":low,"cards":cards.duplicate(),"owned":owned.duplicate(),
 		"targets":targets.duplicate(true) if alien else [],"forbidden":forbidden.duplicate() if alien else [],
 		"language":language.duplicate() if alien or phase == "end" else [],"notes":notes.get(seat,{}).duplicate(),

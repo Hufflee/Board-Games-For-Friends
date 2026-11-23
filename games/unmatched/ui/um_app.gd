@@ -8,13 +8,17 @@ const Match := preload("res://games/unmatched/logic/um_match.gd")
 const Style := preload("res://games/unmatched/ui/um_style.gd")
 const Art := preload("res://games/unmatched/ui/um_card_art.gd")
 const BoardView := preload("res://games/unmatched/ui/um_board_view.gd")
+const Complexity := preload("res://games/unmatched/logic/um_complexity.gd")
+const HeroCards := preload("res://games/unmatched/ui/um_hero_cards.gd")
+const HeroPicker := preload("res://games/unmatched/ui/um_hero_picker.gd")
 const HERO_MODES := ["free", "random", "pick2", "pick3"]
 
 var _screen: Control
 var _playing := false
 var _message := ""
 var _handoff_actor := -1
-var _hero_preview: TextureRect
+var _hero_preview: HeroCards
+var _hero_sort_by_complexity := false
 
 
 func _ready() -> void:
@@ -42,8 +46,13 @@ func _switch(screen: Control) -> void:
 
 
 func _show_lobby() -> void:
+	# Обновление лобби могло быть отложено до начала партии.
+	if Net.in_game and Net.party_game == GAME_ID:
+		return
 	_playing = false
 	var settings: Dictionary = Net.settings if Net.is_host() else Net.lobby_view.get("settings", {})
+	var members: Array = Net.lobby_view.get("members", [])
+	var total := Net.player_total() if Net.is_host() else members.size()
 	var arena := str(settings.get("um_arena", "marmoreal"))
 	if arena in Match.Maps.HIDDEN_ARENAS:
 		arena = "random"
@@ -73,7 +82,10 @@ func _show_lobby() -> void:
 	center.add_child(layout)
 	var panel := PanelContainer.new()
 	panel.size_flags_vertical = Control.SIZE_SHRINK_CENTER
-	panel.custom_minimum_size.y = minf(536.0, size.y - 48.0)
+	var panel_height := 536.0
+	if Net.in_session() and settings.get("um_hero_mode", "free") == "free":
+		panel_height = 672.0 if total > 2 else 560.0
+	panel.custom_minimum_size.y = minf(panel_height, size.y - 48.0)
 	panel.add_theme_stylebox_override("panel", Style.frame(colors.panel, colors.rim, 20))
 	layout.add_child(panel)
 	var col := K12UI.vbox(12)
@@ -89,7 +101,7 @@ func _show_lobby() -> void:
 	title.add_theme_font_size_override("font_size", 52)
 	col.add_child(title)
 	var subtitle := Label.new()
-	subtitle.text = "Битва легенд · Тома 1–3"
+	subtitle.text = "Битва легенд и дополнения"
 	subtitle.add_theme_font_size_override("font_size", 18)
 	col.add_child(subtitle)
 	if not Net.in_session():
@@ -101,8 +113,6 @@ func _show_lobby() -> void:
 			func(t: String, z: int): return K12UI.label(t, z, K12UI.MUTED, HORIZONTAL_ALIGNMENT_CENTER)))
 	else:
 		_build_lobby(col)
-		var members: Array = Net.lobby_view.get("members", [])
-		var total := Net.player_total() if Net.is_host() else members.size()
 		layout.add_child(_lobby_preview(arena, settings, total, colors))
 	if not _message.is_empty():
 		var message := K12UI.label(_message, K12UI.BODY)
@@ -240,40 +250,35 @@ func _lobby_preview(arena: String, settings: Dictionary, total: int, colors: Dic
 	heroes.add_theme_constant_override("separation", 8)
 	preview.add_child(heroes)
 	for hero: String in selected:
-		var face := TextureRect.new()
-		face.texture = Art.reference_face(hero)
-		face.tooltip_text = Roster.HEROES.get(hero, {}).get("name", "")
-		face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		face.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		face.size_flags_horizontal = SIZE_EXPAND_FILL
-		face.custom_minimum_size.y = 232
-		face.focus_mode = Control.FOCUS_ALL
-		Art.round_corners(face)
-		heroes.add_child(face)
-		face.mouse_entered.connect(_show_hero_preview.bind(face))
-		face.mouse_exited.connect(_hide_hero_preview)
-		face.focus_entered.connect(_show_hero_preview.bind(face))
-		face.focus_exited.connect(_hide_hero_preview)
+		var cards := HeroCards.new()
+		cards.show_hero(hero)
+		cards.tooltip_text = Roster.HEROES.get(hero, {}).get("name", "")
+		cards.size_flags_horizontal = SIZE_EXPAND_FILL
+		cards.custom_minimum_size.y = 232
+		cards.mouse_filter = MOUSE_FILTER_STOP
+		cards.focus_mode = FOCUS_ALL
+		heroes.add_child(cards)
+		cards.mouse_entered.connect(_show_hero_preview.bind(cards))
+		cards.mouse_exited.connect(_hide_hero_preview)
+		cards.focus_entered.connect(_show_hero_preview.bind(cards))
+		cards.focus_exited.connect(_hide_hero_preview)
 	return preview
 
 
-func _show_hero_preview(source: TextureRect) -> void:
+func _show_hero_preview(source: HeroCards) -> void:
 	if not is_instance_valid(_hero_preview):
-		_hero_preview = TextureRect.new()
+		_hero_preview = HeroCards.new()
 		_hero_preview.name = "HeroCardZoom"
 		_hero_preview.z_index = 100
-		_hero_preview.mouse_filter = MOUSE_FILTER_IGNORE
-		_hero_preview.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		_hero_preview.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		Art.round_corners(_hero_preview)
 		_screen.add_child(_hero_preview)
-	_hero_preview.texture = source.texture
-	var height := minf(size.y - 48.0, 560.0)
-	var width := height * source.texture.get_width() / source.texture.get_height()
+	_hero_preview.show_hero(source.hero)
+	var height := minf(560.0, minf(size.y - 48.0, (size.x - 48.0) / HeroCards.PAIR_RATIO))
+	var width := height * HeroCards.PAIR_RATIO
 	_hero_preview.size = Vector2(width, height)
-	var x := source.global_position.x - width - 16.0
+	var source_left := source.global_position.x - _screen.global_position.x
+	var x := source_left - width - 16.0
 	if x < 24.0:
-		x = source.get_global_rect().end.x + 16.0
+		x = source_left + source.size.x + 16.0
 	_hero_preview.position = Vector2(clampf(x, 24.0, size.x - width - 24.0), (size.y - height) * 0.5)
 	_hero_preview.show()
 
@@ -288,19 +293,39 @@ func _build_hero_selectors(col: VBoxContainer, members: Array, total: int, setti
 	var selected: Array = Array(settings.get("um_heroes", []))
 	if selected.size() != seats:
 		selected = Match.DEFAULT_HEROES.slice(0, seats)
+	var selectors := K12UI.vbox(6)
+	col.add_child(selectors)
 	for place in seats:
-		var choose := OptionButton.new()
+		var choose := HeroPicker.new()
+		choose.name = "HeroSelect%d" % place
+		choose.fit_to_longest_item = false
+		choose.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		var difficulty := K12UI.label("", 14, get_theme_color("font_color", "Label"))
+		difficulty.name = "HeroDifficulty%d" % place
+		var picker := K12UI.vbox(2)
+		picker.add_child(choose)
+		picker.add_child(difficulty)
 		var roster: Array = Roster.HEROES.keys()
-		for hero: String in Roster.HEROES:
-			choose.add_item(Roster.HEROES[hero].name)
-		choose.select(roster.find(selected[place]))
+		var hero: String = selected[place] if Roster.HEROES.has(selected[place]) else roster[0]
+		choose.configure(hero, _hero_sort_by_complexity)
+		choose.sort_changed.connect(func(enabled: bool) -> void: _hero_sort_by_complexity = enabled)
+		_show_selected_hero(choose, difficulty, hero)
 		var owner: int = Match.controllers_for(total, int(settings.get("um_double_player", 1)))[place]
 		var local_owner: bool = Net.mode == "offline" or (owner < members.size() and members[owner].get("peer", 0) == multiplayer.get_unique_id())
 		choose.disabled = not local_owner
-		choose.item_selected.connect(func(index: int): Net.set_unmatched_hero(place, roster[index]))
+		choose.hero_selected.connect(func(key: String) -> void:
+			_show_selected_hero(choose, difficulty, key)
+			Net.set_unmatched_hero(place, key))
 		var name := str(members[owner].name) if owner < members.size() else "Игрок %d" % (owner + 1)
-		col.add_child(_lobby_row("%s · %s" % ["А" if place % 2 == 0 else "Б", name], choose))
+		selectors.add_child(_lobby_row("%s · %s" % ["А" if place % 2 == 0 else "Б", name], picker))
+		picker.custom_minimum_size.x = 184
 	return Match.has_duplicate_heroes(selected)
+
+
+func _show_selected_hero(choose: OptionButton, difficulty: Label, hero: String) -> void:
+	choose.text = Roster.HEROES[hero].name
+	difficulty.text = Complexity.label(hero)
+	choose.tooltip_text = "%s · %s" % [choose.text, difficulty.text]
 
 
 func _lobby_row(title: String, control: Control) -> HBoxContainer:

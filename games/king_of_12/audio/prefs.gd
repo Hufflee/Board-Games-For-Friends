@@ -107,6 +107,12 @@ func _apply_audio() -> void:
 ## или вертикальной синхронизации в полноэкранном режиме у некоторых видеокарт сворачивает игру.
 func apply() -> void:
 	_apply_audio()
+	# Social сам управляет прозрачным окном: полноэкранный режим игры перекрывал Steam.
+	var social := OS.has_feature("bgs_social") or "--social" in OS.get_cmdline_user_args() or get_tree().root.has_meta(&"bgs_social")
+	if social:
+		Engine.max_fps = 60
+		changed.emit()
+		return
 	if not DisplayServer.get_name().begins_with("headless"):
 		_apply_window()
 	ui_scale = clampf(ui_scale, UI_SCALE_MIN, UI_SCALE_MAX)

@@ -78,7 +78,6 @@ func restore_animation(state: Dictionary) -> void:
 func _ready() -> void:
 	mouse_filter = Control.MOUSE_FILTER_STOP
 	mouse_default_cursor_shape = Control.CURSOR_POINTING_HAND
-	tooltip_text = "Пощекотать пушку"
 	_picture = TextureRect.new()
 	_picture.texture = preload("res://games/stillion/art/cannon_directions_painted.png")
 	_picture.expand_mode = TextureRect.EXPAND_IGNORE_SIZE

@@ -73,7 +73,7 @@ func _ready() -> void:
 	theme = Style.theme()
 	Art.backdrop(self)
 	top = TopBar.make(self, "Кровь на часовой башне", Style.button, null, Style.INK, Style.font(true))
-	for item: Array in [["Справочник", app.show_handbook], ["Настройки", app.show_settings], ["Журнал", _toggle_log]]:
+	for item: Array in [["Настройки", app.show_settings], ["Журнал", _toggle_log]]:
 		var button := Style.button(item[0], Style.SMALL)
 		button.pressed.connect(item[1])
 		top.actions.add_child(button)
@@ -174,6 +174,11 @@ func _ready() -> void:
 	side.add_theme_constant_override("separation", 8)
 	side.size_flags_horizontal = SIZE_EXPAND_FILL
 	side_panel.add_child(side)
+	var handbook := Style.button("Справочник ролей", Style.BODY)
+	handbook.name = "HandbookShortcut"
+	handbook.add_theme_stylebox_override("normal", Style.box(Style.ACCENT))
+	handbook.pressed.connect(app.show_handbook)
+	side.add_child(handbook)
 	role_toggle = Style.button("", Style.SMALL)
 	role_toggle.name = "RoleToggle"
 	role_toggle.alignment = HORIZONTAL_ALIGNMENT_LEFT
@@ -479,7 +484,7 @@ func update_view(next: Dictionary) -> void:
 		_filter_choices()
 		request_confirm.disabled = true
 	request_panel.visible = not token.is_empty()
-	messages.visible = token.is_empty()
+	messages.visible = true
 	messages.size_flags_vertical = SIZE_EXPAND_FILL if token.is_empty() else SIZE_FILL
 	request_confirm.disabled = selected_option < 0 or _choice_sent
 	_paint_picks()
@@ -506,7 +511,7 @@ func update_view(next: Dictionary) -> void:
 	actions.hand.visible = not is_story and can_raise and phase == "voting" and not view.get("counted", []).has(me)
 	if me >= 0: actions.hand.text = "Опустить руку" if bool(people[me].hand) else "Поднять руку"
 	var my_turn := me >= 0 and phase == "voting" and voter == me
-	actions.cast_vote.visible = not is_story and my_turn
+	actions.cast_vote.visible = not is_story and my_turn and can_raise
 	actions.cast_vote.disabled = blocked or not can_raise
 	actions.abstain.visible = actions.cast_vote.visible
 	var speech: Dictionary = view.get("day_timer", {})

@@ -147,7 +147,7 @@ func _votes() -> void:
 	check(act(game, 1, "nominate", {"target": 2}), "Живой номинирует")
 	check(not act(game, 3, "nominate", {"target": 4}), "Вторая номинация ждёт завершения первой")
 	check(act(game, 0, "start_vote"), "После защиты начато голосование")
-	check(game.vote_order.back() == 2 and not game.vote_order.has(0), "Номинант голосует последним, рассказчик не голосует")
+	check(game.vote_order.front() == 1 and not game.vote_order.has(0), "В первый день голосование начинается с первого места")
 	for seat: int in [1, 2, 3]:
 		check(act(game, seat, "hand", {"raised": true}), "Можно голосовать за себя и другого")
 	for step in 5:
@@ -418,7 +418,7 @@ func _butler_votes() -> void:
 	for scenario: String in ["рука опущена", "рука поднята", "голос засчитан", "голос пропущен", "мастер без жетона", "способность отключена"]:
 		var game := base()
 		var butler := 3
-		var master := 4
+		var master := 2 if scenario in ["голос засчитан", "голос пропущен"] else 4
 		game.roles[butler] = "butler"
 		game.status[butler]["master"] = master
 		game.dawn()

@@ -23,7 +23,7 @@ func _initialize() -> void:
 	for round_no in 2:
 		for seat in 2:
 			_check(contact.action(seat,"ask",{"serial":contact.serial,"slots":[0]},false), 23)
-			_check(contact.action(2,"teach",{"serial":contact.serial,"feature":0},false), 24)
+			_check(contact.action(contact.turn,"teach",{"serial":contact.serial,"feature":0},false), 24)
 		if round_no == 0:
 			_check(contact.phase == "ask" and contact.turn_no == 2, 26)
 	_check(contact.action(2,"clue",{"serial":contact.serial,"signs":[1,-2]},false), 25)

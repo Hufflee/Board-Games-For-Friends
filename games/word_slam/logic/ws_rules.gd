@@ -8,8 +8,9 @@ extends RefCounted
 ##       → round_result → … → game_over
 ## Режимы: teams — две команды и два рассказчика; solo — один рассказчик, остальные каждый за себя.
 
-const MAX_ON_HOLDER := 12
-const WORDS_PER_ROW := 3
+const WORDS_PER_ROW := 4
+const HOLDER_ROWS := 4
+const MAX_ON_HOLDER := WORDS_PER_ROW * HOLDER_ROWS
 const LOG_SIZE := 40
 const LOOK_TIME := 15.0  # столько рассказчики смотрят слово и подсказки, потом раунд начинается сам (Net)
 
@@ -17,6 +18,7 @@ var players: Array = []  # [{name, team}]
 var mode := "teams"
 var names_on := true
 var catalog_mode := "basic"
+var answer_dictionary := "shared"
 var catalog_order := {}  # категория → неизменные id, в порядке показа
 var scores: Array = []  # teams: [синие, оранжевые]; solo: по игрокам
 var won_cards: Array = []  # [{word, by}] — для итогов
@@ -44,11 +46,12 @@ var phase := "setup"
 var rng := RandomNumberGenerator.new()
 
 
-func new_game(player_list: Array, solo: bool, card_count: int, intro: bool, with_names: bool, seed_value: int = 0, catalog: String = "basic") -> void:
+func new_game(player_list: Array, solo: bool, card_count: int, intro: bool, with_names: bool, seed_value: int = 0, catalog: String = "basic", answers: String = "shared") -> void:
 	players = player_list.duplicate(true)
 	mode = "solo" if solo else "teams"
 	names_on = false
 	catalog_mode = "simplified" if catalog == "simplified" else "basic"
+	answer_dictionary = "simple" if answers == "simple" else "shared"
 	catalog_order = {}
 	for category in WSData.CATEGORIES:
 		catalog_order[category] = []
@@ -66,7 +69,7 @@ func new_game(player_list: Array, solo: bool, card_count: int, intro: bool, with
 		scores.fill(0)
 	else:
 		scores = [0, 0]
-	deck = WSData.build_deck(rng, card_count, intro)
+	deck = WSData.build_deck(rng, card_count, intro, answer_dictionary)
 	total_cards = card_count
 	won_cards = []
 	_turn = [0, 0]
@@ -108,7 +111,7 @@ func _start_round() -> void:
 		for t in 2:
 			storytellers.append(_pick_storyteller(t, team_members(t)))
 	if deck.is_empty():
-		deck = WSData.build_deck(rng, 1, false)  # дополнительная карта при ничьей
+		deck = WSData.build_deck(rng, 1, false, answer_dictionary)  # дополнительная карта при ничьей
 	card = deck.pop_back()
 	_roll()
 	_build_catalog()
@@ -170,6 +173,12 @@ func _fix_catalog() -> void:
 	for category: String in WSData.CATEGORIES:
 		var pool := WSData.story_pool(category)
 		var ids: Array = catalog_order.get(category, [])
+		if catalog_mode == "simplified":
+			# В фиксированном наборе скрываются только родственные текущему ответу слова.
+			# Исключения прошлых ответов не должны накапливаться после нескольких замен.
+			ids = []
+			for index in WSData.STORY[category].size():
+				ids.append("%s:%d" % [category, index])
 		var spare: Array = []
 		if catalog_mode == "basic":
 			for index in pool.size():
@@ -193,7 +202,7 @@ func reroll(seat: int) -> bool:
 
 
 func _new_word() -> void:
-	card["words"] = preload("res://hub/shared_words.gd").sample(rng)
+	card = _draw_other_answer()
 	_roll()
 	_fix_catalog()
 	for i in ready.size():
@@ -221,11 +230,14 @@ func set_ready(seat: int) -> bool:
 		if catalog_mode == "basic":
 			for category in WSData.CATEGORIES:
 				var ids: Array = catalog_order[category]
+				var previous_order := ids.duplicate()
 				for j in range(ids.size() - 1, 0, -1):
 					var other := rng.randi_range(0, j)
 					var previous: String = ids[j]
 					ids[j] = ids[other]
 					ids[other] = previous
+				if ids.size() > 1 and ids == previous_order:
+					ids.push_back(ids.pop_front())
 		phase = "play"
 		flipped = true  # время на ход идёт сразу (переворачивать часы не нужно)
 	return true
@@ -388,6 +400,7 @@ func get_view(seat: int, show_all: bool = false) -> Dictionary:
 		"players": players.duplicate(true),
 		"mode": mode,
 		"catalog_mode": catalog_mode,
+		"answer_dictionary": answer_dictionary,
 		"catalog_order": catalog_order.duplicate(true),
 		"scores": scores.duplicate(),
 		"storytellers": storytellers.duplicate(),
@@ -484,7 +497,7 @@ func host_new_theme() -> bool:
 		return false
 	var old := card
 	if deck.is_empty():
-		card = WSData.build_deck(rng, 1, false)[0]
+		card = _draw_other_answer()
 	else:
 		card = deck.pop_back()
 		deck.insert(0, old)
@@ -501,3 +514,9 @@ func host_new_theme() -> bool:
 	guesses = []
 	phase = "word"
 	return true
+
+
+## Даже когда колода закончилась, замена даёт другое слово из выбранного словаря.
+func _draw_other_answer() -> Dictionary:
+	var alternatives := WSData.build_deck(rng, 2, false, answer_dictionary)
+	return alternatives[1] if alternatives[0]["words"][0] == word else alternatives[0]

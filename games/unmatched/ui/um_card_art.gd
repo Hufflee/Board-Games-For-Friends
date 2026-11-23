@@ -31,6 +31,18 @@ const IMMEDIATE_BOUNDS := {
 	"blackbeard:29": Vector2(0.67, 0.78), "chupacabra:17": Vector2(0.73, 0.84),
 	"loki:08": Vector2(0.73, 0.91), "loki:23": Vector2(0.73, 0.91),
 	"pandora:15": Vector2(0.73, 0.84), "pandora:25": Vector2(0.73, 0.80),
+	"dracula:01": Vector2(0.735, 0.830),
+	"dracula:21": Vector2(0.731, 0.926),
+	"sherlock:01": Vector2(0.739, 0.832),
+	"invisible_man:20": Vector2(0.735, 0.938),
+	"invisible_man:29": Vector2(0.739, 0.810),
+	"jekyll_hyde:01": Vector2(0.735, 0.828),
+	"genie:25": Vector2(0.735, 0.818),
+	"genie:28": Vector2(0.735, 0.820),
+	"houdini:03": Vector2(0.721, 0.800),
+	"houdini:11": Vector2(0.745, 0.952),
+	"houdini:13": Vector2(0.735, 0.900),
+	"houdini:20": Vector2(0.762, 0.846),
 }
 # Верх и низ печатного блока «Во время боя» в долях высоты лицевой стороны.
 const DURING_BOUNDS := {
@@ -74,6 +86,20 @@ const DURING_BOUNDS := {
 	"yennenga:19": Vector2(0.743, 0.934),
 	"arthur:20": Vector2(0.738, 0.825),
 	"sun_wukong:22": Vector2(0.734, 0.816),
+	"dracula:09": Vector2(0.735, 0.950),
+	"dracula:19": Vector2(0.739, 0.910),
+	"dracula:25": Vector2(0.737, 0.908),
+	"dracula:29": Vector2(0.735, 0.958),
+	"sherlock:16": Vector2(0.733, 0.910),
+	"sherlock:22": Vector2(0.788, 0.928),
+	"invisible_man:24": Vector2(0.739, 0.910),
+	"jekyll_hyde:07": Vector2(0.737, 0.952),
+	"jekyll_hyde:14": Vector2(0.741, 0.920),
+	"genie:05": Vector2(0.792, 0.914),
+	"houdini:01": Vector2(0.703, 0.784),
+	"houdini:03": Vector2(0.816, 0.898),
+	"houdini:17": Vector2(0.671, 0.752),
+	"houdini:27": Vector2(0.760, 0.838),
 }
 static var _rounding: ShaderMaterial
 
@@ -87,6 +113,10 @@ static func arena_theme(arena: String) -> String:
 
 
 static func face(card: Dictionary) -> Texture2D:
+	if card.get("cauldron_rules", false):
+		return texture("res://games/unmatched/art/references/cauldron.webp")
+	if card.has("enchantment"):
+		return texture("res://games/unmatched/art/references/enchantment_%d.webp" % (int(card.enchantment) + 1))
 	if card.has("battlefield_item"):
 		return texture("res://games/unmatched/art/items/%d.webp" % card.battlefield_item)
 	var hero := str(card.get("hero", ""))

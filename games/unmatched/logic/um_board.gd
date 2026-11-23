@@ -16,6 +16,7 @@ var item_slots: Array = []
 var dangerous_paths: Array[Vector2i] = []
 var conveyor := PackedInt32Array()
 var conveyor_exit := PackedInt32Array()
+var fog_links: Array = []
 
 
 func _init(spaces: Array[Dictionary], links: Array[PackedInt32Array], starts: PackedInt32Array,
@@ -147,7 +148,12 @@ func reachable(from: int, distance: int, team: int, occupied: Dictionary, throug
 		return through_enemies or not occupied.has(space) or int(occupied[space]) == team
 	var can_stop := func(space: int) -> bool:
 		return not occupied.has(space) or (stop_on_allies and int(occupied[space]) == team)
-	return Paths.reachable(_without_closed_doors(_movement_links), from, distance, can_cross, can_stop, previous)
+	var links: Array[PackedInt32Array] = _without_closed_doors(_movement_links).duplicate(true)
+	for cell: int in fog_links:
+		for other: int in fog_links:
+			if cell != other and other not in links[cell]:
+				links[cell].append(other)
+	return Paths.reachable(links, from, distance, can_cross, can_stop, previous)
 
 
 func route(from: int, to: int, distance: int, team: int, occupied: Dictionary, through_enemies: bool = false, stop_on_allies: bool = false) -> PackedInt32Array:
@@ -161,4 +167,11 @@ func route(from: int, to: int, distance: int, team: int, occupied: Dictionary, t
 
 
 func movement_neighbors(from: int) -> PackedInt32Array:
-	return _without_closed_doors(_movement_links)[from].duplicate() if valid_space(from) else PackedInt32Array()
+	if not valid_space(from):
+		return PackedInt32Array()
+	var links: PackedInt32Array = _without_closed_doors(_movement_links)[from].duplicate()
+	if from in fog_links:
+		for other: int in fog_links:
+			if other != from and other not in links:
+				links.append(other)
+	return links

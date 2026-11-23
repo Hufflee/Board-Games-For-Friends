@@ -13,7 +13,7 @@ const LETTERS := "АБВГД"
 const PHASES := {"opening": "Нулевой ход", "ask": "Учимся языку", "teach": "Ответ инопланетян", "clue": "Подсказка инопланетянина", "vote": "Тайное голосование", "result": "Результат", "end": "Итоги"}
 const RULES_TEXT := """[b]Кто есть кто.[/b] Земляне учат язык инопланетян. Инопланетяне видят свои задания — нужные предметы светятся на их экране — и знают, каким знаком обозначается каждый признак.
 
-[b]Учимся языку.[/b] Землянин в свой ход отмечает от одного до пяти предметов-примеров. Инопланетяне отвечают одним знаком — признаком, общим для этих примеров. Записывайте догадки в словарь знаков: «△ — наверное, «Большое»».
+[b]Учимся языку.[/b] Землянин в свой ход отмечает от одного до пяти предметов-примеров. Назначенный инопланетянин отвечает одним знаком — признаком, общим для этих примеров. Затем землянин и отвечающий инопланетянин меняются по очереди. Можно пропустить свой ход обучения. Записывайте несколько догадок к одному знаку в словарь: «△ — наверное, «Большое» или «Тяжёлое»».
 
 [b]Подсказка.[/b] Инопланетянин складывает из знаков подсказку к одному из своих предметов. Черта над знаком — отрицание: «не …».
 
@@ -37,6 +37,7 @@ var preview: Control
 var error: Label
 ## Цвета задания по инопланетянам (обычная партия — один, сложная — несколько): бирюза, фиалка, янтарь.
 var faction_colors: Array[Color] = []
+var _local_ui := preload("res://hub/local_ui_state.gd").new()
 
 
 class Backdrop:
@@ -397,10 +398,7 @@ func _table() -> void:
 	top.info.add_theme_font_override("font", FCStyle.font("bold"))
 	_add(top.actions, "Правила", _rules, "quiet")
 	_add(top.actions, "Настройки", _settings, "quiet")
-	_add(top.actions, "Тема", func() -> void:
-		Prefs.theme_mode = "light" if Prefs.dark_theme() else "dark"
-		Prefs.save()
-		Prefs.changed.emit(), "quiet")
+	top.actions.add_child(ThemeToggle.make(_bar_button, FCStyle.CAP))
 	var back := _button("Выйти", FCStyle.CAP, "quiet")
 	top.actions.add_child(back)
 	LeaveGuard.wire(back, "Выйти из игры?", "Вы вернётесь в хаб.", _leave)
@@ -593,9 +591,15 @@ func _set_banner(chip: String, text: String, kind: String) -> void:
 func _draw_state(view: Dictionary) -> void:
 	if not is_instance_valid(board_area) or not board_area.is_inside_tree() or not view.has("cards"):
 		return
-	if state.get("serial", -1) != view.serial or state.get("seat", -2) != view.seat:
-		selected.clear()
-		signs.clear()
+	# Чужой голос/заметка меняет serial, но не задание текущего игрока.
+	var context := [view.get("game_id", ""), view.seat, view.round, view.phase,
+		view.turn if view.phase in ["opening", "ask", "teach", "clue"] else -1,
+		view.seat in view.answered]
+	_local_ui.update(self, context, {"selected": [], "signs": []},
+		func() -> void: _render_state(view))
+
+
+func _render_state(view: Dictionary) -> void:
 	_close_peek()
 	state = view
 	top.info.text = "Раунд %d · %s" % [view.round, PHASES.get(view.phase, "")]
@@ -621,10 +625,10 @@ func _update_banner(mine: bool) -> void:
 		"ask":
 			_set_banner("Ваш ход" if mine else "Ходит", "Отметьте от 1 до 5 предметов-примеров и подтвердите" if mine else who + " выбирает предметы-примеры", "mine" if mine else "idle")
 		"teach":
-			if state.alien:
-				_set_banner("Вы — инопланетянин", "Покажите знак признака, общего для предметов-примеров", "alien")
+			if mine:
+				_set_banner("Ваш ход", "Покажите знак признака, общего для предметов-примеров", "alien")
 			else:
-				_set_banner("Ждём", "Инопланетяне отвечают знаком на ваши примеры", "idle")
+				_set_banner("Ждём", who + " выбирает подходящий знак", "idle")
 		"clue":
 			if mine:
 				_set_banner("Вы — инопланетянин", "Сложите из знаков подсказку к светящемуся предмету", "alien")
@@ -704,16 +708,39 @@ func _update_ship() -> void:
 		col.add_child(hint)
 
 
+## Номер и цвет связывают задания с конкретным игроком; цвет не единственный ориентир.
+func _add_alien_legend() -> void:
+	for faction in int(state.get("aliens", state.names.size() - state.humans)):
+		var row := HBoxContainer.new()
+		row.add_theme_constant_override("separation", 8)
+		var swatch := ColorRect.new()
+		swatch.color = faction_colors[faction]
+		swatch.custom_minimum_size = Vector2(16, 16)
+		swatch.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+		row.add_child(swatch)
+		var seat: int = state.humans + faction
+		var text := "%d · %s%s" % [faction + 1, _name(seat), " · вы" if seat == state.seat else ""]
+		var label := FCStyle.label(text, FCStyle.CAP, "bold")
+		label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		label.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+		row.add_child(label)
+		side.add_child(row)
+
+
 func _update_side(mine: bool) -> void:
 	_clear(side)
-	if state.alien and (state.phase == "teach" or (state.phase == "clue" and mine)):
+	_add_alien_legend()
+	if state.alien and mine and state.phase in ["teach", "clue"]:
 		_sign_keyboard()
 		return
 	# словарь знаков: каждый показанный знак → примеры и ваша догадка
 	side.add_child(FCStyle.heading("Словарь знаков", FCStyle.BODY))
 	var notes_by_glyph := {}
 	for feature in state.notes:
-		notes_by_glyph[int(state.notes[feature])] = Rules.FEATURES[int(feature)]
+		var symbol: int = int(state.notes[feature])
+		var guesses: Array = notes_by_glyph.get(symbol, [])
+		guesses.append(Rules.FEATURES[int(feature)])
+		notes_by_glyph[symbol] = guesses
 	var shown := {}  # знак → список примеров без повторов
 	for entry: Dictionary in state.teaching:
 		var symbol: int = entry.symbol
@@ -737,7 +764,10 @@ func _update_side(mine: bool) -> void:
 		texts.add_theme_constant_override("separation", -3)
 		texts.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 		row.add_child(texts)
-		texts.add_child(FCStyle.label((notes_by_glyph[symbol] + "?") if notes_by_glyph.has(symbol) else "?", FCStyle.BODY, "bold"))
+		var guess_text := ", ".join(notes_by_glyph[symbol]) + "?" if notes_by_glyph.has(symbol) else "?"
+		var guess_label := FCStyle.label(guess_text, FCStyle.BODY, "bold")
+		guess_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		texts.add_child(guess_label)
 		var ex := FCStyle.label(", ".join(shown[symbol]), FCStyle.CAP, "regular", "muted")
 		ex.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 		texts.add_child(ex)
@@ -839,12 +869,16 @@ func _note_picker() -> void:
 	row.add_theme_constant_override("separation", 6)
 	side.add_child(row)
 	var symbol := OptionButton.new()
+	symbol.name = "NoteSymbol"
+	symbol.set_meta("local_ui_key", "fc.note_symbol")
 	for value in Rules.GLYPHS:
 		symbol.add_item(value)
 	symbol.custom_minimum_size.x = 64
 	row.add_child(symbol)
 	row.add_child(FCStyle.label("=", FCStyle.BODY, "bold", "muted"))
 	var feature := OptionButton.new()
+	feature.name = "NoteFeature"
+	feature.set_meta("local_ui_key", "fc.note_feature")
 	for i in Rules.FEATURES.size():
 		feature.add_item(Rules.FEATURES[i])
 	feature.size_flags_horizontal = Control.SIZE_EXPAND_FILL
@@ -859,19 +893,17 @@ func _note_picker() -> void:
 	if glyph >= 0:
 		symbol.select(glyph)
 		for known in state.notes:
-			if int(state.notes[known]) == glyph:
+			if glyph == int(state.notes[known]):
 				feature.select(int(known))
 	var buttons := HBoxContainer.new()
 	buttons.add_theme_constant_override("separation", 6)
 	side.add_child(buttons)
 	var write := _add(buttons, "Записать", func() -> void: _send("note", {"feature": feature.selected, "symbol": symbol.selected}))
 	write.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	write.tooltip_text = "Если этот знак уже записан с другим признаком — запись заменится"
+	write.tooltip_text = "Добавить ещё одну догадку к знаку. Прежние догадки сохранятся."
 	# стереть догадку к выбранному знаку (признак, под которым он записан)
 	_add(buttons, "Стереть", func() -> void:
-		for known in state.notes:
-			if int(state.notes[known]) == symbol.selected:
-				_send("note", {"feature": int(known), "symbol": -1}), "quiet")
+		_send("note_erase", {"symbol": symbol.selected, "feature": feature.selected}), "quiet")
 
 
 ## Одна главная кнопка фазы под правой колонкой.
@@ -888,11 +920,15 @@ func _update_action(mine: bool) -> void:
 		var caption := ("Показать примеры" if phase == "ask" else "Подтвердить голос") + (" · " + ", ".join(names) if not names.is_empty() else "")
 		var b := _main_button(caption, func() -> void: _send("ask" if phase == "ask" else "vote", {"slots": selected.duplicate()}))
 		b.disabled = selected.is_empty()
+		if phase == "ask":
+			_add(action_slot, "Пропустить изучение языка", func() -> void: _send("skip_learning"), "quiet")
 	elif mine and phase == "opening":
 		var row := HBoxContainer.new()
 		row.add_theme_constant_override("separation", 8)
 		action_slot.add_child(row)
 		var feature := OptionButton.new()
+		feature.name = "OpeningFeature"
+		feature.set_meta("local_ui_key", "fc.opening_feature")
 		var choices: Array[int] = []
 		for id in Rules.FEATURES.size():
 			if not state.teaching.any(func(entry: Dictionary) -> bool: return entry.get("feature", -1) == id):
@@ -903,6 +939,7 @@ func _update_action(mine: bool) -> void:
 		var ask := _button("Спросить знак", FCStyle.BODY, "primary")
 		ask.pressed.connect(func() -> void: _send("opening", {"feature": choices[feature.selected]}))
 		row.add_child(ask)
+		_add(action_slot, "Пропустить изучение языка", func() -> void: _send("skip_learning"), "quiet")
 	elif state.alien and phase == "clue" and mine:
 		var b := _main_button("Отправить подсказку", func() -> void: _send("clue", {"signs": signs.filter(func(code: int) -> bool: return code != 0)}))
 		b.disabled = signs.filter(func(code: int) -> bool: return code != 0).is_empty()

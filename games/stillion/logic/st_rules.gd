@@ -17,6 +17,7 @@ const LETTERS := MAIN_LETTERS + OPTIONAL_LETTERS
 const SKINS := 8  # персонажей на листе (ui/st_portrait.gd)
 const MAX_LIVES := 2  # жизней по умолчанию (настройка st_lives)
 const ANSWER_TIME := 10.0  # время на ответ по умолчанию (настройка st_time)
+const MAX_SPEED_AFTER := 20  # столько засчитанных ответов сокращают фитиль вдвое
 const AIM_TIME := 0.9  # пушка поворачивается к игроку
 const BOOM_TIME := 1.8  # выстрел, дым, потеря жизни
 const NEW_Q_TIME := 2.2  # «Новая тема!»: пауза перед показом темы и фитиля
@@ -25,6 +26,7 @@ const REVIEW_TIME := 4.0  # буквы кончились: столько сек
 var players: Array = []  # {name, lives, alive, bot, last_answer}
 var max_lives := MAX_LIVES  # задать до new_game()
 var answer_time := ANSWER_TIME
+var accelerating := false  # фитиль сокращается по мере заполнения букв на текущую тему
 var oral := false  # устный режим: ответ — нажатая буква, сам ответ говорят вслух
 var hotseat := false  # один компьютер: «Оспорить» решает одно нажатие (решили вслух)
 var phase := "new_q"  # new_q / aim / fuse / review / boom / game_over
@@ -342,7 +344,10 @@ func _aim(seat: int) -> void:
 	phase = "aim"
 	phase_t = 0.0
 	fuse_t = 0.0
-	fuse_len = answer_time
+	var speed := 1.0
+	if accelerating:
+		speed += float(mini(used.size(), MAX_SPEED_AFTER)) / MAX_SPEED_AFTER
+	fuse_len = answer_time / speed
 	_bot_at = -1.0
 	_bump()
 
@@ -391,7 +396,8 @@ func _plan_bot() -> void:
 	_bot_at = -1.0
 	if not players[target].bot:
 		return
-	_bot_at = rng.randf_range(1.5, maxf(2.0, minf(fuse_len * 0.85, 6.0))) if rng.randf() < 0.85 else fuse_len + 1.0
+	if rng.randf() < 0.85:
+		_bot_at = rng.randf_range(minf(1.5, fuse_len * 0.6), minf(fuse_len * 0.85, 6.0))
 
 
 func _bot_answer() -> void:

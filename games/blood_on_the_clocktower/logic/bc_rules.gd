@@ -261,7 +261,7 @@ func _start_speeches() -> void:
 	if not timer_on:
 		return
 	var order: Array = []
-	for seat: int in seats_in_circle():
+	for seat: int in _day_order():
 		if bool(announced_alive[seat]):
 			order.append(seat)
 	if order.is_empty():
@@ -436,7 +436,7 @@ func action(seat: int, kind: String, arg: Variant = {}) -> bool:
 				phase = "voting"
 				hands.fill(false)
 				counted.clear()
-				vote_order = _order_after(nominee)
+				vote_order = _day_order().filter(func(s: int): return is_living_player(s) or bool(dead_votes[s]))
 				vote_cursor = 0
 				vote_total = 0
 				_vote_open_revision = public_revision + 1
@@ -501,6 +501,14 @@ func _target(arg: Dictionary) -> int:
 		return -1
 	var target := int(arg.target)
 	return target if target >= 0 and target < players.size() else -1
+
+## Каждый новый день начало речей и голосования сдвигается на одно место.
+func _day_order() -> Array:
+	var circle := seats_in_circle()
+	if circle.is_empty():
+		return []
+	var offset := maxi(0, day - 1) % circle.size()
+	return circle.slice(offset) + circle.slice(0, offset)
 
 func _order_after(seat: int) -> Array:
 	var circle := seats_in_circle()

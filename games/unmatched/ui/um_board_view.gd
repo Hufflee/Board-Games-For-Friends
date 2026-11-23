@@ -27,6 +27,7 @@ var _moved := false
 var _motions := {}
 var _effect_losses: Array[Dictionary] = []
 var _hovered := ""
+var fog: Array = []
 var drop_highlight := false:
 	set(value):
 		drop_highlight = value
@@ -160,6 +161,10 @@ func _draw() -> void:
 	var field := _field_rect()
 	draw_texture_rect(_board, field, false)
 	draw_rect(field.grow(0.75), outline_color, false, 1.5, true)
+	for at: Vector2 in fog:
+		var center := field.position + at * field.size
+		draw_circle(center, field.size.x * 0.031, Color(0.65, 0.84, 0.87, 0.48), true, -1.0, true)
+		draw_arc(center, field.size.x * 0.031, 0, TAU, 24, Color("b4e5e6"), 2.0, true)
 	for item: Dictionary in _items:
 		var rect := _item_rect(item, field)
 		var spent: bool = item.get("spent", false)

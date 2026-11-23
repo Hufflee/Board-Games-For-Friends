@@ -13,6 +13,8 @@ static func make(make_button: Callable, size: int) -> ThemeToggle:
 	for st in ["normal", "hover", "pressed", "focus", "disabled"]:
 		if proto.has_theme_stylebox_override(st):
 			t.add_theme_stylebox_override(st, proto.get_theme_stylebox(st))
+	for color_name in ["font_color", "font_hover_color", "font_pressed_color", "font_disabled_color"]:
+		t.add_theme_color_override(color_name, proto.get_theme_color(color_name))
 	t.theme_type_variation = proto.theme_type_variation
 	var side := maxf(proto.get_combined_minimum_size().y, 34)
 	t.custom_minimum_size = Vector2(side, side)
@@ -42,11 +44,25 @@ func _draw() -> void:
 	var c := size * 0.5
 	var r := minf(size.x, size.y) * 0.2
 	if Prefs.dark_theme():
-		# луна: круг, из которого «вырезан» круг цветом фона кнопки
-		draw_circle(c, r * 1.15, col)
-		var bg := get_theme_stylebox("normal", "Button")
-		var bgc: Color = (bg as StyleBoxFlat).bg_color if bg is StyleBoxFlat else Color(0, 0, 0)
-		draw_circle(c + Vector2(r * 0.55, -r * 0.4), r * 0.95, Color(bgc, 1.0))
+		# Серп без закрашивания фона: значок работает и на прозрачной кнопке.
+		var outer := r * 1.15
+		var inner := r * 0.95
+		var shift := Vector2(r * 0.55, -r * 0.4)
+		var distance := shift.length()
+		var angle := shift.angle()
+		var spread := acos((outer * outer + distance * distance - inner * inner) / (2.0 * outer * distance))
+		var first := Vector2.from_angle(angle + spread) * outer
+		var last := Vector2.from_angle(angle - spread) * outer
+		var points := PackedVector2Array()
+		for i in 33:
+			points.append(c + Vector2.from_angle(lerpf(angle + spread, angle - spread + TAU, i / 32.0)) * outer)
+		var inner_start := (last - shift).angle()
+		var inner_end := (first - shift).angle()
+		while inner_end > inner_start:
+			inner_end -= TAU
+		for i in 33:
+			points.append(c + shift + Vector2.from_angle(lerpf(inner_start, inner_end, i / 32.0)) * inner)
+		draw_colored_polygon(points, col)
 	else:
 		# солнце: круг и восемь лучей
 		draw_circle(c, r * 0.75, col)

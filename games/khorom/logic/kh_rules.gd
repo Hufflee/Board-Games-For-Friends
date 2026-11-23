@@ -32,6 +32,7 @@ var tiebreak_rounds := 0  # сыграно доп. раундов из-за ни
 const MAX_TIEBREAK_ROUNDS := 10
 var revision := 0
 var _used_topics: Array = []
+var _used_crow: Array = []
 var _used_blitz: Array = []
 var _rng := RandomNumberGenerator.new()
 
@@ -57,10 +58,18 @@ func new_game(seats: Array, options: Dictionary = {}) -> String:
 	return ""
 
 
+func _draw_topics() -> Array:
+	if kind == "blitz":
+		return _draw(KHData.BLITZ, _used_blitz, SLOTS)
+	if kind == "crow":
+		return _draw(KHData.CROW, _used_crow, 1)
+	return _draw(KHData.TOPICS, _used_topics, 1)
+
+
 func _start_round() -> void:
 	kind = KHData.KINDS[round_no % KHData.KINDS.size()]
 	leader = (first_leader + round_no) % players.size()
-	topics = _draw(KHData.BLITZ, _used_blitz, SLOTS) if kind == "blitz" else _draw(KHData.TOPICS, _used_topics, 1)
+	topics = _draw_topics()
 	answers.clear()
 	revealed.clear()
 	marked.clear()
@@ -342,7 +351,7 @@ func host_set_stat(seat: int, key: String, value: int) -> bool:
 func host_new_theme() -> bool:
 	if phase != "write":
 		return false
-	topics = _draw(KHData.BLITZ, _used_blitz, SLOTS) if kind == "blitz" else _draw(KHData.TOPICS, _used_topics, 1)
+	topics = _draw_topics()
 	for seat: int in players.size():
 		for row: int in SLOTS:
 			answers[seat][row] = ""

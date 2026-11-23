@@ -342,6 +342,8 @@ func _resolve_targets(actor: int, id: String, targets: Array) -> void:
 		g.status[actor]["once"] = true
 	if id == "po":
 		g.status[actor]["po_charged"] = false
+	if id == "sailor":
+		g.status[actor]["sailor_target"] = int(targets[0])
 	if id in ["exorcist", "devils_advocate"]:
 		g.status[actor]["previous"] = int(targets[0])
 	if not healthy(actor):

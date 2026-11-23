@@ -35,6 +35,7 @@ var players_row: HFlowContainer
 var right: VBoxContainer
 var edit: LineEdit
 var preview: Control
+var _local_ui := preload("res://hub/local_ui_state.gd").new()
 
 
 class Backdrop:
@@ -396,12 +397,12 @@ func _answer_text(raw: String) -> String:
 
 
 func _draw_state(next: Dictionary) -> void:
-	if is_instance_valid(edit) and edit.is_inside_tree():
-		draft = edit.text
-	if next.get("round", -2) != state.get("round", -1) or next.get("seat", -2) != state.get("seat", -1):
-		option = ""
-		merge_seat = -1
-		draft = ""
+	var context := [next.get("game_id", ""), next.get("round"), next.get("seat"), next.get("phase")]
+	_local_ui.update(self, context, {"option": "", "merge_seat": -1, "draft": ""},
+		func() -> void: _render_state(next))
+
+
+func _render_state(next: Dictionary) -> void:
 	state = next
 	if not is_instance_valid(right) or not right.is_inside_tree() or not state.has("card"):
 		return
@@ -491,6 +492,7 @@ func _answer_ui() -> void:
 	go.custom_minimum_size.y = 60
 	if _option_count() == 0:
 		edit = LineEdit.new()
+		edit.name = "AnswerDraft"
 		edit.text = draft
 		edit.max_length = 80
 		edit.placeholder_text = "Ваше слово"

@@ -17,7 +17,7 @@ func _ready() -> void:
 	var card := STStyle.panel(24)
 	card.custom_minimum_size = Vector2(640, 0)
 	center.add_child(card)
-	_body = STStyle.vbox(12)
+	_body = STStyle.vbox(8)
 	card.add_child(_body)
 	var chat := K12ChatPanel.new()
 	chat.expanded = true
@@ -89,6 +89,9 @@ func _rebuild() -> void:
 	_choice_row("Жизни", "st_lives", int(s.get("st_lives", STRules.MAX_LIVES)), [1, 2, 3, 4, 5], host)
 	_choice_row("Время", "st_time", int(s.get("st_time", int(STRules.ANSWER_TIME))), [5, 10, 15, 20], host,
 		"Сколько секунд даётся на ответ, пока пушка не выстрелит.")
+	_choice_row("Ускорение", "st_accelerating", bool(s.get("st_accelerating", false)), [false, true], host,
+		"Каждый засчитанный ответ в текущей теме ускоряет фитиль на 5% от начальной скорости. После 20 ответов фитиль горит вдвое быстрее.",
+		["Нет", "Да"])
 	var oral := bool(s.get("st_oral", false))
 	_choice_row("Режим", "st_oral", oral, [false, true], host,
 		"Письменный — ответ печатают в поле, первая буква ответа гаснет.

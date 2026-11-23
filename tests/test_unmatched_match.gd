@@ -30,7 +30,8 @@ func _run() -> void:
 	_combat_timing()
 	_check_random_arena()
 	var count := maxi(1, int(OS.get_environment("UM_GAMES"))) if OS.has_environment("UM_GAMES") else 24
-	for seed_value in count:
+	var start := int(OS.get_environment("UM_SEED_START"))
+	for seed_value in range(start, start + count):
 		_fuzz(seed_value)
 		if (seed_value + 1) % 100 == 0:
 			print("Unmatched: завершено партий %d/%d" % [seed_value + 1, count])
@@ -116,9 +117,9 @@ func _check_arena_lobby() -> void:
 					app._show_lobby()
 					await _named_capture("lobby_venice_%s" % mode)
 					preview = app.find_child("LobbyPreview", true, false) as Control
-					var face := preview.get_child(2).get_child(0) as TextureRect
+					var face := preview.get_child(2).get_child(0) as Control
 					face.mouse_entered.emit()
-					var zoom := app.find_child("HeroCardZoom", true, false) as TextureRect
+					var zoom := app.find_child("HeroCardZoom", true, false) as Control
 					check(zoom != null and zoom.visible and zoom.size.y > face.size.y * 2.0, "Карточка героя увеличивается при наведении")
 					await _named_capture("lobby_hero_zoom_%s" % mode)
 					face.mouse_exited.emit()
@@ -402,6 +403,7 @@ func _fuzz(seed_value: int) -> void:
 	for step in 800:
 		if match_game.rules.phase == Rules.Phase.FINISHED:
 			var cards: Array = []
+			cards.append_array(match_game.rules.bard.poem + match_game.rules.bard.cauldron)
 			for place in match_game.game.heroes.size():
 				cards.append_array(match_game.game.hands[place] + match_game.game.decks[place] + match_game.game.discards[place])
 			for place in match_game.game.heroes.size():
@@ -443,7 +445,7 @@ func _fuzz(seed_value: int) -> void:
 			for card: Dictionary in view.hand.cards:
 				if card.key == action[1].key:
 					played[card.definition] = true
-	check(false, "Партия %d не завершилась за 800 действий" % seed_value)
+	check(false, "Партия %d не завершилась за 800 действий · герои %s · фаза %s · запрос %s" % [seed_value, match_game.game.heroes, match_game.rules.phase, match_game.rules._effect_request])
 	match_game.close()
 
 

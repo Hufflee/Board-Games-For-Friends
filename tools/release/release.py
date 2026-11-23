@@ -11,7 +11,8 @@
 
 Ключи base/patch: --title "0.8.10 — ..." (заголовок релиза), --no-bump (не трогать версию в
 project.godot / export_presets.cfg), --local http://127.0.0.1:8765/ (ссылки в latest.json — на
-локальный сервер, для проверки). patch --allow-project — изменения project.godot, которые патчу не
+локальный сервер, для проверки). patch --with-social — новый BGSocial.exe рядом с патчем.
+patch --allow-project — изменения project.godot, которые патчу не
 нужны (имя, иконка, папка данных та же): печатает их и собирает. publish — только с согласия владельца.
 
 Две посылки одной версии (переход на новую базу без лишних загрузок):
@@ -40,6 +41,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import zipfile
 from functools import partial
 from pathlib import Path
@@ -51,7 +53,8 @@ PRESET = "Windows"
 OUT = ROOT / "build" / "releases"
 EXE_DIR = ROOT / "build" / "windows"
 # Что кладётся в zip базы (решение владельца: без КАК_ИГРАТЬ.md).
-BASE_FILES = ["PartyWorld.exe", "libgodotsteam.windows.template_release.x86_64.dll", "steam_api64.dll", "steam_appid.txt"]
+GAME_EXE = "BoardGameShelf.exe"
+BASE_FILES = [GAME_EXE, "libgodotsteam.windows.template_release.x86_64.dll", "steam_api64.dll", "steam_appid.txt"]
 # Второй exe — BGSocial (пресет «BGS Social», feature bgs_social, без арта и музыки игр): кладётся в
 # полную сборку и отдельным файлом релиза — клиент докачивает его, если в папке игры его нет.
 SOCIAL_PRESET = "BGS Social"
@@ -160,10 +163,10 @@ def write_manifest(bdir: Path, local: str) -> dict:
 			m["lines"].append({"base": lb["version"], "patches": lp})
 			versions += [p["version"] for p in lp]
 		m["patch_from"] = legacy["patch_from"]
-	for d in (bdir, OUT / full["dir"]) if full else (bdir,):
-		social = read_json(d / "social.json", {})
-		if social:
-			m["social"] = dict(social, url=url_for(social["version"], social["file"], local))
+	for version in sorted(set(versions), key=version_key, reverse=True):
+		social = read_json(OUT / version / "social.json", {})
+		if social.get("version") == version:
+			m["social"] = dict(social, url=url_for(version, social["file"], local))
 			break
 	latest = max(versions, key=version_key)
 	m["version"] = latest
@@ -182,6 +185,26 @@ def notes_for(version: str) -> str:
 	return ""
 
 
+def describe_social(bdir: Path, version: str) -> None:
+	exe = bdir / SOCIAL_EXE
+	write_json(bdir / "social.json", {"version": version, "file": SOCIAL_EXE, "size": exe.stat().st_size, "sha256": sha256(exe)})
+
+
+def build_patch_social(version: str) -> None:
+	"""Собирает отдельный BGSocial.exe без смены базы игры."""
+	if project_version() != version:
+		die(f"в project.godot версия {project_version()}, а собираем BGSocial {version}")
+	bdir = OUT / version
+	bdir.mkdir(parents=True, exist_ok=True)
+	with tempfile.TemporaryDirectory(prefix="social-", dir=bdir) as stage:
+		exe = Path(stage) / SOCIAL_EXE
+		godot("--export-release", SOCIAL_PRESET, str(exe))
+		if not exe.is_file() or exe.stat().st_size == 0:
+			die(f"Godot не создал {SOCIAL_EXE}")
+		exe.replace(bdir / SOCIAL_EXE)
+	describe_social(bdir, version)
+
+
 def build_full(a) -> Path:
 	"""Полная сборка: exe игры и BGSocial в build/windows, base.pck (основа будущих патчей) и zip в build/releases/<v>/."""
 	v = a.version
@@ -192,7 +215,7 @@ def build_full(a) -> Path:
 	bdir = OUT / v
 	bdir.mkdir(parents=True, exist_ok=True)
 	EXE_DIR.mkdir(parents=True, exist_ok=True)
-	godot("--export-release", PRESET, str(EXE_DIR / "PartyWorld.exe"))
+	godot("--export-release", PRESET, str(EXE_DIR / GAME_EXE))
 	godot("--export-release", SOCIAL_PRESET, str(EXE_DIR / SOCIAL_EXE))
 	godot("--export-pack", PRESET, str(bdir / "base.pck"))
 	zname = f"PartyWorld-{v}-Windows.zip"
@@ -205,8 +228,7 @@ def build_full(a) -> Path:
 	zp = bdir / zname
 	write_json(bdir / "base.json", {"version": v, "file": zname, "size": zp.stat().st_size, "sha256": sha256(zp)})
 	shutil.copy2(EXE_DIR / SOCIAL_EXE, bdir / SOCIAL_EXE)
-	sp = bdir / SOCIAL_EXE
-	write_json(bdir / "social.json", {"version": v, "file": SOCIAL_EXE, "size": sp.stat().st_size, "sha256": sha256(sp)})
+	describe_social(bdir, v)
 	write_json(bdir / "chain.json", [])
 	write_json(bdir / "fingerprint.json", fingerprint())
 	(bdir / f"notes-{v}.md").write_text(notes_for(v), encoding="utf-8")
@@ -285,6 +307,8 @@ def cmd_patch(a) -> None:
 	fp = bdir / fname
 	if not fp.exists():
 		die("Godot не создал патч")
+	if a.with_social:
+		build_patch_social(v)
 	chain.append({"version": v, "file": fname, "size": fp.stat().st_size, "sha256": sha256(fp)})
 	write_json(bdir / "chain.json", chain)
 	# Старые линии (после finalize): тот же патч, но от их базы и цепочки — своё имя файла в релизе.
@@ -321,7 +345,7 @@ def cmd_publish(a) -> None:
 	full = read_json(bdir / "full.json", {})
 	if full and full["dir"] == v:
 		assets.append(OUT / v / read_json(OUT / v / "base.json", {})["file"])
-	if read_json(OUT / v / "social.json", {}).get("version") == v:
+	if m.get("social", {}).get("version") == v:
 		assets.append(OUT / v / SOCIAL_EXE)
 	for d in read_json(bdir / "legacy.json", {"lines": []})["lines"]:
 		assets += [OUT / d / p["file"] for p in read_json(OUT / d / "chain.json", []) if p["version"] == v]
@@ -368,6 +392,9 @@ def main() -> None:
 		p.add_argument("--local", default="")
 		p.add_argument("--allow-project", action="store_true")
 		p.add_argument("--patch-from", default="")
+		if name == "patch":
+			p.add_argument("--with-social", action="store_true",
+						   help="добавить новую сборку BGSocial.exe рядом с патчем")
 		p.set_defaults(fn=fn)
 	p = sub.add_parser("finalize")
 	p.add_argument("--local", default="")

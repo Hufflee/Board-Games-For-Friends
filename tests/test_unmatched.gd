@@ -75,7 +75,7 @@ func check_catalog() -> void:
 			if card.has("follow_up"):
 				follow_ups[card.definition] = true
 		check(Catalog.deck_for(hero, 3)[0].key != deck[0].key, "Ключ включает место")
-	check(definitions.size() == 175 and follow_ups.size() == 4, "Уникальные записи и дополнительные атаки")
+	check(definitions.size() == 324 and follow_ups.size() == 4, "Уникальные записи и дополнительные атаки")
 	for id: String in definitions:
 		check(Effects.COMBAT.has(id) != Effects.SCHEMES.has(id), "Одно определение эффекта для %s" % id)
 	check(Catalog.deck_for("unknown", 0).is_empty(), "Неизвестный герой не получает карты")

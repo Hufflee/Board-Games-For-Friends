@@ -85,12 +85,23 @@ static func standard_cards(players: int) -> int:
 	return CARD_SIZES.get(players, 25)
 
 
-## Колода карт-ответов: каждая — 5 слов одной сложности + «имя». intro — только зелёные.
-static func build_deck(rng: RandomNumberGenerator, count: int, intro: bool) -> Array:
-	var words: Array = preload("res://hub/shared_words.gd").sample(rng, count)
+## Колода ответов: одно слово на карту из выбранного словаря, без повторов внутри колоды.
+static func build_deck(rng: RandomNumberGenerator, count: int, _intro: bool, dictionary: String = "shared") -> Array:
+	var words: Array
+	if dictionary == "simple":
+		var pool := IBSWords.pick("simple")
+		for i in range(pool.size() - 1, 0, -1):
+			var j := rng.randi_range(0, i)
+			var previous: String = pool[i]
+			pool[i] = pool[j]
+			pool[j] = previous
+		words = pool.slice(0, clampi(count, 0, pool.size()))
+	else:
+		dictionary = "shared"
+		words = SharedWords.sample(rng, count)
 	var result: Array = []
 	for word: String in words:
-		result.append({"level": "shared", "words": [word]})
+		result.append({"level": dictionary, "words": [word]})
 	return result
 
 ## Исторический состав карт, только для происхождения словаря.

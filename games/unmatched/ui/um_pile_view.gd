@@ -80,30 +80,38 @@ func _update_rows() -> void:
 		_rows.remove_child(row)
 		row.queue_free()
 	for seat in _piles.size():
-		var row: HBoxContainer
+		var row: VBoxContainer
 		if seat >= _rows.get_child_count():
-			row = HBoxContainer.new()
+			row = VBoxContainer.new()
 			row.size_flags_horizontal = SIZE_EXPAND_FILL
-			row.add_theme_constant_override("separation", 8)
+			row.add_theme_constant_override("separation", 4)
 			var hero := Label.new()
 			hero.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-			hero.clip_text = true
-			hero.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+			hero.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 			row.add_child(hero)
+			var counters := HBoxContainer.new()
+			counters.add_theme_constant_override("separation", 8)
+			row.add_child(counters)
 			var deck := Button.new()
 			deck.pressed.connect(_open.bind(seat, "deck"))
-			row.add_child(deck)
+			counters.add_child(deck)
 			var open := Button.new()
 			open.pressed.connect(_open.bind(seat, "discard"))
-			row.add_child(open)
+			counters.add_child(open)
+			var special := Button.new()
+			special.size_flags_horizontal = Control.SIZE_SHRINK_BEGIN
+			special.pressed.connect(_open.bind(seat, "special"))
+			row.add_child(special)
 			_rows.add_child(row)
 		else:
 			row = _rows.get_child(seat)
 		var pile: Dictionary = _piles[seat]
 		(row.get_child(0) as Label).text = _hero_name(seat)
 		(row.get_child(0) as Label).tooltip_text = _hero_name(seat)
-		(row.get_child(1) as Button).text = "Колода %d" % int(pile.deck_count)
-		(row.get_child(2) as Button).text = "Сброс %d" % pile.discard.size()
+		(row.get_child(1).get_child(0) as Button).text = "Колода %d" % int(pile.deck_count)
+		(row.get_child(1).get_child(1) as Button).text = "Сброс %d" % pile.discard.size()
+		(row.get_child(2) as Button).text = pile.get("special_name", "")
+		row.get_child(2).visible = pile.has("special_name")
 
 
 func present_miseries(cards: Array) -> void:
@@ -139,6 +147,8 @@ func _fill_browser() -> void:
 	preview_closed.emit()
 	var is_deck := _opened_stack == "deck"
 	var title := "Колода" if is_deck else "Сброс"
+	if _opened_stack == "special":
+		title = _piles[_opened].get("special_name", "Особые карты")
 	_heading.text = "Активные бедствия этого хода" if _opened == -2 else "%s · %s" % [title, _hero_name(_opened)]
 	for child in _cards.get_children():
 		_cards.remove_child(child)

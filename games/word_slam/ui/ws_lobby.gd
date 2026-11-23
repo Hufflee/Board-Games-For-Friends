@@ -115,6 +115,7 @@ func _rebuild() -> void:
 	_body.add_child(HCStyle.caption("Настройки"))
 	_body.add_child(SeatShuffle.settings_row(func(t, _z): return HCStyle.button(t, HCStyle.CAP), func(t, _z): return HCStyle.label(t, HCStyle.BODY)))
 	var count := WSData.INTRO_CARDS if s.get("ws_cards", "standard") == "intro" else WSData.standard_cards(members.size())
+	var answers: String = s.get("ws_words", "shared")
 	if host:
 		var r0 := HCStyle.hbox(8)
 		r0.add_child(HCStyle.label("Режим:", HCStyle.BODY))
@@ -126,7 +127,7 @@ func _rebuild() -> void:
 			r0.add_child(b)
 		_body.add_child(r0)
 		var catalog_row := HCStyle.hbox(8)
-		catalog_row.add_child(HCStyle.label("Слова:", HCStyle.BODY))
+		catalog_row.add_child(HCStyle.label("Подсказки:", HCStyle.BODY))
 		for opt in [["basic", "Базовый · перемешивать"], ["simplified", "Упрощённый · по порядку"]]:
 			var b := HCStyle.button(opt[1], HCStyle.CAP)
 			UISel.pick(b, s.get("ws_catalog", "basic") == opt[0])
@@ -134,9 +135,18 @@ func _rebuild() -> void:
 			b.pressed.connect(func(): Net.set_setting("ws_catalog", val))
 			catalog_row.add_child(b)
 		_body.add_child(catalog_row)
+		var answer_row := HCStyle.hbox(8)
+		answer_row.add_child(HCStyle.label("Словарь ответов:", HCStyle.BODY))
+		for opt in [["shared", "Общий словарь"], ["simple", "Простые слова"]]:
+			var b := HCStyle.button(opt[1], HCStyle.CAP)
+			var val: String = opt[0]
+			UISel.pick(b, answers == val)
+			b.pressed.connect(func(): Net.set_setting("ws_words", val))
+			answer_row.add_child(b)
+		_body.add_child(answer_row)
 		var r1 := HCStyle.hbox(8)
 		r1.add_child(HCStyle.label("Карты:", HCStyle.BODY))
-		for opt in [["standard", "обычная игра"], ["intro", "вводная (10 простых)"]]:
+		for opt in [["standard", "обычная игра"], ["intro", "вводная игра"]]:
 			var b := HCStyle.button(opt[1], HCStyle.CAP)
 			UISel.pick(b, s.get("ws_cards", "standard") == opt[0])
 			var val: String = opt[0]
@@ -156,7 +166,8 @@ func _rebuild() -> void:
 			r2.add_child(b)
 		_body.add_child(r2)
 	else:
-		_body.add_child(HCStyle.label("Слова: " + ("упрощённый · по порядку" if s.get("ws_catalog", "basic") == "simplified" else "базовый · перемешивать после «Слэм»"), HCStyle.CAP, HCStyle.MUTED))
+		_body.add_child(HCStyle.label("Подсказки: " + ("по порядку" if s.get("ws_catalog", "basic") == "simplified" else "перемешивать после «Слэм»"), HCStyle.CAP, HCStyle.MUTED))
+		_body.add_child(HCStyle.label("Словарь ответов: " + ("простые слова" if answers == "simple" else "общий словарь"), HCStyle.CAP, HCStyle.MUTED))
 		var turn := "без ограничения времени" if int(s.get("ws_time", 120)) <= 0 else "на ход %d с" % int(s.get("ws_time", 120))
 		_body.add_child(HCStyle.label("%s · %s · %s" % ["Один рассказчик" if solo else "Две команды", TextUI.plural(count, "карта", "карты", "карт"), turn], HCStyle.BODY))
 

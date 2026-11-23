@@ -16,10 +16,10 @@ signal notice(text: String)
 signal won(id: String)  # я победил в партии — окно сыплет конфетти и звенит
 
 const GAMES := ["chess", "checkers", "go", "connect4"]  # один на один, по приглашению
-const ROOMS := ["balls", "stars", "blackjack"]  # общие комнаты
+const ROOMS := ["balls", "race", "stars", "blackjack"]  # общие комнаты
 const SOLO := ["mines"]
 const TITLES := {"chess": "Шахматы", "checkers": "Шашки", "go": "Го", "connect4": "4 в ряд",
-	"balls": "Сумо", "stars": "Лови звёздочку", "blackjack": "Блэкджек", "mines": "Сапёр"}
+	"balls": "Сумо", "race": "Гонка", "stars": "Лови звёздочку", "blackjack": "Блэкджек", "mines": "Сапёр"}
 const RULES := {
 	"chess": preload("res://hub/minigames/logic/mg_chess.gd"),
 	"checkers": preload("res://hub/minigames/logic/mg_checkers.gd"),
@@ -28,6 +28,7 @@ const RULES := {
 	"mines": preload("res://hub/minigames/logic/mg_mines.gd"),
 }
 const Balls := preload("res://hub/minigames/logic/mg_balls.gd")
+const Race := preload("res://hub/minigames/logic/mg_race.gd")
 const Stars := preload("res://hub/minigames/logic/mg_stars.gd")
 const Blackjack := preload("res://hub/minigames/logic/mg_blackjack.gd")
 const StarOverlay := preload("res://hub/minigames/mg_star_overlay.gd")
@@ -668,11 +669,15 @@ func _host_room_join(peer: int, game: String) -> void:
 		return
 	if not _rooms.has(game):
 		var fresh: Dictionary = Balls.new_state() if game == "balls" else (Blackjack.new_state() if game == "blackjack" else Stars.new_state())
+		if game == "race":
+			fresh = Race.new_state(_room_rng)
 		_rooms[game] = {"state": fresh, "acc": 0.0, "tick": 0.0}
 	var room: Dictionary = _rooms[game]
 	var color := int(_member(peer).get("color", 0))
 	if game == "balls":
 		Balls.join(room.state, peer, _room_name(peer), color, _room_rng)
+	elif game == "race":
+		Race.join(room.state, peer, _room_name(peer), color)
 	elif game == "blackjack":
 		Blackjack.join(room.state, peer, _room_name(peer), color)
 	else:
@@ -686,6 +691,8 @@ func _host_room_leave(peer: int, game: String) -> void:
 	var room: Dictionary = _rooms[game]
 	if game == "balls":
 		Balls.leave(room.state, peer)
+	elif game == "race":
+		Race.leave(room.state, peer)
 	elif game == "blackjack":
 		Blackjack.leave(room.state, peer)
 	else:
@@ -707,6 +714,8 @@ func _room_snapshot(game: String) -> Dictionary:
 	var state: Dictionary = _rooms[game].state
 	if game == "blackjack":
 		return Blackjack.snapshot(state)
+	if game == "race":
+		return Race.snapshot(state)
 	return Balls.snapshot(state) if game == "balls" else Stars.snapshot(state)
 
 
@@ -735,6 +744,19 @@ func _take_room(game: String, snap: Dictionary) -> void:
 		return
 	var session: Dictionary = sessions[id]
 	var old_seq := int((session.state as Dictionary).get("seq", -1))
+	if game == "race":
+		if bool(session.get("orphan", false)):
+			session.erase("race_record_id")  # новая комната после смены хоста начинает номера кругов заново
+		for row: Dictionary in snap.get("list", []):
+			if int(row.peer) == my_peer() and float(row.record) > 0.0:
+				var record_id := "%s:%s:%s" % [snap.track, snap.round, row.record_seq]
+				if str(session.get("race_record_id", "")) == record_id:
+					continue
+				session.race_record_id = record_id
+				var key := "race_%d" % int(snap.track)
+				var previous := best_time(key)
+				if previous <= 0.0 or float(row.record) < previous:
+					_save_best_time(key, float(row.record))
 	session.state = snap
 	session.orphan = false
 	if game == "stars":
@@ -751,15 +773,15 @@ func room_act(game: String, action: Dictionary) -> void:
 	if _room_host():
 		_host_room_act(my_peer(), game, action)
 	elif action.has("aim"):
-		_rpc_room_aim_up.rpc_id(1, action.aim, bool(action.get("on", false)))
+		_rpc_room_aim_up.rpc_id(1, action.aim, bool(action.get("on", false)), game)
 	else:
 		_rpc_room_act_up.rpc_id(1, game, action)
 
 
 @rpc("any_peer", "unreliable_ordered")
-func _rpc_room_aim_up(aim: Vector2, on: bool) -> void:
+func _rpc_room_aim_up(aim: Vector2, on: bool, game: String = "balls") -> void:
 	if _net().is_host():
-		_host_room_act(multiplayer.get_remote_sender_id(), "balls", {"aim": aim, "on": on})
+		_host_room_act(multiplayer.get_remote_sender_id(), game, {"aim": aim, "on": on})
 
 
 @rpc("any_peer", "reliable")
@@ -775,6 +797,8 @@ func _host_room_act(peer: int, game: String, action: Dictionary) -> void:
 	if _net().minigames_locked_now(peer):
 		if game == "balls":
 			Balls.force_ghost(room.state, peer)
+		elif game == "race":
+			Race.force_ghost(room.state, peer)
 		else:
 			_tell(peer, "Мини-игры приостановлены до конца вашего хода")
 		return
@@ -783,6 +807,14 @@ func _host_room_act(peer: int, game: String, action: Dictionary) -> void:
 			Balls.steer(room.state, peer, action.aim, bool(action.get("on", false)))
 		elif bool(action.get("dash", false)):
 			Balls.dash(room.state, peer)
+	elif game == "race":
+		if bool(action.get("change_track", false)):
+			if Race.change_track(room.state, peer, _room_rng):
+				_room_push(game)
+		elif action.has("aim") and action.aim is Vector2:
+			Race.steer(room.state, peer, action.aim, bool(action.get("on", false)))
+		elif bool(action.get("dash", false)):
+			Race.dash(room.state, peer)
 	elif game == "stars" and action.has("catch"):
 		if Stars.catch_star(room.state, peer, int(action.catch), _room_rng):
 			_send(peer, "_rpc_star_caught", [1])
@@ -820,15 +852,19 @@ var _lock_clock := 0.0
 ## Хост: у кого начался ход — шарик сразу призрак (проверка 10 раз в секунду: вид места считать недёшево).
 func _host_turn_locks(delta: float) -> void:
 	_lock_clock += delta
-	if _lock_clock < 0.1 or not _rooms.has("balls") or not _net().is_host():
+	if _lock_clock < 0.1 or not _net().is_host():
 		return
 	_lock_clock = 0.0
-	var state: Dictionary = _rooms.balls.state
-	for peer: int in state.balls:
-		if _net().minigames_locked_now(peer):
-			var ball: Dictionary = state.balls[peer]
-			if bool(ball.steer) or Balls.opacity(ball, float(state.time)) > Balls.GHOST_ALPHA:
-				Balls.force_ghost(state, peer)
+	for game: String in ["balls", "race"]:
+		if not _rooms.has(game):
+			continue
+		var state: Dictionary = _rooms[game].state
+		for peer: int in _room_peers(game):
+			if _net().minigames_locked_now(peer):
+				if game == "race":
+					Race.force_ghost(state, peer)
+				else:
+					Balls.force_ghost(state, peer)
 
 
 ## Каждый кадр: хост двигает комнаты и рассылает положение шариков.
@@ -849,13 +885,15 @@ func _rooms_process(delta: float) -> void:
 			room.acc = float(room.acc) - ROOM_STEP
 			if game == "balls":
 				dirty = not Balls.step(room.state, ROOM_STEP, _room_rng).is_empty() or dirty
+			elif game == "race":
+				dirty = Race.step(room.state, ROOM_STEP, _room_rng) or dirty
 			elif game == "blackjack":
 				dirty = Blackjack.step(room.state, ROOM_STEP, _room_rng) or dirty  # дилер добирает по карте
 			else:
 				dirty = Stars.step(room.state, ROOM_STEP, _room_rng) or dirty
 		if dirty:
 			_room_push(game)
-		elif game == "balls":
+		elif game in ["balls", "race"]:
 			room.tick = float(room.tick) + delta
 			if float(room.tick) >= ROOM_TICK:
 				room.tick = 0.0

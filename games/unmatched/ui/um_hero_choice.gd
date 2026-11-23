@@ -3,9 +3,10 @@ extends Control
 
 signal chosen(hero: String)
 
-const Art := preload("res://games/unmatched/ui/um_card_art.gd")
 const Style := preload("res://games/unmatched/ui/um_style.gd")
 const Roster := preload("res://games/unmatched/logic/um_roster.gd")
+const Complexity := preload("res://games/unmatched/logic/um_complexity.gd")
+const HeroCards := preload("res://games/unmatched/ui/um_hero_cards.gd")
 
 var _title: Label
 var _row: HBoxContainer
@@ -56,21 +57,40 @@ func sync(offers: Array, remaining: int, waiting: String) -> void:
 		var tile := Button.new()
 		tile.tooltip_text = Roster.HEROES[hero].name
 		tile.mouse_default_cursor_shape = CURSOR_POINTING_HAND
-		var face := TextureRect.new()
-		face.name = "Face"
-		face.texture = Art.reference_face(hero)
-		face.mouse_filter = MOUSE_FILTER_IGNORE
-		face.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
-		face.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
-		Art.round_corners(face)
-		tile.add_child(face)
+		var margin := MarginContainer.new()
+		margin.mouse_filter = MOUSE_FILTER_IGNORE
+		for side: String in ["left", "top", "right", "bottom"]:
+			margin.add_theme_constant_override("margin_" + side, 12)
+		var details := VBoxContainer.new()
+		details.mouse_filter = MOUSE_FILTER_IGNORE
+		details.add_theme_constant_override("separation", 4)
+		margin.add_child(details)
+		var ink := get_theme_color("font_color", "Button")
+		var hero_name := Label.new()
+		hero_name.name = "HeroName"
+		hero_name.text = Roster.HEROES[hero].name
+		hero_name.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		hero_name.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+		hero_name.add_theme_font_override("font", Style.TITLE)
+		hero_name.add_theme_font_size_override("font_size", 24)
+		hero_name.add_theme_color_override("font_color", ink)
+		details.add_child(hero_name)
+		var difficulty := Label.new()
+		difficulty.name = "HeroDifficulty"
+		difficulty.text = Complexity.label(hero)
+		difficulty.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+		difficulty.add_theme_font_size_override("font_size", 16)
+		difficulty.add_theme_color_override("font_color", ink)
+		details.add_child(difficulty)
+		var cards := HeroCards.new()
+		cards.name = "HeroCards"
+		cards.show_hero(hero)
+		cards.size_flags_vertical = SIZE_EXPAND_FILL
+		details.add_child(cards)
+		tile.add_child(margin)
 		_row.add_child(tile)
 		_tiles.append(tile)
-		face.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
-		face.offset_left = 8
-		face.offset_top = 8
-		face.offset_right = -8
-		face.offset_bottom = -9
+		margin.set_anchors_and_offsets_preset(PRESET_FULL_RECT)
 		tile.pressed.connect(func(): chosen.emit(hero))
 		tile.mouse_entered.connect(_highlight.bind(tile))
 		tile.mouse_exited.connect(_highlight.bind(null))
@@ -81,15 +101,16 @@ func sync(offers: Array, remaining: int, waiting: String) -> void:
 
 func _size_tiles() -> void:
 	var columns := maxi(1, _tiles.size())
-	var width := clampf(minf((size.x - 72.0 - 24.0 * (columns - 1)) / columns, (size.y - 140.0) / 1.38), 92.0, 226.0)
+	var width := clampf(minf((size.x - 72.0 - 24.0 * (columns - 1)) / columns,
+		(size.y - 180.0) * HeroCards.PAIR_RATIO), 172.0, 420.0)
 	for tile: Button in _tiles:
-		tile.custom_minimum_size = Vector2(width, width * 1.38)
+		tile.custom_minimum_size = Vector2(width, width / HeroCards.PAIR_RATIO + 76.0)
 
 
 func _highlight(current: Button) -> void:
 	for tile: Button in _tiles:
-		var face := tile.get_node("Face") as TextureRect
-		face.pivot_offset = face.size * 0.5
+		var cards := tile.find_child("HeroCards", true, false) as HeroCards
+		cards.pivot_offset = cards.size * 0.5
 		if tile.has_meta("hover_tween"):
 			var previous: Tween = tile.get_meta("hover_tween")
 			previous.kill()
@@ -97,5 +118,5 @@ func _highlight(current: Button) -> void:
 		tile.z_index = int(active)
 		var tween := tile.create_tween().set_parallel(true).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
 		tile.set_meta("hover_tween", tween)
-		tween.tween_property(face, "position:y", 2.0 if active and not Prefs.reduce_motion else 8.0, 0.13)
-		tween.tween_property(face, "modulate", Color(0.75, 0.72, 0.71) if current != null and not active else Color.WHITE, 0.13)
+		tween.tween_property(cards, "scale", Vector2.ONE * (1.03 if active and not Prefs.reduce_motion else 1.0), 0.13)
+		tween.tween_property(cards, "modulate", Color(0.75, 0.72, 0.71) if current != null and not active else Color.WHITE, 0.13)

@@ -46,7 +46,6 @@ var _key_fades: Dictionary = {}
 const KEY_FADE_TIME := 2.5
 var _prev_label: Label
 var _prev_hint: Label
-var _challenge_rule: Label
 var _challenge: Button
 var _fx: Control  # всплывающие надписи
 var _fuse_t0 := 0.0
@@ -134,7 +133,7 @@ func _ready() -> void:
 	bottom.set_anchors_and_offsets_preset(Control.PRESET_BOTTOM_WIDE)
 	bottom.offset_left = 120
 	bottom.offset_right = -SIDE_W - 120
-	bottom.offset_top = -84
+	bottom.offset_top = -96
 	bottom.offset_bottom = -12
 	add_child(bottom)
 	var brow := STStyle.hbox(12)
@@ -206,7 +205,7 @@ func _build_keyboard() -> void:
 	side.offset_top = TopBar.HEIGHT + 4
 	side.offset_bottom = -12
 	add_child(side)
-	var col := STStyle.vbox(12)
+	var col := STStyle.vbox(8)
 	side.add_child(col)
 	var head := STStyle.hbox(8)
 	var t := STStyle.label("Буквы", STStyle.H2, Color(0, 0, 0, 0), HORIZONTAL_ALIGNMENT_LEFT, "title")
@@ -214,6 +213,7 @@ func _build_keyboard() -> void:
 	head.add_child(t)
 	_keys_left = STStyle.label("", STStyle.CAP, STStyle.muted(), HORIZONTAL_ALIGNMENT_RIGHT)
 	_keys_left.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+	_keys_left.mouse_filter = Control.MOUSE_FILTER_PASS
 	head.add_child(_keys_left)
 	col.add_child(head)
 	var grid := GridContainer.new()
@@ -247,7 +247,10 @@ func _build_keyboard() -> void:
 	col.add_child(STStyle.label("ПОСЛЕДНИЙ ОТВЕТ", STStyle.CAP, STStyle.muted(), HORIZONTAL_ALIGNMENT_LEFT, "bold"))
 	_prev_label = STStyle.label("", STStyle.BODY, Color(0, 0, 0, 0), HORIZONTAL_ALIGNMENT_LEFT, "bold")
 	_prev_label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_prev_label.max_lines_visible = 2
+	_prev_label.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
 	col.add_child(_prev_label)
+	TextUI.full_on_hover(_prev_label)
 	_prev_hint = STStyle.label("", STStyle.CAP, STStyle.muted())
 	_prev_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	col.add_child(_prev_hint)
@@ -256,9 +259,6 @@ func _build_keyboard() -> void:
 	_challenge.tooltip_text = "Ответ не подходит к теме? Нажмите. Если оспорит больше половины остальных игроков (1 на 1 — один),\nответ не засчитан: буква снова свободна, отвечающий отвечает заново. Оспорят второй раз подряд — выстрел."
 	_challenge.pressed.connect(func(): Net.send_action("st_challenge", {}))
 	col.add_child(_challenge)
-	_challenge_rule = STStyle.label("Большинство оспорило — ответ снимается, буква освобождается.", STStyle.CAP, STStyle.muted())
-	_challenge_rule.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
-	col.add_child(_challenge_rule)
 
 
 func _on_state(v: Dictionary) -> void:
@@ -499,8 +499,7 @@ func _update_keys() -> void:
 	for entry: Dictionary in history.slice(maxi(0, history.size() - 2)):
 		recent.append("%s — %s" % [str(entry.letter).to_upper(), str(_v.players[int(entry.seat)].name)])
 	_keys_left.text = "основных: %d" % left
-	if not recent.is_empty():
-		_keys_left.text += " · " + " · ".join(recent)
+	_keys_left.tooltip_text = "\n".join(recent)
 
 
 func _style_used_key(button: Button, remaining: float) -> void:
@@ -530,18 +529,19 @@ func _update_challenge() -> void:
 	if prev.is_empty():
 		_prev_label.text = "—"
 		_prev_hint.text = "Сомнительный ответ можно оспорить, пока отвечает следующий."
+		_prev_hint.show()
 		_challenge.visible = false
-		_challenge_rule.hide()
 		return
 	var who := str(_v.players[int(prev.seat)].name)
 	var name := str(prev.name)
-	_prev_label.text = ("«%s» — %s" % [name, who]) if name != "" else "%s: на «%s» (вслух)" % [who, str(prev.letter).to_upper()]
+	_prev_label.text = ("«%s» — %s" % [name, who]) if name != "" else "На «%s» (вслух) — %s" % [str(prev.letter).to_upper(), who]
 	var votes: Array = _v.get("votes", [])
 	var need := int(_v.get("votes_needed", 1))
 	var mine := int(_v.get("seat", -1))
-	_prev_hint.text = "Его уже оспаривали: оспорят ещё раз — выстрел!" if bool(prev.get("retry", false)) else ""
 	_challenge.visible = not bool(_v.get("spectator", false))
-	_challenge_rule.visible = _challenge.visible
+	var retry := bool(prev.get("retry", false))
+	_prev_hint.visible = retry or _challenge.visible
+	_prev_hint.text = "Ещё одно оспаривание — выстрел!" if retry else "Большинство оспорило — ответ снимается, буква освобождается."
 	var voted := votes.has(mine) and not bool(_v.get("hotseat", false))
 	_challenge.text = ("Вы оспорили" if voted else "Оспорить") + ("  %d/%d" % [votes.size(), need] if need > 1 else "")
 	_challenge.disabled = not bool(_v.get("can_challenge", false)) or _game_paused()
@@ -696,9 +696,13 @@ func _popup(at: Vector2, text: String, color: Color, font_size: int = 28) -> voi
 	l.add_theme_constant_override("outline_size", 12)
 	_fx.add_child(l)
 	l.reset_size()
+	if l.size.x > 380.0:
+		l.text_overrun_behavior = TextServer.OVERRUN_TRIM_ELLIPSIS
+		l.size.x = 380.0
 	var p := _stage.position + at - l.size * 0.5
 	p.y = maxf(p.y, _stage.position.y + 8.0)  # не наезжать на карточку темы
-	p.x = clampf(p.x, 8.0, size.x - SIDE_W - 24.0 - l.size.x)
+	var margin := 8.0 + l.size.x * 0.06  # место для увеличения надписи при появлении
+	p.x = clampf(p.x, margin, _stage.size.x - l.size.x - margin)
 	l.position = p
 	l.pivot_offset = l.size * 0.5
 	l.scale = Vector2(0.4, 0.4)

@@ -33,10 +33,11 @@ func _ready() -> void:
 	add_child(Style.Background.new())
 	_top = TopBar.make(self, "Unspoken", Style.button, null, Style.ink(), Style.HEAD)
 	_top.coin_at = func() -> Vector2: return get_global_rect().position + Vector2(48, size.y - 48)
-	for item: Array in [["Правила", app.show_rules], ["Настройки", app.show_settings], ["Тема", _theme], ["Журнал", _journal]]:
+	for item: Array in [["Правила", app.show_rules], ["Настройки", app.show_settings], ["Журнал", _journal]]:
 		var b := Style.button(item[0], 14)
 		b.pressed.connect(item[1])
 		_top.actions.add_child(b)
+	_top.actions.add_child(ThemeToggle.make(Style.button, 14))
 	var leave := Style.button("Выйти", 14)
 	LeaveGuard.wire(leave, "Выйти?", "Вернуться к выбору игры.", app.back_to_hub)
 	_top.actions.add_child(leave)

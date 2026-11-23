@@ -35,6 +35,9 @@ var _fight_frame: PanelContainer
 var _stage: VBoxContainer
 var _preview_column: VBoxContainer
 var _shown_scheme := 0
+var _shown_public_card := 0
+var _scheme_queue: Array[Texture2D] = []
+var _scheme_running := false
 var _shown_misery := 0
 var _miseries_button: Button
 var _preview: TextureRect
@@ -65,6 +68,8 @@ var _staged_attack := ""
 var _maneuver_preview := false
 var _combat_show: CombatShow
 var _hero_choice: HeroChoice
+var _slot_combat := {}
+var _slot_hold_started := false
 
 
 func _ready() -> void:
@@ -102,6 +107,10 @@ func present(view: Dictionary) -> void:
 	_miseries_button.visible = not view.get("active_miseries", []).is_empty()
 	_miseries_button.text = "Бедствия %d" % view.get("active_miseries", []).size()
 	_show_scheme(view.get("scheme_notice", {}))
+	var public_card: Dictionary = view.get("public_card_notice", {})
+	if int(public_card.get("id", 0)) > _shown_public_card:
+		_shown_public_card = public_card.id
+		_queue_card_show(Art.face(public_card.card))
 	if view.has("handoff") and not view.handoff:
 		_hand.accept_handoff()
 	var hand: Dictionary = view.get("hand", {})
@@ -112,6 +121,7 @@ func present(view: Dictionary) -> void:
 			"max": 1, "prompt": effect.prompt}
 	_hand.present(hand)
 	var combat: Dictionary = view.get("combat", {})
+	_board.fog = view.get("fog", [])
 	_combat_show.present(combat, view.get("combat_outcome", {}), _attack.get_global_rect(), _defense.get_global_rect(), _fight_frame.get_global_rect())
 	_update_combat(combat)
 	var draft: Dictionary = view.get("draft", {})
@@ -423,7 +433,7 @@ func _present_actions(view: Dictionary) -> void:
 			_add_action("Большая Алиса", "size", {"large": true})
 			_add_action("Маленькая Алиса", "size", {"large": false})
 		elif not active_targets.is_empty():
-			_add_board_hint("Расстановка · выберите подсвеченную клетку")
+			_add_board_hint("Расстановка тумана · выберите клетку" if view.setup.get("fog", false) else "Расстановка · выберите подсвеченную клетку")
 	elif not effect.is_empty():
 		_effect_actions(effect)
 		for option: Variant in effect.options:
@@ -503,9 +513,14 @@ func _present_actions(view: Dictionary) -> void:
 func _sync_action_row() -> void:
 	if _actions == null or not _actions.visible:
 		return
+	# До первой раскладки слот ещё имеет нулевую ширину. Подсказка не должна
+	# превращаться в столбец букв и своим минимумом выталкивать поле за экран.
+	for child in _actions.get_children():
+		if child is Label and child.has_meta("board_hint_width"):
+			child.custom_minimum_size.x = minf(float(child.get_meta("board_hint_width")), clampf(_action_slot.size.x * 0.52, 160.0, 360.0))
+	_actions.size = _action_slot.size
 	_action_slot.custom_minimum_size.y = _actions.get_combined_minimum_size().y
 	_actions.global_position = _action_slot.global_position
-	_actions.size = _action_slot.size
 
 
 func _board_clicked(cell: int) -> void:
@@ -569,7 +584,7 @@ func _can_play_from_hand(key: String) -> bool:
 			continue
 		for card: Dictionary in _state.hand.cards:
 			if card.key == key:
-				return Catalog.can_play(card, Catalog.Kind.ATTACK, fighter.hero)
+				return Catalog.can_play(card, Catalog.Kind.ATTACK, fighter.hero, _state.get("form", ""))
 	return false
 
 
@@ -624,7 +639,8 @@ func _add_board_hint(text: String) -> void:
 	var hint := _label(text, 14)
 	hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	var text_width := hint.get_theme_font("font").get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, 14).x
-	hint.custom_minimum_size.x = minf(text_width, minf(360.0, _action_slot.size.x * 0.52))
+	hint.set_meta("board_hint_width", text_width)
+	hint.custom_minimum_size.x = minf(text_width, clampf(_action_slot.size.x * 0.52, 160.0, 360.0))
 	_ink_on_backdrop(hint)
 	_actions.add_child(hint)
 
@@ -707,6 +723,10 @@ func _option_label(option: Variant, cards: Array) -> String:
 			if fighter.seat == option.x and fighter.fighter == option.y:
 				return fighter.name
 	const LABELS := {"confirm": "Готово", "draw": "Добор", "heal": "Лечение",
+		"move": "Перемещение", "cauldron": "В котёл", "return": "Вернуть",
+		"jekyll": "Доктор Джекилл", "hyde": "Мистер Хайд", "boost_value": "Заменить усилением",
+		"fog_place": "Переместиться в туман", "fog_move": "Передвинуть туман",
+		"wish_draw": "Взять 5 карт", "wish_four": "Значения карт равны 4", "wish_discard": "Противники сбрасывают по 2 карты",
 		"use": "Использовать", "item_first": "Сначала предмет", "item_last": "Сначала карта",
 		"reveal": "Открыть ещё", "pay": "Потратить дублон", "strength": "Увеличить значение карты",
 		"place": "Размещение", "hand": "В руку", "deck": "Колода", "discard": "Сброс", "action": "Действие", "archer": "Лучник",
@@ -805,15 +825,23 @@ func _build_preview(parent: HBoxContainer) -> void:
 
 
 func _update_combat(combat: Dictionary) -> void:
+	if not combat.is_empty():
+		_slot_combat = combat.duplicate(true)
+		_slot_hold_started = false
+	elif not _combat_show.visible and not _slot_combat.is_empty():
+		combat = _slot_combat
+		if not _slot_hold_started:
+			_slot_hold_started = true
+			_expire_combat_slots(int(combat.get("id", -1)))
 	var attack: Dictionary = combat.get("attack", {})
 	var defense: Dictionary = combat.get("defense", {})
-	if _combat_show.visible and combat.get("id", -1) == _combat_show._current:
+	if _combat_show.visible:
 		attack = {}
 		defense = {}
 	elif combat.has("id") and not _combat_show.faces_visible(combat.id):
-		if not attack.is_empty():
+		if not attack.is_empty() and not combat.get("attack_face_up", false):
 			attack = {"sealed": true}
-		if not defense.is_empty():
+		if not defense.is_empty() and not combat.get("defense_face_up", false):
 			defense = {"sealed": true}
 	_apply_slot(_attack, _attack_hint, attack, str(combat.get("attack_hero", "")))
 	_apply_slot(_defense, _defense_hint, defense, str(combat.get("defense_hero", "")))
@@ -823,6 +851,13 @@ func _update_combat(combat: Dictionary) -> void:
 	_defense_name.visible = not _defense_name.text.is_empty()
 	var choice: Dictionary = _state.get("hand", {}).get("choice", {})
 	_reply.visible = not choice.is_empty() and int(choice.get("min", 1)) == 0 and choice.get("pass_label") == "Без защиты"
+
+
+func _expire_combat_slots(id: int) -> void:
+	await get_tree().create_timer(3.0, false).timeout
+	if _state.get("combat", {}).is_empty() and int(_slot_combat.get("id", -1)) == id and _slot_hold_started:
+		_slot_combat = {}
+		_update_combat({})
 
 
 func _apply_slot(face: TextureRect, hint: Label, card: Dictionary, hero: String) -> void:
@@ -893,9 +928,23 @@ func _show_scheme(notice: Dictionary) -> void:
 	if id <= _shown_scheme:
 		return
 	_shown_scheme = id
-	var texture := Art.face(notice.card)
+	_queue_card_show(Art.face(notice.card))
+
+
+func _queue_card_show(texture: Texture2D) -> void:
 	if texture == null:
 		return
+	_scheme_queue.append(texture)
+	if not _scheme_running:
+		_play_card_show()
+
+
+func _play_card_show() -> void:
+	if _scheme_queue.is_empty():
+		_scheme_running = false
+		return
+	_scheme_running = true
+	var texture: Texture2D = _scheme_queue.pop_front()
 	var card := TextureRect.new()
 	card.expand_mode = TextureRect.EXPAND_IGNORE_SIZE
 	card.stretch_mode = TextureRect.STRETCH_KEEP_ASPECT_CENTERED
@@ -906,16 +955,16 @@ func _show_scheme(notice: Dictionary) -> void:
 	add_child(card)
 	card.size = Vector2(244.0, 339.0)
 	card.position = (size - card.size) * 0.5
-	await get_tree().create_timer(0.9, false).timeout
+	await get_tree().create_timer(1.35, false).timeout
 	var slot := _preview.get_global_rect()
 	var travel := create_tween().set_parallel()
 	var duration := 0.01 if Prefs.reduce_motion else 0.33
 	travel.tween_property(card, "global_position", slot.position, duration).set_ease(Tween.EASE_IN_OUT)
 	travel.tween_property(card, "size", slot.size, duration)
 	await travel.finished
-	if id == _shown_scheme:
-		_set_preview(texture, "scheme")
+	_set_preview(texture, "scheme")
 	card.queue_free()
+	_play_card_show()
 
 
 func _clear_preview(source: String) -> void:

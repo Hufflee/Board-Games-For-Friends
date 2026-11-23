@@ -268,12 +268,12 @@ func get_view(viewer: int, selected_hand: int = -1) -> Dictionary:
 			var schemes_for_fighter: Array = []
 			var has_attack := false
 			for card: Dictionary in game.hands[rules.seat]:
-				if Catalog.can_play(card, Catalog.Kind.SCHEME, selected.is_hero):
+				if rules.card_can_play(card, Catalog.Kind.SCHEME, selected.is_hero):
 					schemes_for_fighter.append(card.duplicate(true))
-				has_attack = has_attack or Catalog.can_play(card, Catalog.Kind.ATTACK, selected.is_hero)
+				has_attack = has_attack or rules.card_can_play(card, Catalog.Kind.ATTACK, selected.is_hero)
 			if has_attack:
 				for target: Dictionary in figures:
-					if target.seat % 2 != rules.seat % 2 and rules.attack_in_range(Vector2i(figure.seat, figure.fighter), target.cell):
+					if target.seat % 2 != rules.seat % 2 and not rules.attack_keys_for(Vector2i(figure.seat, figure.fighter), target.cell).is_empty():
 						targets_for_fighter.append(target.cell)
 			attacks[figure.fighter] = targets_for_fighter
 			schemes[figure.fighter] = schemes_for_fighter
@@ -298,8 +298,11 @@ func get_view(viewer: int, selected_hand: int = -1) -> Dictionary:
 		"boost_allowed": controlled and rules.can_boost_maneuver(),
 		"maneuver_in_transit": controlled and rules.phase == Rules.Phase.MANEUVER and rules._maneuver_in_transit(),
 		"setup": setup if not setup.is_empty() and game.controllers[setup.seat] == viewer else {},
-		"hand": hand, "piles": Piles.public_view(game.decks, game.discards, game.heroes, game.hands), "effect": effect,
+		"hand": hand, "piles": _public_piles(), "effect": effect,
 		"scheme_notice": _scheme_notice,
+		"public_card_notice": rules.public_card_notice.duplicate(true),
+		"form": "hyde" if rules.hyde else "jekyll",
+		"fog": game.fog.map(func(cell: int) -> Vector2: return game.board.position_for(cell)),
 		"battlefield_items": (rules.battlefield_items + rules.used_items).duplicate(true),
 		"misery_notice": rules.misery_opened.duplicate(true),
 		"active_miseries": rules.miseries.map(rules.misery_card),
@@ -347,11 +350,24 @@ func _choose_hero(viewer: int, hero: String) -> bool:
 
 
 func _fighter_name(place: int, fighter: Dictionary) -> String:
+	if game.heroes[place] == "witches":
+		return "Вещая сестра %d" % (game.fighters[place].find(fighter) + 1)
 	var hero: Dictionary = Roster.HEROES[game.heroes[place]]
 	return hero.name if fighter.is_hero else hero.sidekick.name
 
 
+func _public_piles() -> Array:
+	var piles := Piles.public_view(game.decks, game.discards, game.heroes, game.hands)
+	for place in piles.size():
+		piles[place].merge(rules.bard.special_pile(place))
+	return piles
+
+
 func _token(place: int, fighter: Dictionary) -> String:
+	if fighter.is_hero and game.heroes[place] == "jekyll_hyde" and rules.hyde:
+		return "hyde"
+	if game.heroes[place] == "witches":
+		return fighter.get("token", "witch_0")
 	if fighter.is_hero:
 		return game.heroes[place]
 	if fighter.id == "archer":
@@ -386,12 +402,15 @@ func _public_combat(combat: Dictionary) -> Dictionary:
 		"attacker": attacker, "defender": defender,
 		"attack_name": _fighter_name(attacker.x, game.fighters[attacker.x][attacker.y]),
 		"defense_name": _fighter_name(defender.x, game.fighters[defender.x][defender.y])}
+	result["pending_reveal"] = combat.get("pending_reveal", false)
+	result["attack_face_up"] = cards.get("attack", {}).get("definition", "") == "tomoe:12"
 	if cards.is_empty():
 		if combat.attack_sealed:
 			result["attack"] = {"sealed": true}
 	else:
-		result["attack"] = cards.attack
-		result["defense"] = cards.defense
+		result["attack"] = cards.get("attack", {"sealed": true})
+		result["defense"] = cards.get("defense", {})
+		result["defense_face_up"] = cards.get("defense", {}).get("definition", "") == "sherlock:22"
 		result["immediate"] = rules.immediate_cue.duplicate()
 		result["board_focus"] = rules.board_focus or rules.has_combat_choice()
 		if rules.pending_impact.is_valid():
